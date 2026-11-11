@@ -655,8 +655,12 @@ class Giving
             . '  AND NOT ' . self::erasedDonorSql('e.siteID', 'e.donorID') . ' '
             . 'GROUP BY e.donorID, u.fullName, u.emailAddress, u.notifyPrefs, e.currency '
             . 'HAVING SUM(e.amountPence) > 0 '
-            . 'ORDER BY u.fullName '
-            . 'LIMIT 2000'
+            // 💷 NO LIMIT on these rows (round 4 of #966's check): they are one per
+            //    donor AND currency, so a LIMIT could cut a donor's second currency
+            //    off while keeping the first, and their statement would then show
+            //    part of their giving as all of it. The 2,000-donor ceiling is
+            //    applied below, AFTER the rows are folded into one per donor.
+            . 'ORDER BY u.fullName, e.donorID'
         );
         if ($stmt === false) {
             return [];
@@ -708,6 +712,9 @@ class Giving
         if (count($rows) === 0) {
             return [];
         }
+        // The ceiling the query used to hold, now on DONORS (insertion order is
+        // the query's name order, so the same donors are kept as before).
+        $rows = array_slice($rows, 0, 2000, true);
 
         // 🔗 Keyed lookup against this period's log rows rather than a SQL
         // JOIN — keeps the aggregate above simple and avoids re-deriving

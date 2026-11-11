@@ -2644,16 +2644,19 @@ class AssetRegister
             return '';
         }
         $was = (string) ($old['currency'] ?? '');
-        if ($was === '' || strtoupper(trim($newCurrency)) === $was) {
+        $new = strtoupper(trim($newCurrency));
+        if ($new === $was) {
             return '';
         }
+        // Any repair or valuation NOT already in the new currency blocks the
+        // change — an unrecorded asset's unrecorded repairs too (round 4).
         try {
             $db   = App::db();
             $stmt = $db->prepare(
-                'SELECT (SELECT COUNT(*) FROM `tblAssetMaintenance` WHERE `assetID` = ? AND `currency` = ?)'
-                . ' + (SELECT COUNT(*) FROM `tblAssetValueHistory` WHERE `assetID` = ? AND `currency` = ?) AS `n`'
+                'SELECT (SELECT COUNT(*) FROM `tblAssetMaintenance` WHERE `assetID` = ? AND `currency` <> ?)'
+                . ' + (SELECT COUNT(*) FROM `tblAssetValueHistory` WHERE `assetID` = ? AND `currency` <> ?) AS `n`'
             );
-            $stmt->bind_param('isis', $assetId, $was, $assetId, $was);
+            $stmt->bind_param('isis', $assetId, $new, $assetId, $new);
             $stmt->execute();
             $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
             $stmt->close();
@@ -2662,7 +2665,7 @@ class AssetRegister
         }
 
         return $n > 0
-            ? 'This asset has ' . $n . ' repair or valuation record(s) in ' . $was . ', so its currency cannot change to ' . strtoupper(trim($newCurrency)) . '.'
+            ? 'This asset has ' . $n . ' repair or valuation record(s) in ' . ($was !== '' ? $was : 'no recorded currency') . ', so its currency cannot change to ' . $new . '.'
             : '';
     }
 
@@ -2715,7 +2718,8 @@ class AssetRegister
             'purchaseDate'       => [$data['purchaseDate'] ?? null, 's'],
             'purchaseStore'      => [$data['purchaseStore'] ?? null, 's'],
             'purchaseCostPence'  => [$data['purchaseCostPence'] ?? null, 'i'],
-            'currency'           => [(string) ($data['currency'] ?? $old['currency']), 's'],
+            // ✏️ Currency::onEdit(): its own unless one was posted (#966, D-139).
+            'currency'           => [Currency::onEdit((string) $old['currency'], isset($data['currency']) === true ? (string) $data['currency'] : null), 's'],
             'warrantyExpiry'     => [$data['warrantyExpiry'] ?? null, 's'],
             'warrantyDetails'    => [$data['warrantyDetails'] ?? null, 's'],
             'licenseSeats'       => [$data['licenseSeats'] ?? null, 'i'],

@@ -164,7 +164,10 @@ $looseEnvelopePence = $agreedEnvelopePence - $envelopeSumPence;
 $settings   = App::settings()['giving'] ?? [];
 // 💷 The gifts a count writes are in the COUNT's currency (D-139), the one it
 //    was counted in, even if the organisation's has changed since.
-$currency   = (string) $session['currency'] !== '' ? (string) $session['currency'] : \Portal\Core\Currency::ofSite();
+//    A count with NO recorded currency writes gifts with none either (round 4
+//    of #966's check): taking today's here made the gifts disagree with the
+//    count and its envelopes, which stay ''. They are labelled together.
+$currency   = (string) $session['currency'];
 $categoryId = (int) $session['categoryID'];
 $serviceDate = (string) $session['serviceDate'];
 $reference  = 'Count #' . $countSessionId;

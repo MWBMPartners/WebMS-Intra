@@ -2030,6 +2030,15 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_one_password_writer.py
 
+      # 💷 A money record's currency is written by ONE rule (#966, D-139):
+      #    an UPDATE that writes it goes through Currency::onEdit(), and a
+      #    child row takes its parent's. "An edit relabels a record" failed
+      #    two check rounds running, each through a new caller's own branch.
+      - name: 'A money record keeps its currency (hard gate)'
+        id: currency_writes
+        if: always()
+        run: python3 -I tools/audit-checks/check_currency_writes.py
+
       # 🧪 EVERY AUDIT CHECK'S OWN SELF-TEST, FOUND RATHER THAN LISTED (#919).
       #
       # Several checks above carry a self-test (planted faults each must report,

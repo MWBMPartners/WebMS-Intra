@@ -1599,19 +1599,22 @@ class Venues
                 $costPence = null;
             }
         }
-        // 💷 The organisation's currency unless one was chosen (#966). A
-        //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word. With NO currency
-        //    posted, an existing booking KEEPS its own (D-139, round 3 of the
-        //    check): a record keeps the currency it was made in, so an edit after
-        //    the organisation changed currency must not relabel it.
+        // 💷 A currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED (it used to become GBP without a word). A NEW booking takes
+        //    the posted currency, else the organisation's. An EDITED one goes
+        //    through Currency::onEdit() (#966, D-139, round 4): its own unless a
+        //    currency was posted for it — never today's, and an unrecorded one
+        //    ('') stays unrecorded. (Round 3 kept a recorded one but stamped an
+        //    unrecorded one with today's, while its children stayed ''.)
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
-        if ($currency === '') {
-            $kept = $bookingId > 0 ? self::getBooking($bookingId, $siteId) : null;
-            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
-                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
-        } elseif (Currency::isChoosable($currency) === false) {
+        if ($currency !== '' && Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
+        }
+        $kept = $bookingId > 0 ? self::getBooking($bookingId, $siteId) : null;
+        if (is_array($kept) === true) {
+            $currency = Currency::onEdit((string) ($kept['currency'] ?? ''), $currency);
+        } elseif ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
         }
 
         // ⏰ Time resolution (§3.4 rule)
@@ -2895,19 +2898,22 @@ class Venues
         }
         $rateUnit = (string) ($data['rateUnit'] ?? '');
         $rateUnitVal = in_array($rateUnit, self::RATE_UNITS, true) === true ? $rateUnit : null;
-        // 💷 The organisation's currency unless one was chosen (#966). A
-        //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word. With NO currency
-        //    posted, an existing agreement KEEPS its own (D-139, round 3 of the
-        //    check): a record keeps the currency it was made in, so an edit after
-        //    the organisation changed currency must not relabel it.
+        // 💷 A currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED (it used to become GBP without a word). A NEW agreement takes
+        //    the posted currency, else the organisation's. An EDITED one goes
+        //    through Currency::onEdit() (#966, D-139, round 4): its own unless a
+        //    currency was posted for it — never today's, and an unrecorded one
+        //    ('') stays unrecorded. (Round 3 kept a recorded one but stamped an
+        //    unrecorded one with today's, while its children stayed ''.)
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
-        if ($currency === '') {
-            $kept = $agreementId > 0 ? self::getAgreement($agreementId, $siteId) : null;
-            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
-                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
-        } elseif (Currency::isChoosable($currency) === false) {
+        if ($currency !== '' && Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
+        }
+        $kept = $agreementId > 0 ? self::getAgreement($agreementId, $siteId) : null;
+        if (is_array($kept) === true) {
+            $currency = Currency::onEdit((string) ($kept['currency'] ?? ''), $currency);
+        } elseif ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
         }
         $status = (string) ($data['status'] ?? 'draft');
         if (in_array($status, self::AGREEMENT_STATUSES, true) === false) {
@@ -3198,16 +3204,20 @@ class Venues
     {
         $old = self::getInvoice($invoiceId, $siteId);
         $was = is_array($old) === true ? (string) ($old['currency'] ?? '') : '';
-        if ($was === '' || strtoupper(trim($newCurrency)) === $was) {
+        $new = strtoupper(trim($newCurrency));
+        if (is_array($old) === false || $new === $was) {
             return '';
         }
+        // Any line or payment NOT already in the new currency blocks the
+        // change — an unrecorded ('') invoice's unrecorded payments too, so
+        // the invoice and its payments always agree (round 4).
         try {
             $db   = App::db();
             $stmt = $db->prepare(
-                'SELECT (SELECT COUNT(*) FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ? AND `currency` = ?)'
-                . ' + (SELECT COUNT(*) FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ? AND `currency` = ?) AS `n`'
+                'SELECT (SELECT COUNT(*) FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ? AND `currency` <> ?)'
+                . ' + (SELECT COUNT(*) FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ? AND `currency` <> ?) AS `n`'
             );
-            $stmt->bind_param('isis', $invoiceId, $was, $invoiceId, $was);
+            $stmt->bind_param('isis', $invoiceId, $new, $invoiceId, $new);
             $stmt->execute();
             $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
             $stmt->close();
@@ -3216,7 +3226,7 @@ class Venues
         }
 
         return $n > 0
-            ? 'This invoice has ' . $n . ' line(s) or payment(s) in ' . $was . ', so its currency cannot change to ' . strtoupper(trim($newCurrency)) . '.'
+            ? 'This invoice has ' . $n . ' line(s) or payment(s) in ' . ($was !== '' ? $was : 'no recorded currency') . ', so its currency cannot change to ' . $new . '.'
             : '';
     }
 
@@ -3250,19 +3260,22 @@ class Venues
         if ($amountPence <= 0) {
             $errors[] = 'Amount must be a positive number of pence.';
         }
-        // 💷 The organisation's currency unless one was chosen (#966). A
-        //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word. With NO currency
-        //    posted, an existing invoice KEEPS its own (D-139, round 3 of the
-        //    check): a record keeps the currency it was made in, so an edit after
-        //    the organisation changed currency must not relabel it.
+        // 💷 A currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED (it used to become GBP without a word). A NEW invoice takes
+        //    the posted currency, else the organisation's. An EDITED one goes
+        //    through Currency::onEdit() (#966, D-139, round 4): its own unless a
+        //    currency was posted for it — never today's, and an unrecorded one
+        //    ('') stays unrecorded. (Round 3 kept a recorded one but stamped an
+        //    unrecorded one with today's, while its children stayed ''.)
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
-        if ($currency === '') {
-            $kept = $invoiceId > 0 ? self::getInvoice($invoiceId, $siteId) : null;
-            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
-                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
-        } elseif (Currency::isChoosable($currency) === false) {
+        if ($currency !== '' && Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
+        }
+        $kept = $invoiceId > 0 ? self::getInvoice($invoiceId, $siteId) : null;
+        if (is_array($kept) === true) {
+            $currency = Currency::onEdit((string) ($kept['currency'] ?? ''), $currency);
+        } elseif ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
         }
         // 💷 An invoice with lines or payments in its currency keeps that
         //    currency (#966, D-139): those rows keep theirs, so relabelling the

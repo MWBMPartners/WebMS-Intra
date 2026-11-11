@@ -339,6 +339,37 @@ final class Currency
         return self::isChoosable($code) === true ? $code : null;
     }
 
+    /**
+     * ✏️ THE ONE RULE for the currency an EDITED money record is written with
+     * (#966, D-139). It returns the record's STORED currency unless a currency
+     * was deliberately posted AND the record may change it; then the posted
+     * one. Never today's currency: an edit after the organisation changed its
+     * own must not relabel a record, and a record with no recorded currency
+     * ('') STAYS '' unless one is posted for it, so a parent and its children
+     * keep agreeing (an unrecorded parent's children are unrecorded too).
+     *
+     * Every UPDATE of a money table under web/ that writes `currency` asks this
+     * (tools/audit-checks/check_currency_writes.py is the hard gate). "An edit
+     * relabels a record" failed two check rounds running, each time through a
+     * different caller's own "fall back to the organisation's" branch: one rule
+     * in one place is the fix for the class, not a fifth such branch.
+     *
+     * $posted: null or '' when no currency was posted; otherwise a code the
+     * caller has ALREADY checked with isChoosable() (an unusable code is the
+     * caller's refusal, in its own words). $mayChange: false when the record
+     * may not change currency now (it has child rows in another currency);
+     * the caller says why, and the stored currency is kept.
+     */
+    public static function onEdit(string $stored, ?string $posted, bool $mayChange = true): string
+    {
+        $wanted = strtoupper(trim((string) $posted));
+        if ($wanted === '' || $mayChange === false) {
+            return $stored;
+        }
+
+        return $wanted;
+    }
+
     /** 💷 The currency's own symbol ("£"), or '' when it is written with its code. */
     public static function symbol(string $code): string
     {

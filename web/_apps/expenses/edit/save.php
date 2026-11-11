@@ -268,7 +268,8 @@ if ($earlyReason !== ExpenseRules::EDIT_ALLOWED) {
 //    agree; an administrator labels both together on Organisation settings.
 //    (The first version used today's currency for the lines of such a claim
 //    while the claim itself stayed '', so the two disagreed.)
-$claimCurrency = is_array($claim) === true ? (string) $claim['currency'] : '';
+//    Currency::onEdit() with nothing posted: the claim's own, by the one rule.
+$claimCurrency = is_array($claim) === true ? \Portal\Core\Currency::onEdit((string) $claim['currency'], null) : '';
 $items = [];
 $total = 0.0;
 foreach ($rawLines as $raw) {

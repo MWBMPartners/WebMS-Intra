@@ -125,8 +125,11 @@ foreach ($txns as $t) {
 $tolDays      = max(0, (int) (App::settings('giving.reconcile.toleranceDays') ?? '5'));
 // 💷 Count deposits in this statement's OWN currency are offered (#966,
 //    D-139): each count keeps the currency it was counted in.
+//    A statement with NO currency recorded matches no count (the automatic
+//    match skips it too), and the page says so — round 4 of #966's check
+//    found this flag always true, so the message below could never show.
 $siteCurrency       = $currency;
-$depositsApplicable = true;
+$depositsApplicable = $currency !== '';
 
 // -----------------------------------------------------------------------------
 // 📋 Bulk-load candidate universes over the padded window, once — reused for
@@ -542,7 +545,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endif; ?>
         <?php if ($depositsApplicable === false): ?>
-            <p class="small text-muted p-3 mb-0">Count-session deposits are not shown — this statement's currency (<?php echo htmlspecialchars($currency, ENT_QUOTES, 'UTF-8'); ?>) differs from the site's giving currency (<?php echo htmlspecialchars($siteCurrency, ENT_QUOTES, 'UTF-8'); ?>); offering-count sessions carry no per-currency record.</p>
+            <p class="small text-muted p-3 mb-0">Count-session deposits are not shown — this statement has no currency recorded, so no count can be matched to it. An administrator can record one on Organisation settings.</p>
         <?php endif; ?>
     </div>
 </div>

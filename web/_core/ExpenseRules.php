@@ -2026,8 +2026,13 @@ final class ExpenseRules
                 'quotedLineTotal' => $quoted, 'lineTotal' => $quoted, 'currency' => $claimCurrency];
         }
         if ($claimCurrency === '') {
-            return '"' . $desc . '" is quoted in ' . $quotedCode . ', but this organisation has no currency chosen to '
-                . 'convert it into. Ask an administrator to choose one on Organisation settings.';
+            // The CLAIM has no currency: a new claim when the organisation has
+            // none chosen, or an older claim nobody has labelled yet. Either
+            // way an administrator fixes it on Organisation settings (round 4:
+            // this used to say the organisation had none, which is untrue for
+            // an older claim in an organisation that has one).
+            return '"' . $desc . '" is quoted in ' . $quotedCode . ', but this claim has no currency recorded to '
+                . 'convert it into. Ask an administrator to choose or record one on Organisation settings.';
         }
         if (is_numeric($converted) === false || (float) $converted <= 0) {
             return '"' . $desc . '" is quoted in ' . $quotedCode . ': type what it cost in ' . $claimCurrency

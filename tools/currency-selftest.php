@@ -708,10 +708,28 @@ $keptRows = rows($db, "SELECT 'gift' AS `what`, `currency` FROM `tblGivingEntry`
     . "UNION ALL SELECT 'campaign', `currency` FROM `tblPledgeCampaigns` WHERE `campaignID` = ? "
     . "UNION ALL SELECT 'claim', `currency` FROM `tblExpenseClaims` WHERE `claimTitle` = 'Currency selftest claim'", 'ii', [$made['gifts'][0], $campaign]);
 $campaignName = rows($db, 'SELECT `name`, `goalAmountPence` FROM `tblPledgeCampaigns` WHERE `campaignID` = ?', 'i', [$campaign]);
-check('D3b and in the rows themselves: the gift, the claim and a pledge campaign EDITED after the change (name and goal saved) are all still EUR — an edit never relabels a record (round 3 of the check: the campaign used to be rewritten in today\'s currency)',
+check('D3b a pledge campaign EDITED OVER HTTP after the change (its name and goal really saved) is still EUR, and so are the gift and claim rows read straight from the database (round 3 of the check: the campaign used to be rewritten in today\'s currency)',
     $campaignEdit['status'] === 302 && ($campaignName[0]['goalAmountPence'] ?? 0) === 600000
     && array_column($keptRows, 'currency', 'what') === ['gift' => 'EUR', 'campaign' => 'EUR', 'claim' => 'EUR'],
     json_encode([$keptRows, $campaignName]));
+// D3c: the project and the expense claim made in EUR, each EDITED over HTTP while the
+// organisation is in USD. Round 4 of the check planted today's currency into both
+// edits and 63 of 63 stayed green, because nothing here edited either.
+$projEdit = $http('POST', '/projects/manage-save', ['csrf_token' => $freshToken('/projects/manage'), 'projectID' => (string) $proj[0]['projectID'],
+    'title' => 'Currency selftest roof, edited', 'targetAmount' => '1500.00', 'status' => 'active', 'isPublic' => '1', 'description' => 'x']);
+$projAfter = rows($db, 'SELECT `title`, `currency` FROM `tblProject` WHERE `projectID` = ?', 'i', [(int) $proj[0]['projectID']]);
+$eurClaim = (int) (rows($db, "SELECT `claimID` FROM `tblExpenseClaims` WHERE `claimTitle` = 'Currency selftest claim'")[0]['claimID'] ?? 0);
+$claimEdit = $http('POST', '/expenses/edit/save', ['csrf_token' => $freshToken('/expenses/edit?id=' . $eurClaim), 'claimID' => (string) $eurClaim,
+    'claimTitle' => 'Currency selftest claim, edited', 'deptID' => (string) $dept,
+    'itemDesc' => ['Hymn books'], 'itemQty' => ['1'], 'itemUnit' => ['250.00'], 'itemCurrency' => ['EUR'], 'itemConverted' => ['']]);
+$claimAfter = rows($db, 'SELECT `claimTitle`, `currency`, `totalAmount` FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [$eurClaim]);
+$claimLinesAfter = rows($db, 'SELECT `currency`, `quotedCurrency`, `lineTotal` FROM `tblExpenseClaimItems` WHERE `claimID` = ?', 'i', [$eurClaim]);
+check('D3c a project and an expense claim, each EDITED OVER HTTP after the change (title saved), are still EUR — and so is the edited claim\'s line',
+    ($projAfter[0]['title'] ?? '') === 'Currency selftest roof, edited' && ($projAfter[0]['currency'] ?? '') === 'EUR'
+    && ($claimAfter[0]['claimTitle'] ?? '') === 'Currency selftest claim, edited' && ($claimAfter[0]['currency'] ?? '') === 'EUR'
+    && (float) ($claimAfter[0]['totalAmount'] ?? 0) === 250.00
+    && count($claimLinesAfter) === 1 && $claimLinesAfter[0]['currency'] === 'EUR' && $claimLinesAfter[0]['quotedCurrency'] === 'EUR',
+    'HTTP ' . $projEdit['status'] . '/' . $claimEdit['status'] . '; ' . json_encode([$projAfter, $claimAfter, $claimLinesAfter]));
 $madeBefore = (int) (rows($db, 'SELECT COALESCE(MAX(`projectID`), 0) AS `m` FROM `tblProject`')[0]['m']);
 $http('POST', '/projects/manage-save', ['csrf_token' => $freshToken('/projects/manage'), 'title' => 'Currency selftest organ', 'targetAmount' => '900.00', 'status' => 'active', 'isPublic' => '1', 'description' => 'x']);
 $projUsd = rows($db, 'SELECT `projectID`, `currency` FROM `tblProject` WHERE `projectID` > ? AND `siteID` = ?', 'ii', [$madeBefore, $site]);
@@ -882,16 +900,23 @@ run($db, "INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `status`, `v
 run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 3000, 'GBP', CURDATE(), 'cash')",
     'iii', [$site, CU_ADMIN, $category]);
 $made['gifts'][] = (int) $db->insert_id;
+// And one with NO recorded currency: it must be left out of the claim (it is not
+// known to be pounds) and COUNTED in the note (round 4 of the check).
+run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 4100, '', CURDATE(), 'cash')",
+    'iii', [$site, CU_ADMIN, $category]);
+$made['gifts'][] = (int) $db->insert_id;
 $heldByAdmin = rows($db, "SELECT `currency`, COUNT(*) AS `n` FROM `tblGivingEntry` WHERE `siteID` = ? AND `donorID` = ? GROUP BY `currency`", 'ii', [$site, CU_ADMIN]);
 $notPounds   = array_sum(array_map(static fn (array $r): int => $r['currency'] === 'GBP' ? 0 : (int) $r['n'], $heldByAdmin));
 $claimFile = $http('GET', '/giving/hmrc-export?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'));
 $claimRows = array_values(array_filter(explode("\n", trim($claimFile['body'])), static fn (string $l): bool => str_contains($l, '7 Selftest Road')));
-check('H1 the HMRC claim file holds the gift in POUNDS (30.00) and none of this donor\'s gifts in euros or dollars (' . $notPounds . ' of them)',
-    $claimFile['status'] === 200 && count($claimRows) === 1 && str_ends_with(trim($claimRows[0]), ',30.00') === true && $notPounds >= 2,
+check('H1 the HMRC claim file holds the gift in POUNDS (30.00) and none of this donor\'s gifts in euros, dollars or with NO recorded currency (' . $notPounds . ' of them; the 41.00 with none is not taken as pounds)',
+    $claimFile['status'] === 200 && count($claimRows) === 1 && str_ends_with(trim($claimRows[0]), ',30.00') === true && $notPounds >= 3
+    && str_contains($claimFile['body'], '41.00') === false,
     'HTTP ' . $claimFile['status'] . '; rows: ' . json_encode($claimRows));
 $leftOutPage = $http('GET', '/giving/manage?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'))['body'];
-check('H2 and Manage giving says how many it left out, and why (Gift Aid is claimed in pounds)',
-    preg_match('/data-hmrc-left-out="(\d+)"/', $leftOutPage, $mm) === 1 && (int) $mm[1] === $notPounds && str_contains($leftOutPage, 'claimed in') === true,
+check('H2 and Manage giving says how many it left out — the unrecorded one included — and why, naming both kinds',
+    preg_match('/data-hmrc-left-out="(\d+)"/', $leftOutPage, $mm) === 1 && (int) $mm[1] === $notPounds
+    && str_contains(preg_replace('/\s+/', ' ', $leftOutPage), 'recorded in another currency than pounds, or with no currency recorded. Gift Aid is a UK scheme claimed in pounds') === true,
     'note: ' . ($mm[1] ?? '(none)') . ', expected ' . $notPounds);
 
 // Reconciliation: a statement in EUR, a closed count in USD and one in EUR.
@@ -916,6 +941,38 @@ $http('POST', '/giving/reconcile/match', ['csrf_token' => $freshToken('/giving/r
 $afterEur = rows($db, 'SELECT `matchStatus`, `matchedCountSessionID` FROM `tblBankTxns` WHERE `txnID` = ?', 'i', [$txn]);
 check('H4 ...while a count in euros matches it (so H3 refused for the currency, not for another reason)',
     ($afterEur[0]['matchStatus'] ?? '') === 'matched' && (int) $afterEur[0]['matchedCountSessionID'] === $eurCount, json_encode($afterEur));
+
+// The manual GIFT match: a euro bank line may be matched to a euro gift only.
+run($db, "INSERT INTO `tblBankTxns` (`importID`, `siteID`, `txnDate`, `amountPence`, `currency`, `description`) VALUES (?, ?, CURDATE(), 7777, 'EUR', 'Currency selftest gift line')", 'ii', [$import, $site]);
+$giftTxn = (int) $db->insert_id;
+$usdGift = (int) (rows($db, "SELECT `entryID` FROM `tblGivingEntry` WHERE `siteID` = ? AND `donorID` = ? AND `currency` = 'USD' LIMIT 1", 'ii', [$site, CU_ADMIN])[0]['entryID'] ?? 0);
+$http('POST', '/giving/reconcile/match', ['csrf_token' => $freshToken('/giving/reconcile/view?id=' . $import), 'action' => 'match-entry', 'txnID' => (string) $giftTxn, 'entryID' => (string) $usdGift]);
+$giftAfterUsd = rows($db, 'SELECT `matchStatus`, `matchedEntryID` FROM `tblBankTxns` WHERE `txnID` = ?', 'i', [$giftTxn]);
+$http('POST', '/giving/reconcile/match', ['csrf_token' => $freshToken('/giving/reconcile/view?id=' . $import), 'action' => 'match-entry', 'txnID' => (string) $giftTxn, 'entryID' => (string) $made['gifts'][0]]);
+$giftAfterEur = rows($db, 'SELECT `matchStatus`, `matchedEntryID` FROM `tblBankTxns` WHERE `txnID` = ?', 'i', [$giftTxn]);
+check('H4b a posted match of a EURO bank line to a DOLLAR gift is refused by the server, while the euro gift then matches it',
+    $usdGift > 0 && ($giftAfterUsd[0]['matchStatus'] ?? '') === 'unmatched' && ($giftAfterEur[0]['matchStatus'] ?? '') === 'matched'
+    && (int) $giftAfterEur[0]['matchedEntryID'] === $made['gifts'][0], json_encode([$giftAfterUsd, $giftAfterEur]));
+// The AUTOMATIC match (the "Re-run" button): a line of 33.33 has only a DOLLAR count of
+// that amount, a line of 44.44 a EURO one; only the second may match.
+$countOf = static function (string $code, string $cash) use ($db, $site, $category, &$made): int {
+    run($db, "INSERT INTO `tblCountSessions` (`siteID`, `serviceDate`, `categoryID`, `currency`, `status`, `cashTotal`, `chequeTotal`, `envelopeTotal`) VALUES (?, CURDATE(), ?, ?, 'closed', ?, 0, 0)",
+        'iiss', [$site, $category, $code, $cash]);
+    $id = (int) $db->insert_id;
+    $made['counts'][] = $id;
+    return $id;
+};
+run($db, "INSERT INTO `tblBankTxns` (`importID`, `siteID`, `txnDate`, `amountPence`, `currency`, `description`) VALUES (?, ?, CURDATE(), 3333, 'EUR', 'Currency selftest auto one')", 'ii', [$import, $site]);
+$autoOne = (int) $db->insert_id;
+run($db, "INSERT INTO `tblBankTxns` (`importID`, `siteID`, `txnDate`, `amountPence`, `currency`, `description`) VALUES (?, ?, CURDATE(), 4444, 'EUR', 'Currency selftest auto two')", 'ii', [$import, $site]);
+$autoTwo = (int) $db->insert_id;
+$countOf('USD', '33.33');
+$eurAuto = $countOf('EUR', '44.44');
+$http('POST', '/giving/reconcile/match', ['csrf_token' => $freshToken('/giving/reconcile/view?id=' . $import), 'action' => 'rematch', 'importID' => (string) $import]);
+$auto = rows($db, 'SELECT `txnID`, `matchStatus`, `matchedCountSessionID` FROM `tblBankTxns` WHERE `txnID` IN (?, ?) ORDER BY `txnID`', 'ii', [$autoOne, $autoTwo]);
+check('H4c the automatic match leaves a euro line whose only same-amount count is in DOLLARS unmatched, and matches the one with a EURO count',
+    count($auto) === 2 && $auto[0]['matchStatus'] === 'unmatched' && $auto[1]['matchStatus'] === 'matched' && (int) $auto[1]['matchedCountSessionID'] === $eurAuto,
+    json_encode($auto));
 
 // An asset: an unusable currency is refused; a change is refused once a repair is recorded.
 $piano = (int) $made['assets'][0];
@@ -952,11 +1009,25 @@ $setting('org.currency', 'USD', $site);
 // so it could not show whether "keep" itself works (planted, it did not).
 $http('POST', '/venues/invoice-save', array_diff_key($invoicePost($unpaidInvoice, ''), ['currency' => true]));
 check('H10 and an edit that posts NO currency keeps the invoice\'s own (EUR), not the organisation\'s (now USD)', $invoiceCurrency($unpaidInvoice) === 'EUR', $invoiceCurrency($unpaidInvoice));
+// An UNRECORDED invoice with an unrecorded payment (as an older database holds),
+// edited with no currency: both must stay unrecorded and agree. Round 3 stamped the
+// invoice with today's currency (USD) while its payment stayed '' (measured by the
+// round-4 check); Currency::onEdit() keeps ''.
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 6000, '', 'part-paid')", 'ii', [$site, $venue]);
+$oldInvoice = (int) $db->insert_id;
+$made['invoices'][] = $oldInvoice;
+run($db, "INSERT INTO `tblVenueInvoicePayments` (`siteID`, `invoiceID`, `paidDate`, `amountPence`, `currency`) VALUES (?, ?, CURDATE(), 1000, '')", 'ii', [$site, $oldInvoice]);
+$http('POST', '/venues/invoice-save', ['csrf_token' => $freshToken('/venues/invoice?id=' . $oldInvoice), 'invoiceID' => (string) $oldInvoice,
+    'venueID' => (string) $venue, 'issueDate' => date('Y-m-d'), 'amount' => '60.00', 'invoiceRef' => 'SELFTEST-OLD']);
+$oldAfter = rows($db, "SELECT `i`.`invoiceRef`, `i`.`currency` AS `inv`, `p`.`currency` AS `pay` FROM `tblVenueInvoices` `i` JOIN `tblVenueInvoicePayments` `p` ON `p`.`invoiceID` = `i`.`invoiceID` WHERE `i`.`invoiceID` = ?", 'i', [$oldInvoice]);
+check('H10b an UNRECORDED invoice edited with no currency is saved (reference set) and STAYS unrecorded, agreeing with its unrecorded payment — never today\'s USD',
+    ($oldAfter[0]['invoiceRef'] ?? '') === 'SELFTEST-OLD' && ($oldAfter[0]['inv'] ?? 'x') === '' && ($oldAfter[0]['pay'] ?? 'x') === '', json_encode($oldAfter));
 
 // A venue booking and agreement recorded in EUR, edited while the organisation is in
-// USD with NO currency posted (the booking form has no currency field): each must keep
-// EUR. Before this, nothing drove either edit, so a planted "take today's currency" in
-// Venues::saveBooking() stayed green (round 3's own report said so).
+// USD: each must keep EUR. The booking form DOES carry a currency box (booking.php,
+// prefilled with the booking's own); round 3's note here said it had none, which was
+// untrue. So H12 posts what the REAL form sends, read out of the page, and H12b posts
+// a crafted edit with no currency at all (the API-shaped case).
 run($db, "INSERT INTO `tblVenueStatuses` (`siteID`, `statusName`, `statusCategory`, `countsAsConfirmed`) VALUES (?, 'Currency selftest booked', 'agreed', 1)", 'i', [$site]);
 $bookStatus = (int) $db->insert_id;
 run($db, "INSERT INTO `tblVenueUsageTypes` (`siteID`, `venueID`, `typeName`) VALUES (?, ?, 'Currency selftest hire')", 'ii', [$site, $venue]);
@@ -964,11 +1035,55 @@ $bookUsage = (int) $db->insert_id;
 run($db, "INSERT INTO `tblVenueBookings` (`siteID`, `venueID`, `bookingDate`, `usageTypeID`, `statusID`, `costPence`, `currency`, `notes`) VALUES (?, ?, CURDATE(), ?, ?, 2500, 'EUR', 'before')",
     'iiii', [$site, $venue, $bookUsage, $bookStatus]);
 $booking = (int) $db->insert_id;
+/** The fields the page's own booking form would post: its inputs, selected options and text areas. */
+$formPost = static function (string $html, string $actionEndsWith): array {
+    $doc = new DOMDocument();
+    @$doc->loadHTML('<?xml encoding="utf-8"?>' . $html);
+    foreach ($doc->getElementsByTagName('form') as $form) {
+        if (str_ends_with((string) $form->getAttribute('action'), $actionEndsWith) === false) {
+            continue;
+        }
+        $fields = [];
+        foreach ((new DOMXPath($doc))->query('.//input|.//select|.//textarea', $form) as $el) {
+            $name = (string) $el->getAttribute('name');
+            if ($name === '' || $el->hasAttribute('disabled') === true) {
+                continue;
+            }
+            $type = strtolower((string) $el->getAttribute('type'));
+            if ($el->nodeName === 'input' && in_array($type, ['checkbox', 'radio'], true) === true && $el->hasAttribute('checked') === false) {
+                continue;
+            }
+            $value = (string) $el->getAttribute('value');
+            if ($el->nodeName === 'textarea') {
+                $value = $el->textContent;
+            } elseif ($el->nodeName === 'select') {
+                $value = '';
+                foreach ($el->getElementsByTagName('option') as $i => $opt) {
+                    if ($i === 0 || $opt->hasAttribute('selected') === true) {
+                        $value = (string) $opt->getAttribute('value');
+                    }
+                }
+            }
+            $fields[$name] = $value;
+        }
+        if (($fields['action'] ?? '') === 'save') {
+            return $fields;
+        }
+    }
+    return [];
+};
+$bookingForm = $formPost($http('GET', '/venues/booking?id=' . $booking)['body'], 'venues/booking-save');
+$bookingForm['notes'] = 'edited through the real form';
+$http('POST', '/venues/booking-save', $bookingForm);
+$bookingAfter = rows($db, 'SELECT `notes`, `costPence`, `currency` FROM `tblVenueBookings` WHERE `bookingID` = ?', 'i', [$booking]);
+check('H12 a venue booking EDITED THROUGH ITS REAL FORM after the organisation moved to USD — the form posts its own currency box, prefilled with the booking\'s EUR (' . var_export($bookingForm['currency'] ?? null, true) . ') — is saved (notes changed) and is STILL EUR',
+    ($bookingForm['currency'] ?? null) === 'EUR' && ($bookingAfter[0]['notes'] ?? '') === 'edited through the real form' && (int) ($bookingAfter[0]['costPence'] ?? 0) === 2500 && ($bookingAfter[0]['currency'] ?? '') === 'EUR',
+    json_encode($bookingAfter) . '; flash: ' . (preg_match('/alert-danger[^>]*>([^<]*)/', $http('GET', '/venues/booking?id=' . $booking)['body'], $mm) === 1 ? $mm[1] : '(none)'));
 $http('POST', '/venues/booking-save', ['csrf_token' => $freshToken('/venues/booking?id=' . $booking), 'action' => 'save', 'bookingID' => (string) $booking,
     'venueID' => (string) $venue, 'bookingDate' => date('Y-m-d'), 'statusID' => (string) $bookStatus, 'usageTypeID' => (string) $bookUsage,
     'costPence' => '25.00', 'notes' => 'edited after the change']);
 $bookingAfter = rows($db, 'SELECT `notes`, `costPence`, `currency` FROM `tblVenueBookings` WHERE `bookingID` = ?', 'i', [$booking]);
-check('H12 a venue booking EDITED after the organisation moved to USD (no currency posted, as the form posts none) is saved — its notes changed — and is STILL EUR',
+check('H12b and a CRAFTED edit posting no currency at all is saved too (notes changed) and is STILL EUR',
     ($bookingAfter[0]['notes'] ?? '') === 'edited after the change' && (int) ($bookingAfter[0]['costPence'] ?? 0) === 2500 && ($bookingAfter[0]['currency'] ?? '') === 'EUR',
     json_encode($bookingAfter) . '; flash: ' . (preg_match('/alert-danger[^>]*>([^<]*)/', $http('GET', '/venues/booking?id=' . $booking)['body'], $mm) === 1 ? $mm[1] : '(none)'));
 run($db, "INSERT INTO `tblVenueAgreements` (`siteID`, `venueID`, `title`, `rateAmountPence`, `currency`, `status`) VALUES (?, ?, 'Currency selftest hire terms', 10000, 'EUR', 'active')", 'ii', [$site, $venue]);
@@ -980,13 +1095,15 @@ check('H13 a venue agreement EDITED the same way (no currency posted) is saved �
     ($agreementAfter[0]['title'] ?? '') === 'Currency selftest hire terms, renamed' && (int) ($agreementAfter[0]['rateAmountPence'] ?? 0) === 10000 && ($agreementAfter[0]['currency'] ?? '') === 'EUR',
     json_encode($agreementAfter));
 
-// A giving statement for a donor who gave in several currencies (EUR, USD and GBP here).
+// A giving statement for a donor who gave in several currencies (EUR, USD and GBP here,
+// and one gift with none). The unrecorded GIFT is unlabelled; the statement must not be.
+$unlabelledBefore = Currency::unlabelledCount($db, $site);
 $http('POST', '/giving/statements-generate', ['csrf_token' => $freshToken('/giving/statements'), 'from' => date('Y-01-01'), 'to' => date('Y-12-31')]);
 $logRow = rows($db, 'SELECT `currency`, `totalPence`, `giftAidPence` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN]);
 check('H11 a statement covering several currencies is logged as "*" with totals 0 — never \'\' ("not recorded") — so the organisation page does not count it as unlabelled and labelling cannot stamp one currency on it',
-    count($logRow) === 1 && $logRow[0]['currency'] === '*' && (int) $logRow[0]['totalPence'] === 0 && Currency::unlabelledCount($db, $site) === 0
-    && Currency::labelUnlabelled($db, $site, 'EUR') === 0 && rows($db, 'SELECT `currency` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN])[0]['currency'] === '*',
-    json_encode($logRow) . '; unlabelled: ' . var_export(Currency::unlabelledCount($db, $site), true));
+    count($logRow) === 1 && $logRow[0]['currency'] === '*' && (int) $logRow[0]['totalPence'] === 0 && Currency::unlabelledCount($db, $site) === $unlabelledBefore
+    && Currency::labelUnlabelled($db, $site, 'EUR') === $unlabelledBefore && rows($db, 'SELECT `currency` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN])[0]['currency'] === '*',
+    json_encode($logRow) . '; unlabelled before ' . var_export($unlabelledBefore, true) . ', now ' . var_export(Currency::unlabelledCount($db, $site), true));
 run($db, 'DELETE FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN]);
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
