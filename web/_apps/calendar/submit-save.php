@@ -325,14 +325,47 @@ try {
 $newId = (int) $stmt->insert_id;
 $stmt->close();
 
-Logger::activity('EventSubmitted', 'Event #' . $newId . ' submitted by ' . ($isLoggedIn ? 'user ' . $submitterId : 'anonymous ' . $submitterEmail));
+// 🔒 THE RECORD OF A SUGGESTION NAMES NOBODY WHO HAS NO ACCOUNT (#963).
+//
+//    A member who suggests an event is named the way every activity record
+//    names its person: by account number, and Logger::activity() fills
+//    `userID` from the session.
+//
+//    A visitor who is not signed in has no account, so there is nobody for
+//    the record to name. This line used to write their e-mail address into
+//    the description ("submitted by anonymous <address>"). D-134 says the
+//    address is used for ONE thing — telling them their suggestion was
+//    approved — and the activity log is kept for a year by default and for
+//    ever if an administrator chooses "never" (#932). An erasure does not
+//    rewrite a description either, so the address would have outlived any
+//    request to remove it. The record now says what happened and which event
+//    it was; who sent it is on the event's own row, which only the moderation
+//    page shows. Records written before #963 still hold addresses; removing
+//    them is erasure work (#964), not this change.
+if ($isLoggedIn === true) {
+    Logger::activity('EventSubmitted', 'Event #' . $newId . ' submitted by user ' . $submitterId);
+} else {
+    Logger::activity('EventSubmitted', 'Event #' . $newId . ' suggested by a visitor who was not signed in');
+}
 
 // 🪝 Outbound webhook on submission (#324).
+//
+// 🔒 `submittedBy` is "visitor" for somebody who is not signed in, never their
+//    address (#963). It used to be the address itself, so every connected
+//    service listening for `calendar.event.submitted` was sent a member of
+//    the public's e-mail address, and a copy of what was sent is kept on the
+//    delivery row (`tblWebhookDeliveries.payload`). The receiver gains nothing
+//    it could rightly use: D-134 keeps the address for the approval e-mail
+//    alone, and that e-mail is sent by the portal. A member is still
+//    `user-<account number>`, as before — a number, not a name or an
+//    address, of the kind other webhooks already carry (`reviewerID` on a
+//    registration's, admin/calendar/registrations-act.php).
+//    The name is not sent either, and never was.
 if (class_exists(\Portal\Core\WebhookDispatcher::class) === true) {
     \Portal\Core\WebhookDispatcher::emit('calendar.event.submitted', [
         'eventID'     => $newId,
         'eventName'   => $eventName,
-        'submittedBy' => $isLoggedIn === true ? ('user-' . $submitterId) : $submitterEmail,
+        'submittedBy' => $isLoggedIn === true ? ('user-' . $submitterId) : 'visitor',
     ]);
 }
 

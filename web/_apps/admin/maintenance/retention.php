@@ -342,8 +342,8 @@ $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
 // person's records but does not rewrite descriptions. Most descriptions name
 // nobody; of those that name somebody, most do so by account number, and some
 // by full name or e-mail address — for example UserCreated, six of the
-// password-reset records, EventInviteSent, EventSubmitted and the
-// children's-profile records. That list is NOT complete: #933 holds the full
+// password-reset records, EventInviteSent, EventSubmitted (in records written
+// before #963 only) and the children's-profile records. That list is NOT complete: #933 holds the full
 // count, and ActivityLogRetention's header gives the same examples (with the
 // file for two of them). Because not every description names anybody, the
 // sentence the page shows is general.

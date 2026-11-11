@@ -45,7 +45,9 @@
  * `UserCreated` (admin/users/save.php: full name and own e-mail address), the
  * password-reset records (auth/forgot-password/save.php: the e-mail address,
  * in six of them), `EventInviteSent` (the invitee's e-mail address),
- * `EventSubmitted` (an anonymous submitter's e-mail address),
+ * `EventSubmitted` (an anonymous submitter's e-mail address — in records
+ * written before #963 only; a visitor's suggestion is now recorded with no
+ * address),
  * `KidProfileAdded`/`KidProfileEdited` (a child's name), an event registration
  * received, and an account linked or unlinked (a sign-in provider's e-mail
  * address). Until #932 the clear-out was what eventually removed such a line;

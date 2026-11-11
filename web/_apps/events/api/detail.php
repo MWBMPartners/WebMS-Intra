@@ -176,8 +176,29 @@ $isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
 //    The column list is every tblEvents column (web/_sql/full_schema.sql,
 //    CREATE TABLE tblEvents) EXCEPT externalFeedID, externalUid and the #514
 //    import*/external* columns, which must never leave the portal through this
-//    API. It is written out instead of `e.*` so that a column added to
-//    tblEvents later is NOT returned until somebody decides it should be.
+//    API, and EXCEPT `submitterName` and `submitterEmail` (#963, below). It is
+//    written out instead of `e.*` so that a column added to tblEvents later is
+//    NOT returned until somebody decides it should be.
+//
+// 🔒 #963 — THE NAME AND ADDRESS OF A VISITOR WHO SUGGESTED THE EVENT ARE NOT
+//    SENT, TO ANYBODY. `submitterName` and `submitterEmail` are filled in only
+//    when somebody who is NOT signed in suggests an event on the public form
+//    (calendar/submit-save.php). D-134 says that address is used for one
+//    thing: telling them their suggestion was approved. This statement used
+//    to select both for every caller allowed to see the event, so once a
+//    suggestion was approved and published, any signed-in member and any key
+//    holding only `events:read` could read a member of the public's name and
+//    e-mail address (measured over HTTP with
+//    tools/event-suggester-privacy-selftest.php against bd82ce1b).
+//
+//    Why not "only for an administrator": nothing that reads this endpoint
+//    uses them. The moderation page (admin/calendar/moderation.php), which is
+//    where an administrator needs them, reads the row itself; no page or
+//    script under web/ calls this endpoint for them; and a key holding
+//    `events:write` is a connected service, not a person moderating, so
+//    giving it the address would be using it for something else, which D-134
+//    rules out. `submittedByID` (a member's own account number, when a
+//    signed-in member suggested it) and `submissionStatus` stay, as before.
 //    `(e.externalFeedID IS NOT NULL) AS imported` gives the yes/no the reply
 //    needs without selecting the calendar number itself.
 //
@@ -213,7 +234,7 @@ $stmt = $db->prepare(sprintf(
     . 'e.locationPhone, e.locationEmail, e.hostOrgName, e.partnerOrgs, e.heroImage, e.posterImage, e.profileImage, '
     . 'e.status, %s, e.isFeatured, e.isDeleted, e.deletedAt, e.capacity, '
     . 'e.createdByID, e.updatedByID, e.createdAt, e.updatedAt, '
-    . 'e.submissionStatus, e.submittedByID, e.submitterName, e.submitterEmail, e.submittedAt, '
+    . 'e.submissionStatus, e.submittedByID, e.submittedAt, '
     . 'e.moderatedByID, e.moderatedAt, e.moderationNote, e.cancelReason, e.statusChangedByID, e.statusChangedAt, '
     . 'e.capacityCount, e.registrationEnabled, e.registrationOpensAt, e.registrationClosesAt, '
     . 'e.registrationRetentionDays, e.venueID, e.roomID, '
