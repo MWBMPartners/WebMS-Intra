@@ -92,9 +92,10 @@ if (function_exists('portal_place_map_agreement') === false) {
         } else {
             echo '<p class="small text-secondary mb-0 portal-place-host-status">This is ' . $esc($name) . '\'s home. '
                 . $esc($name) . ' has ' . ($agreed === true ? 'agreed' : 'not agreed') . ' to a map of it. Only '
-                . $esc($name) . ' can change that, by opening this form themselves, and only ' . $esc($name)
-                . ' can change who lives here or mark it as not anybody\'s home. If you change the address, any '
-                . 'agreement given so far no longer counts.</p>';
+                . $esc($name) . ' can change that, by opening this form themselves. Only ' . $esc($name)
+                . ' can name a different host or mark it as not anybody\'s home. You may correct the address, but '
+                . 'then any agreement given so far no longer counts. To meet somewhere else, empty or remove this '
+                . 'place and enter the new one afresh.</p>';
         }
         echo '</div>';
     }
@@ -163,7 +164,7 @@ if (function_exists('portal_place_host_select') === false) {
         echo '</select>';
         echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home. With nobody '
             . 'named, no map is shown unless the place is marked as not anybody\'s home below. Once a host is named, only '
-            . 'they can change who lives there.</small>';
+            . 'they can name somebody else or mark it; anybody else must empty or remove the place first.</small>';
         echo '<input type="hidden" name="notAHomeAsked" value="1">';
         echo '<div class="form-check mt-2">';
         echo '<input type="checkbox" class="form-check-input" name="notAHome" id="notAHome" value="1"'

@@ -368,9 +368,10 @@ if ($isCreate === true) {
     if ($markTicked === true && $hostPick['host'] !== null) {
         $refuseBoth();
     }
-    // 🛡️ Check round 1 of #809 (D-124, D-128): with the address unchanged,
-    //    only the place's own named host may change who lives there or mark it
-    //    "not anybody's home". Asked on the LOCKED row.
+    // 🛡️ Check rounds 1 and 2 of #809 (D-124, D-128): while the place names a
+    //    host, nobody else may change the host or mark it "not anybody's
+    //    home", whatever they do to the address; only emptying or removing it
+    //    starts again. Asked on the LOCKED row.
     $takeOver = SmallGroups::whyHostChangeRefused($lockedRow, $postedPlace, $hostPick['host'], $markTicked, $userId,
         'empty the meeting place\'s address and save');
     if ($takeOver !== '') {

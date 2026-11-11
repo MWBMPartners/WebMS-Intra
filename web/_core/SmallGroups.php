@@ -802,21 +802,42 @@ final class SmallGroups
 
     /**
      * 🛡️ Is this save trying to take a place away from its named host? (Check
-     * round 1 of #809; D-124 and D-128 "rule out" a host's home shown without
-     * that host's agreement.)
+     * rounds 1 and 2 of #809; D-124 and D-128 "rule out" a host's home shown
+     * without that host's agreement, and D-124 rules out an erasure that no
+     * longer reaches the host's address.)
      *
-     * When a place HAS a stored named host and its ADDRESS IS UNCHANGED, only
-     * that stored host may remove or replace the host, or mark it "not
-     * anybody's home". Anybody else — a leader, an administrator — is refused:
-     * otherwise a leader could rename the host to themselves and agree (X1), or
-     * pick "nobody" and tick "not anybody's home" (X2), and the member's home
-     * would be on a map though the member never agreed. To change who lives
-     * there, the place is removed and entered again — removing deletes the old
-     * address at once (D-126), so nothing about the old host's home survives.
+     * THE RULE: while a place has a stored named host and the person saving is
+     * NOT that host, the save may not change the host (to somebody else, or to
+     * nobody) and may not mark the place "not anybody's home" — WHATEVER
+     * happens to the address. The host keeps full control of their own home.
+     * The ONE way past is to EMPTY the place (the usual place) or REMOVE it
+     * (a listed home, which never reaches this method): either deletes the
+     * address at once (D-126), so nothing of the old host's home survives, and
+     * a new place is then entered afresh.
      *
-     * A CHANGED address is not refused here: it already clears the agreement
-     * and the mark (rules 3 and 8 above), so whatever is now entered starts
-     * with nobody's agreement.
+     * A non-host MAY still edit the address with the host kept (a typo fix);
+     * a changed address clears the host's agreement and the mark, as it always
+     * has (rules 3 and 8 of `placeAgreementAfterSave()`).
+     *
+     * WHY THERE IS NO "the address changed, so it is a new place" EXEMPTION.
+     * Round 1's version had one, and round 2 of the independent check drove
+     * five takeovers through it over HTTP: change the country, the case of one
+     * letter or the seventh decimal of the position while dropping or
+     * replacing the host, then put the address back and agree, or mark it a
+     * hall, on the next save — the identical home mapped with no host, in
+     * three saves. "Different" cannot be judged by comparing fields, so the
+     * rule does not try: only an EMPTY place counts as starting again.
+     *
+     * What it CANNOT see (D-128's stated limit): a non-host who empties a place
+     * and then types the same address in afresh as "not anybody's home". The
+     * portal cannot know whose home an address is; that is the owner's
+     * recorded limit for the mark, not something this rule claims to stop.
+     *
+     * The `$markTicked` term: both handlers refuse a host AND the mark
+     * together (`$refuseBoth`) before asking this, so through a handler the
+     * mark only arrives here with the host changed, which is refused anyway.
+     * It is kept so the rule is complete on its own and does not lean on the
+     * order of two calls in two files; PA13e pins it on facts.
      *
      * @param ?array<string,mixed> $existing The stored row (locked), or null for a new place.
      * @param array<string,mixed>  $posted   The place as it will be stored, keyed by PLACE_COLUMNS.
@@ -834,17 +855,17 @@ final class SmallGroups
         if ($storedHost <= 0 || $storedHost === $saverId) {
             return '';
         }
-        $after = self::placeOf($posted);
-        if (self::placeIsEmpty($after) === true || self::placeOf($existing) !== $after) {
+        if (self::placeIsEmpty(self::placeOf($posted)) === true) {
             return '';
         }
         if ((int) ($newHost ?? 0) === $storedHost && $markTicked === false) {
             return '';
         }
 
-        return 'This place is the home of the member named as its host, and only they can change who lives there or '
-            . 'mark it as not anybody\'s home. To change who lives there, ' . $how . ' and enter it again: that deletes '
-            . 'the old address. Nothing was saved.';
+        return 'This place is the home of the member named as its host. Only they can name a different host, remove '
+            . 'themselves as host, or mark it as not anybody\'s home. You can still correct its address, but they will '
+            . 'then need to agree to a map again. To meet somewhere else, ' . $how . ' and enter the new place afresh: '
+            . 'that deletes this address. Nothing was saved.';
     }
 
     /**
