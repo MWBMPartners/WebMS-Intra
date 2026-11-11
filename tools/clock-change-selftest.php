@@ -1212,12 +1212,17 @@ if ($foundBoth === false) {
         $exactWrong === [] ? 'all exact' : implode(' | ', $exactWrong), 'all exact');
 
     // K07g — NO PHP WARNING FROM STEP (d). For `<weekday> N weeks ago`,
-    //        `date_parse()` reports a relative weekday of -7, -6 or -1, and
-    //        round 4 looked that up in the day-name list: "Undefined array key
-    //        -7", logged to tblErrors for every such row and visible on dev and
-    //        beta (the independent check's round 4). Such a cell keeps the old
-    //        answer now. The warning is caught by a handler here because the
-    //        value alone cannot show it: PHP carries on after the warning.
+    //        `date_parse()` reports a relative weekday of -1 to -7 depending on
+    //        the weekday (`tuesday` gives -2, `sunday` -7), and for `... ago
+    //        ago` it reports +7 (measured -- an earlier version of this comment
+    //        said "-7, -6 or -1"). Round 4 looked that up in the day-name list:
+    //        "Undefined array key -7", logged to tblErrors for every such row
+    //        and visible on dev and beta (the independent check's round 4).
+    //        Such a cell keeps the old answer now. The warning is caught by a
+    //        handler here because the value alone cannot show it: PHP carries
+    //        on after the warning. The `tuesday` cell (-2) and the `ago ago`
+    //        cell (+7) test the guard's two bounds behaviourally -- loosen
+    //        either bound and that cell warns.
     $warned = [];
     $weeksWrong = [];
     set_error_handler(static function (int $no, string $msg) use (&$warned): bool {
@@ -1227,6 +1232,8 @@ if ($foundBoth === false) {
     foreach ([
         ['sunday 1 week ago 2026-04-05 01:30',                   '2026-03-29 02:30:00'],
         ['saturday 2 weeks ago 2026-04-12 01:30 +86400000 msec', '2026-03-29 02:30:00'],
+        ['tuesday 1 week ago 2026-03-31 01:30',                  '2026-03-17 01:30:00'],
+        ['sunday 1 week ago ago 2026-03-22 01:30',               '2026-04-05 01:30:00'],
     ] as [$weeksCell, $weeksWant]) {
         $weeksGot = $fmtStore($weeksCell);
         if ($weeksGot !== $weeksWant) {

@@ -226,12 +226,14 @@ CLASSIFIED: dict[str, object] = {
 #    in round 5 of #785 -- every written field (year, month, day, hour,
 #    minute, second, fraction), every relative date rule (year, month, day,
 #    weekdays, first day of, last day of, the weekday, the weekday written
-#    first), and every gate -- each removed alone: 22 of 24 turn a section-K
+#    first), and every gate, plus (round 6) each bound of the weekday range
+#    guard loosened alone -- each removed alone: 24 of 26 turn a section-K
 #    check red. The two that do not, and why no check can:
 #      * the `readingIsReal()` test: the UTC reading agrees with the zone on
 #        every reading that exists, so removing it was measured to change
-#        nothing over 315,043 generated cells. Pinned as a statement of what
-#        the step is for.
+#        nothing -- over 330,727 cells in my round-5 sweep, and 0 of 9,348,144
+#        in the independent check's round 5. Pinned as a statement of what the
+#        step is for.
 #      * the "full written date" guard: every cell without a year is refused
 #        earlier by #797's two-reference rule, and `date_parse()` gives a
 #        month-and-year cell day 1, so no cell reaching step (d) lacks one.
@@ -255,9 +257,11 @@ CLASSIFIED: dict[str, object] = {
 #      time test "measured redundant" -- and `date_parse()` misreports some
 #      date rules, so `next sunday 2026-03-29 01:30 -168 hours` matched and
 #      was stored an hour early. Planted back it fails K07c.
-#    * Round 4 looked a weekday of -7 up in the day-name list for `<weekday>
-#      N weeks ago`, raising "Undefined array key -7". Planted back (the
-#      range guard removed) it fails K07g and K07g2.
+#    * Round 4 looked a weekday outside 0-6 up in the day-name list for
+#      `<weekday> N weeks ago` (-1 to -7 by weekday; +7 for `ago ago`),
+#      raising "Undefined array key -7". Planted back (the range guard
+#      removed) it fails K07g and K07g2; loosening either bound alone fails
+#      K07g.
 IMPORT_STEP3_GUARD = (
     "$relative = $parsed['relative'] ?? []; "
     "if ($parsed['is_localtime'] === false "
@@ -285,17 +289,19 @@ _IMPORT_REASON = (
     "The CSV import's loose-spreadsheet step (`$fmtClockRaw` step 3) builds a "
     "moment with strtotime() ON PURPOSE: it is the only reader of Excel's long "
     "date, US slash dates and the rest, and the strict steps before it store "
-    "the text without one. Since #785, for a cell with no zone, no offset and "
-    "no relative time date_parse() reports, step (d) also reads the cell in "
-    "UTC, where nothing moves, and returns THAT when it equals PHP's reading "
-    "of a canonical cell built from what was WRITTEN and is in the hour the "
-    "zone skipped -- so for a plain reading, what reaches this column is the "
+    "the text without one. Since #785, for a cell with no zone, no offset, no "
+    "relative time date_parse() reports, and any relative weekday it reports "
+    "a day of the week (0-6), step (d) also reads the cell in UTC, where "
+    "nothing moves, and returns THAT when it equals PHP's reading of a "
+    "canonical cell built from what was WRITTEN and is in the hour the zone "
+    "skipped -- so for a plain reading, what reaches this column is the "
     "reading the cell wrote. Known limit, a CLASS (#946): any date rule "
     "date_parse() misreports, combined with millisecond or microsecond "
     "arithmetic that exactly cancels the misreport, can still match and store "
-    "the written reading -- `next <weekday>`, `last <weekday> of`, `<weekday> "
-    "N weeks ago` and others are examples, not a complete list. Driven by "
-    "section K of tools/clock-change-selftest.php."
+    "the written reading -- `next <weekday>`, `last <weekday> of <month>` and "
+    "`<ordinal> <weekday> of next month` are examples, not a complete list "
+    "(an `... ago` cell is not one: the weekday guard keeps it on the old "
+    "answer). Driven by section K of tools/clock-change-selftest.php."
 )
 ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":

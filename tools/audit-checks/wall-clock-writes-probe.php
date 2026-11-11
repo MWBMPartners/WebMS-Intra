@@ -47,7 +47,9 @@
  *     changed only in form (`PASS_THROUGH`: trim, substr ...).
  *   * EVERY construct in this list and in the two below has a case in
  *     `tools/wall-clock-writes-selftest.py` that was measured to go red when
- *     that construct's handling is switched off (39 of 39 in round 5 of #785).
+ *     that construct's handling is switched off (40 of 40 in round 6 of #785;
+ *     round 5 claimed 39 of 39 while the `createFromFormat()` re-read branch
+ *     it had just added had no case at all -- plant P34 now).
  *     That was not true before round 4: switching `foreach` off left the
  *     self-test green, and an arrow function's body was never read at all
  *     although this list said it was -- `=>` ended the expression. And round

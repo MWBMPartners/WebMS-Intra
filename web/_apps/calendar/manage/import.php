@@ -714,9 +714,9 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        later. Test 1 cannot see the msec; the comparison is fooled by the
     //        misreport. Known members, as EXAMPLES and not a complete list:
     //        `next <weekday>`, `last <weekday> of <month>`, `<weekday> next
-    //        week`, a bare `next`/`last`/`this`/`previous week`, `<ordinal>
-    //        <weekday> of next/this/last month`, and `<weekday> N weeks ago`
-    //        -- for instance `next sunday 2026-03-29 01:30 -604800000 msec` in
+    //        week`, a bare `next`/`last`/`this`/`previous week`, and `<ordinal>
+    //        <weekday> of next/this/last month` -- for instance `next sunday
+    //        2026-03-29 01:30 -604800000 msec` in
     //        London, or `first sunday of next month 2026-02-08 02:30
     //        +604800000 msec` in New York. Nobody writes such a cell in a
     //        spreadsheet; the class is recorded on #946. So these tests do NOT
@@ -739,11 +739,16 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        below.
     //
     //        A WEEKDAY `date_parse()` REPORTS OUTSIDE 0-6 keeps the line below.
-    //        For `<weekday> N weeks ago` it reports -7, -6 or -1, and the first
-    //        version looked that up in the day-name list -- PHP's "Undefined
-    //        array key -7" warning, logged to `tblErrors` on every such row and
-    //        visible on dev and beta (the independent check's round 4). Such a
-    //        cell is one of the misreported rules above anyway.
+    //        For `<weekday> N weeks ago` it reports -1 to -7, depending on the
+    //        weekday (`tuesday` gives -2, `sunday` -7), and for `... ago ago`
+    //        it reports +7 (measured). The first version looked that up in the
+    //        day-name list -- PHP's "Undefined array key -7" warning, logged to
+    //        `tblErrors` on every such row and visible on dev and beta (the
+    //        independent check's round 4). Because every such cell now keeps
+    //        the line below BEFORE the comparison, an "ago" cell is NOT a member
+    //        of the limit above, even with cancelling msec: measured by the
+    //        independent check's round 5, 0 of 245,616 such cells were stored
+    //        as written (round 4 stored 114). K07g and K07g2 test both bounds.
     //
     //        KNOWN AND LEFT, safe in direction: a cell the canonical cell
     //        cannot reproduce keeps the line below, which is what it stored

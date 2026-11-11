@@ -419,6 +419,21 @@ $stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
 $stmt->bind_param('s', $s);
 """, {("$s", "tblEvents.startDateTime")}),
 
+    # ⚠️ P34: ROUND 5 ADDED A "FORMATTED TEXT RE-READ" BRANCH FOR
+    #    createFromFormat() BESIDE THE ONE FOR `new`, AND TESTED ONLY THE
+    #    `new` ONE. Deleting it left this test at 97 of 97 while "39 of 39"
+    #    was claimed (the independent check's round 5).
+    ("P34 a FORMATTED moment from a helper, re-read by createFromFormat()",
+     HEAD + """
+function postedStart(): string
+{
+    return date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+}
+$s = \\DateTimeImmutable::createFromFormat('Y-m-d H:i:s', postedStart())->format('Y-m-d H:i:s');
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
     ("P14 a single value carried into a closure through its use list",
      HEAD + """
 $start = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
@@ -817,10 +832,10 @@ print(f"\n{len(results)} checks: {len(results) - len(failed)} passed, {len(faile
 #    hold the pinned copy to the real lists, so an entry removed from ONE of
 #    them fails -- but an entry removed from BOTH in one edit left every
 #    remaining case green and silently tested one thing fewer.
-if plants != 33 or greens != 11 or refusals != 9 or lists != 6 or generated != 38:
+if plants != 34 or greens != 11 or refusals != 9 or lists != 6 or generated != 38:
     print(f"FAIL: a case list has changed size ({plants} plants / {greens} green / "
           f"{refusals} refusals / {lists} list pins / {generated} generated; "
-          f"pinned 33 / 11 / 9 / 6 / 38). "
+          f"pinned 34 / 11 / 9 / 6 / 38). "
           f"Change the pin in the same edit, deliberately.")
     sys.exit(1)
 sys.exit(1 if len(failed) > 0 else 0)
