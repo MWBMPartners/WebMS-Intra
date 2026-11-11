@@ -191,7 +191,8 @@ appended with its real date and a note that it was added later.
 | [D-133](133-the-installation-and-each-organisation-choose-their-country.md) | 2026-11-11 | The installation and each organisation choose their own country; nothing defaults to Great Britain | in force |
 | [D-134](134-an-approved-suggestion-e-mails-the-person-who-suggested-it.md) | 2026-11-11 | An approved event suggestion e-mails the person who suggested it | in force |
 | [D-135](135-no-live-install-so-a-schema-change-needs-no-migration.md) | 2026-11-02 | While no customer installation exists, a schema change needs no numbered migration | in force |
+| [D-136](136-moderators-notes-are-for-signed-in-administrators-only.md) | 2026-11-11 | Moderators' notes and who-did-what numbers are for signed-in administrators only | in force |
 
-*135 decisions. This index is checked against the folder by
+*136 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
