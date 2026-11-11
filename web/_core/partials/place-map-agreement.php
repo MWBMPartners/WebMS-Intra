@@ -62,9 +62,8 @@ if (function_exists('portal_place_start_again') === false) {
     {
         return $listedHome === true
             ? 'To meet somewhere else, remove this home from the group\'s list, then add the new one.'
-            : 'To meet somewhere else, clear every part of this place except the country (both address lines, the '
-                . 'town, the region, the postcode, the map position and the what3words address) and save, then '
-                . 'enter the new place.';
+            : 'To meet somewhere else, clear every part of this place except the country ('
+                . \Portal\Core\SmallGroups::placePartsInWords() . ') and save, then enter the new place.';
     }
 }
 
@@ -175,8 +174,10 @@ if (function_exists('portal_place_host_select') === false) {
      *     hostId: int,
      *     hostName: string,
      *     listedHome: bool,
+     *     isNew?: bool,
      *     notAHome?: bool
-     * } $cfg
+     * } $cfg  `isNew` is true on the ADD-a-home form, which draws no route: a
+     *          home not yet on the list cannot be removed from it.
      */
     function portal_place_host_select(array $cfg): void
     {
@@ -210,7 +211,9 @@ if (function_exists('portal_place_host_select') === false) {
         echo '</select>';
         echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home. With nobody '
             . 'named, no map is shown unless the place is marked as not anybody\'s home below. Once a host is named, only '
-            . 'they can name somebody else or mark it. ' . $esc(portal_place_start_again(portal_place_listed_home($cfg)))
+            . 'they can name somebody else or mark it.'
+            . ((($cfg['isNew'] ?? false) === true && portal_place_listed_home($cfg) === true)
+                ? '' : ' ' . $esc(portal_place_start_again(portal_place_listed_home($cfg))))
             . '</small>';
         echo '<input type="hidden" name="notAHomeAsked" value="1">';
         echo '<div class="form-check mt-2">';

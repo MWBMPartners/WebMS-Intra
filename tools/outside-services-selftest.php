@@ -1567,6 +1567,9 @@ foreach ($placeParts as $col) {
 $partSample = static fn (string $col): string|float => match ($col) {
     'latitude' => 52.21, 'longitude' => 0.13, 'what3words' => 'filled.count.soap', default => 'Kept ' . $col,
 };
+$unlabelled = array_values(array_diff($placeParts, array_keys(\Portal\Core\SmallGroups::PLACE_PART_LABELS)));
+check('PA13g2b every place column except the country has a label in PLACE_PART_LABELS, so the route sentences name every part',
+    $unlabelled === [] && str_contains(\Portal\Core\SmallGroups::placePartsInWords(), 'the map position') === true, 'no label: ' . implode(', ', $unlabelled));
 check('PA13g3a premise: one "keep only this part" case for every place column except the country, the position as one pair',
     count($keepOnlyCases) === count(\Portal\Core\SmallGroups::PLACE_COLUMNS) - 2 && isset($keepOnlyCases['addressLine1'], $keepOnlyCases['addressLine2']) === true,
     implode(', ', array_keys($keepOnlyCases)));
@@ -1797,13 +1800,20 @@ check('P19 an administrator CHANGES the address: the host stays named, but their
 //    show a map nobody agreed to — which is the harm being refused.
 q("UPDATE `tblSmallGroups` SET `addressLine1` = '12 Host Lane', `placeMapAgreed` = 0 WHERE `groupID` = ?", 'i', [SGROUP]);
 $pageText     = static fn (array $page): string => html_entity_decode((string) ($page['_html'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+// The two route sentences, word for word (the list of parts is built from
+// SmallGroups::PLACE_PART_LABELS; a new place column changes it on purpose).
+$usualRoute  = "To meet somewhere else, clear every part of this place except the country (the first address line, the second address line, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place.";
+$listedRoute = "To meet somewhere else, remove this home from the group's list, then add the new one.";
 $takeOverSays = static fn (array $page): bool => str_contains($pageText($page), 'Only they can name a different host') === true
-    && str_contains($pageText($page), "To meet somewhere else, clear every part of the meeting place except the country (both address lines, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place afresh; that deletes this address. Nothing was saved.") === true;
+    && str_contains($pageText($page), "To meet somewhere else, clear every part of the meeting place except the country (the first address line, the second address line, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place afresh; that deletes this address. Nothing was saved.") === true;
 $x1 = $saveGroup($jarHost2, $groupForm($jarHost2, ['hostUserID' => (string) HOST2]));
 $r  = $recorded();
 $fx = $groupForm($jarHost2);
 check('P20 X1 THROUGH THE FORM: a co-leader names THEMSELVES as host of the leader\'s home (address unchanged): refused, the host is unchanged, and the form says why',
     $x1['status'] === 302 && (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 0 && $takeOverSays($fx) === true, json_encode($r) . ' status ' . $x1['status']);
+check('P20a the HOSTED usual-place form, as a co-leader sees it, gives the usual place\'s route TWICE (the chooser\'s hint AND under the host\'s name) and never the listed-home route (check round 5)',
+    substr_count($pageText($fx), $usualRoute) === 2 && str_contains($pageText($fx), $listedRoute) === false
+    && str_contains($pageText($fx), 'remove this home from the group') === false);
 $saveGroup($jarHost2, array_merge($groupForm($jarHost2), ['hostUserID' => (string) HOST2, 'placeMapAsked' => '1', 'placeMapAgreed' => '1']));
 $r = $recorded();
 $g = $groupPage($jarV);
@@ -1926,7 +1936,7 @@ $fillParts = static function (string $table, string $keyCol, int $id) use ($plac
 };
 $usualPutBack = $fillParts('tblSmallGroups', 'groupID', SGROUP);
 check('P20h0 premise: before the "keep only this part" attacks, EVERY part of the usual place holds something',
-    in_array(null, array_intersect_key($usualSnap(), array_flip($placeParts)), true) === false, json_encode($usualSnap()));
+    array_filter(array_intersect_key($usualSnap(), array_flip($placeParts)), static fn ($v): bool => $v === null || trim((string) $v) === '') === [], json_encode($usualSnap()));
 $usualResetParts = $rowWriter('tblSmallGroups', 'groupID', SGROUP, $usualSnap());
 $runTakeovers('P20h', $usualSnap, static fn (): bool => $sgMap($groupPage($jarV)) === true || $tileRule($groupPage($jarV)) === true,
     static fn (string $jar, array $change): array => $groupForm($jar, $change), $saveGroup, $jarHost2, $jarAA, $partialAttacks(), $usualResetParts);
@@ -2040,8 +2050,6 @@ check('R07 the first host (a leader) posts an unticked box on the SECOND host\'s
 //    unchanged, only its named host may change who lives there or mark it
 //    "not anybody's home". The agreement is set to 0 first, so a take-over
 //    that got through would put a map up that its host never agreed to.
-$usualRoute  = "To meet somewhere else, clear every part of this place except the country (both address lines, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place.";
-$listedRoute = "To meet somewhere else, remove this home from the group's list, then add the new one.";
 $routeOnly = static fn (array $form, string $mine, string $other): bool
     => str_contains($pageText($form), $mine) === true && str_contains($pageText($form), $other) === false
     && str_contains($pageText($form), $mine === $usualRoute ? 'remove this home from the group' : 'clear every part of this place') === false;
@@ -2050,9 +2058,9 @@ $fNewHome = $homeForm($jarHost);
 $fEditHome = $homeForm($jarHost, $placeB);
 check('R07c0 each form offers ONLY the route that works on it: the group\'s own form says to clear every part and save (it has no "remove")',
     $routeOnly($fUsual, $usualRoute, $listedRoute) === true);
-check('R07c0b ...the add-a-home form says to remove a home from the list (a listed home cannot be saved emptied)',
-    $routeOnly($fNewHome, $listedRoute, $usualRoute) === true);
-check('R07c0c ...and so does the edit-a-home form, in the chooser\'s hint AND under the host\'s name',
+check('R07c0b ...the ADD-a-home form draws no route at all (a home not yet on the list cannot be removed from it)',
+    $fNewHome['_status'] === 200 && str_contains($pageText($fNewHome), 'To meet somewhere else') === false);
+check('R07c0c ...the HOSTED edit-a-home form says to remove it from the list, in the chooser\'s hint AND under the host\'s name, and never the usual place\'s route',
     $routeOnly($fEditHome, $listedRoute, $usualRoute) === true && substr_count($pageText($fEditHome), $listedRoute) === 2);
 q('UPDATE `tblSmallGroupPlaces` SET `placeMapAgreed` = 0 WHERE `placeID` = ?', 'i', [$placeB]);
 $rx = $saveHome($jarHost, $homeForm($jarHost, $placeB, ['hostUserID' => (string) HOSTP]));
@@ -2090,7 +2098,7 @@ $listedReset();
 // one does reach the rule, so the same generated cases run here.
 $listedPutBack = $fillParts('tblSmallGroupPlaces', 'placeID', $placeB);
 check('R07f5a premise: before the "keep only this part" attacks, EVERY part of the listed home holds something',
-    in_array(null, array_intersect_key($listedSnap(), array_flip($placeParts)), true) === false, json_encode($listedSnap()));
+    array_filter(array_intersect_key($listedSnap(), array_flip($placeParts)), static fn ($v): bool => $v === null || trim((string) $v) === '') === [], json_encode($listedSnap()));
 $listedResetParts = $rowWriter('tblSmallGroupPlaces', 'placeID', $placeB, $listedSnap());
 $runTakeovers('R07f5', $listedSnap, static fn (): bool => $placeMap($groupPage($jarV), $placeB) === true,
     static fn (string $jar, array $change): array => $homeForm($jar, $placeB, $change), $saveHome, $jarHost, $jarAA, $partialAttacks(), $listedResetParts);

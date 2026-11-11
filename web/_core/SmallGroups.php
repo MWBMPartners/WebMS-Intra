@@ -643,6 +643,54 @@ final class SmallGroups
     ];
 
     /**
+     * 🏷️ Each part of a place in the words a person reads (#809, check round
+     * 5). The route sentences ("clear every part … except the country (…)")
+     * are built from THIS list by `placePartsInWords()`, so a column added to
+     * PLACE_COLUMNS needs its label added HERE, in the same change, or the
+     * sentence would silently leave it out while telling people what "every
+     * part" means. The country is not a part (it always has a value, and an
+     * emptied place keeps it). Two columns may share a label (the position).
+     * `outside-services-selftest.php` fails when a place column has no label.
+     */
+    public const PLACE_PART_LABELS = [
+        'addressLine1' => 'the first address line',
+        'addressLine2' => 'the second address line',
+        'city'         => 'the town',
+        'region'       => 'the region',
+        'postcode'     => 'the postcode',
+        'latitude'     => 'the map position',
+        'longitude'    => 'the map position',
+        'what3words'   => 'the what3words address',
+    ];
+
+    /**
+     * Every part of a place except the country, as one phrase: "the first
+     * address line, …, the map position and the what3words address". Built
+     * from PLACE_COLUMNS in order, through PLACE_PART_LABELS, each label once.
+     * A column with no label is named by its column name rather than left out,
+     * so a forgotten label shows up on the page instead of vanishing.
+     */
+    public static function placePartsInWords(): string
+    {
+        $words = [];
+        foreach (self::PLACE_COLUMNS as $column) {
+            if ($column === 'countryCode') {
+                continue;
+            }
+            $label = self::PLACE_PART_LABELS[$column] ?? $column;
+            if (in_array($label, $words, true) === false) {
+                $words[] = $label;
+            }
+        }
+        if (count($words) <= 1) {
+            return implode('', $words);
+        }
+        $last = array_pop($words);
+
+        return implode(', ', $words) . ' and ' . $last;
+    }
+
+    /**
      * One place, made comparable: every part trimmed text, an empty part as
      * '', and the two coordinates written to the seven decimal places the
      * columns hold, so `52.2053` typed and `52.2053000` read back are the same

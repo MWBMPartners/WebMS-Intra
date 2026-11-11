@@ -136,6 +136,7 @@ $values = $place ?? [];
                 'hostId'    => $hostId,
                 'hostName'  => $hostName,
                 'listedHome' => true,
+                'isNew'     => $placeId === 0,
                 'notAHome'  => $notAHome,
             ]);
             ?>
