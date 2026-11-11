@@ -141,31 +141,54 @@ class Giving
      * cleared the kept row the gift has no account number left, so it is not
      * in this file at all.
      *
+     * THE MADE-UP NAME NEVER REACHES THE TAX OFFICE (#941 check round 3). The
+     * name used to be `COALESCE(k.fullName, u.fullName)`: the kept name, or
+     * else the account's. When a kept row joins, the account has been
+     * emptied (the join asks), so "else the account's" meant "[Deleted
+     * User]" whenever the kept name was empty - which it is by design for a
+     * donor whose account was emptied before the giving step ran, and since
+     * #941 round 3 also for a donor whose account name was blank (the
+     * Microsoft and Google sign-ins write `fullName = ''` when the provider
+     * sends no name), because a blank is stored as NULL. Measured on 8.0.36:
+     * the claim file then read "[Deleted,User]". Now:
+     *   - when a kept row joins, its name is used and NOTHING else, empty or
+     *     not;
+     *   - with no kept row, an account still reading "[Deleted User]" gives
+     *     an empty name, never the made-up one;
+     *   - otherwise the account's own name.
+     * An empty name is the behaviour this file has always had for a nameless
+     * donor: the row is written with an empty first and last name, which
+     * HMRC's upload refuses, so somebody looks at it rather than a made-up
+     * name being claimed for.
+     *
      * @link https://www.gov.uk/claim-gift-aid-online
      */
     public static function buildHmrcCsv(int $siteId, string $fromDate, string $toDate): string
     {
         $db = App::db();
         $rows = [];
+        // FIXED TEXT: the tombstone is a constant in code, never input.
+        $claimName = "CASE WHEN `k`.`keptDonorID` IS NOT NULL THEN `k`.`fullName` "
+            . "WHEN `u`.`fullName` = '" . GdprEraser::TOMBSTONE_NAME . "' THEN NULL ELSE `u`.`fullName` END";
         $stmt = $db->prepare(
-            'SELECT u.userID, COALESCE(k.fullName, u.fullName) AS fullName, u.emailAddress, '
-            . '       e.donatedAt, e.amountPence, '
-            . '       d.address, d.postcode '
-            . 'FROM tblGivingEntry e '
-            . 'INNER JOIN tblUsers u ON u.userID = e.donorID '
-            . 'INNER JOIN tblGiftAidDeclaration d ON d.donorID = e.donorID '
-            . '    AND d.siteID = e.siteID '
-            . '    AND d.status = "active" '
-            . '    AND d.validFrom <= e.donatedAt '
-            . '    AND (d.validTo IS NULL OR d.validTo >= e.donatedAt) '
+            'SELECT `u`.`userID`, ' . $claimName . ' AS `fullName`, `u`.`emailAddress`, '
+            . '       `e`.`donatedAt`, `e`.`amountPence`, '
+            . '       `d`.`address`, `d`.`postcode` '
+            . 'FROM `tblGivingEntry` `e` '
+            . 'INNER JOIN `tblUsers` `u` ON `u`.`userID` = `e`.`donorID` '
+            . 'INNER JOIN `tblGiftAidDeclaration` `d` ON `d`.`donorID` = `e`.`donorID` '
+            . '    AND `d`.`siteID` = `e`.`siteID` '
+            . "    AND `d`.`status` = 'active' "
+            . '    AND `d`.`validFrom` <= `e`.`donatedAt` '
+            . '    AND (`d`.`validTo` IS NULL OR `d`.`validTo` >= `e`.`donatedAt`) '
             // The kept name is used only for a donor whose account has
             // really been emptied. A kept row beside a LIVE member (an
             // erasure that stopped part way) is not that: their name is
             // still on their account, and is read from there.
-            . 'LEFT JOIN tblGivingKeptDonors k ON k.siteID = e.siteID AND k.donorID = e.donorID AND k.clearedAt IS NULL '
+            . 'LEFT JOIN `tblGivingKeptDonors` `k` ON `k`.`siteID` = `e`.`siteID` AND `k`.`donorID` = `e`.`donorID` AND `k`.`clearedAt` IS NULL '
             . '    AND ' . GdprEraser::emptiedAccountSql('u') . ' '
-            . 'WHERE e.siteID = ? AND e.donatedAt BETWEEN ? AND ? '
-            . 'ORDER BY COALESCE(k.fullName, u.fullName), e.donatedAt'
+            . 'WHERE `e`.`siteID` = ? AND `e`.`donatedAt` BETWEEN ? AND ? '
+            . 'ORDER BY ' . $claimName . ', `e`.`donatedAt`'
         );
         if ($stmt !== false) {
             $stmt->bind_param('iss', $siteId, $fromDate, $toDate);

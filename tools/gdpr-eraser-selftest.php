@@ -226,7 +226,18 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 301; // 298 until #941's check round 2 added three: the kept-record
+const EXPECTED_CHECKS = 310; // 309 until a ninth: a declaration whose address is only a tab
+                             // is no declaration address, so the account's address is kept
+                             // and the declaration's postcode is not.
+                             // 301 until #941's check round 3 added eight: a home address kept
+                             // from the ACCOUNT; white space stored as NULL; a blank
+                             // declaration postcode stored as NULL; a blank, missing or
+                             // white-space name stored as NULL; the tax claim file never
+                             // carrying "[Deleted User]", for a just-erased donor and for one
+                             // whose account was already emptied; a row an older version
+                             // wrote with '' read as nothing; and step 4's line saying what
+                             // the earlier record held.
+                             // 298 until #941's check round 2 added three: the kept-record
                              // line read back from the row says "no home address" for an
                              // account address of '', for none at all, and for an address
                              // held only at another organisation - and each row holds NULL.
@@ -394,6 +405,19 @@ const P_NA_OTHER = 920713; // section 23: no address on the account; a declarati
 const REQ_NA_EMPTY = 940711;
 const REQ_NA_NULL  = 940712;
 const REQ_NA_OTHER = 940713;
+// #941 check round 3: section 23's fixtures for what is stored, what the line
+// says, and the tax claim file (one donor per branch; see the section).
+const SITE_C3 = 15;     // section 23: "every gift", Europe/London, no confirmed figure
+const P_K_A = 920721; const REQ_K_A = 940721; // a home address from the ACCOUNT, no declaration
+const P_K_B = 920722; const REQ_K_B = 940722; // an account address of white space only
+const P_K_C = 920723; const REQ_K_C = 940723; // a declaration whose postcode is ''
+const P_K_D = 920724; const REQ_K_D = 940724; // an account name of ''
+const P_K_E = 920725; const REQ_K_E = 940725; // no account name at all
+const P_K_F = 920726; const REQ_K_F = 940726; // an account name of white space only
+const P_K_G = 920727; const REQ_K_G = 940727; // an account already emptied before the run
+const P_K_H = 920728; const REQ_K_H = 940728; // a kept row an older version wrote with ''
+const P_K_I = 920729; const REQ_K_I = 940729; // an earlier run's row, emptied by step 4
+const P_K_J = 920730; const REQ_K_J = 940730; // a declaration whose address is only a tab
 const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
 const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
@@ -6804,7 +6828,7 @@ $lineCl = ge_one(
 // came from (#941 check rounds 1 and 2; the "came from" sentence was wrong
 // twice). Her row holds her name and her declaration's address.
 ge_ok('...and the line on the NEW request\'s trail SAYS what happened - kept again after an earlier run had cleared it, worked out from the start, and that the row holds the name and a home address - and never "Nothing was changed", and never her name or address',
-    $lineCl !== null && $lineCl['action'] === 'retain' && str_contains((string) $lineCl['details'], 'later emptied them, while the account still named')
+    $lineCl !== null && $lineCl['action'] === 'retain' && str_contains((string) $lineCl['details'], 'later emptied it, while the account still named')
     && str_contains((string) $lineCl['details'], 'worked them out again from the start')
     && str_contains((string) $lineCl['details'], 'Kept on this record: the name and a home address.')
     && str_contains((string) $lineCl['details'], 'Nothing was changed') === false
@@ -6900,5 +6924,162 @@ ge_ok('AN ACCOUNT WITH NO ADDRESS: the kept row holds NULL and the line says no 
 $naOther = $noAddress(P_NA_OTHER, REQ_NA_OTHER, 'na.other@selftest.invalid', null, true);
 ge_ok('AN ADDRESS HELD ONLY AT ANOTHER ORGANISATION is not borrowed: this organisation\'s row holds NULL and its line says no home address was kept, while the other organisation keeps its own declaration\'s address',
     $saysNone($naOther) === true && $naOther['elsewhere'] === '9 Other Org Road', json_encode($naOther));
+
+// ---- #941 check round 3: what is STORED, what the line SAYS, and the claim file ----
+// A third organisation that keeps every gift, so a row is written for each of
+// these donors with or without a tax declaration. Its keep-until figure is not
+// confirmed, so nothing here is cleared. Each donor is chosen to make ONE
+// branch matter, and each check names the branch it pins:
+//   A  a real ACCOUNT address and no declaration   -> the row keeps it, the line says so
+//   B  an account address of white space only       -> stored NULL
+//   C  a declaration whose postcode is ''           -> postcode stored NULL, address kept
+//   D/E/F  an account name of '', NULL, white space -> name stored NULL
+//   G  an account ALREADY emptied before the run    -> no name kept
+//   H  a kept row an OLDER version wrote with ''    -> read as nothing
+//   I  an earlier run's row emptied by step 4       -> the line says what it held
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_insert('tblSites', [], ['siteID' => SITE_C3, 'timezone' => 'Europe/London']);
+$catC3 = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_C3]));
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_setting(SITE_C3, GivingRetention::KEY_SCOPE, GivingRetention::SCOPE_ALL);
+$kept4 = static fn (int $person): ?array => ge_one('SELECT `fullName`, `address`, `postcode` FROM `tblGivingKeptDonors` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [SITE_C3, $person]);
+$line4 = static fn (int $requestId, int $siteId): string => (string) (ge_one(
+    "SELECT `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `tableName` = 'GivingRecords' AND `recordKey` = ? ORDER BY `auditID` DESC LIMIT 1",
+    'is',
+    [$requestId, 'organisation #' . $siteId]
+)['details'] ?? '');
+/**
+ * One donor at the third organisation: the account as given, an optional
+ * declaration, one gift of `$pence` (a declared gift is in the claim file),
+ * then the real erasure. `$emptied` empties the account first, as an earlier
+ * erasure that never reached the giving step would have.
+ */
+$case4 = static function (int $person, int $requestId, ?string $name, ?string $accountAddress, ?array $declaration, int $pence, bool $emptied = false) use ($ago, $catC3, $mysqli): mixed {
+    $email = 'case' . $person . '@selftest.invalid';
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+    ge_user($person, 'Placeholder', $email);
+    ge_q('UPDATE `tblUsers` SET `fullName` = ?, `displayAddress` = ? WHERE `userID` = ?', 'ssi', [$name, $accountAddress, $person]);
+    if ($emptied === true) {
+        ge_q("UPDATE `tblUsers` SET `fullName` = ?, `emailAddress` = ?, `isActive` = 0 WHERE `userID` = ?", 'ssi',
+            [GdprEraser::TOMBSTONE_NAME, str_replace('{rid}', (string) $requestId, GdprEraser::TOMBSTONE_EMAIL), $person]);
+    }
+    if ($declaration !== null) {
+        $declRef = ge_declaration(SITE_C3, $person, $ago(400), $declaration[0], 'PLACEHOLDER');
+        ge_q('UPDATE `tblGiftAidDeclaration` SET `postcode` = ? WHERE `declarationID` = ?', 'si', [$declaration[1], ge_id($declRef)]);
+    }
+    ge_gift(SITE_C3, $person, $ago(60), $pence, $catC3);
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+    ge_request($requestId, $person, $email, 'Case ' . $person, 'processing');
+
+    return ge_execute($requestId, $person);
+};
+$ranOk = static fn (mixed $run): bool => is_array($run) === true && (int) $run['failed'] === 0;
+
+// A: the headline property - a home address kept from the ACCOUNT, with no
+// declaration anywhere. Every earlier "a home address" case had a
+// declaration, so a line that only asked "was there a declaration?" passed.
+$runA = $case4(P_K_A, REQ_K_A, 'Ann Account', '4 Account Road', null, 1001);
+ge_ok('A HOME ADDRESS KEPT FROM THE ACCOUNT, with no declaration at all: the row holds it and the line says a home address was kept',
+    $ranOk($runA) && ($kept4(P_K_A)['address'] ?? null) === '4 Account Road'
+    && str_contains($line4(REQ_K_A, SITE_C3), 'Kept on this record: the name and a home address.'),
+    json_encode(['row' => $kept4(P_K_A), 'line' => $line4(REQ_K_A, SITE_C3)]));
+// B: white space is blank.
+$runB = $case4(P_K_B, REQ_K_B, 'Ben Spaces', "  \t ", null, 1002);
+ge_ok('AN ACCOUNT ADDRESS OF ONLY WHITE SPACE IS NO ADDRESS: stored as NULL, and the line says no home address',
+    $ranOk($runB) && $kept4(P_K_B) !== null && $kept4(P_K_B)['address'] === null
+    && str_contains($line4(REQ_K_B, SITE_C3), 'Kept on this record: the name and no home address.'),
+    json_encode(['row' => $kept4(P_K_B), 'line' => $line4(REQ_K_B, SITE_C3)]));
+// C: a declaration's blank postcode is stored as NULL; its address is kept.
+$runC = $case4(P_K_C, REQ_K_C, 'Cy Declared', null, ['5 Declaration Road', ''], 1003);
+ge_ok('A DECLARATION WHOSE POSTCODE IS \'\': the address is kept and the postcode is stored as NULL, not an empty value',
+    $ranOk($runC) && $kept4(P_K_C) !== null && $kept4(P_K_C)['address'] === '5 Declaration Road' && $kept4(P_K_C)['postcode'] === null,
+    json_encode($kept4(P_K_C)));
+// D, E, F: a blank, missing or white-space account name. Each has a
+// declaration, so its gift is in the claim file below.
+$runD = $case4(P_K_D, REQ_K_D, '', null, ['6 Dee Road', 'DD6 6DD'], 1104);
+$runE = $case4(P_K_E, REQ_K_E, null, null, ['7 Eee Road', 'EE7 7EE'], 1105);
+$runF = $case4(P_K_F, REQ_K_F, "  \t", null, ['8 Eff Road', 'FF8 8FF'], 1106);
+ge_ok('AN ACCOUNT NAME OF \'\', NULL OR WHITE SPACE IS NO NAME: each kept row stores NULL, and each line says no name was kept',
+    $ranOk($runD) && $ranOk($runE) && $ranOk($runF)
+    && $kept4(P_K_D) !== null && $kept4(P_K_D)['fullName'] === null && $kept4(P_K_E) !== null && $kept4(P_K_E)['fullName'] === null
+    && $kept4(P_K_F) !== null && $kept4(P_K_F)['fullName'] === null
+    && str_contains($line4(REQ_K_D, SITE_C3), 'Kept on this record: no name and a home address.')
+    && str_contains($line4(REQ_K_E, SITE_C3), 'Kept on this record: no name and a home address.')
+    && str_contains($line4(REQ_K_F, SITE_C3), 'Kept on this record: no name and a home address.'),
+    json_encode(['D' => $kept4(P_K_D), 'E' => $kept4(P_K_E), 'F' => $kept4(P_K_F)]));
+// G: an account already emptied before the run reached the giving step.
+$runG = $case4(P_K_G, REQ_K_G, 'Gil Gone', null, ['9 Gee Road', 'GG9 9GG'], 1107, true);
+// 🧾 THE TAX CLAIM FILE. It read the name as COALESCE(kept name, account
+//    name), so a kept row with no name fell through to the emptied account's
+//    "[Deleted User]" (measured: the row read "[Deleted,User]"). A nameless
+//    donor's row is written with an empty first and last name, as it always
+//    was for a nameless donor - HMRC's upload refuses that, so somebody looks.
+$claimRowsK = [];
+foreach (array_filter(explode("\n", Giving::buildHmrcCsv(SITE_C3, $ago(400), $todayG1))) as $csvLine) {
+    $cells = str_getcsv($csvLine, ',', '"', '');
+    $claimRowsK[(string) ($cells[8] ?? '')] = $cells;
+}
+$claimText = Giving::buildHmrcCsv(SITE_C3, $ago(400), $todayG1);
+$nameCells = static fn (string $amount): ?array => isset($claimRowsK[$amount]) === true ? [$claimRowsK[$amount][1], $claimRowsK[$amount][2]] : null;
+ge_ok('THE CLAIM FILE NEVER CARRIES THE MADE-UP NAME for a just-erased donor whose name was \'\', NULL or white space: each row has an empty first and last name, as a nameless donor always had, and their house and postcode; a named donor\'s row keeps the name',
+    $ranOk($runD) && str_contains($claimText, 'Deleted') === false && str_contains($claimText, GdprEraser::TOMBSTONE_NAME) === false
+    && $nameCells('11.04') === ['', ''] && $nameCells('11.05') === ['', ''] && $nameCells('11.06') === ['', '']
+    && ($claimRowsK['11.04'][3] ?? '') === '6 Dee Road' && ($claimRowsK['11.04'][4] ?? '') === 'DD6 6DD'
+    && $nameCells('10.03') === ['Cy', 'Declared'],
+    $claimText);
+ge_ok('...and for a donor whose account was ALREADY EMPTIED before the run (no name could be kept): an empty name, never "[Deleted User]"',
+    $ranOk($runG) && $kept4(P_K_G) !== null && $kept4(P_K_G)['fullName'] === null && $nameCells('11.07') === ['', '']
+    && str_contains($line4(REQ_K_G, SITE_C3), 'Kept on this record: no name and a home address.'),
+    json_encode(['row' => $kept4(P_K_G), 'claim row' => $claimRowsK['11.07'] ?? null, 'line' => $line4(REQ_K_G, SITE_C3)]));
+
+// H: a row an OLDER version wrote, holding '' rather than NULL, beside an
+// emptied account. Written by hand, said plainly: no version of the code in
+// this repository today writes ''. The later run leaves what the earlier run
+// kept exactly as it is, and the line must read the '' as nothing.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_K_H, 'Placeholder', 'case.h@selftest.invalid');
+ge_q("UPDATE `tblUsers` SET `fullName` = ?, `emailAddress` = ?, `isActive` = 0 WHERE `userID` = ?", 'ssi',
+    [GdprEraser::TOMBSTONE_NAME, str_replace('{rid}', (string) REQ_K_H, GdprEraser::TOMBSTONE_EMAIL), P_K_H]);
+ge_q("INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `erasureRequestID`, `fullName`, `address`, `postcode`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`) "
+    . "VALUES (?, ?, NULL, '', '', '', 'all', ?, 1, UTC_TIMESTAMP())", 'iis', [SITE_C3, P_K_H, $ago(90)]);
+ge_gift(SITE_C3, P_K_H, $ago(90), 1201, $catC3);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_K_H, P_K_H, str_replace('{rid}', (string) REQ_K_H, GdprEraser::TOMBSTONE_EMAIL), 'Case H', 'processing');
+$runH = ge_execute(REQ_K_H, P_K_H);
+ge_ok('A ROW AN OLDER VERSION WROTE WITH \'\' IS READ AS NOTHING: the later run leaves it exactly as it was, and the line says no name and no home address',
+    $ranOk($runH) && $kept4(P_K_H) === ['fullName' => '', 'address' => '', 'postcode' => '']
+    && str_contains($line4(REQ_K_H, SITE_C3), 'Kept on this record: no name and no home address.'),
+    json_encode(['row' => $kept4(P_K_H), 'line' => $line4(REQ_K_H, SITE_C3)]));
+
+// I: step 4 empties an earlier run's row beside a LIVE account, because
+// nothing needs it any more (her gift there is not covered and the first
+// organisation keeps only "tax gifts"). The earlier row holds a name and NO
+// address; the line used to say "a name and address" whatever it held. The
+// earlier row is written by hand, as section 14's are: the state is what a
+// run that stopped before emptying the account leaves.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_K_I, 'Ivy Earlier', 'case.i@selftest.invalid');
+ge_q('INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `erasureRequestID`, `fullName`, `address`, `postcode`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`) '
+    . "VALUES (?, ?, ?, 'Ivy Earlier', NULL, NULL, 'receipted', ?, 1, UTC_TIMESTAMP())", 'iiis', [SITE_C1, P_K_I, REQ_K_I, $ago(70)]);
+ge_gift(SITE_C1, P_K_I, $ago(70), 1301, $catC1);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_K_I, P_K_I, 'case.i@selftest.invalid', 'Ivy Earlier', 'processing');
+$runI  = ge_execute(REQ_K_I, P_K_I);
+$keptI = ge_one('SELECT `fullName`, `clearedAt` FROM `tblGivingKeptDonors` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [SITE_C1, P_K_I]);
+ge_ok('WHEN AN EARLIER RUN\'S RECORD IS EMPTIED, THE LINE SAYS WHAT IT HELD - read before emptying: the name and no home address - and never "a name and address"',
+    $ranOk($runI) && $keptI !== null && $keptI['clearedAt'] !== null && $keptI['fullName'] === null
+    && str_contains($line4(REQ_K_I, SITE_C1), 'The record an earlier run kept here held the name and no home address; nothing needs it any more, so it was emptied.')
+    && str_contains($line4(REQ_K_I, SITE_C1), 'name and address') === false,
+    json_encode(['row' => $keptI, 'line' => $line4(REQ_K_I, SITE_C1)]));
+
+// J: a declaration whose address is only a tab. It passed `address <> ''`, was
+// chosen, then stored as NULL - so the account's own address was never tried,
+// while the declaration's postcode was kept beside nothing. Such an address
+// is no address: the account's is kept, and no postcode from a declaration
+// that gave none.
+$runJ = $case4(P_K_J, REQ_K_J, 'Jay Tab', '10 Jay Road', ["\t", 'JJ1 1JJ'], 1008);
+ge_ok('A DECLARATION ADDRESS OF ONLY A TAB IS NO ADDRESS: the account\'s address is kept instead, and the postcode of that empty declaration is not',
+    $ranOk($runJ) && $kept4(P_K_J) !== null && $kept4(P_K_J)['address'] === '10 Jay Road' && $kept4(P_K_J)['postcode'] === null,
+    json_encode($kept4(P_K_J)));
 
 ge_finish();

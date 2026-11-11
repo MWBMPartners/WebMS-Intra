@@ -5524,11 +5524,26 @@ class GdprEraser
             return $row;
         };
         $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
+        // 🗣️ WHAT A KEPT ROW HOLDS, in words, read from the row itself (#941
+        //    check rounds 2 and 3). The ONE place this step says what is or was
+        //    on a kept row: the line after a write reads the row back, and the
+        //    line when an earlier run's row is emptied reads it BEFORE the
+        //    emptying. '' and NULL - and whitespace - count alike as nothing,
+        //    so a row an older version wrote with '' reads truly. Never the
+        //    name or the address themselves.
+        $holds = static function (?array $row): string {
+            $hasName = trim((string) ($row['fullName'] ?? '')) !== '';
+            $hasHome = trim((string) ($row['address'] ?? '')) !== '';
+
+            return ($hasName === true ? 'the name' : 'no name') . ' and ' . ($hasHome === true ? 'a home address' : 'no home address');
+        };
 
         // 1. The row an earlier run left, if any. Locked, so two runs cannot
-        //    both decide there is no row and both write one.
+        //    both decide there is no row and both write one. Its name and
+        //    address are read too, only so step 4 can say what it held.
         $existing = $one(
-            'SELECT keptDonorID, scope, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ? FOR UPDATE',
+            'SELECT `keptDonorID`, `scope`, `lastGiftDate`, `clearedAt`, `fullName`, `address` FROM `tblGivingKeptDonors` '
+            . 'WHERE `siteID` = ? AND `donorID` = ? FOR UPDATE',
             'ii',
             [$siteId, $userId]
         );
@@ -5774,10 +5789,17 @@ class GdprEraser
                 'Giving records at ' . $where . ': nothing has to be kept with the donor\'s name. '
                 . $plural($emptied, 'gift keeps', 'gifts keep') . ' the amount, date and method and no longer '
                 . ($emptied === 1 ? 'names' : 'name') . ' the donor. Why: ' . $scopeWords . ', and this donor has none of those there.'
-                . ($earlierRun === true ? ' An earlier run had kept a name and address here; nothing needs them any more, so they were emptied.' : '')
-                // #941: the row stays cleared; nothing is written to it.
-                . ($reopenKeptDonorId !== null ? ' An earlier run had kept a name and address here and later emptied them, while the '
-                    . 'account still named the person; nothing needs them now either, so nothing was kept again.' : '')
+                // #941 check round 3: said what the earlier row HELD, read at
+                // step 1 inside this transaction, before the update above
+                // empties it. It used to say "a name and address" whatever the
+                // row held (measured: printed over a row with no address).
+                . ($earlierRun === true ? ' The record an earlier run kept here held ' . $holds($existing)
+                    . '; nothing needs it any more, so it was emptied.' : '')
+                // #941: the row stays cleared; nothing is written to it. What
+                // the cleared row once held cannot be read any more, so the
+                // sentence does not say.
+                . ($reopenKeptDonorId !== null ? ' An earlier run had kept a record here and later emptied it, while the '
+                    . 'account still named the person; nothing needs one now either, so nothing was kept again.' : '')
             );
 
             return ['changed' => $emptied > 0 || $earlierRun === true, 'due' => null];
@@ -5793,8 +5815,13 @@ class GdprEraser
         //    read at 1b).
         $name     = $emptiedAlready === true ? null : (string) $account['fullName'];
         $declared = $one(
-            "SELECT address, postcode FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ? AND address IS NOT NULL AND address <> '' "
-            . 'ORDER BY validFrom DESC, declarationID DESC LIMIT 1',
+            // `REGEXP '[^[:space:]]'`: an address with something in it that
+            // is not white space. It was `address <> ''`, which a tab or a
+            // line break alone passes - then blankIsNone() below made it NULL
+            // and the account's address was never tried (#941 check round 3).
+            "SELECT `address`, `postcode` FROM `tblGiftAidDeclaration` WHERE `siteID` = ? AND `donorID` = ? "
+            . "AND `address` REGEXP '[^[:space:]]' "
+            . 'ORDER BY `validFrom` DESC, `declarationID` DESC LIMIT 1',
             'ii',
             [$siteId, $userId]
         );
@@ -5955,7 +5982,7 @@ class GdprEraser
         //    NULL alike counting as nothing. It cannot disagree with the row,
         //    and it never names the donor or prints the address.
         if ($reopenKeptDonorId !== null) {
-            $line .= ' An earlier run had kept a name and address here and later emptied them, while the account still named '
+            $line .= ' An earlier run had kept a record here and later emptied it, while the account still named '
                 . 'the person; that run then stopped before the account was emptied. Its clearing was about the records held '
                 . 'then, so this run worked them out again from the start, as a first run does, for what has to be kept now.';
         } elseif ($earlierRun === true) {
@@ -5966,11 +5993,8 @@ class GdprEraser
         } elseif ($emptiedAlready === true) {
             $line .= ' This account had ALREADY been emptied before this run, so no name could be recorded.';
         }
-        $stored  = $one('SELECT `fullName`, `address` FROM `tblGivingKeptDonors` WHERE `keptDonorID` = ?', 'i', [$keptDonorId]);
-        $hasName = trim((string) ($stored['fullName'] ?? '')) !== '';
-        $hasHome = trim((string) ($stored['address'] ?? '')) !== '';
-        $line   .= ' Kept on this record: ' . ($hasName === true ? 'the name' : 'no name') . ' and '
-            . ($hasHome === true ? 'a home address' : 'no home address') . '.';
+        $stored = $one('SELECT `fullName`, `address` FROM `tblGivingKeptDonors` WHERE `keptDonorID` = ?', 'i', [$keptDonorId]);
+        $line  .= ' Kept on this record: ' . $holds($stored) . '.';
 
         self::logAudit($db, $requestId, 'retain', 'GivingRecords', $where, $line);
 
