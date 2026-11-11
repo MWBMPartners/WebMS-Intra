@@ -7100,7 +7100,7 @@ ge_ok('A DECLARATION ADDRESS OF ONLY A TAB IS NO ADDRESS: the account\'s address
 // =============================================================================
 // 🧮 THE CLAIM FILE'S NAME RULE, OVER THE WHOLE TABLE (#941 rounds 6 and 7)
 // =============================================================================
-// Rounds 4 and 5 each added one case, and each round's case pinned the rule
+// Rounds 4 and 5 added cases (round 4 two, round 5 one), and each pinned the rule
 // from one side only: a branch keyed on `isActive` one way passed every check,
 // then a branch keyed on it the OTHER way passed the next. So round 6 (answering
 // check round 5) stopped testing the rule by examples and built one donor per
@@ -7109,8 +7109,9 @@ ge_ok('A DECLARATION ADDRESS OF ONLY A TAB IS NO ADDRESS: the account\'s address
 // that joined cleared rows changed nothing the table could see; and the made-up
 // name appeared only in its own capitals, so a case-sensitive comparison passed.
 //
-// The facts this check varies, and nothing else (the declaration, the gift and
-// its date are the same for every donor). Each is varied independently:
+// The facts this check varies (the declaration and the gift differ between donors
+// only in the house number and the amount, which identify each row and do not
+// touch the name). Each is varied independently:
 //
 //   the kept row     none; live and named, nameless (NULL) or blank (''); or
 //                    cleared and named or nameless (6)
