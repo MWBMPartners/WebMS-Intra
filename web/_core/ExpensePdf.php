@@ -57,7 +57,8 @@ class ExpensePdf
 
         // 📦 Load line items
         $it = $mysqli->prepare(
-            'SELECT itemName, quantity, unitCost, lineTotal FROM tblExpenseClaimItems WHERE claimID = ?'
+            'SELECT itemName, quantity, unitCost, lineTotal, `quotedCurrency`, `quotedLineTotal` '
+            . 'FROM tblExpenseClaimItems WHERE claimID = ?'
         );
         if ($it === false) {
             return false;
@@ -105,6 +106,11 @@ class ExpensePdf
         // 📋 Get org name from settings for PDF header
         $orgName = $SETTINGS['site']['name'] ?? 'Organisation';
 
+        // 💷 The claim's OWN currency (#966, D-139): the one it was made in.
+        //    An older claim that recorded none prints no currency rather than
+        //    borrowing today's.
+        $claimCurrency = (string) ($claim['currency'] ?? '');
+
         // 🖨️ Build HTML
         ob_start(); ?>
 <!doctype html>
@@ -147,21 +153,28 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
 
 <!-- 📦 Line Items -->
 <table class="table">
-    <thead><tr><th>Description</th><th>Qty</th><th>Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></th><th>Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></th></tr></thead>
+    <thead><tr><th>Description</th><th>Qty</th><th>Unit, as quoted</th><th>Line, in the claim's currency</th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
         <tr>
             <td><?php echo htmlspecialchars($item['itemName'], ENT_QUOTES, 'UTF-8'); ?></td>
             <td><?php echo (int) $item['quantity']; ?></td>
-            <td><?php echo number_format((float) $item['unitCost'], 2); ?></td>
-            <td><?php echo number_format((float) $item['lineTotal'], 2); ?></td>
+            <?php
+            $lineQuoted = (string) ($item['quotedCurrency'] ?? '') !== '' ? (string) $item['quotedCurrency'] : $claimCurrency;
+            $lineRate   = $item['quotedLineTotal'] !== null
+                ? \Portal\Core\ExpenseRules::rateWords((float) $item['quotedLineTotal'], $lineQuoted, (float) $item['lineTotal'], $claimCurrency)
+                : '';
+            ?>
+            <td><?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $item['unitCost'], $lineQuoted), ENT_QUOTES, 'UTF-8'); ?></td>
+            <td><?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $item['lineTotal'], $claimCurrency), ENT_QUOTES, 'UTF-8'); ?>
+                <?php if ($lineRate !== ''): ?><br><small><?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $item['quotedLineTotal'], $lineQuoted) . ' quoted; ' . $lineRate, ENT_QUOTES, 'UTF-8'); ?></small><?php endif; ?></td>
         </tr>
     <?php endforeach; ?>
     </tbody>
     <tfoot>
         <tr>
             <td colspan="3" class="total">Total</td>
-            <td class="total"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></td>
+            <td class="total"><?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $claim['totalAmount'], $claimCurrency), ENT_QUOTES, 'UTF-8'); ?></td>
         </tr>
     </tfoot>
 </table>

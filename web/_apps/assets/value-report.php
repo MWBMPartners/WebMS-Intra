@@ -44,10 +44,10 @@
  *
  * CURRENCY: every pence total on this page is summed as-is across every
  * asset — no currency conversion. Matches the register's existing
- * single-reporting-currency assumption: one currency per organisation
- * (Portal\Core\Currency, #966), which may change only while no money is
- * recorded — a genuinely multi-currency register would need real FX
- * handling this pass does not attempt.
+ * CURRENCY: every asset keeps the currency it was bought in (#966, D-139),
+ * so this page shows ONE currency at a time — the organisation's by default,
+ * any other the register holds by `?currency=` — and never adds two
+ * together. There is no exchange-rate conversion.
  *
  * @package   Portal\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -101,14 +101,30 @@ if ($isCsvExport === true) {
     }
 }
 
-$depreciationRows = AssetRegister::depreciationReportRows($siteId);
+// 💷 ONE CURRENCY AT A TIME (D-139). Every asset keeps the currency it was
+//    bought in, and the totals, percentages, chart and insurance gap below
+//    would mean nothing added across currencies. So the report shows one:
+//    the one asked for (?currency=) when the register holds it, else the
+//    organisation's when held, else the first held. Links to the others are
+//    drawn above the figures.
+$currenciesHeld = AssetRegister::currenciesHeld($siteId);
+$askedCurrency  = strtoupper(trim(is_string($_GET['currency'] ?? null) === true ? (string) $_GET['currency'] : ''));
+$orgCurrency    = \Portal\Core\Currency::ofSite();
+if (array_key_exists($askedCurrency, $currenciesHeld) === true && ($askedCurrency !== '' || isset($_GET['currency']) === true)) {
+    $reportCurrency = $askedCurrency;
+} elseif (array_key_exists($orgCurrency, $currenciesHeld) === true || $currenciesHeld === []) {
+    $reportCurrency = $orgCurrency;
+} else {
+    $reportCurrency = (string) array_key_first($currenciesHeld);
+}
+$depreciationRows = AssetRegister::depreciationReportRows($siteId, $reportCurrency);
 
 if ($isCsvExport === true) {
     // 📊 Column allow-list — deliberately explicit, never a dump of the
     // raw row. NEVER includes licenseKey, publicToken, or
     // insurancePolicyNumber — see file header note.
-    // 💷 Titled with the organisation's currency, never "(GBP)" (#966).
-    $curTitle   = \Portal\Core\Currency::ofSite() !== '' ? ' (' . \Portal\Core\Currency::ofSite() . ')' : '';
+    // 💷 Titled with the ONE currency this report shows (D-139), never "(GBP)".
+    $curTitle   = $reportCurrency !== '' ? ' (' . $reportCurrency . ')' : '';
     $costTitle  = 'Purchase Cost' . $curTitle;
     $valueTitle = 'Current Value' . $curTitle;
     $insTitle   = 'Insured Value' . $curTitle;
@@ -149,7 +165,7 @@ if ($isCsvExport === true) {
 // -----------------------------------------------------------------------------
 // 📊 Report data.
 // -----------------------------------------------------------------------------
-$summary = AssetRegister::valueSummaryForSite($siteId);
+$summary = AssetRegister::valueSummaryForSite($siteId, $reportCurrency);
 $totals  = $summary['totals'];
 
 // 🧾 Policies renewing within 30 days — a fixed 30-day highlight window for
@@ -169,9 +185,8 @@ $underInsured = array_values(array_filter(
 ));
 
 // 💷 Money formatter — "EUR 123.45", matching item.php's own convention for
-// this app (currency CODE prefix, not a symbol). The organisation's currency
-// (#966; it was "GBP " for everybody), or a plain number with none chosen.
-$reportCurrency = \Portal\Core\Currency::ofSite();
+// this app (currency CODE prefix, not a symbol), in the ONE currency this
+// report shows (#966, D-139; it was "GBP " for everybody).
 $money = static function (?int $pence) use ($reportCurrency): string {
     return $pence !== null ? ($reportCurrency !== '' ? $reportCurrency . ' ' : '') . number_format($pence / 100, 2) : '—';
 };
@@ -205,6 +220,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php else: ?>
 
+    <?php // 💷 One currency at a time (D-139): say which, and link the others. ?>
+    <?php if (count($currenciesHeld) > 1): ?>
+        <div class="alert alert-light border small" role="note" data-report-currency="<?php echo htmlspecialchars($reportCurrency, ENT_QUOTES, 'UTF-8'); ?>">
+            These figures are for assets in <strong><?php echo htmlspecialchars($reportCurrency !== '' ? $reportCurrency : 'no recorded currency', ENT_QUOTES, 'UTF-8'); ?></strong> only: amounts in different currencies are never added together.
+            The register also holds
+            <?php $others = []; foreach ($currenciesHeld as $heldCode => $heldCount) { if ((string) $heldCode === $reportCurrency) { continue; } $others[] = '<a href="' . htmlspecialchars(Site::url('assets/value-report') . '?currency=' . rawurlencode((string) $heldCode), ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars((int) $heldCount . ' in ' . ((string) $heldCode !== '' ? (string) $heldCode : 'no recorded currency'), ENT_QUOTES, 'UTF-8') . '</a>'; } echo implode(', ', $others); ?>.
+        </div>
+    <?php endif; ?>
     <!-- 📊 Headline totals -->
     <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">

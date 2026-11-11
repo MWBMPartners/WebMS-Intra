@@ -25,8 +25,11 @@
  *   ofOrganisation(), ofSite()    is in (its own, else the installation's, else
  *                                 none) — exactly as Countries does for the
  *                                 country (#942).
- *   whyCannotChange()             whether an organisation's currency may change
- *                                 now (see "money already recorded" below).
+ *   addTo(), totalsWords()        totals kept and written PER CURRENCY, never
+ *                                 added across currencies (D-139).
+ *   unlabelledCount(),            rows saved with no currency (''), and labelling
+ *   labelUnlabelled()             them deliberately with one an administrator
+ *                                 chooses (never guessed).
  *
  * ONE CURRENCY PER ORGANISATION, NOT ONE PER APP
  *
@@ -42,27 +45,28 @@
  * `org.currency`, is the one answer, with an installation row and an
  * organisation row like `org.address.countryCode`.
  *
- * A RECORD THAT STORES ITS OWN CURRENCY IS SHOWN IN THAT CURRENCY
+ * EVERY AMOUNT KEEPS ITS OWN CURRENCY (D-139, the owner, 11 November 2026)
  *
- * Nine kinds of record keep a `currency` column (a gift, a pledge campaign, a
- * project, a payment, a bank import, an asset, a venue agreement, booking and
- * invoice). Those are written in the organisation's currency at the moment
- * they are made, and shown in their OWN currency afterwards, never in today's
- * setting. The column has NO DEFAULT since #966: a writer that forgets to name
- * it fails loudly instead of storing pounds (that is how every new project was
- * stored as GBP whatever the setting said, measured on 219cb616 in
- * `projects/manage-save.php`).
+ * Every table that holds money has a `currency` column beside the amount
+ * (nine had one before #966; migration 283 added it to fourteen more). A row
+ * is written in the organisation's currency at the moment it is made — or,
+ * for an expense line, in the currency it was QUOTED in, beside the CONVERTED
+ * amount in the organisation's — and is shown in its OWN currency afterwards,
+ * never in today's setting. So an organisation's currency CAN change (D-133,
+ * D-139): old records keep theirs. Every total is added up PER CURRENCY and
+ * never across currencies (addTo(), totalsWords()); a total with two
+ * currencies is two lines. (Round 1 of #966 locked the currency once money
+ * was recorded instead; the owner chose this, and the lock is gone.)
  *
- * MONEY ALREADY RECORDED (an owner question, recorded on #966)
- *
- * Other records keep only a number — an expense claim, a member's pledge, a
- * collection count, a giving statement — and no total anywhere is added up
- * currency by currency. So switching an organisation from pounds to euros
- * after money is recorded would quietly relabel £500 of claims as €500 and add
- * pounds to euros in every total. Until the owner decides otherwise, an
- * organisation's currency may change only while it has NO money recorded
- * (whyCannotChange()). Choosing a currency for the FIRST time is always
- * allowed: a figure shown as a plain number has no currency to relabel.
+ * The nine older columns have NO default, so a writer that forgets the
+ * currency fails loudly (that is how every new project used to be stored as
+ * GBP whatever the setting said). The fourteen newer ones default to '',
+ * because a whole-database backup taken before migration 283 has none of
+ * those columns and must still restore. '' means "not recorded": the amount
+ * is shown as a plain number, and Organisation settings offers to label an
+ * organisation's unlabelled rows with a currency an administrator CHOOSES
+ * (labelUnlabelled()) — it is never guessed, because only a person knows
+ * what money an old figure was.
  *
  * HUNDREDTHS: WHY ONLY SOME CURRENCIES CAN BE CHOSEN
  *
@@ -198,33 +202,44 @@ final class Currency
     ];
 
     /**
-     * 💰 Where an organisation's money is recorded: table => extra condition
-     * ('' = every row of that organisation is money). Asked by
-     * whyCannotChange(). A table missing from here would let the currency
-     * change under money it holds, so section C of the self-test compares this
-     * list with the schema and fails both ways. The provider-spend tables
-     * (translation, transcription, AI, texts) are deliberately NOT here: that
-     * is the money the INSTALLATION pays its providers, not the organisation's.
+     * 💰 The tables that hold an organisation's money DIRECTLY (they carry
+     * `siteID` and `currency`). Used by unlabelledCount() and
+     * labelUnlabelled(). Section B of tools/currency-selftest.php compares this
+     * list and CHILD_TABLES with the schema and fails both ways: a table holding
+     * money that is in neither could never be labelled. The provider-spend
+     * tables (translation, transcription, AI, texts) are deliberately in
+     * neither: that is the INSTALLATION's spending, estimated in hundredths
+     * from US-dollar list prices, and what currency those figures are in is
+     * its own question (see #966's notes).
      *
-     * @var array<string, string>
+     * @var list<string>
      */
-    public const MONEY_TABLES = [
-        'tblAssetMaintenance'    => '`costPence` IS NOT NULL',
-        'tblAssets'              => '(`purchaseCostPence` IS NOT NULL OR `salvageValuePence` IS NOT NULL OR `currentValuePence` IS NOT NULL OR `insuredValuePence` IS NOT NULL)',
-        'tblBankImports'         => '',
-        'tblBankTxns'            => '',
-        'tblCountSessions'       => '',
-        'tblExpenseClaims'       => '',
-        'tblGivingEntry'         => '',
-        'tblGivingStatementLog'  => '',
-        'tblPayment'             => '',
-        'tblPledgeCampaigns'     => '',
-        'tblPledges'             => '',
-        'tblProject'             => '',
-        'tblResource'            => '`hourlyRatePence` IS NOT NULL',
-        'tblVenueAgreements'     => '',
-        'tblVenueBookings'       => '`costPence` IS NOT NULL',
-        'tblVenueInvoices'       => '',
+    public const OWN_TABLES = [
+        'tblAssets', 'tblBankImports', 'tblCountSessions', 'tblExpenseClaims', 'tblGivingEntry',
+        'tblGivingStatementLog', 'tblPayment', 'tblPledgeCampaigns', 'tblProject', 'tblResource',
+        'tblVenueAgreements', 'tblVenueBookings', 'tblVenueInvoices',
+    ];
+
+    /**
+     * 🔗 Tables whose money belongs to a PARENT row: child => [parent table,
+     * the child's column, the parent's key]. A child is labelled with its
+     * parent's currency, so a repair to an asset bought in francs stays in
+     * francs. Some of these also carry `siteID`; they are still labelled
+     * through their parent, which is the truer answer.
+     *
+     * @var array<string, array{0: string, 1: string, 2: string}>
+     */
+    public const CHILD_TABLES = [
+        'tblAssetMaintenance'     => ['tblAssets', 'assetID', 'assetID'],
+        'tblAssetValueHistory'    => ['tblAssets', 'assetID', 'assetID'],
+        'tblBankTxns'             => ['tblBankImports', 'importID', 'importID'],
+        'tblCountEnvelopes'       => ['tblCountSessions', 'countSessionID', 'countSessionID'],
+        'tblExpenseClaimItems'    => ['tblExpenseClaims', 'claimID', 'claimID'],
+        'tblExpenseClaimPayments' => ['tblExpenseClaims', 'claimID', 'claimID'],
+        'tblPledges'              => ['tblPledgeCampaigns', 'campaignID', 'campaignID'],
+        'tblProjectPledge'        => ['tblProject', 'projectID', 'projectID'],
+        'tblVenueInvoiceLines'    => ['tblVenueInvoices', 'invoiceID', 'invoiceID'],
+        'tblVenueInvoicePayments' => ['tblVenueInvoices', 'invoiceID', 'invoiceID'],
     ];
 
     /** 🌍 The currency a country uses ('' for none or an unknown country). Two capital letters only. */
@@ -431,54 +446,150 @@ final class Currency
     }
 
     /**
-     * 🔒 Why this organisation's currency may NOT change from `$now` to `$next`,
-     * in plain words, or '' when it may.
+     * ➕ Add an amount to a set of totals kept PER CURRENCY (D-139): totals are
+     * a map of currency code => hundredths. Two currencies are never added
+     * together; an unrecorded currency ('') is its own line.
      *
-     * It may always change while no currency is in force (`$now` is ''): a
-     * figure shown as a plain number has no currency to relabel. Otherwise it
-     * may change only while the organisation has no money recorded in any of
-     * MONEY_TABLES. With `$lock` true each table is read with a locking read
-     * (`FOR UPDATE`), which under InnoDB's REPEATABLE READ also blocks a new row
-     * for this organisation until the caller's transaction ends — so nothing
-     * can be recorded between this answer and the caller's write (#647). The
-     * lock is real only inside the caller's transaction (#697). A table that
-     * cannot be read counts as HOLDING money: "we could not tell" must never
-     * become "go ahead".
+     * @param array<string, int> $totals
      */
-    public static function whyCannotChange(\mysqli $db, int $siteId, string $now, string $next, bool $lock): string
+    public static function addTo(array &$totals, string $code, int $hundredths): void
     {
-        if ($now === '' || $now === $next) {
-            return '';
+        $code = strtoupper(trim($code));
+        $totals[$code] = ($totals[$code] ?? 0) + $hundredths;
+    }
+
+    /**
+     * 🧾 Per-currency totals written for a person, one per currency, in code
+     * order: "€1,234.50", or "€1,234.50 and £20.00". With no totals at all it
+     * is one line of 0.00, in `$emptyCurrency` (a plain "0.00" when that is '').
+     *
+     * @param array<string, int> $totals
+     * @return list<string> One line per currency.
+     */
+    public static function totalsLines(array $totals, string $emptyCurrency = ''): array
+    {
+        if ($totals === []) {
+            return [self::format(0, $emptyCurrency)];
         }
-        foreach (self::MONEY_TABLES as $table => $condition) {
-            $sql = 'SELECT 1 FROM `' . $table . '` WHERE `siteID` = ?'
-                . ($condition !== '' ? ' AND ' . $condition : '')
-                . ' LIMIT 1' . ($lock === true ? ' FOR UPDATE' : '');
-            try {
-                $stmt = $db->prepare($sql);
-                if ($stmt === false) {
-                    return self::lockedWords($now, 'the records could not be checked');
-                }
-                $stmt->bind_param('i', $siteId);
-                $stmt->execute();
-                $found = $stmt->get_result()->fetch_row() !== null;
-                $stmt->close();
-            } catch (\Throwable $e) {
-                return self::lockedWords($now, 'the records could not be checked');
-            }
-            if ($found === true) {
-                return self::lockedWords($now, 'money is already recorded in it');
-            }
+        ksort($totals, SORT_STRING);
+        $lines = [];
+        foreach ($totals as $code => $hundredths) {
+            $lines[] = self::format((int) $hundredths, (string) $code);
         }
 
-        return '';
+        return $lines;
+    }
+
+    /**
+     * 🧾 totalsLines() ready for a page: each line escaped for HTML, joined by
+     * a line break, so a total in two currencies reads as two lines.
+     *
+     * @param array<string, int> $totals
+     */
+    public static function totalsHtml(array $totals, string $emptyCurrency = ''): string
+    {
+        return implode('<br>', array_map(
+            static fn (string $line): string => htmlspecialchars($line, ENT_QUOTES, 'UTF-8'),
+            self::totalsLines($totals, $emptyCurrency)
+        ));
+    }
+
+    /** 🧾 totalsLines() joined into one phrase: "€1,234.50 and £20.00". @param array<string, int> $totals */
+    public static function totalsWords(array $totals, string $emptyCurrency = ''): string
+    {
+        $lines = self::totalsLines($totals, $emptyCurrency);
+        if (count($lines) === 1) {
+            return $lines[0];
+        }
+        $last = array_pop($lines);
+
+        return implode(', ', $lines) . ' and ' . $last;
+    }
+
+    /**
+     * 🏷️ How many of this organisation's money rows were saved with NO currency
+     * (''), across OWN_TABLES and, through their parents, CHILD_TABLES. Null
+     * when it could not be counted (the page then says so rather than "none").
+     */
+    public static function unlabelledCount(\mysqli $db, int $siteId): ?int
+    {
+        $count = 0;
+        try {
+            foreach (self::OWN_TABLES as $table) {
+                $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE `siteID` = ? AND `currency` = \'\'');
+                $stmt->bind_param('i', $siteId);
+                $stmt->execute();
+                $count += (int) ($stmt->get_result()->fetch_row()[0] ?? 0);
+                $stmt->close();
+            }
+            foreach (self::CHILD_TABLES as $child => [$parent, $col, $key]) {
+                $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $child . '` `k` JOIN `' . $parent . '` `p` ON `p`.`' . $key . '` = `k`.`' . $col . '` '
+                    . 'WHERE `p`.`siteID` = ? AND `k`.`currency` = \'\'');
+                $stmt->bind_param('i', $siteId);
+                $stmt->execute();
+                $count += (int) ($stmt->get_result()->fetch_row()[0] ?? 0);
+                $stmt->close();
+            }
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return $count;
+    }
+
+    /**
+     * 🏷️ Label this organisation's unlabelled money rows with `$code`, chosen by
+     * an administrator who knows what money they were. Rows of its own tables
+     * take `$code`; a child row takes its PARENT's currency (labelled first),
+     * so a repair stays in its asset's money. An expense line's quoted currency
+     * is labelled too when it is empty. Rows that already hold a currency are
+     * never touched. All or nothing, in one transaction. Answers the number of
+     * rows labelled, or null when it failed (nothing was changed).
+     */
+    public static function labelUnlabelled(\mysqli $db, int $siteId, string $code): ?int
+    {
+        if (self::isChoosable($code) === false) {
+            return null;
+        }
+        $labelled = 0;
+        $db->begin_transaction();
+        try {
+            foreach (self::OWN_TABLES as $table) {
+                $stmt = $db->prepare('UPDATE `' . $table . '` SET `currency` = ? WHERE `siteID` = ? AND `currency` = \'\'');
+                $stmt->bind_param('si', $code, $siteId);
+                $stmt->execute();
+                $labelled += $stmt->affected_rows;
+                $stmt->close();
+            }
+            foreach (self::CHILD_TABLES as $child => [$parent, $col, $key]) {
+                $stmt = $db->prepare('UPDATE `' . $child . '` `k` JOIN `' . $parent . '` `p` ON `p`.`' . $key . '` = `k`.`' . $col . '` '
+                    . 'SET `k`.`currency` = IF(`p`.`currency` <> \'\', `p`.`currency`, ?) WHERE `p`.`siteID` = ? AND `k`.`currency` = \'\'');
+                $stmt->bind_param('si', $code, $siteId);
+                $stmt->execute();
+                $labelled += $stmt->affected_rows;
+                $stmt->close();
+            }
+            $stmt = $db->prepare('UPDATE `tblExpenseClaimItems` `k` JOIN `tblExpenseClaims` `p` ON `p`.`claimID` = `k`.`claimID` '
+                . 'SET `k`.`quotedCurrency` = `k`.`currency` WHERE `p`.`siteID` = ? AND `k`.`quotedCurrency` = \'\' AND `k`.`currency` <> \'\'');
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $stmt->close();
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollback();
+
+            return null;
+        }
+
+        return $labelled;
     }
 
     /**
      * 🔒 Does the general Settings editor refuse this key? Yes for the currency:
-     * that editor writes a row with no money check, so it would let a currency
-     * change under recorded money. The organisation settings page is the ONE
-     * place it is changed. Capitals are ignored, as a key's are everywhere.
+     * that editor would store any text at all, where the organisation settings
+     * page accepts only a currency the portal can store, and offers to label
+     * old unlabelled amounts. That page is the ONE place it is changed.
+     * Capitals are ignored, as a key's are everywhere.
      */
     public static function lockedInGeneralEditor(string $key): bool
     {
@@ -486,17 +597,8 @@ final class Currency
     }
 
     /** What the general settings editor says when it refuses the currency. */
-    public const LOCKED_MESSAGE = 'The currency can only be changed at Admin, Settings, Organisation, where a change '
-        . 'that would relabel money already recorded is refused. Nothing was changed.';
-
-    /** The one sentence for a currency that cannot change. */
-    private static function lockedWords(string $now, string $because): string
-    {
-        return 'This organisation\'s currency is ' . $now . ' and cannot be changed, because ' . $because
-            . '. Amounts already recorded have no currency of their own, so changing it would relabel them '
-            . '(£500 of claims would start showing as 500 of the new currency) and add two currencies together '
-            . 'in every total.';
-    }
+    public const LOCKED_MESSAGE = 'The currency is changed at Admin, Settings, Organisation, which accepts only a '
+        . 'currency the portal can use. Nothing was changed.';
 
     /**
      * Both rows in one query. A read that fails is "nothing known" (''),

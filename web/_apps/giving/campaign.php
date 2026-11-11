@@ -70,14 +70,23 @@ $currency = (string) ($campaign['currency'] ?? \Portal\Core\Currency::ofSite());
 // large campaign.
 // -----------------------------------------------------------------------------
 $goal   = (int) $campaign['goalAmountPence'];
-$raised = 0;
-$stmt = $db->prepare('SELECT COALESCE(SUM(amountPence), 0) AS raised FROM tblGivingEntry WHERE siteID = ? AND campaignID = ?');
+// 💷 Per currency (D-139): only gifts in the campaign's own currency count
+//    towards its goal; gifts in another are shown beside it, never added in.
+$raised      = 0;
+$raisedOther = [];
+$stmt = $db->prepare('SELECT `currency`, COALESCE(SUM(amountPence), 0) AS raised FROM tblGivingEntry WHERE siteID = ? AND campaignID = ? GROUP BY `currency`');
 if ($stmt !== false) {
     $stmt->bind_param('ii', $siteId, $campaignId);
     $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
+    $raisedRows = $stmt->get_result();
+    while (($row = $raisedRows->fetch_assoc()) !== null) {
+        if (strtoupper((string) $row['currency']) === strtoupper($currency)) {
+            $raised += (int) $row['raised'];
+        } else {
+            \Portal\Core\Currency::addTo($raisedOther, (string) $row['currency'], (int) $row['raised']);
+        }
+    }
     $stmt->close();
-    $raised = $row !== null ? (int) $row['raised'] : 0;
 }
 $pct      = $goal > 0 ? intdiv($raised * 100, $goal) : 0;
 $barWidth = min(100, $pct);
@@ -106,11 +115,13 @@ if ($stmt !== false) {
 
 $paidByPledge = [];
 $stmt = $db->prepare(
+    // 💷 Only gifts in the campaign's currency count as paid towards a pledge,
+    //    which is in that currency too (D-139).
     'SELECT pledgeID, COALESCE(SUM(amountPence), 0) AS paid FROM tblGivingEntry '
-    . 'WHERE siteID = ? AND campaignID = ? AND pledgeID IS NOT NULL GROUP BY pledgeID'
+    . 'WHERE siteID = ? AND campaignID = ? AND pledgeID IS NOT NULL AND `currency` = ? GROUP BY pledgeID'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('ii', $siteId, $campaignId);
+    $stmt->bind_param('iis', $siteId, $campaignId, $currency);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
@@ -255,6 +266,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="mb-0">
             <strong><?php echo htmlspecialchars(Giving::formatAmount($raised, $currency), ENT_QUOTES, 'UTF-8'); ?></strong>
             of <?php echo htmlspecialchars(Giving::formatAmount($goal, $currency), ENT_QUOTES, 'UTF-8'); ?>
+            <?php if ($raisedOther !== []): ?><br><span class="text-muted" data-raised-other>plus <?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($raisedOther), ENT_QUOTES, 'UTF-8'); ?> given in another currency, not counted towards the goal</span><?php endif; ?>
             <?php if ($pct >= 100): ?><span class="badge text-bg-success ms-1">Goal reached</span><?php endif; ?>
         </p>
     </div>

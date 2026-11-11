@@ -433,10 +433,9 @@
  *      `isResponsibleFor()` — the SAME gate as the Ownership & legal
  *      vault, point 8 above, since a policy number/insured value sits at
  *      roughly that same sensitivity). Neither total in this section
- *      currency-converts — every pence figure is summed as-is, matching
- *      the register's single-reporting-currency assumption: one
- *      currency per organisation, which may change only while no money
- *      is recorded (Currency::whyCannotChange(), #966).
+ *      currency-converts. Since #966 (D-139) every asset keeps its own
+ *      currency and the totals are taken ONE currency at a time
+ *      (valueSummaryForSite($siteId, $currency)), never across two.
  *
  *  14. Kiosk self check-in/out (#414, Phase 3 Pass 5). Unattended, PUBLIC
  *      terminal access — `_apps/assets/kiosk.php`/`kiosk-action.php` carry
@@ -2331,7 +2330,7 @@ class AssetRegister
         $sql = 'SELECT a.assetID, a.assetKind, a.name, a.description, a.categoryID, a.locationID, '
              . '       a.manufacturer, a.model, a.serialNumber, a.assetTagCode, a.conditionState, '
              . '       a.status, a.isConfidential, a.publicToken, a.publicPageEnabled, a.updatedAt, '
-             . '       a.purchaseDate, a.purchaseCostPence, '
+             . '       a.purchaseDate, a.purchaseCostPence, a.`currency`, '
              . '       c.categoryName, l.locationName '
              . 'FROM tblAssets a '
              . 'LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
@@ -5605,6 +5604,28 @@ class AssetRegister
      *
      * @return int New maintID, or 0 on validation failure or insert failure
      */
+    /**
+     * 💷 The currency an asset's money is in ('' when it cannot be read), for a
+     * child row — a repair — that must carry its asset's currency (D-139).
+     */
+    private static function currencyOfAsset(\mysqli $db, int $assetId, int $siteId): string
+    {
+        try {
+            $stmt = $db->prepare('SELECT `currency` FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? LIMIT 1');
+            if ($stmt === false) {
+                return '';
+            }
+            $stmt->bind_param('ii', $assetId, $siteId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return '';
+        }
+
+        return is_array($row) === true ? (string) $row['currency'] : '';
+    }
+
     public static function addMaintenance(int $assetId, array $data, int $actorUserId): int
     {
         $db     = App::db();
@@ -5681,6 +5702,8 @@ class AssetRegister
             'performedByUserID' => [$performedByUserId, 'i'],
             'performedByName'   => [$performedByName, 's'],
             'costPence'         => [$costPence, 'i'],
+            // 💷 A repair is in its ASSET's currency, kept on the row (D-139).
+            'currency'          => [self::currencyOfAsset($db, $assetId, $siteId), 's'],
             'performedAt'       => [$performedAt, 's'],
             'nextDueDate'       => [$nextDueDate, 's'],
             'status'            => [$status, 's'],
@@ -8842,17 +8865,18 @@ class AssetRegister
         }
 
         $ins = $db->prepare(
+            // 💷 A valuation is in its ASSET's currency, kept on the row (D-139).
             'INSERT INTO tblAssetValueHistory '
-            . '(siteID, assetID, valueDate, currentValuePence, method, source, recordedByID) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?) '
-            . 'ON DUPLICATE KEY UPDATE currentValuePence = VALUES(currentValuePence), '
+            . '(siteID, assetID, valueDate, currentValuePence, method, source, recordedByID, `currency`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT `a`.`currency` FROM `tblAssets` `a` WHERE `a`.`assetID` = ?)) '
+            . 'ON DUPLICATE KEY UPDATE currentValuePence = VALUES(currentValuePence), `currency` = VALUES(`currency`), '
             . 'method = VALUES(method), source = VALUES(source), recordedByID = VALUES(recordedByID)'
         );
         if ($ins === false) {
             error_log('AssetRegister::recordValueSnapshot() insert prepare failed: ' . $db->error);
             return false;
         }
-        $ins->bind_param('iisissi', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById);
+        $ins->bind_param('iisissii', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById, $assetId);
         $success = $ins->execute();
         if ($success === false) {
             error_log('AssetRegister::recordValueSnapshot() insert execute failed: ' . $ins->error);
@@ -8946,22 +8970,29 @@ class AssetRegister
      *   byStatus: array<int, array<string, mixed>>
      * }
      */
-    public static function valueSummaryForSite(int $siteId): array
+    public static function valueSummaryForSite(int $siteId, ?string $currency = null): array
     {
         $db = App::db();
 
+        // 💷 `$currency` keeps every total to ONE currency (D-139): an asset
+        //    keeps the currency it was bought in, and two are never added.
         $stmt = $db->prepare(
             'SELECT a.assetID, a.status, a.categoryID, c.categoryName, '
             . '       a.purchaseCostPence, a.currentValuePence, a.depreciationMethod, '
             . '       a.usefulLifeMonths, a.salvageValuePence, a.purchaseDate, a.insuredValuePence '
             . 'FROM tblAssets a LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
             . 'WHERE a.siteID = ? AND a.isDeleted = 0'
+            . ($currency !== null ? ' AND a.`currency` = ?' : '')
         );
         if ($stmt === false) {
             error_log('AssetRegister::valueSummaryForSite() prepare failed: ' . $db->error);
             return ['totals' => [], 'byCategory' => [], 'byStatus' => []];
         }
-        $stmt->bind_param('i', $siteId);
+        if ($currency !== null) {
+            $stmt->bind_param('is', $siteId, $currency);
+        } else {
+            $stmt->bind_param('i', $siteId);
+        }
         $stmt->execute();
         $result = $stmt->get_result();
 
@@ -9064,23 +9095,58 @@ class AssetRegister
      *         isEstimate (bool), valuationDate (nullable),
      *         pctDepreciated (nullable float), insuredValuePence (nullable)
      */
-    public static function depreciationReportRows(int $siteId): array
+    /**
+     * 💷 The currencies this organisation's register holds (assets not deleted),
+     * code => number of assets, so the value report can show ONE at a time
+     * (D-139) and say what else there is.
+     *
+     * @return array<string, int>
+     */
+    public static function currenciesHeld(int $siteId): array
+    {
+        $held = [];
+        try {
+            $db   = App::db();
+            $stmt = $db->prepare('SELECT `currency`, COUNT(*) AS `n` FROM `tblAssets` WHERE `siteID` = ? AND `isDeleted` = 0 GROUP BY `currency` ORDER BY `currency`');
+            if ($stmt === false) {
+                return [];
+            }
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $rs = $stmt->get_result();
+            while (($row = $rs->fetch_assoc()) !== null) {
+                $held[(string) $row['currency']] = (int) $row['n'];
+            }
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        return $held;
+    }
+
+    public static function depreciationReportRows(int $siteId, ?string $currency = null): array
     {
         $db = App::db();
 
         $stmt = $db->prepare(
             'SELECT a.assetID, a.name, a.assetTagCode, c.categoryName, a.purchaseCostPence, '
             . '       a.depreciationMethod, a.usefulLifeMonths, a.salvageValuePence, a.purchaseDate, '
-            . '       a.currentValuePence, a.valuationDate, a.insuredValuePence '
+            . '       a.currentValuePence, a.valuationDate, a.insuredValuePence, a.`currency` '
             . 'FROM tblAssets a LEFT JOIN tblAssetCategories c ON c.categoryID = a.categoryID '
             . 'WHERE a.siteID = ? AND a.isDeleted = 0 '
+            . ($currency !== null ? 'AND a.`currency` = ? ' : '')
             . 'ORDER BY a.name ASC'
         );
         if ($stmt === false) {
             error_log('AssetRegister::depreciationReportRows() prepare failed: ' . $db->error);
             return [];
         }
-        $stmt->bind_param('i', $siteId);
+        if ($currency !== null) {
+            $stmt->bind_param('is', $siteId, $currency);
+        } else {
+            $stmt->bind_param('i', $siteId);
+        }
         $stmt->execute();
         $result = $stmt->get_result();
 

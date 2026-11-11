@@ -118,13 +118,14 @@ if ($campaign === null) {
 // pledger's one row per campaign (#299 edge case 3), re-opening a cancelled
 // pledge rather than duplicating it.
 $stmt = $db->prepare(
-    'INSERT INTO tblPledges (siteID, campaignID, userID, amountPence, paymentSchedule, status) '
-    . 'VALUES (?, ?, ?, ?, ?, \'open\') '
+    // 💷 A pledge is in its CAMPAIGN's currency, kept on the row (D-139).
+    'INSERT INTO tblPledges (siteID, campaignID, userID, amountPence, paymentSchedule, status, `currency`) '
+    . 'VALUES (?, ?, ?, ?, ?, \'open\', (SELECT `c`.`currency` FROM `tblPledgeCampaigns` `c` WHERE `c`.`campaignID` = ?)) '
     . 'ON DUPLICATE KEY UPDATE amountPence = VALUES(amountPence), '
-    . '    paymentSchedule = VALUES(paymentSchedule), status = \'open\''
+    . '    paymentSchedule = VALUES(paymentSchedule), status = \'open\', `currency` = VALUES(`currency`)'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('iiiis', $siteId, $campaignId, $userId, $amount, $schedule);
+    $stmt->bind_param('iiiisi', $siteId, $campaignId, $userId, $amount, $schedule, $campaignId);
     $stmt->execute();
     $stmt->close();
 }

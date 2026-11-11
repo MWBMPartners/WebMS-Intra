@@ -22,7 +22,7 @@ $siteId = Site::id();
 $rows = [];
 $stmt = $db->prepare(
     'SELECT resourceID, name, description, category, capacity, location, '
-    . '       requiresApproval, hourlyRatePence '
+    . '       requiresApproval, hourlyRatePence, `currency` '
     . 'FROM tblResource WHERE siteID = ? AND isActive = 1 '
     . 'ORDER BY category, name'
 );
@@ -96,7 +96,7 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
                                 <span class="badge bg-warning text-dark">Approval required</span>
                             <?php endif; ?>
                             <?php if ($r['hourlyRatePence'] !== null): ?>
-                                <span class="badge bg-info text-dark"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr</span>
+                                <span class="badge bg-info text-dark"><?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $r['hourlyRatePence'], (string) ($r['currency'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>/hr</span>
                             <?php endif; ?>
                             <?php if (($r['description'] ?? '') !== ''): ?>
                                 <p class="small mt-2 mb-2"><?php echo htmlspecialchars((string) $r['description'], ENT_QUOTES, 'UTF-8'); ?></p>

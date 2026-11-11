@@ -106,7 +106,7 @@ $claims = [];
 $siteId = Site::id();
 $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $stmt = $mysqli->prepare(
-    'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
+    'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.`currency`, EC.createdAt '
     . 'FROM tblExpenseClaims EC '
     . 'JOIN tblUsers U ON U.userID = EC.userID '
     . 'JOIN tblDepts D ON D.deptID = EC.deptID '
@@ -121,6 +121,18 @@ if ($stmt !== false) {
         $claims[] = $row;
     }
     $stmt->close();
+}
+
+// 💷 Each claim in its OWN currency, written here once (#966, D-139): the
+//    list and the Review window both read `totalWords`, so neither builds a
+//    symbol of its own (the window used to write a pound sign, by its escape code,
+//    whatever the claim was in). `quotedWords` lists the lines quoted in
+//    another currency, added up per currency, so the person deciding sees
+//    both figures; the claim's own figure is the one approved and paid.
+$quotedByClaim = \Portal\Core\ExpenseRules::quotedElsewhere($mysqli, array_map(static fn (array $c): int => (int) $c['claimID'], $claims));
+foreach ($claims as $ci => $c) {
+    $claims[$ci]['totalWords']  = \Portal\Core\Currency::formatMajor((float) $c['totalAmount'], (string) ($c['currency'] ?? ''));
+    $claims[$ci]['quotedWords'] = implode('; ', $quotedByClaim[(int) $c['claimID']] ?? []);
 }
 
 // 📝 D-130 (the owner, 11 November 2026): every look at expense records is
@@ -144,7 +156,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <!-- 💷 Treasury Dashboard -->
-<h1 class="mb-4"><i class="fa-solid fa-sterling-sign me-2"></i>Treasury — Approved Claims</h1>
+<h1 class="mb-4"><i class="fa-solid fa-money-bill-wave me-2"></i>Treasury — Approved Claims</h1>
 
 <!-- #545: said whether or not the list is empty, so a treasurer looking for
      a claim they made themselves is told why it is not here. -->
@@ -162,7 +174,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-3">Title</div>
             <div class="col-md-2">Claimant</div>
             <div class="col-md-2">Department</div>
-            <div class="col-md-1 text-end">Total <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
+            <div class="col-md-1 text-end">Total</div>
             <div class="col-md-2 text-end">Submitted</div>
             <div class="col-md-1 text-end"></div>
         </div>
@@ -190,7 +202,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="d-md-none fw-semibold">Dept: </span><?php echo htmlspecialchars($c['deptName'], ENT_QUOTES, 'UTF-8'); ?>
                 </div>
                 <div class="col-12 col-md-1 text-md-end">
-                    <span class="d-md-none fw-semibold">Total: </span><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $c['totalAmount'], 2); ?>
+                    <span class="d-md-none fw-semibold">Total: </span><span data-claim-total><?php echo htmlspecialchars($c['totalWords'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php if ($c['quotedWords'] !== ''): ?>
+                        <small class="d-block text-muted" data-claim-quoted><?php echo htmlspecialchars($c['quotedWords'], ENT_QUOTES, 'UTF-8'); ?></small>
+                    <?php endif; ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end small text-secondary">
                     <span class="d-md-none fw-semibold">Submitted: </span><?php echo \Portal\Core\I18n::formatDate($c['createdAt']); ?>
@@ -253,7 +268,8 @@ payModal.addEventListener('show.bs.modal', ev => {
         ['Title', data.claimTitle],
         ['Claimant', data.fullName],
         ['Department', data.deptName],
-        ['Total', '\u00a3' + parseFloat(data.totalAmount).toFixed(2)],
+        ['Total', data.totalWords],
+        ['Quoted in another currency', data.quotedWords || 'Nothing: every line is in the claim\'s own currency'],
         ['Submitted', data.createdAt]
     ];
     fields.forEach(([label, value]) => {

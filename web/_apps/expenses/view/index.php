@@ -177,12 +177,20 @@ $pageTitle   = 'Claim #' . $claimID . ' — ' . $claim['claimTitle'];
 // the claimant's claims above the form; the back button below says the same.
 $breadcrumbs = ['Dashboard' => Router::url(''), 'Expense Claims' => Router::url('expenses/submit'), 'Claim #' . $claimID => ''];
 
+// 💷 The claim's OWN currency (#966, D-139): the one it was made in, kept on
+//    the row. An older claim that recorded none shows its figures with no
+//    currency rather than borrowing today's, which could be a different one.
+$claimCurrency = (string) ($claim['currency'] ?? '');
+$claimMoney = static fn (float|int|string $amount): string => htmlspecialchars(
+    \Portal\Core\Currency::formatMajor($amount, $claimCurrency), ENT_QUOTES, 'UTF-8');
+
 // -----------------------------------------------------------------------------
 // 📋 Fetch line items
 // -----------------------------------------------------------------------------
 $items = [];
 $stmt = $mysqli->prepare(
-    'SELECT itemName, description, quantity, unitCost, lineTotal, purchaseDate, supplier '
+    'SELECT itemName, description, quantity, unitCost, lineTotal, purchaseDate, supplier, '
+    . '`currency`, `quotedCurrency`, `quotedLineTotal` '
     . 'FROM tblExpenseClaimItems WHERE claimID = ? ORDER BY itemID'
 );
 if ($stmt !== false) {
@@ -328,7 +336,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm">
             <div class="card-body text-center">
                 <small class="text-muted d-block">Total Amount</small>
-                <h3 class="mb-0"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></h3>
+                <h3 class="mb-0" data-claim-total><?php echo $claimMoney($claim['totalAmount']); ?></h3>
             </div>
         </div>
     </div>
@@ -366,8 +374,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row portal-data-header d-none d-md-flex">
                 <div class="col-md-4">Description</div>
                 <div class="col-md-2 text-center">Qty</div>
-                <div class="col-md-2 text-end">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
-                <div class="col-md-2 text-end">Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="col-md-2 text-end">Unit cost, as quoted</div>
+                <div class="col-md-2 text-end">Line, in the claim's currency</div>
                 <div class="col-md-2">Supplier</div>
             </div>
 
@@ -382,12 +390,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php echo (int) $item['quantity']; ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
-                        <span class="d-md-none fw-semibold">Unit: </span>
-                        <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $item['unitCost'], 2); ?>
+                        <?php
+                        // 💱 Quoted in another currency (D-139): the quoted
+                        //    figure in its own currency, and the rate worked
+                        //    out from the two figures — never fetched.
+                        $lineQuoted = (string) ($item['quotedCurrency'] ?? '');
+                        if ($lineQuoted === '') {
+                            $lineQuoted = $claimCurrency;
+                        }
+                        $lineForeign = $lineQuoted !== $claimCurrency && $item['quotedLineTotal'] !== null;
+                        ?>
+                        <span class="d-md-none fw-semibold">Unit, as quoted: </span>
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor($item['unitCost'], $lineQuoted), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Line: </span>
-                        <strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $item['lineTotal'], 2); ?></strong>
+                        <strong><?php echo $claimMoney($item['lineTotal']); ?></strong>
+                        <?php if ($lineForeign === true): ?>
+                            <small class="d-block text-muted" data-line-quoted>
+                                <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor($item['quotedLineTotal'], $lineQuoted), ENT_QUOTES, 'UTF-8'); ?> quoted;
+                                <?php echo htmlspecialchars(ExpenseRules::rateWords((float) $item['quotedLineTotal'], $lineQuoted, (float) $item['lineTotal'], $claimCurrency), ENT_QUOTES, 'UTF-8'); ?>
+                            </small>
+                        <?php endif; ?>
                     </div>
                     <div class="col-12 col-md-2">
                         <span class="d-md-none fw-semibold">Supplier: </span>
@@ -398,7 +422,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <div class="portal-data-row fw-bold">
                 <div class="col-12 col-md-8 text-md-end">Total</div>
-                <div class="col-12 col-md-2 text-md-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></div>
+                <div class="col-12 col-md-2 text-md-end"><?php echo $claimMoney($claim['totalAmount']); ?></div>
                 <div class="col-md-2"></div>
             </div>
         </div>
@@ -541,7 +565,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Amount: </span>
-                        <?php echo $p['payAmount'] !== null ? htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $p['payAmount'], \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8') : '—'; ?>
+                        <?php echo $p['payAmount'] !== null ? $claimMoney($p['payAmount']) : '—'; ?>
                     </div>
                     <div class="col-12 col-md-2">
                         <span class="d-md-none fw-semibold">Paid By: </span>
@@ -619,7 +643,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
     <?php if ($claim['status'] === 'Approved' && $isClaimant === false && ($hasTreasurer === true || $isAdmin === true)): ?>
         <a href="<?php echo htmlspecialchars(Router::url('expenses/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-success">
-            <i class="fa-solid fa-sterling-sign me-1"></i> Go to Treasury
+            <i class="fa-solid fa-money-bill-wave me-1"></i> Go to Treasury
         </a>
     <?php endif; ?>
     <?php if ($mayEditClaim === true): ?>

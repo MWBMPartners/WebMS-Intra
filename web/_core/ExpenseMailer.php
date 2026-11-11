@@ -97,8 +97,10 @@ class ExpenseMailer
         $claimTitle = htmlspecialchars($claim['claimTitle'], ENT_QUOTES, 'UTF-8');
         $claimant   = htmlspecialchars($claim['claimantName'], ENT_QUOTES, 'UTF-8');
         $dept       = htmlspecialchars($claim['deptName'], ENT_QUOTES, 'UTF-8');
-        // 💷 The organisation's currency (#966), never a pound sign by default.
-        $total      = htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $claim['totalAmount'], \Portal\Core\Currency::ofOrganisation($siteId)), ENT_QUOTES, 'UTF-8');
+        // 💷 The claim's OWN currency (#966, D-139), never a pound sign by
+        //    default and never today's setting: a claim keeps the currency it
+        //    was made in, even after the organisation changes its own.
+        $total      = htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $claim['totalAmount'], (string) ($claim['currency'] ?? '')), ENT_QUOTES, 'UTF-8');
         $claimDate  = date('j M Y', strtotime($claim['claimDate']));
 
         switch ($event) {

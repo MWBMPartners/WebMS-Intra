@@ -74,13 +74,14 @@ if (mb_strlen($message) > 500) {
 
 $projectId = (int) $project['projectID'];
 $stmt = $db->prepare(
-    'INSERT INTO tblProjectPledge (projectID, donorID, donorName, donorEmail, amountPence, isAnonymous, message) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+    // 💷 A pledge is in its PROJECT's currency, kept on the row (D-139).
+    'INSERT INTO tblProjectPledge (projectID, donorID, donorName, donorEmail, amountPence, isAnonymous, message, `currency`) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT `p`.`currency` FROM `tblProject` `p` WHERE `p`.`projectID` = ?))'
 );
 if ($stmt !== false) {
     $nameOrNull  = $donorId === null && $donorName !== '' ? $donorName : null;
     $emailOrNull = $donorId === null && $donorEmail !== '' ? $donorEmail : null;
-    $stmt->bind_param('iissiis', $projectId, $donorId, $nameOrNull, $emailOrNull, $amountPence, $isAnon, $message);
+    $stmt->bind_param('iissiisi', $projectId, $donorId, $nameOrNull, $emailOrNull, $amountPence, $isAnon, $message, $projectId);
     $stmt->execute();
     $stmt->close();
 }

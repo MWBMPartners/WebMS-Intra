@@ -49,6 +49,9 @@ final class ReportBuilder
     public const MAX_FILTERS     = 15;
     public const MAX_IN_VALUES   = 20;   // must equal ReportRegistry operator('in')['max']
     public const MAX_AGGREGATES  = 6;
+    /** 💷 The output column a report's currency appears under (#966, D-139). Also a selectable column of the money sources. */
+    public const CURRENCY_KEY = 'currency';
+
     public const MAX_VALUE_BYTES = 500;  // per bound filter value
     public const MAX_DEF_BYTES   = 16384; // stored/posted definition JSON cap
 
@@ -162,6 +165,11 @@ final class ReportBuilder
             $outputKeys[] = $groupColKey;
             $outputMeta[] = ['key' => $groupColKey, 'label' => (string) $groupCol['label'], 'type' => (string) $groupCol['type']];
 
+            // 💷 Set when an aggregate other than a count reads an amount that
+            //    has a currency (#966, D-139): the report then also groups by
+            //    that currency, so a sum, average, least or greatest is never
+            //    worked out across two currencies.
+            $currencyExprForAggs = null;
             $aggregates = $definition['aggregates'] ?? [];
             if (is_array($aggregates) === false || count($aggregates) === 0) {
                 throw new \InvalidArgumentException('At least one aggregate is required for a grouped report.');
@@ -200,6 +208,9 @@ final class ReportBuilder
                     self::noteJoin($joinsNeeded, $aggCol);
                     $aggExprSql = sprintf($template, $aggCol['expr']);
                     $aggAlias   = $fnKey . '_' . $aggColKeyRaw;
+                    if ($fnKey !== 'count' && is_string($aggCol['currencyExpr'] ?? null) === true) {
+                        $currencyExprForAggs = (string) $aggCol['currencyExpr'];
+                    }
                     $aggType    = self::aggregateOutputType($fnKey, $aggCol);
                 }
 
@@ -209,6 +220,12 @@ final class ReportBuilder
                 $selectList[] = $aggExprSql . ' AS `' . $aggAlias . '`';
                 $outputKeys[] = $aggAlias;
                 $outputMeta[] = ['key' => $aggAlias, 'label' => self::aggregateLabel($fnKey, $aggColKeyRaw), 'type' => $aggType];
+            }
+            if ($currencyExprForAggs !== null && $groupColKey !== self::CURRENCY_KEY) {
+                // Placed straight after the group column, and grouped by below.
+                array_splice($selectList, 1, 0, [$currencyExprForAggs . ' AS `' . self::CURRENCY_KEY . '`']);
+                array_splice($outputKeys, 1, 0, [self::CURRENCY_KEY]);
+                array_splice($outputMeta, 1, 0, [['key' => self::CURRENCY_KEY, 'label' => 'Currency', 'type' => 'string']]);
             }
         } else {
             // ── 3/4. Plain SELECT mode ──────────────────────────────────
@@ -231,6 +248,17 @@ final class ReportBuilder
                 $selectList[] = $col['expr'] . ' AS `' . $colKey . '`';
                 $outputKeys[] = $colKey;
                 $outputMeta[] = ['key' => $colKey, 'label' => (string) $col['label'], 'type' => (string) $col['type']];
+                if (is_string($col['currencyExpr'] ?? null) === true) {
+                    $plainCurrencyExpr = (string) $col['currencyExpr'];
+                }
+            }
+            // 💷 An amount is never shown without the currency it is in
+            //    (#966, D-139): the currency column is added when the report
+            //    did not choose it itself.
+            if (isset($plainCurrencyExpr) === true && in_array(self::CURRENCY_KEY, $outputKeys, true) === false) {
+                $selectList[] = $plainCurrencyExpr . ' AS `' . self::CURRENCY_KEY . '`';
+                $outputKeys[] = self::CURRENCY_KEY;
+                $outputMeta[] = ['key' => self::CURRENCY_KEY, 'label' => 'Currency', 'type' => 'string'];
             }
         }
 
@@ -339,6 +367,9 @@ final class ReportBuilder
         $groupBySql = '';
         if ($isGrouped === true) {
             $groupBySql = ' GROUP BY `' . $outputKeys[0] . '`';
+            if (($outputKeys[1] ?? null) === self::CURRENCY_KEY && $outputKeys[0] !== self::CURRENCY_KEY) {
+                $groupBySql .= ', `' . self::CURRENCY_KEY . '`';
+            }
         }
 
         // ── 8. ORDER BY (V) ──────────────────────────────────────────────

@@ -24,10 +24,15 @@ $db     = App::db();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 // 💳 "Pay now" entry point (#268) — only offered when Payments has a
-// provider enabled AND the pledge's own project currency matches the
-// configured checkout currency (gap-item Q5: `/payments/checkout` always
-// charges the organisation's currency, Currency::ofSite() since #966, so a mismatched project would otherwise be
-// silently charged in the wrong currency at face value).
+// provider enabled AND the pledge's own currency is the organisation's.
+// `/payments/checkout` charges a pledge in the PLEDGE's own currency (the
+// one recorded on it, else its project's — #966, D-139), never the
+// organisation's, and refuses a currency no provider takes. The button is
+// still held to the organisation's currency because that is the one the
+// payment provider was set up to take; a pledge in another currency is
+// paid by arrangement, as before. (This comment used to say checkout
+// always charges the organisation's currency, which was untrue for a
+// pledge.)
 $paymentsSettings = App::settings()['payments'] ?? [];
 $paymentsEnabled  = (string) ($paymentsSettings['enabled'] ?? '0') === '1';
 $paymentsCurrency = \Portal\Core\Currency::ofSite();
@@ -36,7 +41,7 @@ $csrf = Auth::csrfToken();
 $rows = [];
 $stmt = $db->prepare(
     'SELECT p.pledgeID, p.amountPence, p.pledgedAt, p.fulfilledAt, p.message, '
-    . '       pr.title, pr.slug, pr.currency '
+    . '       pr.title, pr.slug, COALESCE(NULLIF(p.`currency`, \'\'), pr.`currency`) AS `currency` '
     . 'FROM tblProjectPledge p INNER JOIN tblProject pr ON pr.projectID = p.projectID '
     . 'WHERE p.donorID = ? ORDER BY p.pledgedAt DESC LIMIT 200'
 );

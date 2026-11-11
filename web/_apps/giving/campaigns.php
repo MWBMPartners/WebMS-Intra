@@ -64,15 +64,19 @@ if ($stmt !== false) {
 // spec) rather than one query per card.
 $raisedByCampaign = [];
 $stmt = $db->prepare(
-    'SELECT campaignID, COALESCE(SUM(amountPence), 0) AS raised '
-    . 'FROM tblGivingEntry WHERE siteID = ? AND campaignID IS NOT NULL GROUP BY campaignID'
+    // 💷 Per campaign AND currency (D-139): a goal is in the campaign's own
+    //    currency, so only gifts in that currency count towards it; others
+    //    are shown beside it and never added in.
+    'SELECT campaignID, `currency`, COALESCE(SUM(amountPence), 0) AS raised '
+    . 'FROM tblGivingEntry WHERE siteID = ? AND campaignID IS NOT NULL GROUP BY campaignID, `currency`'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
-        $raisedByCampaign[(int) $r['campaignID']] = (int) $r['raised'];
+        $raisedByCampaign[(int) $r['campaignID']] ??= [];
+        \Portal\Core\Currency::addTo($raisedByCampaign[(int) $r['campaignID']], (string) $r['currency'], (int) $r['raised']);
     }
     $stmt->close();
 }
@@ -173,11 +177,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php foreach ($campaigns as $c):
             $campaignId = (int) $c['campaignID'];
             $goal       = (int) $c['goalAmountPence'];
-            $raised     = $raisedByCampaign[$campaignId] ?? 0;
+            $cur         = (string) ($c['currency'] ?? $currency);
+            $raisedAll   = $raisedByCampaign[$campaignId] ?? [];
+            $raised      = (int) ($raisedAll[$cur] ?? 0);
+            $raisedOther = array_diff_key($raisedAll, [$cur => true]);
             $pct        = $goal > 0 ? intdiv($raised * 100, $goal) : 0;
             $barWidth   = min(100, $pct);
             $barClass   = $pct >= 100 ? 'bg-primary' : 'bg-success';
-            $cur        = (string) ($c['currency'] ?? $currency);
             $mine       = $myPledges[$campaignId] ?? null;
         ?>
             <div class="col-md-6">
@@ -207,6 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <p class="small text-muted mb-3">
                             <strong><?php echo htmlspecialchars(Giving::formatAmount($raised, $cur), ENT_QUOTES, 'UTF-8'); ?></strong>
                             of <?php echo htmlspecialchars(Giving::formatAmount($goal, $cur), ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ($raisedOther !== []): ?><br><span class="text-muted" data-raised-other>plus <?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($raisedOther), ENT_QUOTES, 'UTF-8'); ?> given in another currency, not counted towards the goal</span><?php endif; ?>
                         </p>
 
                         <?php if ($mine !== null): ?>

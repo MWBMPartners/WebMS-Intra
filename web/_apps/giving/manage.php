@@ -108,7 +108,12 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-$total = array_sum(array_map(static fn (array $e): int => (int) $e['amountPence'], $entries));
+// 💷 The listed gifts' total PER CURRENCY (D-139): each gift keeps the currency
+//    it was given in, and two currencies are never added together.
+$totals = [];
+foreach ($entries as $e) {
+    \Portal\Core\Currency::addTo($totals, (string) ($e['currency'] ?? ''), (int) $e['amountPence']);
+}
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
@@ -249,7 +254,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <div class="alert alert-light border d-flex justify-content-between align-items-center">
     <strong><?php echo count($entries); ?></strong> entries
-    <strong>Total: <?php echo htmlspecialchars(Giving::formatAmount($total, $currency), ENT_QUOTES, 'UTF-8'); ?></strong>
+    <strong>Total: <?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($totals, $currency), ENT_QUOTES, 'UTF-8'); ?></strong>
 </div>
 
 <?php if (count($entries) === 0): ?>

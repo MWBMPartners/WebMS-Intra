@@ -106,7 +106,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-card portal-card-branded h-100 p-4">
                 <div class="d-flex align-items-center gap-3 mb-3">
                     <span class="d-inline-flex align-items-center justify-content-center rounded-3 bg-info bg-opacity-10 text-info" style="width:48px;height:48px;">
-                        <i class="fa-solid fa-sterling-sign fa-lg"></i>
+                        <i class="fa-solid fa-money-bill-wave fa-lg"></i>
                     </span>
                     <h5 class="mb-0">Treasury</h5>
                 </div>

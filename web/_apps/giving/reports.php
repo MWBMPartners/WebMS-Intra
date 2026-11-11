@@ -48,12 +48,38 @@ if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false) {
     return;
 }
 
+/**
+ * 💷 Fold rows that come back per group AND per currency (D-139) into one
+ * row per group, carrying 'n' summed and 'totals' per currency. Two
+ * currencies are never added together; the first-seen order is kept.
+ *
+ * @param list<array<string,mixed>> $rows
+ * @return list<array<string,mixed>>
+ */
+$foldByCurrency = static function (array $rows, string $keyField): array {
+    $out = [];
+    foreach ($rows as $r) {
+        $key = (string) $r[$keyField];
+        if (isset($out[$key]) === false) {
+            $out[$key] = $r;
+            $out[$key]['n'] = 0;
+            $out[$key]['totals'] = [];
+        }
+        $out[$key]['n'] += (int) $r['n'];
+        if ($r['currency'] !== null) {
+            \Portal\Core\Currency::addTo($out[$key]['totals'], (string) $r['currency'], (int) $r['total']);
+        }
+    }
+
+    return array_values($out);
+};
+
 $byCategory = [];
 $stmt = $db->prepare(
-    'SELECT c.name, COUNT(e.entryID) AS n, COALESCE(SUM(e.amountPence), 0) AS total '
+    'SELECT c.categoryID, c.name, COUNT(e.entryID) AS n, COALESCE(SUM(e.amountPence), 0) AS total, e.`currency` AS `currency` '
     . 'FROM tblGivingCategory c LEFT JOIN tblGivingEntry e '
     . '    ON e.categoryID = c.categoryID AND e.donatedAt BETWEEN ? AND ? '
-    . 'WHERE c.siteID = ? GROUP BY c.categoryID ORDER BY total DESC'
+    . 'WHERE c.siteID = ? GROUP BY c.categoryID, e.`currency` ORDER BY total DESC'
 );
 if ($stmt !== false) {
     $stmt->bind_param('ssi', $from, $to, $siteId);
@@ -64,12 +90,13 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+$byCategory = $foldByCurrency($byCategory, 'categoryID');
 
 $byMonth = [];
 $stmt = $db->prepare(
-    'SELECT DATE_FORMAT(donatedAt, "%Y-%m") AS ym, COUNT(*) AS n, SUM(amountPence) AS total '
+    'SELECT DATE_FORMAT(donatedAt, "%Y-%m") AS ym, COUNT(*) AS n, SUM(amountPence) AS total, `currency` '
     . 'FROM tblGivingEntry WHERE siteID = ? AND donatedAt BETWEEN ? AND ? '
-    . 'GROUP BY ym ORDER BY ym DESC'
+    . 'GROUP BY ym, `currency` ORDER BY ym DESC'
 );
 if ($stmt !== false) {
     $stmt->bind_param('iss', $siteId, $from, $to);
@@ -80,14 +107,15 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+$byMonth = $foldByCurrency($byMonth, 'ym');
 
 $byDonor = [];
 $stmt = $db->prepare(
     'SELECT COALESCE(u.fullName, e.donorName, "Anonymous") AS donor, '
-    . '       COUNT(e.entryID) AS n, SUM(e.amountPence) AS total '
+    . '       COUNT(e.entryID) AS n, SUM(e.amountPence) AS total, e.`currency` AS `currency` '
     . 'FROM tblGivingEntry e LEFT JOIN tblUsers u ON u.userID = e.donorID '
     . 'WHERE e.siteID = ? AND e.donatedAt BETWEEN ? AND ? '
-    . 'GROUP BY donor ORDER BY total DESC LIMIT 50'
+    . 'GROUP BY donor, e.`currency` ORDER BY total DESC LIMIT 50'
 );
 if ($stmt !== false) {
     $stmt->bind_param('iss', $siteId, $from, $to);
@@ -98,6 +126,7 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+$byDonor = $foldByCurrency($byDonor, 'donor');
 
 $pageTitle   = 'Giving Reports';
 $pageSection = 'giving';
@@ -122,7 +151,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="row py-1 border-bottom small">
                         <div class="col-7"><?php echo htmlspecialchars((string) $c['name'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-2 text-muted text-end"><?php echo (int) $c['n']; ?></div>
-                        <div class="col-3 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $c['total'], $currency), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="col-3 text-end"><strong><?php echo \Portal\Core\Currency::totalsHtml($c['totals'], $currency); ?></strong></div>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -136,7 +165,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="row py-1 border-bottom small">
                         <div class="col-7"><?php echo htmlspecialchars((string) $m['ym'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-2 text-muted text-end"><?php echo (int) $m['n']; ?></div>
-                        <div class="col-3 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $m['total'], $currency), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="col-3 text-end"><strong><?php echo \Portal\Core\Currency::totalsHtml($m['totals'], $currency); ?></strong></div>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -150,7 +179,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="row py-1 border-bottom small">
                         <div class="col-md-7"><?php echo htmlspecialchars((string) $d['donor'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted text-end"><?php echo (int) $d['n']; ?> gifts</div>
-                        <div class="col-md-3 text-end"><strong><?php echo htmlspecialchars(Giving::formatAmount((int) $d['total'], $currency), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="col-md-3 text-end"><strong><?php echo \Portal\Core\Currency::totalsHtml($d['totals'], $currency); ?></strong></div>
                     </div>
                 <?php endforeach; ?>
             </div>

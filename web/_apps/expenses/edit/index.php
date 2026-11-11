@@ -73,7 +73,7 @@ if ($claimID <= 0) {
 // -----------------------------------------------------------------------------
 $claim = null;
 $stmt  = $mysqli->prepare(
-    'SELECT claimID, userID, deptID, claimTitle, totalAmount, status '
+    'SELECT claimID, userID, deptID, claimTitle, totalAmount, status, `currency` '
     . 'FROM tblExpenseClaims WHERE claimID = ? AND siteID = ? LIMIT 1'
 );
 if ($stmt !== false) {
@@ -142,7 +142,7 @@ Logger::activity('ExpenseClaimEditView', 'Opened the change form of expense clai
 // -----------------------------------------------------------------------------
 $items = [];
 $stmt  = $mysqli->prepare(
-    'SELECT itemName, quantity, unitCost FROM tblExpenseClaimItems WHERE claimID = ? ORDER BY itemID'
+    'SELECT itemName, quantity, unitCost, lineTotal, `quotedCurrency`, `quotedLineTotal` FROM tblExpenseClaimItems WHERE claimID = ? ORDER BY itemID'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $claimID);
@@ -158,6 +158,13 @@ if ($stmt !== false) {
 //    guess at "enough for a correction"; the person can save and come back
 //    for more, which is why this is not a number worth agonising over.
 const BLANK_LINES = 5;
+
+// 💷 The claim's currency, and the currencies a line may be quoted in
+//    (#966, D-139). A line quoted in another currency also keeps the cost in
+//    the claim's currency from the claimant's statement: that is what is
+//    approved and paid. ExpenseRules::expenseLine() is the rule.
+$claimCurrency = (string) ($claim['currency'] ?? '') !== '' ? (string) $claim['currency'] : \Portal\Core\Currency::ofSite();
+$quotedChoices = $claimCurrency !== '' ? array_values(array_unique(array_merge([$claimCurrency], array_keys(\Portal\Core\Currency::choices())))) : [];
 
 // 🏢 The live departments of this organisation, for the picker.
 $depts = [];
@@ -261,33 +268,52 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         $rowIdx = 0;
         $rows   = $items;
         for ($b = 0; $b < BLANK_LINES; $b++) {
-            $rows[] = ['itemName' => '', 'quantity' => 1, 'unitCost' => '0.00'];
+            $rows[] = ['itemName' => '', 'quantity' => 1, 'unitCost' => '0.00', 'lineTotal' => null, 'quotedCurrency' => '', 'quotedLineTotal' => null];
         }
         foreach ($rows as $row):
             $rowIdx++;
         ?>
             <div class="row g-2 align-items-end mb-2">
-                <div class="col-12 col-md-6">
+                <?php
+                $rowQuoted   = (string) ($row['quotedCurrency'] ?? '') !== '' ? (string) $row['quotedCurrency'] : $claimCurrency;
+                $rowForeign  = $rowQuoted !== $claimCurrency;
+                ?>
+                <div class="col-12 col-md-4">
                     <label class="form-label small d-md-none" for="itemDesc<?php echo $rowIdx; ?>">Description</label>
                     <input type="text" id="itemDesc<?php echo $rowIdx; ?>" name="itemDesc[]" class="form-control"
                            aria-label="Description for line <?php echo $rowIdx; ?>"
                            placeholder="Line <?php echo $rowIdx; ?>"
                            value="<?php echo htmlspecialchars((string) $row['itemName'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
-                <div class="col-6 col-md-2">
+                <div class="col-6 col-md-1">
                     <label class="form-label small d-md-none" for="itemQty<?php echo $rowIdx; ?>">Quantity</label>
                     <input type="number" id="itemQty<?php echo $rowIdx; ?>" name="itemQty[]" min="1" step="1"
                            class="form-control text-end"
                            aria-label="Quantity for line <?php echo $rowIdx; ?>"
                            value="<?php echo (int) ($row['quantity'] ?? 1); ?>">
                 </div>
-                <div class="col-6 col-md-4">
-                    <label class="form-label small d-md-none" for="itemUnit<?php echo $rowIdx; ?>">Unit price</label>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small d-md-none" for="itemUnit<?php echo $rowIdx; ?>">Unit cost, as quoted</label>
                     <input type="number" id="itemUnit<?php echo $rowIdx; ?>" name="itemUnit[]" min="0" step="0.01"
                            class="form-control text-end"
-                           aria-label="Unit price for line <?php echo $rowIdx; ?>"
+                           aria-label="Unit cost, as quoted, for line <?php echo $rowIdx; ?>"
                            value="<?php echo htmlspecialchars(number_format((float) ($row['unitCost'] ?? 0), 2, '.', ''), ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
+                <?php if ($quotedChoices !== []): ?>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small" for="itemCurrency<?php echo $rowIdx; ?>">Quoted in</label>
+                    <select id="itemCurrency<?php echo $rowIdx; ?>" name="itemCurrency[]" class="form-select">
+                        <?php foreach ($quotedChoices as $qc): ?>
+                            <option value="<?php echo htmlspecialchars($qc, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $qc === $rowQuoted ? ' selected' : ''; ?>><?php echo htmlspecialchars($qc, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small" for="itemConverted<?php echo $rowIdx; ?>">If quoted in another currency: cost in <?php echo htmlspecialchars($claimCurrency, ENT_QUOTES, 'UTF-8'); ?>, from your statement</label>
+                    <input type="number" id="itemConverted<?php echo $rowIdx; ?>" name="itemConverted[]" min="0" step="0.01" class="form-control text-end"
+                           value="<?php echo $rowForeign === true && $row['lineTotal'] !== null ? htmlspecialchars(number_format((float) $row['lineTotal'], 2, '.', ''), ENT_QUOTES, 'UTF-8') : ''; ?>">
+                </div>
+                <?php endif; ?>
             </div>
         <?php endforeach; ?>
 
@@ -295,7 +321,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
              handler from the lines above, and a posted total is never read. -->
         <p class="mt-3">
             <strong>Total now:</strong>
-            <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?>
+            <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), $claimCurrency), ENT_QUOTES, 'UTF-8'); ?>
             <span class="text-body-secondary small">
                 &mdash; this is worked out again from the lines when you save.
             </span>

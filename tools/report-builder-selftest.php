@@ -329,5 +329,71 @@ foreach ([
 }
 date_default_timezone_set($zoneWas);
 
+// =============================================================================
+// PART M — money is never added across currencies (#966, D-139)
+// =============================================================================
+// A claim and a gift each keep their own currency. A report that adds amounts up
+// must group by that currency as well, and a report that shows an amount must
+// show its currency beside it. The money columns are gated (treasurer, or an
+// administrator of the organisation), so this part stands in a global
+// administrator by setting App's cached user — there is no database here — and
+// puts the cache back afterwards.
+echo "\n=== PART M — money is never added across currencies (#966, D-139) ===\n";
+$appClass  = new \ReflectionClass(\Portal\Core\App::class);
+$loadedWas = $appClass->getStaticPropertyValue('userLoaded');
+$userWas   = $appClass->getStaticPropertyValue('currentUser');
+$appClass->setStaticPropertyValue('userLoaded', true);
+$appClass->setStaticPropertyValue('currentUser', ['userID' => 1, 'isActive' => 1, 'isAdmin' => 1, 'isRootAdmin' => 1, 'isSiteAdmin' => 1, 'isSiteRootAdmin' => 1]);
+try {
+    $sumByStatus = ReportBuilder::compile([
+        'v' => 1, 'source' => 'expenses',
+        'group' => ['col' => 'status', 'transform' => null],
+        'aggregates' => [['col' => 'totalAmount', 'fn' => 'sum']],
+    ], 1);
+    assertTrue('M1 a sum of claim totals grouped by status is ALSO grouped by currency, and shows it straight after the group column',
+        str_contains($sumByStatus['sql'], 'ec.currency AS `currency`') === true
+        && str_contains($sumByStatus['sql'], ' GROUP BY `status`, `currency`') === true
+        && array_column($sumByStatus['columns'], 'key') === ['status', 'currency', 'sum_totalAmount']);
+    $avgGift = ReportBuilder::compile([
+        'v' => 1, 'source' => 'giving',
+        'group' => ['col' => 'method', 'transform' => null],
+        'aggregates' => [['col' => 'amountPence', 'fn' => 'avg']],
+    ], 1);
+    assertTrue('M2 so is an AVERAGE of gifts (an average across two currencies is as meaningless as a sum)',
+        str_contains($avgGift['sql'], ' GROUP BY `method`, `currency`') === true);
+    $countOnly = ReportBuilder::compile([
+        'v' => 1, 'source' => 'expenses',
+        'group' => ['col' => 'status', 'transform' => null],
+        'aggregates' => [['col' => 'totalAmount', 'fn' => 'count'], ['col' => null, 'fn' => 'count']],
+    ], 1);
+    assertTrue('M3 a COUNT of claims adds no currency: counting claims in two currencies is still one count',
+        str_contains($countOnly['sql'], '`currency`') === false && str_contains($countOnly['sql'], ' GROUP BY `status` ') === true);
+    $byCurrency = ReportBuilder::compile([
+        'v' => 1, 'source' => 'expenses',
+        'group' => ['col' => 'currency', 'transform' => null],
+        'aggregates' => [['col' => 'totalAmount', 'fn' => 'sum']],
+    ], 1);
+    assertTrue('M4 grouping BY the currency is allowed and does not add it twice',
+        array_column($byCurrency['columns'], 'key') === ['currency', 'sum_totalAmount'] && substr_count($byCurrency['sql'], ' AS `currency`') === 1
+        && str_contains($byCurrency['sql'], ' GROUP BY `currency` ') === true);
+    $plain = ReportBuilder::compile(['v' => 1, 'source' => 'expenses', 'columns' => ['claimTitle', 'totalAmount']], 1);
+    assertTrue('M5 a plain list showing claim totals also shows each claim\'s currency, added at the end',
+        array_column($plain['columns'], 'key') === ['claimTitle', 'totalAmount', 'currency'] && str_contains($plain['sql'], 'ec.currency AS `currency`') === true);
+    $plainChosen = ReportBuilder::compile(['v' => 1, 'source' => 'expenses', 'columns' => ['currency', 'totalAmount']], 1);
+    assertTrue('M6 ...and not twice when the report chose the currency itself',
+        array_column($plainChosen['columns'], 'key') === ['currency', 'totalAmount']);
+    $noMoney = ReportBuilder::compile(['v' => 1, 'source' => 'expenses', 'columns' => ['claimTitle']], 1);
+    assertTrue('M7 a list with no amount in it gains no currency column',
+        array_column($noMoney['columns'], 'key') === ['claimTitle']);
+    $reCheck('grouped sum of claim totals (currency added)', [
+        'v' => 1, 'source' => 'expenses',
+        'group' => ['col' => 'status', 'transform' => null],
+        'aggregates' => [['col' => 'totalAmount', 'fn' => 'sum']],
+    ], 1);
+} finally {
+    $appClass->setStaticPropertyValue('userLoaded', $loadedWas);
+    $appClass->setStaticPropertyValue('currentUser', $userWas);
+}
+
 echo "\n" . ($failures === 0 ? "ALL PASS ({$failures} failures)\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

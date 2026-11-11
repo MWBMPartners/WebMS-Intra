@@ -213,7 +213,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span>Declined by the approver. Check comments for the reason.</span>
                     </div>
                     <div class="list-group-item d-flex align-items-center gap-3 px-0">
-                        <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-sterling-sign"></i> Reimbursed</span>
+                        <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-money-bill-wave"></i> Reimbursed</span>
                         <span>Payment has been processed by treasury.</span>
                     </div>
                     <?php
@@ -432,7 +432,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/getting-started'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-rocket me-1"></i>Getting Started</a>
             <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-receipt me-1"></i>Expenses</a>
             <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/approvals'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-check-double me-1"></i>Approvals</a>
-            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-sterling-sign me-1"></i>Treasury</a>
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/treasury'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-money-bill-wave me-1"></i>Treasury</a>
             <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-gear me-1"></i>Admin</a>
         </div>
     </div>

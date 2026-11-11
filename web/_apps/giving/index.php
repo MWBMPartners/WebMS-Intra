@@ -44,11 +44,13 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-$ytdTotal = 0;
+// 💷 This year's total PER CURRENCY (D-139): a gift keeps the currency it was
+//    given in, so a year spanning a currency change shows two totals.
+$ytdTotals = [];
 $year = (int) date('Y');
 foreach ($entries as $e) {
     if ((int) date('Y', (int) strtotime((string) $e['donatedAt'])) === $year) {
-        $ytdTotal += (int) $e['amountPence'];
+        \Portal\Core\Currency::addTo($ytdTotals, (string) ($e['currency'] ?? ''), (int) $e['amountPence']);
     }
 }
 
@@ -67,7 +69,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-hand-holding-dollar me-2"></i>My Giving</h1>
-        <p class="text-secondary mb-0">Your contribution history. <?php echo (int) $year; ?> total: <strong><?php echo htmlspecialchars(Giving::formatAmount($ytdTotal, $currency), ENT_QUOTES, 'UTF-8'); ?></strong></p>
+        <p class="text-secondary mb-0">Your contribution history. <?php echo (int) $year; ?> total: <strong><?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($ytdTotals, $currency), ENT_QUOTES, 'UTF-8'); ?></strong></p>
     </div>
     <div class="d-flex gap-2 flex-wrap">
         <?php if ($paymentsEnabled === true): ?>

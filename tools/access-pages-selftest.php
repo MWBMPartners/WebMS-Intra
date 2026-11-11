@@ -614,7 +614,7 @@ function siteSetting(int $site, string $key, string $value): void
 function claim(int $id, int $by, string $title): void
 {
     q(
-        "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, ?, CURDATE(), 12.50, 'Pending')",
+        "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, `currency`) VALUES (?, ?, ?, ?, ?, CURDATE(), 12.50, 'Pending', 'EUR')",
         'iiiis', [$id, ORG_A, $by, DEPT, $title]
     );
 }
@@ -2263,7 +2263,7 @@ ok('…sent as a download, with a dated file name', ap_find('/^Content-Dispositi
 // The heading row is checked by name and in order. A reordering is a silent
 // break for anybody whose spreadsheet or script reads it by position.
 $firstLine = trim((string) strtok($csv['body'], "\n"));
-ok('…the heading row names its columns, in order', str_ends_with($firstLine, 'claimID,Claimant,Department,Title,Date,Amount,Status') === true, 'first line: ' . $firstLine);
+ok('…the heading row names its columns, in order', str_ends_with($firstLine, 'claimID,Claimant,Department,Title,Date,Amount,Currency,Status') === true, 'first line: ' . $firstLine);
 ok('…and the organisation\'s own claims are in it', str_contains($csv['body'], 'ACCESS member approved claim') === true);
 
 // --- it is one organisation's claims, not the installation's -----------------
@@ -2273,7 +2273,7 @@ ok('…and the organisation\'s own claims are in it', str_contains($csv['body'],
 // tblDepts, which is how that was found rather than guessed.
 q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'ACCESS L2 B dept', 'L2B', 1)", 'ii', [916392, ORG_B]);
 q(
-    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, 'ACCESS L2 B-ONLY CLAIM', CURDATE(), 99.99, 'Pending')",
+    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, `currency`) VALUES (?, ?, ?, ?, 'ACCESS L2 B-ONLY CLAIM', CURDATE(), 99.99, 'Pending', 'EUR')",
     'iiii', [916391, ORG_B, BMEM, 916392]
 );
 $page = $approvalsNow('adm');
@@ -2294,7 +2294,7 @@ $bExport = req($jar['badm'], 'GET', ADDR_B . '/expenses/api/export?csrf_token=' 
 $bFirst  = trim((string) strtok($bExport['body'], "\n"));
 ok(
     'an organisation with no claims gets the heading row, not an empty file',
-    $bExport['status'] === 200 && str_ends_with($bFirst, 'claimID,Claimant,Department,Title,Date,Amount,Status') === true && strlen($bExport['body']) > 10,
+    $bExport['status'] === 200 && str_ends_with($bFirst, 'claimID,Claimant,Department,Title,Date,Amount,Currency,Status') === true && strlen($bExport['body']) > 10,
     'HTTP ' . $bExport['status'] . ', ' . strlen($bExport['body']) . ' bytes, first line: ' . $bFirst
 );
 
@@ -2382,10 +2382,10 @@ const L3_MEM_CLAIM  = 916394; // MEM's OWN claim, in L3_DEPT, where MEM has no r
 const L3_ROLE       = 916297;
 q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'ACCESS L3 second dept', 'L3D', 1)", 'ii', [L3_DEPT, ORG_A]);
 q(
-    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES "
-    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN THE APPROVERS DEPT', CURDATE(), 31.00, 'Pending'), "
-    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN ANOTHER DEPT', CURDATE(), 32.00, 'Pending'), "
-    . "(?, ?, ?, ?, 'ACCESS L3 MEMBERS OWN CLAIM', CURDATE(), 33.00, 'Pending')",
+    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, `currency`) VALUES "
+    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN THE APPROVERS DEPT', CURDATE(), 31.00, 'Pending', 'EUR'), "
+    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN ANOTHER DEPT', CURDATE(), 32.00, 'Pending', 'EUR'), "
+    . "(?, ?, ?, ?, 'ACCESS L3 MEMBERS OWN CLAIM', CURDATE(), 33.00, 'Pending', 'EUR')",
     'iiiiiiiiiiii', [L3_OWN_DEPT, ORG_A, LEAD, DEPT, L3_OTHER_DEPT, ORG_A, LEAD, L3_DEPT, L3_MEM_CLAIM, ORG_A, MEM, L3_DEPT]
 );
 // Every claim needs a line to be a claim anybody could edit; the edit checks
@@ -2535,7 +2535,7 @@ ok(
 ok(
     'L3-8. …is still offered the Export button (who may download is unchanged), and the file is the heading row and nothing else',
     $buttonDrawn($memPage) === true && $memCsv['status'] === 200
-        && trim(ap_replace('/^\xEF\xBB\xBF/', '', $memCsv['body'])) === 'claimID,Claimant,Department,Title,Date,Amount,Status',
+        && trim(ap_replace('/^\xEF\xBB\xBF/', '', $memCsv['body'])) === 'claimID,Claimant,Department,Title,Date,Amount,Currency,Status',
     'HTTP ' . $memCsv['status'] . ', body: ' . mb_substr(trim($memCsv['body']), 0, 160)
 );
 $l3Role(MEM, false);
@@ -3069,7 +3069,7 @@ foreach (array_values($l4Statuses) as $i => $status) {
     $fileId  = 916851 + $i;
     $bytes   = '%PDF-1.4 a receipt of a ' . $status . ' claim ' . bin2hex(random_bytes(8)) . "\n";
     q(
-        'INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES (?, ?, ?, ?, ?, CURDATE(), 7.00, ?)',
+        'INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, ?, ?, CURDATE(), 7.00, ?, \'EUR\')',
         'iiiiss', [$claimId, ORG_A, LEAD, DEPT, 'ACCESS L4 ' . strtoupper($status) . ' CLAIM', $status]
     );
     $l4Add($fileId, $claimId, 'Claim_' . $claimId . '_Receipt_1_2026-11-11.pdf', $claimId . '_1700000000_receipt1.pdf', 'application/pdf', null, $bytes);
@@ -3109,7 +3109,7 @@ const L4_B_CLAIM   = 916393;
 const L4_B_RECEIPT = 916873;
 q("INSERT INTO `tblDepts` (`deptID`, `siteID`, `deptName`, `deptCode`, `isActive`) VALUES (?, ?, 'ACCESS L4 B dept', 'L4B', 1)", 'ii', [L4_B_DEPT, ORG_B]);
 q(
-    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES (?, ?, ?, ?, 'ACCESS L4 CLAIM OF B', CURDATE(), 9.00, 'Pending')",
+    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, ?, 'ACCESS L4 CLAIM OF B', CURDATE(), 9.00, 'Pending', 'EUR')",
     'iiii', [L4_B_CLAIM, ORG_B, BMEM, L4_B_DEPT]
 );
 $l4Add(L4_B_RECEIPT, L4_B_CLAIM, 'Claim_' . L4_B_CLAIM . '_Receipt_1_2026-11-11.pdf', L4_B_CLAIM . '_1700000000_receipt1.pdf', 'application/pdf', null, $l4Bytes[L4_B_RECEIPT]);
@@ -3416,8 +3416,8 @@ foreach ([L4_ONE1 => ['one1', 'One claim'], L4_ONE2 => ['one2', 'No claims']] as
 q("INSERT INTO `tblDepts` (`deptID`, `siteID`, `deptName`, `deptCode`, `isActive`) VALUES (?, ?, 'ACCESS L4 one-claim dept', 'L41', 1)", 'ii', [L4_ONE_DEPT, ORG_A]);
 q('INSERT INTO `tblUserDepts` (`userID`, `deptID`, `siteID`, `isDeptLead`, `isApprover`, `isMandatoryApprover`) VALUES (?, ?, ?, 0, 1, 0)', 'iii', [L4_ONE1, L4_ONE_DEPT, ORG_A]);
 q(
-    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES "
-    . "(?, ?, ?, ?, ?, CURDATE(), 3.00, 'Pending'), (?, ?, ?, ?, 'ACCESS L4 ONE1 OWN CLAIM', CURDATE(), 4.00, 'Pending')",
+    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES "
+    . "(?, ?, ?, ?, ?, CURDATE(), 3.00, 'Pending', 'EUR'), (?, ?, ?, ?, 'ACCESS L4 ONE1 OWN CLAIM', CURDATE(), 4.00, 'Pending', 'EUR')",
     'iiiisiiii', [L4_ONE_CLAIM, ORG_A, LEAD, L4_ONE_DEPT, $l4OneTitle, L4_ONE_OWN, ORG_A, L4_ONE1, DEPT]
 );
 $jar['one1'] = signIn('one1', ADDR_A);
@@ -3573,7 +3573,7 @@ head('M. #587 — withdrawing a claim through the real page, reading back what i
 /** One claim for this part, in any state and either organisation. */
 $mClaim = static function (int $id, int $by, string $title, string $status = 'Pending', int $site = ORG_A, int $dept = DEPT): void {
     q(
-        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, ?, CURDATE(), 12.50, ?)',
+        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, `currency`) VALUES (?, ?, ?, ?, ?, CURDATE(), 12.50, ?, \'EUR\')',
         'iiiiss', [$id, $site, $by, $dept, $title, $status]
     );
 };
@@ -4405,8 +4405,8 @@ foreach (['pc1' => PC1, 'pc2' => PC2, 'pc0' => PC0] as $who => $id) {
 /** One claim for this part, submitted `$daysAgo` days ago. */
 $pClaim = static function (int $id, int $by, string $title, string $status, int $daysAgo, string $total, int $site = ORG_A, int $dept = DEPT): void {
     q(
-        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, createdAt) '
-        . 'VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?, DATE_SUB(NOW(), INTERVAL ? DAY))',
+        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, createdAt, `currency`) '
+        . 'VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?, DATE_SUB(NOW(), INTERVAL ? DAY), \'EUR\')',
         'iiiisssi', [$id, $site, $by, $dept, $title, $total, $status, $daysAgo]
     );
 };

@@ -14,18 +14,26 @@
  *   A  the rules in Portal\Core\Currency (no database): which currency a
  *      country suggests, which can be chosen (only those counted in
  *      hundredths), how an amount is written (never "£" by default);
- *   B  the schema: no GBP default, the four old settings gone, org.currency
- *      seeded empty, and Currency::MONEY_TABLES matching every table that
- *      holds an organisation's money — FAILING BOTH WAYS, because a table
- *      missing from that list would let the currency change under money it
- *      holds;
+ *   B  the schema: no currency column defaults to a real code, the four old
+ *      settings gone, org.currency seeded empty, and EVERY table holding
+ *      money keeps its own currency beside the amount (D-139): the tables
+ *      with a `currency` column are exactly Currency::OWN_TABLES and
+ *      Currency::CHILD_TABLES — FAILING BOTH WAYS, because a money table
+ *      with no currency of its own would be read in today's currency, which
+ *      may not be the one it was recorded in;
  *   C  an organisation in EUROS: the organisation page pre-selects the
  *      currency from the country and saves it; a project made over HTTP is
- *      stored in EUR (it used to be stored as GBP whatever the setting said);
- *      and every money page answers in full with no pound sign, showing "€"
- *      where it shows an amount;
- *   D  the lock: once money is recorded the page shows the currency disabled
- *      with the reason, and a posted change is refused with nothing written;
+ *      stored in EUR; every money page answers in full with no pound sign —
+ *      looked for in its escape forms too (\u00a3, &#163;, &#xa3;), since
+ *      a script writes it that way — with a gift, a claim, a venue invoice
+ *      and an asset in the world so that those money blocks really draw;
+ *   D  the currency CAN change (D-139 removed the lock): what is recorded
+ *      keeps its own currency, a total over two currencies is two lines, and
+ *      rows recorded with no currency can be labelled by an administrator;
+ *   G  an expense line quoted in another currency: the claimant types what
+ *      it cost in the claim's currency, both figures are kept, the claim
+ *      page shows the rate worked out from them, and a line with no
+ *      converted figure is refused with nothing written;
  *   E  a payment request: checkout hands the organisation's currency to the
  *      provider step, recorded on the pending payment row; a currency no
  *      provider is sent, and no currency at all, are refused before any row;
@@ -37,10 +45,11 @@
  *     the provider is set to "gocardless", which this release refuses after
  *     the pending row is written, so the row records exactly the currency the
  *     Stripe and PayPal builders would have been handed;
- *   - two administrators racing (one recording money while another changes
- *     the currency): PHP's built-in server runs one request at a time here.
- *     The lock is a locking read inside the save's transaction; that is read,
- *     not driven;
+ *   - the approval and treasury lists' "quoted" note over HTTP: nobody
+ *     decides their own claim, so the one administrator here never sees its
+ *     own claim on those lists. The claim page and the database are checked
+ *     instead, and the lists' words come from one method
+ *     (ExpenseRules::quotedElsewhere()), checked directly in G;
  *   - every page: it loads the main money pages, not every one of the 48.
  *
  * Run it on a THROWAWAY database built from web/_sql/full_schema.sql:
@@ -201,65 +210,78 @@ if ($tables < 100) {
 // B. The schema
 // =============================================================================
 head('Section B — the database, as the install script built it');
-$gbpDefaults = rows($db, "SELECT `TABLE_NAME` AS `t` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
-    . "AND `COLUMN_NAME` = 'currency' AND `COLUMN_DEFAULT` IS NOT NULL");
-$curColumns  = rows($db, "SELECT `TABLE_NAME` AS `t`, `IS_NULLABLE` AS `n` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` = 'currency'");
-check('B1 no money column has a default currency: all nine `currency` columns are NOT NULL with NO default, so a writer that forgets the currency fails instead of storing pounds',
-    $gbpDefaults === [] && count($curColumns) === 9 && array_filter($curColumns, static fn (array $r): bool => $r['n'] !== 'NO') === [],
-    'with a default: ' . json_encode(array_column($gbpDefaults, 't')) . '; columns: ' . count($curColumns));
+$curCols = rows($db, "SELECT `TABLE_NAME` AS `t`, `COLUMN_NAME` AS `c`, `IS_NULLABLE` AS `n`, `COLUMN_DEFAULT` AS `d` FROM `information_schema`.`COLUMNS` "
+    . "WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` IN ('currency', 'quotedCurrency')");
+// '' is "not recorded" (an older row, which an administrator can label); MariaDB
+// reports that default with its quotes, as "''". Anything else would be a
+// currency built in.
+$builtIn = array_values(array_filter($curCols, static fn (array $r): bool
+    => $r['n'] !== 'NO' || ($r['d'] !== null && $r['d'] !== '' && $r['d'] !== "''")));
+check('B1 no currency column defaults to a real currency: every `currency` and `quotedCurrency` column (' . count($curCols) . ') is NOT NULL with no default or the empty "not recorded" one, so a writer that forgets the currency never stores pounds',
+    $builtIn === [] && count($curCols) > 9,
+    'built in: ' . json_encode($builtIn));
 $oldKeys = rows($db, "SELECT `settingKey` FROM `tblSettings` WHERE `settingKey` IN ('giving.currency', 'projects.currency', 'payments.currency', 'venues.currency', 'site.currency')");
 $orgRow  = rows($db, "SELECT `siteID`, `settingValue`, `defaultValue` FROM `tblSettings` WHERE `settingKey` = 'org.currency'");
 check('B2 the four per-app currency settings are not seeded, and org.currency is seeded once, installation-wide, EMPTY',
     $oldKeys === [] && count($orgRow) === 1 && $orgRow[0]['siteID'] === null && $orgRow[0]['settingValue'] === '' && $orgRow[0]['defaultValue'] === '',
     json_encode([$oldKeys, $orgRow]));
 
-// Every table holding an organisation's money: it has a siteID and either a
-// `currency` column or a whole-number/decimal column whose name says money.
-// Each must be in Currency::MONEY_TABLES, or below with the reason it is not.
-// (A table with no siteID — a claim's lines, a count's envelopes — is reached
-// through its parent, which IS in the list, and is not judged here.)
+// Every table holding money keeps its own currency beside the amount (D-139).
+// A table is money-shaped when a whole-number or decimal column's name says
+// money. Each must have a `currency` column, or be named below with the reason
+// it does not; and the tables with one must be exactly Currency::OWN_TABLES
+// and Currency::CHILD_TABLES, which the labelling of old rows walks.
 $notOrganisationMoney = [
-    'tblAiUsage'               => 'the INSTALLATION\'s spending with an AI provider (one key pays for every organisation)',
-    'tblContentTranslation'    => 'a cache of translations; its cost is the installation\'s spending with a provider',
-    'tblTranslationUsage'      => 'the installation\'s spending with a translation provider',
-    'tblSmsMessage'            => 'the installation\'s spending with a text-message provider',
-    'tblAssetValueHistory'     => 'an earlier valuation of an asset; a valuation also sets the asset\'s current value (tblAssets, in the list)',
-    'tblVenueInvoiceLines'     => 'a line of a venue invoice (tblVenueInvoices), which is in the list',
-    'tblVenueInvoicePayments'  => 'a payment of a venue invoice (tblVenueInvoices), which is in the list',
+    'tblAiUsage'            => 'the INSTALLATION\'s spending with an AI provider (one key pays for every organisation; its currency is a separate question, raised as an issue)',
+    'tblContentTranslation' => 'a cache of translations; its cost is the installation\'s spending with a provider',
+    'tblTranslationUsage'   => 'the installation\'s spending with a translation provider',
+    'tblSmsMessage'         => 'the installation\'s spending with a text-message provider',
+    'tblTranscript'         => 'the installation\'s spending with a transcription provider',
 ];
 $moneyShaped = [];
-foreach (rows($db, "SELECT c.`TABLE_NAME` AS `t`, c.`COLUMN_NAME` AS `c`, c.`DATA_TYPE` AS `d` FROM `information_schema`.`COLUMNS` c "
-    . "WHERE c.`TABLE_SCHEMA` = DATABASE() AND EXISTS (SELECT 1 FROM `information_schema`.`COLUMNS` s WHERE s.`TABLE_SCHEMA` = c.`TABLE_SCHEMA` "
-    . "AND s.`TABLE_NAME` = c.`TABLE_NAME` AND s.`COLUMN_NAME` = 'siteID')") as $col) {
-    $isMoney = $col['c'] === 'currency'
-        || (in_array($col['d'], ['int', 'bigint', 'decimal', 'mediumint', 'smallint'], true) === true
-            && preg_match('/(Pence|Amount|^amount|^cashTotal|^chequeTotal|^envelopeTotal|^totalAmount|^payAmount|^unitCost|^lineTotal)/', (string) $col['c']) === 1);
-    if ($isMoney === true) {
+foreach (rows($db, "SELECT `TABLE_NAME` AS `t`, `COLUMN_NAME` AS `c`, `DATA_TYPE` AS `d` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE()") as $col) {
+    if (in_array($col['d'], ['int', 'bigint', 'decimal', 'mediumint', 'smallint'], true) === true
+        && preg_match('/(Pence|Amount|^amount$|^cashTotal|^chequeTotal|^envelopeTotal|^payAmount|^unitCost|^lineTotal)/', (string) $col['c']) === 1) {
         $moneyShaped[(string) $col['t']] = true;
     }
 }
-$moneyShaped = array_keys($moneyShaped);
-sort($moneyShaped);
-$unlisted = array_values(array_filter($moneyShaped, static fn (string $t): bool
-    => isset(Currency::MONEY_TABLES[$t]) === false && isset($notOrganisationMoney[$t]) === false));
-$stale = [];
-foreach (array_merge(array_keys(Currency::MONEY_TABLES), array_keys($notOrganisationMoney)) as $t) {
-    if (in_array($t, $moneyShaped, true) === false) {
-        $stale[] = $t;
-    }
+$withCurrency = [];
+foreach (rows($db, "SELECT `TABLE_NAME` AS `t` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` = 'currency'") as $r) {
+    $withCurrency[(string) $r['t']] = true;
 }
-check('B3 every table holding an organisation\'s money is in Currency::MONEY_TABLES or named here with the reason it is not, and every name in either list is a real money table (fails BOTH ways)',
-    $unlisted === [] && $stale === [], 'not listed: ' . json_encode($unlisted) . '; listed but not a money table: ' . json_encode($stale));
-$badCondition = [];
-foreach (Currency::MONEY_TABLES as $t => $condition) {
+$listed = array_merge(Currency::OWN_TABLES, array_keys(Currency::CHILD_TABLES));
+sort($listed);
+$withCurrencyNames = array_keys($withCurrency);
+sort($withCurrencyNames);
+$noCurrency = array_values(array_filter(array_keys($moneyShaped), static fn (string $t): bool
+    => isset($withCurrency[$t]) === false && isset($notOrganisationMoney[$t]) === false));
+$staleReasons = array_values(array_filter(array_keys($notOrganisationMoney), static fn (string $t): bool
+    => isset($moneyShaped[$t]) === false || isset($withCurrency[$t]) === true));
+check('B3 every table holding money keeps its own currency: each money-shaped table has a `currency` column or is named here with the reason it does not, and each reason is still true (fails BOTH ways)',
+    $noCurrency === [] && $staleReasons === [], 'no currency column: ' . json_encode($noCurrency) . '; reason no longer true: ' . json_encode($staleReasons));
+check('B4 the tables with a `currency` column are EXACTLY Currency::OWN_TABLES and Currency::CHILD_TABLES (fails BOTH ways: a table missing there would keep rows nobody can label)',
+    $listed === $withCurrencyNames,
+    'with a column, not listed: ' . json_encode(array_values(array_diff($withCurrencyNames, $listed))) . '; listed, no column: ' . json_encode(array_values(array_diff($listed, $withCurrencyNames))));
+$badShape = [];
+foreach (Currency::OWN_TABLES as $t) {
     try {
-        rows($db, 'SELECT 1 FROM `' . $t . '` WHERE `siteID` = 0' . ($condition !== '' ? ' AND ' . $condition : '') . ' LIMIT 1');
+        rows($db, 'SELECT 1 FROM `' . $t . "` WHERE `siteID` = 0 AND `currency` = '' LIMIT 1");
     } catch (Throwable $e) {
-        $badCondition[] = $t . ': ' . $e->getMessage();
+        $badShape[] = $t . ': ' . $e->getMessage();
     }
 }
-check('B4 every table and condition in Currency::MONEY_TABLES runs against this schema (a broken one would read as "could not check", which locks the currency for ever)',
-    $badCondition === [], implode(' | ', $badCondition));
+foreach (Currency::CHILD_TABLES as $child => [$parent, $column, $key]) {
+    try {
+        rows($db, 'SELECT 1 FROM `' . $child . '` `c` JOIN `' . $parent . '` `p` ON `p`.`' . $key . '` = `c`.`' . $column . "` WHERE `p`.`siteID` = 0 AND `c`.`currency` = '' LIMIT 1");
+    } catch (Throwable $e) {
+        $badShape[] = $child . ': ' . $e->getMessage();
+    }
+}
+check('B5 every table in those two lists can really be walked: an own table has a siteID, and a child reaches its parent through the named column (a broken entry would make labelling fail)',
+    $badShape === [], implode(' | ', $badShape));
+$itemCols = array_column(rows($db, "SELECT `COLUMN_NAME` AS `c` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblExpenseClaimItems'"), 'c');
+check('B6 an expense line keeps BOTH figures: its quoted currency and quoted amount beside the converted amount in the claim\'s currency',
+    count(array_intersect(['currency', 'quotedCurrency', 'quotedLineTotal', 'lineTotal'], $itemCols)) === 4);
 
 // =============================================================================
 // The test server: a copy of web/, as the other page tests do
@@ -385,6 +407,10 @@ $http = static function (string $method, string $path, array $post = []) use ($p
         return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle)];
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+    // CU_DUMP_DIR: keep each answer's body, for reading a failure by eye.
+    if (getenv('CU_DUMP_DIR') !== false && is_dir((string) getenv('CU_DUMP_DIR')) === true) {
+        file_put_contents((string) getenv('CU_DUMP_DIR') . '/' . $method . preg_replace('/[^A-Za-z0-9]+/', '_', $path) . '.html', substr((string) $raw, $headSize));
+    }
 
     return [
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
@@ -419,8 +445,23 @@ if (\Portal\Core\Site::detectionFailed() === true) {
 }
 
 // ── Rows this run makes, removed at the end ─────────────────────────────────
-$made = ['settings' => [], 'gifts' => [], 'projects' => [], 'payments' => [], 'categories' => [], 'claims' => [], 'depts' => []];
-$removeAll = static function () use ($db, &$made): void {
+$made = ['settings' => [], 'gifts' => [], 'projects' => [], 'payments' => [], 'categories' => [], 'claims' => [], 'depts' => [],
+    'invoices' => [], 'venues' => [], 'assets' => []];
+$removeAll = static function () use ($db, &$made, $site): void {
+    foreach ($made['invoices'] as $id) {
+        run($db, 'DELETE FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ?', 'i', [$id]);
+        run($db, 'DELETE FROM `tblVenueInvoices` WHERE `invoiceID` = ?', 'i', [$id]);
+    }
+    foreach ($made['venues'] as $id) {
+        run($db, 'DELETE FROM `tblVenues` WHERE `venueID` = ?', 'i', [$id]);
+    }
+    foreach ($made['assets'] as $id) {
+        run($db, 'DELETE FROM `tblAssets` WHERE `assetID` = ?', 'i', [$id]);
+    }
+    // Claims this run made over HTTP are found by their title.
+    foreach (rows($db, "SELECT `claimID` FROM `tblExpenseClaims` WHERE `userID` = ? AND `claimTitle` LIKE 'Currency selftest%'", 'i', [CU_ADMIN]) as $r) {
+        $made['claims'][] = (int) $r['claimID'];
+    }
     foreach ($made['payments'] as $id) {
         run($db, 'DELETE FROM `tblPayment` WHERE `paymentID` = ?', 'i', [$id]);
     }
@@ -431,9 +472,11 @@ $removeAll = static function () use ($db, &$made): void {
         run($db, 'DELETE FROM `tblProjectPledge` WHERE `projectID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblProject` WHERE `projectID` = ?', 'i', [$id]);
     }
-    foreach ($made['claims'] as $id) {
+    foreach (array_unique($made['claims']) as $id) {
+        run($db, 'DELETE FROM `tblExpenseClaimItems` WHERE `claimID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [$id]);
     }
+    $made['claims'] = [];
     foreach ($made['depts'] as $id) {
         run($db, 'DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [$id]);
     }
@@ -441,6 +484,7 @@ $removeAll = static function () use ($db, &$made): void {
         run($db, 'DELETE FROM `tblGivingCategory` WHERE `categoryID` = ?', 'i', [$id]);
     }
     run($db, "DELETE FROM `tblPayment` WHERE `userID` = ?", 'i', [CU_ADMIN]);
+    run($db, "DELETE FROM `tblGivingEntry` WHERE `donorID` = ?", 'i', [CU_ADMIN]);
     run($db, 'DELETE FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [CU_ADMIN]);
     run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [CU_ADMIN]);
     $db->query('SET FOREIGN_KEY_CHECKS = 0');
@@ -501,12 +545,6 @@ foreach (['translation.enabled', 'transcription.enabled', 'sms.enabled', 'ai_ass
     $setting($switch, '1', null);
 }
 
-// No organisation money of this site may exist yet, or C's "no money recorded" premise is false.
-$premise = Currency::whyCannotChange($db, $site, 'GBP', 'EUR', false);
-if ($premise !== '') {
-    refuse('the database already holds money for organisation ' . $site . ', so the first-choice checks cannot be made: ' . $premise);
-}
-
 // =============================================================================
 // C. An organisation in euros
 // =============================================================================
@@ -544,19 +582,33 @@ $made['categories'][] = $category;
 run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 123450, 'EUR', CURDATE(), 'cash')",
     'iii', [$site, CU_ADMIN, $category]);
 $made['gifts'][] = (int) $db->insert_id;
-// And an expense claim, which keeps only a NUMBER: it is in the organisation's currency.
-// Without one, Admin, Reports draws no total, and a pound sign put back there passed every
-// check (planted, 11 November 2026).
-run($db, 'INSERT INTO `tblDepts` (`siteID`) VALUES (?)', 'i', [$site]);
+// And an expense claim, in EUR. Without one, Admin, Reports draws no total, and a pound
+// sign put back there passed every check (planted, 11 November 2026).
+// A NAMED department: the claim's PDF prints the name, and a claim filed over HTTP in G
+// is refused whole when that print fails on an empty name.
+run($db, "INSERT INTO `tblDepts` (`siteID`, `deptName`) VALUES (?, 'Currency selftest department')", 'i', [$site]);
 $dept = (int) $db->insert_id;
 $made['depts'][] = $dept;
-run($db, "INSERT INTO `tblExpenseClaims` (`siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES (?, ?, ?, 'Currency selftest claim', CURDATE(), 250.00, 'Pending')",
+run($db, "INSERT INTO `tblExpenseClaims` (`siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, 'Currency selftest claim', CURDATE(), 250.00, 'Pending', 'EUR')",
     'iii', [$site, CU_ADMIN, $dept]);
 $made['claims'][] = (int) $db->insert_id;
+// A venue invoice (part paid) and an asset, both in EUR. Without them, Venues, invoices
+// and the asset value report draw no amount at all, so a pound sign put back in their
+// money blocks could not be seen (the round-1 check found both).
+run($db, "INSERT INTO `tblVenues` (`siteID`, `venueName`, `countryCode`, `timezone`) VALUES (?, 'Currency selftest hall', 'FR', 'Europe/Paris')", 'i', [$site]);
+$venue = (int) $db->insert_id;
+$made['venues'][] = $venue;
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 40000, 'EUR', 'part-paid')", 'ii', [$site, $venue]);
+$invoice = (int) $db->insert_id;
+$made['invoices'][] = $invoice;
+run($db, "INSERT INTO `tblVenueInvoicePayments` (`siteID`, `invoiceID`, `paidDate`, `amountPence`, `currency`) VALUES (?, ?, CURDATE(), 10000, 'EUR')", 'ii', [$site, $invoice]);
+run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`, `purchaseCostPence`, `currentValuePence`) VALUES (?, 'Currency selftest piano', 'EUR', ?, 89999, 89999)",
+    'is', [$site, bin2hex(random_bytes(16))]);
+$made['assets'][] = (int) $db->insert_id;
 // And a pledge to the project, not yet paid: Projects, manage lists it, in the PROJECT's
 // currency (that list spans every project, so there is no one project to ask).
 if (isset($proj[0]['projectID']) === true) {
-    run($db, "INSERT INTO `tblProjectPledge` (`projectID`, `donorID`, `amountPence`) VALUES (?, ?, 7700)", 'ii', [(int) $proj[0]['projectID'], CU_ADMIN]);
+    run($db, "INSERT INTO `tblProjectPledge` (`projectID`, `donorID`, `amountPence`, `currency`) VALUES (?, ?, 7700, 'EUR')", 'ii', [(int) $proj[0]['projectID'], CU_ADMIN]);
 }
 
 $pages = [
@@ -567,6 +619,11 @@ $pages = [
     '/assets/value-report', '/admin/reports', '/admin/translation', '/admin/transcription', '/admin/ai-assist', '/admin/sms',
     '/account/recurring', '/projects/my-pledges', '/giving/give',
 ];
+/** Does a page show a pound sign, written any way a page or its script could write it? */
+$hasPound = static function (string $body): bool {
+    return str_contains($body, '£') === true
+        || preg_match('/&pound;|&#163;|&#x0*a3;|\\\\u00a3|\\\\x\\{?a3\\}?/i', $body) === 1;
+};
 $pound = [];
 $broken = [];
 foreach ($pages as $path) {
@@ -575,13 +632,19 @@ foreach ($pages as $path) {
         $broken[] = $path . ' (HTTP ' . $answer['status'] . ')';
         continue;
     }
-    if (str_contains($answer['body'], '£') === true || str_contains($answer['body'], '&pound;') === true) {
+    if ($hasPound($answer['body']) === true) {
         // Gift Aid is a UK tax scheme, stated in pounds by law, and only its own page says so.
         $pound[] = $path;
     }
 }
 check('C5 every money page loaded answers in full (HTTP 200, the page finished), as a global administrator', $broken === [], 'not whole: ' . implode(', ', $broken));
-check('C6 and NOT ONE of them prints a pound sign for an organisation in euros (' . count($pages) . ' pages)', $pound === [], 'a pound sign on: ' . implode(', ', $pound));
+check('C6 and NOT ONE of them prints a pound sign for an organisation in euros, as the sign, an entity or a script escape (' . count($pages) . ' pages)', $pound === [], 'a pound sign on: ' . implode(', ', $pound));
+$invoicesPage = $http('GET', '/venues/invoices')['body'];
+$valuePage    = $http('GET', '/assets/value-report')['body'];
+check('C10 the money blocks C6 searched really drew: Venues, invoices bills €400.00 with €100.00 paid and €300.00 outstanding, and the asset value report shows the piano\'s EUR 899.99 (that report writes the code, as the asset pages do)',
+    preg_match('/data-total="billed">€400\\.00</', $invoicesPage) === 1 && preg_match('/data-total="paid">€100\\.00</', $invoicesPage) === 1
+    && preg_match('/data-total="outstanding">€300\\.00</', $invoicesPage) === 1 && str_contains($valuePage, 'EUR 899.99') === true,
+    'invoices: ' . (preg_match_all('/data-total="[a-z]+">[^<]*</', $invoicesPage, $mm) > 0 ? implode(' ', $mm[0]) : '(no totals)') . '; value report has EUR 899.99: ' . var_export(str_contains($valuePage, 'EUR 899.99'), true));
 $manage   = $http('GET', '/giving/manage')['body'];
 $projects = $http('GET', '/projects')['body'];
 check('C7 where an amount is shown it is in euros: the gift as €1,234.50 on Giving, manage, and the project\'s target in € on Projects',
@@ -589,33 +652,112 @@ check('C7 where an amount is shown it is in euros: the gift as €1,234.50 on Gi
     'manage has €1,234.50: ' . var_export(str_contains($manage, '€1,234.50'), true) . '; projects has €1,500.00: ' . var_export(preg_match('/€1,500\.00/', $projects) === 1, true));
 
 $pledges = $http('GET', '/projects/manage')['body'];
-check('C9 the pledge list on Projects, manage shows the unpaid pledge in its project\'s currency, €77.00',
+check('C9 the pledge list on Projects, manage shows the unpaid pledge in its own currency, €77.00',
     str_contains($pledges, '€77.00') === true && str_contains($pledges, '£') === false);
 $reports  = $http('GET', '/admin/reports')['body'];
 $ownList  = $http('GET', '/expenses/submit')['body'];
-check('C8 an expense claim, which stores only a number, is shown in the organisation\'s currency: Reports\' total value is €250.00, and so is the claim on its claimant\'s own list',
+check('C8 an expense claim is shown in its own currency: Reports\' total value is €250.00, and so is the claim on its claimant\'s own list',
     str_contains($reports, 'Total value: <strong>€250.00</strong>') === true && str_contains($ownList, '€250.00') === true,
     'reports: ' . (preg_match('/Total value: <strong>[^<]*<\/strong>/', $reports, $mm) === 1 ? $mm[0] : '(no total)') . '; own list has €250.00: ' . var_export(str_contains($ownList, '€250.00'), true));
 
 // =============================================================================
-// D. The lock: money is recorded now
+// D. The currency can change; what is recorded keeps its own (D-139)
 // =============================================================================
-head('Section D — once money is recorded, the currency cannot change');
-$locked = $http('GET', '/admin/settings/organisation');
-check('D1 the page shows the currency box DISABLED and says why (money is recorded)',
-    preg_match('/<select[^>]*id="currency"[^>]*disabled[^>]*>/', $locked['body']) === 1 && str_contains($locked['body'], 'data-currency-locked-reason') === true
-    && str_contains($locked['body'], 'money is already recorded in it') === true);
-$refused = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $tokenOn($locked['body']), 'currency' => 'USD', 'countryCode' => '']);
-$flash   = $http('GET', '/admin/settings/organisation')['body'];
-check('D2 a posted change to USD is REFUSED, "Nothing was saved", and the organisation\'s currency is still EUR',
-    $refused['status'] === 302 && $ownCurrency() === 'EUR' && str_contains($flash, 'Nothing was saved. This organisation&#039;s currency is EUR and cannot be changed') === true,
-    'own row: ' . var_export($ownCurrency(), true));
-$sameAs = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $tokenOn($flash), 'currency' => '', 'countryCode' => '']);
-check('D3 so is "Same as the installation" (which would switch it to the installation\'s: none here), and the own row stays',
-    $sameAs['status'] === 302 && $ownCurrency() === 'EUR');
-$untouched = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $freshToken('/admin/settings/organisation'), 'countryCode' => '']);
-check('D4 a Save with the currency box absent (as the disabled box sends it) is accepted and leaves the currency alone (#677: ask whether the field ARRIVED)',
-    $untouched['status'] === 302 && $ownCurrency() === 'EUR' && str_contains($http('GET', '/admin/settings/organisation')['body'], 'Nothing was saved') === false);
+head('Section D — the currency can change, and every record keeps the currency it was made in');
+$open = $http('GET', '/admin/settings/organisation');
+check('D1 with money recorded the currency box is still OPEN, and says a change affects new records only (D-139 removed the lock)',
+    preg_match('/<select[^>]*id="currency"[^>]*>/', $open['body'], $mm) === 1 && str_contains($mm[0], 'disabled') === false
+    && str_contains($open['body'], 'Changing it affects new records only') === true && str_contains($open['body'], 'cannot be changed') === false);
+$changed = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $tokenOn($open['body']), 'currency' => 'USD', 'countryCode' => '']);
+check('D2 a posted change to USD is saved', $changed['status'] === 302 && $ownCurrency() === 'USD', 'own row: ' . var_export($ownCurrency(), true));
+$manageUsd = $http('GET', '/giving/manage')['body'];
+$ownUsd    = $http('GET', '/expenses/submit')['body'];
+$valueUsd  = $http('GET', '/assets/value-report')['body'];
+check('D3 and every record made before keeps its own currency: the gift is still €1,234.50, the claim still €250.00, the invoice still bills €400.00, and the value report (which shows one currency at a time) still finds the piano in EUR',
+    str_contains($manageUsd, '€1,234.50') === true && str_contains($ownUsd, '€250.00') === true
+    && preg_match('/data-total="billed">€400\.00</', $http('GET', '/venues/invoices')['body']) === 1 && str_contains($valueUsd, 'EUR 899.99') === true);
+$madeBefore = (int) (rows($db, 'SELECT COALESCE(MAX(`projectID`), 0) AS `m` FROM `tblProject`')[0]['m']);
+$http('POST', '/projects/manage-save', ['csrf_token' => $freshToken('/projects/manage'), 'title' => 'Currency selftest organ', 'targetAmount' => '900.00', 'status' => 'active', 'isPublic' => '1', 'description' => 'x']);
+$projUsd = rows($db, 'SELECT `projectID`, `currency` FROM `tblProject` WHERE `projectID` > ? AND `siteID` = ?', 'ii', [$madeBefore, $site]);
+foreach ($projUsd as $p) {
+    $made['projects'][] = (int) $p['projectID'];
+}
+check('D4 a project made AFTER the change is stored in USD', count($projUsd) === 1 && $projUsd[0]['currency'] === 'USD', json_encode($projUsd));
+
+// Money in two currencies: a second claim, gift and invoice in USD.
+run($db, "INSERT INTO `tblExpenseClaims` (`siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, 'Currency selftest claim in dollars', CURDATE(), 40.00, 'Pending', 'USD')",
+    'iii', [$site, CU_ADMIN, $dept]);
+$made['claims'][] = (int) $db->insert_id;
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 5000, 'USD', 'pending')", 'ii', [$site, $venue]);
+$made['invoices'][] = (int) $db->insert_id;
+$reportsTwo  = $http('GET', '/admin/reports')['body'];
+$invoicesTwo = $http('GET', '/venues/invoices')['body'];
+check('D5 a total over two currencies is TWO lines, never one sum: Reports\' total value is €250.00 and $40.00, and Venues, invoices bills €400.00 and $50.00',
+    preg_match('/Total value: <strong>€250\.00<br>\$40\.00<\/strong>/', $reportsTwo) === 1
+    && preg_match('/data-total="billed">€400\.00<br>\$50\.00</', $invoicesTwo) === 1,
+    'reports: ' . (preg_match('/Total value: <strong>.*?<\/strong>/', $reportsTwo, $mm) === 1 ? $mm[0] : '(none)')
+    . '; invoices: ' . (preg_match('/data-total="billed">[^<]*(<br>[^<]*)?</', $invoicesTwo, $mm) === 1 ? $mm[0] : '(none)'));
+
+// A record with NO currency (as an older database may hold): it can be labelled.
+run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 2000, '', CURDATE(), 'cash')",
+    'iii', [$site, CU_ADMIN, $category]);
+$unlabelledGift = (int) $db->insert_id;
+$made['gifts'][] = $unlabelledGift;
+$labelPage = $http('GET', '/admin/settings/organisation');
+check('D6 the organisation page says how many amounts have no recorded currency (1) and offers to label them',
+    preg_match('/data-currency-unlabelled="1"/', $labelPage['body']) === 1 && str_contains($labelPage['body'], 'name="labelCurrency"') === true
+    && Currency::unlabelledCount($db, $site) === 1);
+$labelled = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $tokenOn($labelPage['body']), 'form' => 'label-currency', 'labelCurrency' => 'EUR']);
+$afterLabel = rows($db, 'SELECT `currency` FROM `tblGivingEntry` WHERE `entryID` = ?', 'i', [$unlabelledGift]);
+// The rows recorded in DOLLARS are the ones that show whether labelling touched
+// anything but the unlabelled: a row already in EUR would read the same either way.
+$dollarsAfter = array_column(rows($db, "SELECT `currency` FROM `tblExpenseClaims` WHERE `claimTitle` = 'Currency selftest claim in dollars' "
+    . "UNION ALL SELECT `currency` FROM `tblVenueInvoices` WHERE `invoiceID` = ?", 'i', [end($made['invoices'])]), 'currency');
+check('D7 labelling them EUR writes EUR on that row ONLY: nothing is left unlabelled, the claim and the invoice recorded in dollars are still USD, and the organisation\'s own currency is still USD',
+    $labelled['status'] === 302 && ($afterLabel[0]['currency'] ?? '') === 'EUR' && Currency::unlabelledCount($db, $site) === 0 && $ownCurrency() === 'USD'
+    && $dollarsAfter === ['USD', 'USD']
+    && str_contains($http('GET', '/admin/settings/organisation')['body'], 'data-currency-unlabelled') === false,
+    json_encode([$afterLabel, $dollarsAfter]));
+$badLabel = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $freshToken('/admin/settings/organisation'), 'form' => 'label-currency', 'labelCurrency' => 'JPY']);
+check('D8 a currency the portal cannot use (the yen) is refused as a label', $badLabel['status'] === 302 && Currency::labelUnlabelled($db, $site, 'JPY') === null);
+// Back to EUR, which E below relies on.
+$back = $http('POST', '/admin/settings/organisation/save', ['csrf_token' => $freshToken('/admin/settings/organisation'), 'currency' => 'EUR', 'countryCode' => '']);
+check('D9 and it can change back to EUR', $back['status'] === 302 && $ownCurrency() === 'EUR');
+
+// =============================================================================
+// G. An expense line quoted in another currency (D-139)
+// =============================================================================
+head('Section G — a claim with a line bought in dollars');
+$claimForm = $http('GET', '/expenses/submit');
+check('G1 the claim form asks which currency each line is quoted in, and offers the box for the cost in EUR from the statement',
+    str_contains($claimForm['body'], 'name="itemCurrency[]"') === true && str_contains($claimForm['body'], 'name="itemConverted[]"') === true);
+$claimPost = static fn (string $title, string $converted): array => [
+    'csrf_token' => $tokenOn($http('GET', '/expenses/submit')['body']), 'deptID' => (string) $dept, 'claimTitle' => $title,
+    'itemDesc' => ['Train ticket', 'Hotel in New York'], 'itemQty' => ['1', '2'], 'itemUnit' => ['10.00', '60.00'],
+    'itemCurrency' => ['EUR', 'USD'], 'itemConverted' => ['', $converted],
+];
+$http('POST', '/expenses/submit/save', $claimPost('Currency selftest no conversion', ''));
+$noConversion = rows($db, "SELECT 1 FROM `tblExpenseClaims` WHERE `claimTitle` = 'Currency selftest no conversion'");
+$refusedPage  = $http('GET', '/expenses/submit')['body'];
+check('G2 a dollar line with no cost in EUR is REFUSED, nothing is written, and the claimant is told what to type',
+    $noConversion === [] && str_contains($refusedPage, 'type what it cost in EUR') === true);
+$http('POST', '/expenses/submit/save', $claimPost('Currency selftest abroad', '101.10'));
+$abroad = rows($db, "SELECT `claimID`, `currency`, `totalAmount` FROM `tblExpenseClaims` WHERE `claimTitle` = 'Currency selftest abroad'");
+$lines  = $abroad === [] ? [] : rows($db, 'SELECT `itemName`, `unitCost`, `lineTotal`, `currency`, `quotedCurrency`, `quotedLineTotal` FROM `tblExpenseClaimItems` WHERE `claimID` = ? ORDER BY `itemID`', 'i', [(int) $abroad[0]['claimID']]);
+check('G3 the claim is stored in EUR with the CONVERTED total, 111.10 (10.00 + 101.10), never the quoted 130',
+    count($abroad) === 1 && $abroad[0]['currency'] === 'EUR' && (float) $abroad[0]['totalAmount'] === 111.10, json_encode($abroad));
+check('G4 the dollar line keeps BOTH figures: quoted $120.00 (2 x 60.00) in USD, and 101.10 in EUR; the euro line is quoted and converted alike',
+    count($lines) === 2
+    && $lines[0]['quotedCurrency'] === 'EUR' && (float) $lines[0]['quotedLineTotal'] === 10.00 && (float) $lines[0]['lineTotal'] === 10.00 && $lines[0]['currency'] === 'EUR'
+    && $lines[1]['quotedCurrency'] === 'USD' && (float) $lines[1]['quotedLineTotal'] === 120.00 && (float) $lines[1]['lineTotal'] === 101.10 && $lines[1]['currency'] === 'EUR',
+    json_encode($lines));
+$claimPage = $abroad === [] ? '' : $http('GET', '/expenses/view?id=' . (int) $abroad[0]['claimID'])['body'];
+check('G5 the claim page shows both figures and the rate worked out from them: "$120.00 quoted; 1 USD = 0.8425 EUR", with the total €111.10',
+    str_contains($claimPage, '$120.00 quoted;') === true && str_contains($claimPage, '1 USD = 0.8425 EUR') === true && str_contains($claimPage, '€111.10') === true,
+    'quoted note: ' . (preg_match('/data-line-quoted>\s*(.*?)<\/small>/s', $claimPage, $mm) === 1 ? trim(preg_replace('/\s+/', ' ', $mm[1])) : '(none)'));
+$quotedWords = $abroad === [] ? [] : \Portal\Core\ExpenseRules::quotedElsewhere($db, [(int) $abroad[0]['claimID']]);
+check('G6 the approval and treasury lists\' note for it (ExpenseRules::quotedElsewhere()) reads "$120.00 quoted", and names no euro line',
+    $abroad !== [] && ($quotedWords[(int) $abroad[0]['claimID']] ?? []) === ['$120.00 quoted'], json_encode($quotedWords));
 
 // =============================================================================
 // E. A payment request carries the currency

@@ -3415,11 +3415,13 @@ class Venues
         }
 
         try {
-            $stmt = $db->prepare('INSERT INTO tblVenueInvoiceLines (siteID, invoiceID, bookingID, amountPence) VALUES (?, ?, ?, ?)');
+            // 💷 A line is in its INVOICE's currency, kept on the row (D-139).
+            $stmt = $db->prepare('INSERT INTO tblVenueInvoiceLines (siteID, invoiceID, bookingID, amountPence, `currency`) '
+                . 'VALUES (?, ?, ?, ?, (SELECT `i`.`currency` FROM `tblVenueInvoices` `i` WHERE `i`.`invoiceID` = ?))');
             if ($stmt === false) {
                 return ['lineID' => 0, 'error' => 'Could not allocate line.'];
             }
-            $stmt->bind_param('iiii', $siteId, $invoiceId, $bookingId, $amountPence);
+            $stmt->bind_param('iiiii', $siteId, $invoiceId, $bookingId, $amountPence, $invoiceId);
             $ok = $stmt->execute();
             $newId = (int) $stmt->insert_id;
             $stmt->close();
@@ -3499,13 +3501,14 @@ class Venues
         }
 
         $stmt = $db->prepare(
-            'INSERT INTO tblVenueInvoicePayments (siteID, invoiceID, paidDate, amountPence, method, reference, notes, recordedByID) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            // 💷 A payment is in its INVOICE's currency, kept on the row (D-139).
+            'INSERT INTO tblVenueInvoicePayments (siteID, invoiceID, paidDate, amountPence, method, reference, notes, recordedByID, `currency`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT `i`.`currency` FROM `tblVenueInvoices` `i` WHERE `i`.`invoiceID` = ?))'
         );
         if ($stmt === false) {
             return ['payID' => 0, 'errors' => ['Could not record payment.']];
         }
-        $stmt->bind_param('iisisssi', $siteId, $invoiceId, $paidDate, $amountPence, $method, $reference, $notes, $actorUserId);
+        $stmt->bind_param('iisisssii', $siteId, $invoiceId, $paidDate, $amountPence, $method, $reference, $notes, $actorUserId, $invoiceId);
         $ok = $stmt->execute();
         $newId = (int) $stmt->insert_id;
         $stmt->close();

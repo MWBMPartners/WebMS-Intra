@@ -128,11 +128,13 @@ if ($action === 'create') {
 
     $newId = 0;
     $stmt = $db->prepare(
-        'INSERT INTO tblCountSessions (siteID, serviceDate, categoryID, counter1ID, counter2ID, status, createdByID) '
-        . 'VALUES (?, ?, ?, ?, ?, \'open\', ?)'
+        // 💷 A count is in the organisation's currency today, kept on the row (D-139).
+        'INSERT INTO tblCountSessions (siteID, serviceDate, categoryID, counter1ID, counter2ID, status, createdByID, `currency`) '
+        . 'VALUES (?, ?, ?, ?, ?, \'open\', ?, ?)'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('isiiii', $siteId, $serviceDate, $categoryId, $counter1Id, $counter2Id, $userId);
+        $countCurrency = \Portal\Core\Currency::ofSite();
+        $stmt->bind_param('isiiiis', $siteId, $serviceDate, $categoryId, $counter1Id, $counter2Id, $userId, $countCurrency);
         $stmt->execute();
         $newId = (int) $stmt->insert_id;
         $stmt->close();
@@ -356,10 +358,12 @@ if ($action === 'envelope-add') {
     }
 
     $stmt = $db->prepare(
-        'INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, method) VALUES (?, ?, ?, ?, ?)'
+        // 💷 An envelope is in its COUNT's currency (D-139).
+        'INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, method, `currency`) '
+        . 'VALUES (?, ?, ?, ?, ?, (SELECT `s`.`currency` FROM `tblCountSessions` `s` WHERE `s`.`countSessionID` = ?))'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('iisss', $countSessionId, $giverIdParam, $giverNameParam, $amount, $method);
+        $stmt->bind_param('iisssi', $countSessionId, $giverIdParam, $giverNameParam, $amount, $method, $countSessionId);
         $stmt->execute();
         $stmt->close();
     }

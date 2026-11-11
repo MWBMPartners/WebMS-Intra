@@ -196,9 +196,16 @@ final class ReportRegistry
                 // OR site admin. Filtering on this column without the gate
                 // is refused identically to selecting it (§3.4) — a
                 // non-treasurer can't row-count-oracle claim amounts either.
-                'totalAmount' => ['expr' => 'ec.totalAmount', 'label' => 'Total (the organisation\'s currency)', 'type' => 'decimal',
+                // 💷 `currencyExpr` names the column saying which currency
+                //    this amount is in (#966, D-139). ReportBuilder reads it:
+                //    a report showing or adding up this amount also shows,
+                //    and groups by, its currency, so two currencies are never
+                //    added together.
+                'totalAmount' => ['expr' => 'ec.totalAmount', 'label' => 'Total', 'type' => 'decimal',
                                   'gates' => ['treasurer', '@siteAdmin'],
+                                  'currencyExpr' => 'ec.currency',
                                   'aggs'  => ['sum', 'avg', 'min', 'max', 'count']],
+                'currency'    => ['expr' => 'ec.currency', 'label' => 'Currency', 'type' => 'string'],
                 'claimant'    => ['expr' => 'u.fullName',     'label' => 'Claimant',    'type' => 'string',
                                   'join' => 'claimant', 'pii' => true],
                 'createdAt'   => ['expr' => 'ec.createdAt',   'label' => 'Created',     'type' => 'datetime'],
@@ -221,9 +228,11 @@ final class ReportRegistry
                 // amountPence is a genuine INT column (pence, not decimal
                 // pounds) — Giving::canManage() parity: treasurer OR site
                 // admin, same as expenses.totalAmount above.
-                'amountPence' => ['expr' => 'g.amountPence', 'label' => 'Amount (pence)', 'type' => 'int',
+                'amountPence' => ['expr' => 'g.amountPence', 'label' => 'Amount (hundredths)', 'type' => 'int',
                                   'gates' => ['treasurer', '@siteAdmin'],
+                                  'currencyExpr' => 'g.currency',
                                   'aggs'  => ['sum', 'avg', 'min', 'max', 'count']],
+                'currency'    => ['expr' => 'g.currency', 'label' => 'Currency', 'type' => 'string'],
                 'method'      => ['expr' => 'g.method', 'label' => 'Method', 'type' => 'enum',
                                   'enum' => ['cash', 'cheque', 'bank-transfer', 'card', 'standing-order', 'other']],
                 'category'    => ['expr' => 'gcat.name', 'label' => 'Fund / category', 'type' => 'string', 'join' => 'category'],
@@ -541,6 +550,11 @@ final class ReportRegistry
                 }
                 if (array_key_exists('expr', $col) === false || preg_match($exprRe, (string) $col['expr']) !== 1) {
                     throw new \RuntimeException("ReportRegistry: source '{$sourceKey}' column '{$colKey}' has an invalid expr");
+                }
+                // 💷 The currency an amount is in (#966, D-139) is SQL too, so it is
+                //    held to the same shape as an expr.
+                if (array_key_exists('currencyExpr', $col) === true && preg_match($exprRe, (string) $col['currencyExpr']) !== 1) {
+                    throw new \RuntimeException("ReportRegistry: source '{$sourceKey}' column '{$colKey}' has an invalid currencyExpr");
                 }
                 if (array_key_exists('label', $col) === false || (string) $col['label'] === '') {
                     throw new \RuntimeException("ReportRegistry: source '{$sourceKey}' column '{$colKey}' missing label");

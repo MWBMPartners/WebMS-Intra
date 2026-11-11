@@ -128,14 +128,20 @@ if ($countryInForce !== '' && $zoneCountry !== $countryInForce
 //    The box shows the organisation's OWN row (#674): showing the currency in
 //    force would copy the installation's into this organisation's own row on
 //    a Save that touched nothing. It is pre-selected from the country (D-133)
-//    ONLY when no currency is in force at all — the setting-up case, where
-//    there is nothing to relabel. Otherwise the page ADVISES when the
-//    currency and the country disagree, as it does for the time zone.
+//    ONLY when no currency is in force at all — the setting-up case.
+//    Otherwise the page ADVISES when the currency and the country disagree,
+//    as it does for the time zone.
 //
-//    While money is recorded the box is shown disabled with the reason
-//    (Currency::whyCannotChange()). A disabled control is not submitted, so
-//    the save handler, which asks whether the field ARRIVED (#677), leaves
-//    the currency alone; it also checks again itself, under a lock.
+//    THE CURRENCY CAN CHANGE (D-139). Every amount keeps the currency it was
+//    recorded in, so a change applies to new records only and relabels
+//    nothing. (Round 1 of #966 locked it once money was recorded; the owner
+//    chose per-record currencies instead, and the lock is gone.)
+//
+//    AMOUNTS WITH NO CURRENCY. A row saved while no currency was chosen, or
+//    restored from a backup older than migration 283, holds ''. The page
+//    counts them and offers to label them with a currency the administrator
+//    CHOOSES (Currency::labelUnlabelled()): only a person knows what money an
+//    old figure was, so nothing is guessed.
 $currencyOwn          = Currency::ownOf(Site::id());
 $currencyInstallation = Currency::ofInstallation();
 $currencyOwnText      = Currency::ownStoredText(Site::id());
@@ -153,9 +159,7 @@ if ($currencyInForce === '' && $currencySelected === '' && $currencySuggested !=
     $currencySelected    = $currencySuggested;
     $currencyPreselected = true;
 }
-// Any change at all would be refused while money is recorded: asked with
-// '' as the new value, which differs from any currency in force.
-$currencyLocked = Currency::whyCannotChange($mysqli, Site::id(), $currencyInForce, '', false);
+$currencyUnlabelled = Currency::unlabelledCount($mysqli, Site::id());
 $currencyAdvice = '';
 if ($currencyCountryUses !== '' && $currencySuggested === '') {
     $currencyAdvice = Countries::name($countryInForce) . ' uses ' . $currencyCountryUses . '. '
@@ -322,7 +326,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 col-md-6">
                     <label class="form-label" for="currency">Currency</label>
-                    <select class="form-select" id="currency" name="currency" aria-describedby="currencyHelp"<?php echo $currencyLocked !== '' ? ' disabled' : ''; ?> data-currency-locked="<?php echo $currencyLocked !== '' ? '1' : '0'; ?>">
+                    <select class="form-select" id="currency" name="currency" aria-describedby="currencyHelp">
                         <option value=""<?php echo $currencySelected === '' ? ' selected' : ''; ?>><?php echo $e($currencyInstallation !== ''
                             ? 'Same as the installation: ' . $currencyInstallation
                             : 'Same as the installation (none chosen)'); ?></option>
@@ -337,11 +341,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php elseif ($currencyInForce === ''): ?>
                             No currency is chosen yet, so amounts are shown as plain numbers and no payment can be taken.
                         <?php endif; ?>
-                        It can be changed only while the organisation has no money recorded.
+                        Changing it affects new records only: every amount already recorded keeps the currency it was recorded in.
                     </div>
-                    <?php if ($currencyLocked !== ''): ?>
-                        <div class="alert alert-secondary small mt-2 mb-0" role="note" data-currency-locked-reason><?php echo $e($currencyLocked); ?></div>
-                    <?php endif; ?>
                     <?php if ($currencyOwnUnusable === true): ?>
                         <div class="alert alert-warning small mt-2 mb-0" role="note"><?php echo $e(
                             'This organisation\'s currency is stored as "' . $currencyOwnText . '", which is not a currency the portal can use, '
@@ -357,6 +358,32 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save address</button>
             </div>
         </form>
+        <?php if ($currencyUnlabelled === null): ?>
+            <div class="alert alert-warning small mt-3 mb-0" role="note" data-currency-unlabelled="unknown">
+                The portal could not count whether any amounts were saved with no currency. Nothing has been changed; try again later.
+            </div>
+        <?php elseif ($currencyUnlabelled > 0): ?>
+            <?php // 🏷️ A separate small form, so labelling is a deliberate act of its own (#966, D-139). ?>
+            <form method="post" action="<?php echo $e(Site::url('admin/settings/organisation/save')); ?>" class="border rounded p-3 mt-3" data-currency-unlabelled="<?php echo (int) $currencyUnlabelled; ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                <input type="hidden" name="form" value="label-currency">
+                <p class="small mb-2"><strong><?php echo (int) $currencyUnlabelled; ?> amount<?php echo $currencyUnlabelled === 1 ? ' was' : 's were'; ?> saved with no currency</strong>
+                    (before a currency was chosen, or from an older backup). They are shown as plain numbers and counted on their own in every total.
+                    If you know what money they were, choose it here. This labels only those amounts; nothing that already has a currency changes, and it cannot be undone from this page.</p>
+                <div class="d-flex gap-2 align-items-end flex-wrap">
+                    <div>
+                        <label class="form-label small" for="labelCurrency">They were in</label>
+                        <select class="form-select form-select-sm" id="labelCurrency" name="labelCurrency" required>
+                            <option value="" selected>Choose a currency</option>
+                            <?php foreach (Currency::choices() as $code => $currencyName): ?>
+                                <option value="<?php echo $e((string) $code); ?>"><?php echo $e($currencyName); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-outline-primary">Label them</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 

@@ -65,15 +65,19 @@ if ($statusFilter !== '') {
 }
 $invoices = Venues::listInvoices($siteId, $filters);
 
-// 💷 Pence-int footer totals across the filtered set.
-$totalBilled = 0;
-$totalPaid   = 0;
-$today       = date('Y-m-d');
+// 💷 Footer totals across the filtered set, PER CURRENCY (D-139): each invoice
+//    keeps its own currency (its payments share it), and two currencies are
+//    never added together, so a list holding two shows two lines each.
+$totalBilled      = [];
+$totalPaid        = [];
+$totalOutstanding = [];
+$today            = date('Y-m-d');
 foreach ($invoices as $inv) {
-    $totalBilled += (int) $inv['amountPence'];
-    $totalPaid   += (int) $inv['paidPence'];
+    $invCur = (string) ($inv['currency'] ?? '');
+    \Portal\Core\Currency::addTo($totalBilled, $invCur, (int) $inv['amountPence']);
+    \Portal\Core\Currency::addTo($totalPaid, $invCur, (int) $inv['paidPence']);
+    \Portal\Core\Currency::addTo($totalOutstanding, $invCur, (int) $inv['amountPence'] - (int) $inv['paidPence']);
 }
-$totalOutstanding = $totalBilled - $totalPaid;
 
 $statusBadge = [
     'pending'   => 'secondary',
@@ -193,9 +197,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
     </div>
     <div class="d-flex justify-content-end gap-4 text-end mb-4">
-        <div><span class="text-muted small">Billed</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalBilled / 100, 2); ?></strong></div>
-        <div><span class="text-muted small">Paid</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalPaid / 100, 2); ?></strong></div>
-        <div><span class="text-muted small">Outstanding</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalOutstanding / 100, 2); ?></strong></div>
+        <div><span class="text-muted small">Billed</span><br><strong data-total="billed"><?php echo \Portal\Core\Currency::totalsHtml($totalBilled, \Portal\Core\Currency::ofSite()); ?></strong></div>
+        <div><span class="text-muted small">Paid</span><br><strong data-total="paid"><?php echo \Portal\Core\Currency::totalsHtml($totalPaid, \Portal\Core\Currency::ofSite()); ?></strong></div>
+        <div><span class="text-muted small">Outstanding</span><br><strong data-total="outstanding"><?php echo \Portal\Core\Currency::totalsHtml($totalOutstanding, \Portal\Core\Currency::ofSite()); ?></strong></div>
     </div>
 <?php endif; ?>
 

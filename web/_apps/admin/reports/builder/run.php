@@ -228,11 +228,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             // able to break out of this inline <script> block. HEX_TAG
             // rewrites every angle bracket to a \uXXXX escape, which
             // neutralises that regardless of slash-escaping.
+            <?php
+            // 💷 A report about money carries a `currency` column (#966,
+            //    D-139). It is never a value to plot: it goes into each bar's
+            //    LABEL instead ("Pending (EUR)"), so two currencies are two
+            //    bars and never one bar added across them.
+            $chartColumns = array_values(array_filter((array) $compiled['columns'],
+                static fn (array $m): bool => (string) $m['key'] !== \Portal\Core\ReportBuilder::CURRENCY_KEY));
+            $chartLabelKey = (string) ($chartColumns[0]['key'] ?? '');
+            $chartRows = (array) $result['rows'];
+            if (count($chartColumns) !== count((array) $compiled['columns'])) {
+                foreach ($chartRows as $ri => $row) {
+                    $rowCurrency = (string) ($row[\Portal\Core\ReportBuilder::CURRENCY_KEY] ?? '');
+                    $chartRows[$ri][$chartLabelKey] = (string) ($row[$chartLabelKey] ?? '')
+                        . ' (' . ($rowCurrency !== '' ? $rowCurrency : 'no currency recorded') . ')';
+                }
+            }
+            ?>
             var dataIsland = <?php echo json_encode([
-                'labelKey' => (string) $compiled['columns'][0]['key'],
-                'valueKeys' => array_slice(array_column($compiled['columns'], 'key'), 1),
-                'valueLabels' => array_slice(array_column($compiled['columns'], 'label'), 1),
-                'rows' => $result['rows'],
+                'labelKey' => $chartLabelKey,
+                'valueKeys' => array_slice(array_column($chartColumns, 'key'), 1),
+                'valueLabels' => array_slice(array_column($chartColumns, 'label'), 1),
+                'rows' => $chartRows,
             ], JSON_HEX_TAG | JSON_UNESCAPED_UNICODE); ?>;
 
             function render(type) {

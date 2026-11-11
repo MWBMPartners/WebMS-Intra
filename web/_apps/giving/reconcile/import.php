@@ -579,7 +579,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->close();
 
             $lineStmt = $db->prepare(
-                'INSERT INTO tblBankTxns (importID, siteID, txnDate, amountPence, description, reference) VALUES (?, ?, ?, ?, ?, ?)'
+                // 💷 Each line is in its import's currency, kept on the row (D-139).
+                'INSERT INTO tblBankTxns (importID, siteID, txnDate, amountPence, description, reference, `currency`) VALUES (?, ?, ?, ?, ?, ?, ?)'
             );
             if ($lineStmt === false) {
                 throw new \RuntimeException('Failed to prepare bank txn insert: ' . $db->error);
@@ -589,7 +590,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rPence = (int) $r['pence'];
                 $rDesc = (string) $r['desc'];
                 $rRef = $r['ref'];
-                $lineStmt->bind_param('iisiss', $importId, $siteId, $rDate, $rPence, $rDesc, $rRef);
+                $lineStmt->bind_param('iisisss', $importId, $siteId, $rDate, $rPence, $rDesc, $rRef, $currency);
                 $lineStmt->execute();
             }
             $lineStmt->close();

@@ -70,22 +70,23 @@ if ($stmt !== false) {
 // -----------------------------------------------------------------------------
 // 📊 Site-wide unmatched summary
 // -----------------------------------------------------------------------------
-$unmatchedCount = 0;
-$unmatchedPence = 0;
+// 💷 Per currency (D-139): each bank line keeps its import's currency.
+$unmatchedCount  = 0;
+$unmatchedTotals = [];
 $unmatchedCurrency = \Portal\Core\Currency::ofSite();
 $stmt = $db->prepare(
-    'SELECT COUNT(*) AS cnt, COALESCE(SUM(amountPence), 0) AS totalPence '
-    . 'FROM tblBankTxns WHERE siteID = ? AND matchStatus = \'unmatched\''
+    'SELECT COUNT(*) AS cnt, COALESCE(SUM(amountPence), 0) AS totalPence, `currency` '
+    . 'FROM tblBankTxns WHERE siteID = ? AND matchStatus = \'unmatched\' GROUP BY `currency`'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
     $stmt->execute();
-    $sumRow = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    if ($sumRow !== null) {
-        $unmatchedCount = (int) $sumRow['cnt'];
-        $unmatchedPence = (int) $sumRow['totalPence'];
+    $sumRows = $stmt->get_result();
+    while (($sumRow = $sumRows->fetch_assoc()) !== null) {
+        $unmatchedCount += (int) $sumRow['cnt'];
+        \Portal\Core\Currency::addTo($unmatchedTotals, (string) $sumRow['currency'], (int) $sumRow['totalPence']);
     }
+    $stmt->close();
 }
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -117,7 +118,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php if ($unmatchedCount > 0): ?>
     <div class="alert alert-info">
         <strong><?php echo $unmatchedCount; ?></strong> unmatched credit<?php echo $unmatchedCount === 1 ? '' : 's'; ?> site-wide,
-        totalling <strong><?php echo htmlspecialchars(Giving::formatAmount($unmatchedPence, $unmatchedCurrency), ENT_QUOTES, 'UTF-8'); ?></strong>.
+        totalling <strong><?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($unmatchedTotals, $unmatchedCurrency), ENT_QUOTES, 'UTF-8'); ?></strong>.
     </div>
 <?php elseif (count($imports) > 0): ?>
     <div class="alert alert-success">All imported credits are matched or ignored.</div>

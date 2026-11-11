@@ -92,17 +92,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             if ($name === '') {
                 throw new \RuntimeException('Name required');
             }
+            $rateCurrency = \Portal\Core\Currency::ofSite();
             $stmt = $db->prepare(
                 'INSERT INTO tblResource (siteID, name, description, category, capacity, location, requiresApproval, '
-                . 'hourlyRatePence, bufferMinutes, latitude, longitude, what3words, geocodedAt, geocodeSource) '
-                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                . 'hourlyRatePence, bufferMinutes, latitude, longitude, what3words, geocodedAt, geocodeSource, `currency`) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             if ($stmt !== false) {
                 // 📍 #456 Chunk A: 9 -> 14 placeholders/vars (+lat[d], +lng[d], +w3w[s], +geocodedAt[s], +geocodeSource[s]).
                 $stmt->bind_param(
-                    'isssisiiiddsss',
+                    'isssisiiiddssss',
                     $siteId, $name, $desc, $category, $cap, $loc, $requiresApproval, $ratePence, $buffer,
-                    $resLat, $resLng, $w3w, $geocodedAt, $geocodeSource
+                    $resLat, $resLng, $w3w, $geocodedAt, $geocodeSource,
+                    // 💷 The hire rate is in the organisation's currency today, kept on the row (D-139).
+                    $rateCurrency
                 );
                 $stmt->execute();
                 $stmt->close();
@@ -197,7 +200,7 @@ $csrf = Auth::csrfToken();
                         </div>
                         <div class="col-md-2 small">
                             <?php if ((int) $r['requiresApproval'] === 1): ?><span class="badge bg-warning text-dark">Approval</span><?php endif; ?>
-                            <?php if ($r['hourlyRatePence'] !== null): ?><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr<?php endif; ?>
+                            <?php if ($r['hourlyRatePence'] !== null): ?><?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $r['hourlyRatePence'], (string) ($r['currency'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>/hr<?php endif; ?>
                         </div>
                         <div class="col-md-2 text-end">
                             <form method="post" class="d-inline">

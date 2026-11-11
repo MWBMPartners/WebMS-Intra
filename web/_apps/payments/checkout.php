@@ -107,7 +107,9 @@ if ($purpose === 'pledge') {
     $pledge   = null;
     if ($pledgeId > 0) {
         $stmt = $db->prepare(
-            'SELECT p.donorID, p.amountPence, pr.currency, pr.title '
+            // 💷 The pledge's OWN currency (#966, D-139), else its project's
+            //    for an older pledge that recorded none.
+            'SELECT p.donorID, p.amountPence, COALESCE(NULLIF(p.`currency`, \'\'), pr.`currency`) AS `currency`, pr.title '
             . 'FROM tblProjectPledge p INNER JOIN tblProject pr ON pr.projectID = p.projectID '
             . 'WHERE p.pledgeID = ? AND pr.siteID = ? AND p.fulfilledAt IS NULL LIMIT 1'
         );

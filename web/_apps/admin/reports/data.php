@@ -219,10 +219,11 @@ switch ($report) {
         $data = [];
         $stmt = $mysqli->prepare(
             'SELECT DATE_FORMAT(claimDate, \'%Y-%m\') AS month, '
-            . 'COUNT(*) AS claims, COALESCE(SUM(totalAmount), 0) AS total '
+            // 💷 One row per month AND currency (D-139): totals never cross currencies.
+            . 'COUNT(*) AS claims, COALESCE(SUM(totalAmount), 0) AS total, `currency` '
             . 'FROM tblExpenseClaims WHERE siteID = ? '
             . 'AND claimDate >= DATE_SUB(NOW(), INTERVAL 12 MONTH) '
-            . 'GROUP BY month ORDER BY month'
+            . 'GROUP BY month, `currency` ORDER BY month, `currency`'
         );
         if ($stmt !== false) {
             $stmt->bind_param('i', $siteId);

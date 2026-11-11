@@ -705,6 +705,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaims` (
     `claimTitle`  VARCHAR(255)   COLLATE utf8mb4_general_ci DEFAULT NULL,
     `claimDate`   DATE           DEFAULT NULL,
     `totalAmount` DECIMAL(10,2)  DEFAULT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     -- 'Withdrawn' was added by migration 211 (#587): the Withdraw button had
     -- always set it, and the list did not allow it. It is LAST on purpose and
     -- must stay there. The server stores each choice as its position in this
@@ -743,6 +744,9 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimItems` (
     `unitCost`     DECIMAL(10,2)  DEFAULT NULL,
     `quantity`     INT            DEFAULT NULL,
     `lineTotal`    DECIMAL(10,2)  DEFAULT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
+    `quotedCurrency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'The currency the line was QUOTED in (D-139): unitCost and quotedLineTotal are in it. lineTotal is the converted amount, in `currency`',
+    `quotedLineTotal` DECIMAL(10,2) DEFAULT NULL COMMENT 'quantity x unitCost, in quotedCurrency (D-139). Kept for audit beside the converted lineTotal, which is what is approved and reimbursed',
     `purchaseDate` DATE           DEFAULT NULL,
     `supplier`     VARCHAR(255)   COLLATE utf8mb4_general_ci DEFAULT NULL,
     PRIMARY KEY (`itemID`),
@@ -804,6 +808,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimPayments` (
     `payReference` VARCHAR(255)   NOT NULL                COMMENT 'Internal payment reference (bank ref, cheque number etc)',
     `payMethod`    VARCHAR(100)   DEFAULT NULL             COMMENT 'Payment method (Bank Transfer, Cheque, PayPal etc)',
     `payAmount`    DECIMAL(10,2)  DEFAULT NULL            COMMENT 'Amount paid (may differ from claim total in partial payments)',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `paidByID`     INT            DEFAULT NULL             COMMENT 'FK to tblUsers.userID — treasury user who processed payment',
     `addedAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the payment record was created',
     PRIMARY KEY (`payID`),
@@ -4219,6 +4224,7 @@ CREATE TABLE IF NOT EXISTS `tblResource` (
     `geocodeSource`     VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `requiresApproval`  TINYINT(1)   NOT NULL DEFAULT 0,
     `hourlyRatePence`   INT          DEFAULT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `bufferMinutes`     INT          NOT NULL DEFAULT 0,
     `isActive`          TINYINT(1)   NOT NULL DEFAULT 1,
     `createdAt`         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -4811,6 +4817,7 @@ CREATE TABLE IF NOT EXISTS `tblPledges` (
     `campaignID`      INT        NOT NULL,
     `userID`          INT        NOT NULL COMMENT 'The pledger — always a logged-in member',
     `amountPence`     INT        NOT NULL COMMENT 'Per-instalment amount (weekly/monthly); total amount for one-off',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `paymentSchedule` ENUM('one-off','weekly','monthly') NOT NULL DEFAULT 'monthly',
     `status`          ENUM('open','completed','cancelled') NOT NULL DEFAULT 'open',
     `createdAt`       DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -4888,6 +4895,7 @@ CREATE TABLE IF NOT EXISTS `tblGivingStatementLog` (
     `toDate`       DATE         NOT NULL,
     `totalPence`   INT          NOT NULL DEFAULT 0,
     `giftAidPence` INT          NOT NULL DEFAULT 0,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `pdfPath`      VARCHAR(500) DEFAULT NULL COMMENT 'NULL until generated',
     `queuedAt`     DATETIME     DEFAULT NULL COMMENT 'Set when treasurer starts an email run; cron sweeps queued rows',
     `emailedAt`    DATETIME     DEFAULT NULL COMMENT 'Dedupe fence: re-runs skip rows with this set',
@@ -5047,6 +5055,7 @@ CREATE TABLE IF NOT EXISTS `tblProjectPledge` (
     `donorName`    VARCHAR(255) DEFAULT NULL,
     `donorEmail`   VARCHAR(255) DEFAULT NULL,
     `amountPence`  INT          NOT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `pledgedAt`    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `fulfilledAt`  DATETIME     DEFAULT NULL,
     `givingEntryID` INT         DEFAULT NULL,
@@ -7512,6 +7521,7 @@ CREATE TABLE IF NOT EXISTS `tblCountSessions` (
     `cashTotal`      DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed cash total — set when counts match or an admin resolves; written to the gift log on close',
     `chequeTotal`    DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed cheque total',
     `envelopeTotal`  DECIMAL(10,2)  DEFAULT NULL COMMENT 'Agreed envelope total — must equal SUM(tblCountEnvelopes.amount) before close',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `status`         ENUM('open','counting','discrepancy','closed') NOT NULL DEFAULT 'open',
     `notes`          TEXT           DEFAULT NULL,
     `createdByID`    INT            DEFAULT NULL,
@@ -7537,6 +7547,7 @@ CREATE TABLE IF NOT EXISTS `tblCountEnvelopes` (
     `giverID`        INT            DEFAULT NULL COMMENT 'tblUsers — matched member, nullable (unmatched envelopes use giverName)',
     `giverName`      VARCHAR(255)   DEFAULT NULL COMMENT 'Free-text name when the envelope name doesn''t match a member',
     `amount`         DECIMAL(10,2)  NOT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `method`         ENUM('cash','cheque') NOT NULL DEFAULT 'cash' COMMENT 'What the named envelope contained',
     `createdAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`envelopeID`),
@@ -7577,6 +7588,7 @@ CREATE TABLE IF NOT EXISTS `tblBankTxns` (
     `siteID`                INT          NOT NULL DEFAULT 1,
     `txnDate`               DATE         NOT NULL,
     `amountPence`           INT          NOT NULL COMMENT 'Integer minor units, always > 0 (credits only) — house pence convention (#266)',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `description`           VARCHAR(255) NOT NULL DEFAULT '',
     `reference`             VARCHAR(100) DEFAULT NULL,
     `matchStatus`           ENUM('unmatched','matched','ignored') NOT NULL DEFAULT 'unmatched',
@@ -7940,6 +7952,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetMaintenance` (
     `performedByUserID`  INT          DEFAULT NULL COMMENT 'Portal user who did the work, if any',
     `performedByName`    VARCHAR(255) DEFAULT NULL COMMENT 'Free-text — external contractor/engineer',
     `costPence`          INT          DEFAULT NULL,
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `performedAt`        DATE         DEFAULT NULL,
     `nextDueDate`        DATE         DEFAULT NULL,
     `status`             ENUM('scheduled','completed','cancelled') NOT NULL DEFAULT 'completed',
@@ -8213,6 +8226,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetValueHistory` (
     `assetID`            INT      NOT NULL,
     `valueDate`          DATE     NOT NULL,
     `currentValuePence`  INT      NOT NULL COMMENT 'Integer minor units — house pence convention (#266)',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `method`             ENUM('straight-line','reducing-balance','manual') NOT NULL,
     `source`             ENUM('cron','manual') NOT NULL DEFAULT 'cron',
     `recordedByID`       INT      DEFAULT NULL COMMENT 'NULL for a cron-computed row; set for a manual valuation entry',
@@ -8756,6 +8770,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueInvoiceLines` (
     `invoiceID`   INT      NOT NULL,
     `bookingID`   INT      NOT NULL,
     `amountPence` INT      DEFAULT NULL COMMENT 'Portion of the invoice attributable to this booking; NULL = unallocated (invoice total stands alone)',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `createdAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`lineID`),
     UNIQUE KEY `uq_venil_invoice_booking` (`invoiceID`, `bookingID`),
@@ -8782,6 +8797,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueInvoicePayments` (
     `invoiceID`    INT          NOT NULL,
     `paidDate`     DATE         NOT NULL,
     `amountPence`  INT          NOT NULL COMMENT 'Integer minor units — house pence convention (#266); partial payments allowed',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
     `method`       ENUM('bank-transfer','standing-order','cash','cheque','card','online','other') NOT NULL DEFAULT 'bank-transfer',
     `reference`    VARCHAR(100) DEFAULT NULL COMMENT 'Bank ref / cheque number',
     `notes`        VARCHAR(500) DEFAULT NULL,
@@ -11764,6 +11780,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('279_no_built_in_country.sql')
 -- currency into org.currency, and deleting the four old keys) have nothing to
 -- act on in a fresh install; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('282_no_built_in_currency.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 283_every_amount_keeps_its_currency.sql (#966, D-139) ─────────────
+-- Every money table above carries a `currency` beside its amount, and an
+-- expense line its quotedCurrency and quotedLineTotal. A fresh install holds no
+-- rows for the migration's fills to act on; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('283_every_amount_keeps_its_currency.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

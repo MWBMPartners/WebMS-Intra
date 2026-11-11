@@ -115,6 +115,29 @@ class Giving
      * GBP, so an organisation anywhere had its gifts shown in pounds (#966).
      * The writing itself is Currency::format(), the one place it is done.
      */
+    /**
+     * 🧾 The statement's closing totals, one line per currency (D-139): "Total
+     * given: €120.00 · of which Gift Aid eligible: €100.00". With gifts in two
+     * currencies there are two lines, never one sum.
+     *
+     * @param array<string,int> $totals
+     * @param array<string,int> $giftAidTotals
+     */
+    private static function statementTotalsHtml(array $totals, array $giftAidTotals, string $emptyCurrency, callable $esc): string
+    {
+        if ($totals === []) {
+            $totals = [$emptyCurrency => 0];
+        }
+        ksort($totals, SORT_STRING);
+        $html = '';
+        foreach ($totals as $code => $hundredths) {
+            $html .= '<p class="total right">Total given: ' . $esc(Currency::format((int) $hundredths, (string) $code))
+                . ' &middot; of which Gift Aid eligible: ' . $esc(Currency::format((int) ($giftAidTotals[$code] ?? 0), (string) $code)) . '</p>';
+        }
+
+        return $html;
+    }
+
     public static function formatAmount(int $pence, ?string $currency = null): string
     {
         return Currency::format($pence, $currency ?? Currency::ofSite());
@@ -337,18 +360,20 @@ class Giving
         $currency    = Currency::ofOrganisation($siteId);
 
         $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
-        $total = 0;
-        $giftAidTotal = 0;
+        // 💷 Totals PER CURRENCY (D-139): each gift keeps the currency it was
+        //    given in, and two currencies are never added together.
+        $totals        = [];
+        $giftAidTotals = [];
         foreach ($entries as $e) {
             $amount = (int) $e['amountPence'];
-            $total += $amount;
+            Currency::addTo($totals, (string) ($e['currency'] ?? ''), $amount);
             // 🎁 Gift Aid eligibility per entry, computed above via EXISTS
             // (never a JOIN against tblGiftAidDeclaration) — an overlapping
             // pair of active declarations can never double-count a single
             // entry's amount into this sum, mirroring buildHmrcCsv()'s own
             // known JOIN hazard note above.
             if ((int) $e['giftAidEligible'] === 1) {
-                $giftAidTotal += $amount;
+                Currency::addTo($giftAidTotals, (string) ($e['currency'] ?? ''), $amount);
             }
         }
 
@@ -389,8 +414,7 @@ class Giving
             // reclaim figure (#440 Q2 default): the reclaim is the
             // charity's own figure, calculated and claimed via the
             // existing HMRC CSV export, not a donor-facing estimate.
-            . '<p class="total right">Total given: ' . $esc(self::formatAmount($total, $currency))
-            . ' &middot; of which Gift Aid eligible: ' . $esc(self::formatAmount($giftAidTotal, $currency)) . '</p>'
+            . self::statementTotalsHtml($totals, $giftAidTotals, $currency, $esc)
             . '<p class="muted" style="margin-top:32px;">'
             . 'This statement is for your records. Please retain a copy for tax purposes. '
             . 'The "Gift Aid eligible" figure is the portion of your giving covered by an active Gift Aid '
@@ -546,7 +570,12 @@ class Giving
      * disk and on its log row; it is listed at Admin, Settings, Giving
      * records, not here.
      *
-     * @return array<int, array{donorID:int, fullName:string, emailAddress:string,
+     * Totals are PER CURRENCY (D-139): `totals` and `giftAidTotals` map a
+     * currency to hundredths; `totalPence`/`giftAidPence` hold a figure only
+     * when the donor gave in one currency (`currency`), else 0 and ''.
+     *
+     * @return array<int, array{totals:array<string,int>, giftAidTotals:array<string,int>, currency:string,
+     *   donorID:int, fullName:string, emailAddress:string,
      *   usActive:bool, optedOut:bool, entryCount:int, totalPence:int,
      *   giftAidPence:int, pdfPath:?string, queuedAt:?string, emailedAt:?string,
      *   emailedTo:?string, errorMsg:?string}>
@@ -559,6 +588,7 @@ class Giving
             'SELECT e.donorID, u.fullName, u.emailAddress, u.notifyPrefs, '
             . '       MAX(us.userID IS NOT NULL) AS usActive, '
             . '       COUNT(*) AS entryCount, '
+            . '       e.currency AS currency, '
             . '       SUM(e.amountPence) AS totalPence, '
             . '       SUM(CASE WHEN EXISTS ('
             . '             SELECT 1 FROM tblGiftAidDeclaration d '
@@ -570,7 +600,7 @@ class Giving
             . 'LEFT JOIN tblUserSites us ON us.userID = e.donorID AND us.siteID = e.siteID AND us.isActive = 1 '
             . 'WHERE e.siteID = ? AND e.donorID IS NOT NULL AND e.donatedAt BETWEEN ? AND ? '
             . '  AND NOT ' . self::erasedDonorSql('e.siteID', 'e.donorID') . ' '
-            . 'GROUP BY e.donorID, u.fullName, u.emailAddress, u.notifyPrefs '
+            . 'GROUP BY e.donorID, u.fullName, u.emailAddress, u.notifyPrefs, e.currency '
             . 'HAVING SUM(e.amountPence) > 0 '
             . 'ORDER BY u.fullName '
             . 'LIMIT 2000'
@@ -581,8 +611,26 @@ class Giving
         $stmt->bind_param('iss', $siteId, $from, $to);
         $stmt->execute();
         $rs = $stmt->get_result();
+        // 💷 One row per donor AND CURRENCY comes back (D-139); they are folded
+        //    into one entry per donor carrying a total per currency. 'totalPence'
+        //    and 'giftAidPence' are kept only when the donor gave in ONE currency
+        //    ('currency' names it); with two they are 0 and 'currency' is '', so no
+        //    caller can add currencies together by reading them.
         while ($r = $rs->fetch_assoc()) {
-            $rows[(int) $r['donorID']] = [
+            $did = (int) $r['donorID'];
+            if (isset($rows[$did]) === true) {
+                Currency::addTo($rows[$did]['totals'], (string) $r['currency'], (int) $r['totalPence']);
+                Currency::addTo($rows[$did]['giftAidTotals'], (string) $r['currency'], (int) $r['giftAidPence']);
+                $rows[$did]['entryCount']  += (int) $r['entryCount'];
+                $rows[$did]['totalPence']   = 0;
+                $rows[$did]['giftAidPence'] = 0;
+                $rows[$did]['currency']     = '';
+                continue;
+            }
+            $rows[$did] = [
+                'totals'        => [strtoupper((string) $r['currency']) => (int) $r['totalPence']],
+                'giftAidTotals' => [strtoupper((string) $r['currency']) => (int) $r['giftAidPence']],
+                'currency'      => strtoupper((string) $r['currency']),
                 'donorID'      => (int) $r['donorID'],
                 'fullName'     => (string) $r['fullName'],
                 'emailAddress' => (string) ($r['emailAddress'] ?? ''),
@@ -656,25 +704,30 @@ class Giving
      * member) — #440 Q6 out-of-scope for statements, surfaced only as an
      * informational line on the bulk page.
      *
-     * @return array{count:int, totalPence:int}
+     * Totals are PER CURRENCY (D-139): 'totals' maps a currency to hundredths.
+     *
+     * @return array{count:int, totals:array<string,int>}
      */
     public static function statementsExcludedSummary(int $siteId, string $from, string $to): array
     {
         $db = App::db();
-        $count = 0;
-        $totalPence = 0;
+        $count  = 0;
+        $totals = [];
         $stmt = $db->prepare(
-            'SELECT COUNT(*), COALESCE(SUM(amountPence), 0) FROM tblGivingEntry '
-            . 'WHERE siteID = ? AND donorID IS NULL AND donatedAt BETWEEN ? AND ?'
+            'SELECT COUNT(*) AS `n`, COALESCE(SUM(`amountPence`), 0) AS `pence`, `currency` FROM `tblGivingEntry` '
+            . 'WHERE `siteID` = ? AND `donorID` IS NULL AND `donatedAt` BETWEEN ? AND ? GROUP BY `currency`'
         );
         if ($stmt !== false) {
             $stmt->bind_param('iss', $siteId, $from, $to);
             $stmt->execute();
-            $stmt->bind_result($count, $totalPence);
-            $stmt->fetch();
+            $rs = $stmt->get_result();
+            while (($row = $rs->fetch_assoc()) !== null) {
+                $count += (int) $row['n'];
+                Currency::addTo($totals, (string) $row['currency'], (int) $row['pence']);
+            }
             $stmt->close();
         }
-        return ['count' => (int) $count, 'totalPence' => (int) $totalPence];
+        return ['count' => $count, 'totals' => $totals];
     }
 
     /**
@@ -696,9 +749,10 @@ class Giving
         $db = App::db();
         $stmt = $db->prepare(
             'INSERT INTO tblGivingStatementLog '
-            . '(siteID, donorID, periodKey, fromDate, toDate, totalPence, giftAidPence, createdByID) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
-            . 'ON DUPLICATE KEY UPDATE totalPence = VALUES(totalPence), giftAidPence = VALUES(giftAidPence), updatedAt = NOW()'
+            . '(siteID, donorID, periodKey, fromDate, toDate, totalPence, giftAidPence, createdByID, `currency`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE totalPence = VALUES(totalPence), giftAidPence = VALUES(giftAidPence), '
+            . '`currency` = VALUES(`currency`), updatedAt = NOW()'
         );
         if ($stmt === false) {
             return 0;
@@ -708,8 +762,13 @@ class Giving
             $donorId      = (int) $d['donorID'];
             $totalPence   = (int) $d['totalPence'];
             $giftAidPence = (int) $d['giftAidPence'];
+            // 💷 One row per donor and period, one document (D-139): its totals are
+            //    recorded with their currency when the donor gave in ONE currency.
+            //    With two, the row records '' and 0 — the statement itself lists
+            //    each currency's total, and this row never adds them together.
+            $logCurrency  = (string) $d['currency'];
             $stmt->bind_param(
-                'iisssiii',
+                'iisssiiis',
                 $siteId,
                 $donorId,
                 $periodKey,
@@ -717,7 +776,8 @@ class Giving
                 $to,
                 $totalPence,
                 $giftAidPence,
-                $createdByID
+                $createdByID,
+                $logCurrency
             );
             if ($stmt->execute() === true) {
                 $count++;

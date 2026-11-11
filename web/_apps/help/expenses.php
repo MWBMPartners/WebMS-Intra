@@ -86,9 +86,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <ul class="small text-secondary mt-1 mb-0">
                     <li><strong>Description</strong> -- what the expense was for</li>
                     <li><strong>Quantity</strong> -- how many units (default is 1)</li>
-                    <li><strong>Unit price</strong> -- the cost per unit in pounds</li>
+                    <li><strong>Unit cost, as quoted</strong> -- the cost of one, as the receipt or invoice shows it</li>
+                    <li><strong>Quoted in</strong> -- the currency the receipt is in. It starts as your organisation's own currency</li>
                 </ul>
                 <p class="mt-1 mb-0 small text-secondary">The line total and grand total are calculated automatically. Click <strong>+ Add item</strong> to add more rows, or click the <span class="text-danger">&times;</span> button to remove a row.</p>
+                <?php // #966, D-139: a claim is in the organisation's currency; a line bought abroad keeps both figures. The portal fetches no exchange rate from anywhere: the claimant types the converted figure from their own evidence. ?>
+                <p class="mt-2 mb-0 small text-secondary" id="other-currency">
+                    <strong>Something bought in another currency.</strong> Choose that currency under <strong>Quoted in</strong>
+                    and a second box appears: type what it really cost you in your organisation's currency, as your card or
+                    bank statement shows it. That figure is what is approved and paid back. The portal keeps both figures,
+                    shows the rate worked out from them (for example "1 USD = 0.7900 GBP"), and does not look up an
+                    exchange rate anywhere, so attach the statement as evidence. When the receipt is already in your
+                    organisation's currency, there is only the one figure to type.
+                </p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -150,7 +160,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="col-12 col-md-3">
             <div class="card text-center h-100 border-info">
                 <div class="card-body">
-                    <i class="fa-solid fa-sterling-sign fa-2x text-info mb-2"></i>
+                    <i class="fa-solid fa-money-bill-wave fa-2x text-info mb-2"></i>
                     <h6>3. Reimbursed</h6>
                     <p class="small text-secondary mb-0">Treasury has processed the payment. Check the payment reference for your records.</p>
                 </div>
@@ -204,7 +214,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span>The approver has declined the claim. Review any comments they left for an explanation. You may need to submit a corrected claim.</span>
         </div>
         <div class="list-group-item d-flex align-items-center gap-3">
-            <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-sterling-sign"></i> Reimbursed</span>
+            <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-money-bill-wave"></i> Reimbursed</span>
             <span>The treasury team has processed the payment. A payment reference number is attached for your records.</span>
         </div>
         <?php

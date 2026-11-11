@@ -253,15 +253,18 @@ try {
         exit();
     }
 
-    // 1. 💳 Insert payment reference records with paidByID
+    // 1. 💳 Insert payment reference records with paidByID.
+    // 💷 A payment is in the claim's OWN currency (#966, D-139), read from the
+    //    claim row this transaction has just locked, never today's setting.
     $stmt = $mysqli->prepare(
-        'INSERT INTO tblExpenseClaimPayments (claimID, payReference, paidByID) VALUES (?, ?, ?)'
+        'INSERT INTO tblExpenseClaimPayments (claimID, payReference, paidByID, `currency`) '
+        . 'VALUES (?, ?, ?, (SELECT `c`.`currency` FROM `tblExpenseClaims` `c` WHERE `c`.`claimID` = ?))'
     );
     if ($stmt === false) {
         throw new \RuntimeException('Failed to prepare payment insert: ' . $mysqli->error);
     }
     foreach ($refs as $r) {
-        $stmt->bind_param('isi', $claimID, $r, $userId);
+        $stmt->bind_param('isii', $claimID, $r, $userId, $claimID);
         $stmt->execute();
     }
     $stmt->close();

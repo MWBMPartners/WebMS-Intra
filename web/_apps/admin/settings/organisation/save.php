@@ -242,6 +242,27 @@ $upsert = static function (mysqli $db, string $key, string $value, ?int $siteId)
 $siteId = Site::id();
 
 // -----------------------------------------------------------------------------
+// 🏷️ The "label amounts with no currency" form (#966, D-139). It is handled
+//    here and stops. The administrator chooses the currency; nothing guesses
+//    it, and only rows holding '' are touched (Currency::labelUnlabelled()).
+// -----------------------------------------------------------------------------
+if (($_POST['form'] ?? '') === 'label-currency') {
+    $labelCode = Currency::fromPosted($_POST['labelCurrency'] ?? null);
+    if ($labelCode === null || $labelCode === '') {
+        $reject('Nothing was labelled. Choose the currency those amounts were in.');
+    }
+    $labelled = Currency::labelUnlabelled($db, $siteId, $labelCode);
+    if ($labelled === null) {
+        $reject('Nothing was labelled: the amounts could not be updated. Nothing was changed; try again.');
+    }
+    Logger::activity('OrgAmountsLabelled', $labelled . ' amount(s) saved with no currency were labelled ' . $labelCode . '.');
+    $_SESSION['flash_msg']  = $labelled . ' amount' . ($labelled === 1 ? ' was' : 's were') . ' labelled ' . $labelCode . '.';
+    $_SESSION['flash_type'] = 'success';
+    header('Location: ' . $redirect, true, 302);
+    exit();
+}
+
+// -----------------------------------------------------------------------------
 // 🌐 The "Web addresses" form (#500). See the file header: it is handled
 //    here and stops, so that none of the postal-address code below runs.
 // -----------------------------------------------------------------------------
@@ -414,8 +435,8 @@ if ($countrySent === true) {
 //    - a currency the portal can use is stored as the organisation's own;
 //    - text that is not one, sent back exactly as the row holds it, is kept
 //      unchanged; anything else is REFUSED, before anything is written.
-//    Whether the change may happen at all is asked below, inside the
-//    transaction that writes, under a lock (Currency::whyCannotChange()).
+//    A change applies to new records only: every amount keeps the currency it
+//    was recorded in (D-139), so nothing is relabelled and there is no lock.
 $currencySent      = array_key_exists('currency', $_POST) === true;
 $currencyOwnBefore = Currency::ownStoredText($siteId);
 $currencyChosen    = null;
@@ -484,26 +505,12 @@ if ($coords === null && Geocoder::autoEnabled() === true) {
     }
 }
 
-// 🔒 Everything below is written in ONE transaction (#966). The currency's
-//    money check takes locking reads (#647), which hold only inside a
-//    transaction (#697), so no money can be recorded for this organisation
-//    between the check and the write. The check comes FIRST, so a refusal
-//    leaves nothing written and "Nothing was saved" is true.
+// 🔒 Everything below is written in ONE transaction (#966), so a failure part
+//    way leaves the organisation's settings as they were rather than half
+//    saved.
 $db->begin_transaction();
 try {
 if ($currencyChosen !== null && $currencyChosen !== $currencyOwnBefore) {
-    $currencyInstallation = Currency::ofInstallation();
-    $currencyOwnNow       = Currency::ownOf($siteId);
-    $currencyNow          = $currencyOwnNow !== '' ? $currencyOwnNow : $currencyInstallation;
-    $currencyNextOwn      = Currency::isChoosable($currencyChosen) === true ? $currencyChosen : '';
-    $currencyNext         = $currencyNextOwn !== '' ? $currencyNextOwn : $currencyInstallation;
-    $currencyRefusal      = Currency::whyCannotChange($db, $siteId, $currencyNow, $currencyNext, true);
-    if ($currencyRefusal !== '') {
-        $db->rollback();
-        Logger::activity('OrgCurrencyRefused', 'A change of this organisation\'s currency from ' . $currencyNow . ' to '
-            . ($currencyNext !== '' ? $currencyNext : 'none') . ' was refused: money is recorded or could not be checked.');
-        $reject('Nothing was saved. ' . $currencyRefusal);
-    }
     if ($currencyChosen === '') {
         $dropCurrency = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
         if ($dropCurrency !== false) {

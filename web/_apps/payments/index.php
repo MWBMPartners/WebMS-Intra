@@ -51,17 +51,25 @@ $ppWebhookId = (string) ($settings['paypal']['webhookId'] ?? '');
 $hasGcTok   = ((string) ($settings['gocardless']['token'] ?? '')) !== '';
 
 // Reconciliation snapshot for the current month.
-$monthAgg = ['count' => 0, 'gross' => 0, 'fees' => 0, 'refunded' => 0];
+// 💷 Added up PER CURRENCY (D-139): each payment keeps the currency it was
+//    taken in, and two currencies are never added together.
+$monthAgg = ['count' => 0, 'gross' => [], 'fees' => [], 'refunded' => []];
 $stmt = $db->prepare(
     'SELECT COUNT(*) AS n, COALESCE(SUM(amountPence),0) AS gross, '
     . '       COALESCE(SUM(feePence),0) AS fees, '
-    . '       COALESCE(SUM(CASE WHEN status = "refunded" THEN amountPence ELSE 0 END),0) AS refunded '
-    . 'FROM tblPayment WHERE siteID = ? AND createdAt >= DATE_FORMAT(NOW(), "%Y-%m-01")'
+    . '       COALESCE(SUM(CASE WHEN status = "refunded" THEN amountPence ELSE 0 END),0) AS refunded, `currency` '
+    . 'FROM tblPayment WHERE siteID = ? AND createdAt >= DATE_FORMAT(NOW(), "%Y-%m-01") GROUP BY `currency`'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
     $stmt->execute();
-    $monthAgg = $stmt->get_result()->fetch_assoc() ?? $monthAgg;
+    $aggRows = $stmt->get_result();
+    while (($aggRow = $aggRows->fetch_assoc()) !== null) {
+        $monthAgg['count'] += (int) $aggRow['n'];
+        \Portal\Core\Currency::addTo($monthAgg['gross'], (string) $aggRow['currency'], (int) $aggRow['gross']);
+        \Portal\Core\Currency::addTo($monthAgg['fees'], (string) $aggRow['currency'], (int) $aggRow['fees']);
+        \Portal\Core\Currency::addTo($monthAgg['refunded'], (string) $aggRow['currency'], (int) $aggRow['refunded']);
+    }
     $stmt->close();
 }
 
@@ -104,9 +112,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </h1>
 
 <div class="row g-3 mb-3">
-    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">This month gross</div><div class="display-6"><?php echo $sym . number_format(((int) $monthAgg['gross']) / 100, 2); ?></div></div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">Processor fees</div><div class="display-6"><?php echo $sym . number_format(((int) $monthAgg['fees']) / 100, 2); ?></div></div></div></div>
-    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">Refunded</div><div class="display-6"><?php echo $sym . number_format(((int) $monthAgg['refunded']) / 100, 2); ?></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">This month gross</div><div class="display-6"><?php echo \Portal\Core\Currency::totalsHtml($monthAgg['gross'], $currency); ?></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">Processor fees</div><div class="display-6"><?php echo \Portal\Core\Currency::totalsHtml($monthAgg['fees'], $currency); ?></div></div></div></div>
+    <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">Refunded</div><div class="display-6"><?php echo \Portal\Core\Currency::totalsHtml($monthAgg['refunded'], $currency); ?></div></div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body"><div class="small text-muted">Payments</div><div class="display-6"><?php echo (int) $monthAgg['count']; ?></div></div></div></div>
 </div>
 

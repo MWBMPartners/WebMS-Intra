@@ -363,13 +363,16 @@ $kept = R::claimDraftFrom([
     'itemDesc'   => ['Train', '', '<b>Lunch</b>', ''],
     'itemQty'    => ['2', '1', '1', '1'],
     'itemUnit'   => ['10.50', '0.00', '7', '3'],
+    // #966, D-139: a line's quoted currency and converted figure are kept too.
+    'itemCurrency'  => ['', '', 'USD', ''],
+    'itemConverted' => ['', '', '6.10', ''],
     'csrf_token' => 'never kept',
 ], 5, 77);
 check('A53 (#870) a refused claim keeps its title, department and the lines that hold anything — a blank line priced 0.00 is dropped, a priced line with no words is kept — and WHOSE it is',
     $kept, ['siteId' => 5, 'userId' => 77, 'claimTitle' => 'Trip to York', 'deptID' => 12, 'items' => [
-        ['desc' => 'Train', 'qty' => '2', 'unit' => '10.50'],
-        ['desc' => '<b>Lunch</b>', 'qty' => '1', 'unit' => '7'],
-        ['desc' => '', 'qty' => '1', 'unit' => '3'],
+        ['desc' => 'Train', 'qty' => '2', 'unit' => '10.50', 'currency' => '', 'converted' => ''],
+        ['desc' => '<b>Lunch</b>', 'qty' => '1', 'unit' => '7', 'currency' => 'USD', 'converted' => '6.10'],
+        ['desc' => '', 'qty' => '1', 'unit' => '3', 'currency' => '', 'converted' => ''],
     ]]);
 check('A54 (#870) a field of the wrong TYPE is kept as nothing, never trusted (#642)',
     R::claimDraftFrom(['claimTitle' => ['x'], 'deptID' => '0x1', 'itemDesc' => 'not a list'], 5, 77),

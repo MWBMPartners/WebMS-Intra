@@ -50,14 +50,20 @@ if ($s1 !== false) {
 
 // 📊 Total expense claims & amount
 $s2 = $mysqli->prepare(
-    'SELECT COUNT(*) AS cnt, COALESCE(SUM(totalAmount), 0) AS total FROM tblExpenseClaims WHERE siteID = ?'
+    // 💷 Per currency (D-139): a claim keeps the currency it was made in.
+    'SELECT COUNT(*) AS cnt, COALESCE(SUM(totalAmount), 0) AS total, `currency` FROM tblExpenseClaims WHERE siteID = ? GROUP BY `currency`'
 );
+$stats['totalClaims']   = 0;
+$stats['expenseTotals'] = [];
 if ($s2 !== false) {
     $s2->bind_param('i', $siteId);
     $s2->execute();
-    $r2 = $s2->get_result()->fetch_assoc();
-    $stats['totalClaims']  = (int) ($r2['cnt'] ?? 0);
-    $stats['totalExpenses'] = (float) ($r2['total'] ?? 0);
+    $r2s = $s2->get_result();
+    while (($r2 = $r2s->fetch_assoc()) !== null) {
+        $stats['totalClaims'] += (int) ($r2['cnt'] ?? 0);
+        // Claims are decimals of a currency: kept in hundredths for the one adder.
+        \Portal\Core\Currency::addTo($stats['expenseTotals'], (string) $r2['currency'], (int) round(((float) $r2['total']) * 100));
+    }
     $s2->close();
 }
 
@@ -269,7 +275,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     <?php endforeach; ?>
                     <p class="small text-muted mt-3 mb-0">
-                        Total value: <strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($stats['totalExpenses'] ?? 0, 2); ?></strong>
+                        Total value: <strong><?php echo \Portal\Core\Currency::totalsHtml($stats['expenseTotals'] ?? [], \Portal\Core\Currency::ofSite()); ?></strong>
                     </p>
                 <?php endif; ?>
             </div>

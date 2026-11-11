@@ -357,7 +357,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <span class="input-group-text"><?php echo $esc($currency); ?></span>
                             <input type="number" step="0.01" min="0" class="form-control" id="costPence" name="costPence" value="<?php echo $esc($costValue); ?>">
                         </div>
-                        <div class="form-text">Pounds — converted to pence when saved.</div>
+                        <div class="form-text">In whole units and hundredths of the booking's currency (12.50, not 1250).</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label" for="currency">Currency</label>

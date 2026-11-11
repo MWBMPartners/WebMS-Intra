@@ -1011,7 +1011,7 @@
             "format": "double",
             "minimum": 0,
             "example": 12.5,
-            "description": "The price of ONE of this thing, in whole currency units and hundredths — **12.50 means twelve pounds fifty, not twelve and a half pence**. Rounded to two decimal places by the portal. Note there is no currency field anywhere on a claim, so which currency it is in is not recorded. Must be a number and not negative; zero is allowed."
+            "description": "The price of ONE of this thing, in whole currency units and hundredths — **12.50 means twelve and a half units, not twelve and a half hundredths**. In the currency named by `quotedCurrency`, which is the claim's own when that is left out. Rounded to two decimal places by the portal. Must be a number and not negative; zero is allowed."
           },
           "quantity": {
             "type": "integer",
@@ -1029,12 +1029,24 @@
             "maxLength": 255,
             "nullable": true,
             "description": "Who it was bought from — the shop or company's name, as free text. **Going over the length shown is REFUSED with 400**, not shortened."
+          },
+          "quotedCurrency": {
+            "type": "string",
+            "pattern": "^[A-Za-z]{3}$",
+            "example": "USD",
+            "description": "The currency the receipt is in, as an ISO 4217 code such as `USD` (#966, D-139). Leave it out, or send the claim's own currency, for a line bought in the claim's currency. A code the portal cannot use is refused with 400."
+          },
+          "convertedAmount": {
+            "type": "number",
+            "format": "double",
+            "example": 29.6,
+            "description": "What the whole line really cost in the CLAIM's currency, as the claimant's card or bank statement shows it, in whole units and hundredths. **Required, and more than zero, when `quotedCurrency` differs from the claim's currency** (refused with 400 otherwise); ignored when it is the same. This is the figure added to the claim's total, approved and paid. The portal looks up no exchange rate: the rate shown on the claim is worked out from the two figures."
           }
         }
       },
       "ExpenseCreate": {
         "type": "object",
-        "description": "`lineTotal` and the claim `totalAmount` are always computed server-side from `unitCost * quantity` — never accepted from the client. New claims always land in 'Pending' status; the approval/status-transition workflow is DEFERRED to Phase 3 (no `PUT /api/v1/expenses/{id}` exists in v1).",
+        "description": "`lineTotal` and the claim `totalAmount` are always computed server-side — never accepted from the client. A claim is made in the organisation's currency at the moment it is created and keeps it (#966, D-139). A line quoted in that currency totals `unitCost * quantity`; a line quoted in another currency (`quotedCurrency`) totals the `convertedAmount` the claimant read off their statement, and the quoted figure is kept beside it. The portal looks up no exchange rate. New claims always land in 'Pending' status; the approval/status-transition workflow is DEFERRED to Phase 3 (no `PUT /api/v1/expenses/{id}` exists in v1).",
         "required": [
           "deptID",
           "claimTitle",
@@ -1238,7 +1250,7 @@
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says."
           },
           "currency": {
             "type": "string",
@@ -1289,7 +1301,7 @@
           "salvageValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset is expected to be worth at the end of its useful life, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Writing-down never takes the value below this."
+            "description": "What the asset is expected to be worth at the end of its useful life, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. Writing-down never takes the value below this."
           },
           "currentValuePence": {
             "type": "integer",
@@ -1310,7 +1322,7 @@
           "insuredValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The sum the asset is insured for, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
+            "description": "The sum the asset is insured for, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says."
           },
           "insuranceRenewalDate": {
             "type": "string",
@@ -1365,7 +1377,7 @@
         "required": [
           "name"
         ],
-        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with the organisation's own currency** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
+        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not decimal strings such as \"899.99\"), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with the organisation's own currency** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
         "properties": {
           "name": {
             "type": "string",
@@ -1460,7 +1472,7 @@
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
           },
           "currency": {
             "type": "string",
@@ -1517,7 +1529,7 @@
           "salvageValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insurerName": {
             "type": "string",
@@ -1532,7 +1544,7 @@
           "insuredValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insuranceRenewalDate": {
             "type": "string",
@@ -7889,12 +7901,12 @@
         ],
         "responses": {
           "200": {
-            "description": "The spreadsheet. `Content-Type: text/csv; charset=utf-8`, sent as an attachment named `expenses-export-<date>.csv`. The first row is the column headings and begins with a byte-order mark so that spreadsheet programs open it as UTF-8. Amounts are in **pounds**, matching the rest of Expenses and unlike the asset figures, which are in pence. An organisation with no claims yet gets the heading row and nothing after it — not an empty file. (Until 30 October 2026 it got three bytes, the byte-order mark alone, because the headings were derived from the first row and there was no first row.)",
+            "description": "The spreadsheet. `Content-Type: text/csv; charset=utf-8`, sent as an attachment named `expenses-export-<date>.csv`. The first row is the column headings and begins with a byte-order mark so that spreadsheet programs open it as UTF-8. Amounts are in whole currency units and hundredths (12.50), matching the rest of Expenses and unlike the asset figures, which are in hundredths (1250). Each claim's `Currency` column names the currency its amount is in (an ISO 4217 code, empty for an older claim that recorded none): **two rows may be in two currencies, so never add the Amount column up without it** (#966, D-139). An organisation with no claims yet gets the heading row and nothing after it — not an empty file. (Until 30 October 2026 it got three bytes, the byte-order mark alone, because the headings were derived from the first row and there was no first row.)",
             "content": {
               "text/csv": {
                 "schema": {
                   "type": "string",
-                  "description": "The file's text. Columns, in order: claimID, Claimant, Department, Title, Date, Amount, Status — that order is sent explicitly by the handler, so it does not change if the query behind it is reordered. **A claim always belongs to a department** (`tblExpenseClaims.deptID` cannot be empty and is tied to `tblDepts`), so the Department column is blank only where the department itself has no name recorded."
+                  "description": "The file's text. Columns, in order: claimID, Claimant, Department, Title, Date, Amount, Currency, Status — that order is sent explicitly by the handler, so it does not change if the query behind it is reordered. **A claim always belongs to a department** (`tblExpenseClaims.deptID` cannot be empty and is tied to `tblDepts`), so the Department column is blank only where the department itself has no name recorded."
                 }
               }
             }
@@ -9815,7 +9827,7 @@
           "Assets"
         ],
         "summary": "Create a new asset (v1)",
-        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. Every field is validated/coerced exactly like the `save.php` HTML form the API mirrors (ENUM allow-lists, site-scoped FK checks, licenseKey encrypt-on-write) — money fields are PENCE integers, not pounds strings. **Legacy alias:** `POST /api/assets/create`.",
+        "description": "Requires scope `assets:write` (bearer) or an admin/asset_manager session. Every field is validated/coerced exactly like the `save.php` HTML form the API mirrors (ENUM allow-lists, site-scoped FK checks, licenseKey encrypt-on-write) — money fields are PENCE integers, not decimal strings. **Legacy alias:** `POST /api/assets/create`.",
         "security": [
           {
             "bearerAuth": []

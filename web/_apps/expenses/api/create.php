@@ -21,7 +21,10 @@
  *     "userID":     42,                               (bearer mode ONLY — required)
  *     "items": [                                       (required, non-empty)
  *       { "itemName": "Snacks", "unitCost": 12.50, "quantity": 3,
- *         "description": "…", "purchaseDate": "2026-07-17", "supplier": "Tesco" }
+ *         "description": "…", "purchaseDate": "2026-07-17", "supplier": "Tesco",
+ *         "quotedCurrency": "USD", "convertedAmount": 29.60 }  (both optional:
+ *         a line quoted in another currency than the claim's needs the cost in
+ *         the claim's currency from the claimant's statement — #966, D-139)
  *     ]
  *   }
  *
@@ -45,6 +48,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -135,6 +139,8 @@ if (is_array($itemsRaw) === false || count($itemsRaw) === 0) {
 
 $items      = [];
 $totalAmount = 0.0;
+// 💷 A claim is in the organisation's currency today (#966, D-139).
+$claimCurrency = \Portal\Core\Currency::ofSite();
 foreach ($itemsRaw as $idx => $itemRaw) {
     if (is_array($itemRaw) === false) {
         ApiResponse::error('items[' . $idx . '] must be an object', 400);
@@ -179,7 +185,14 @@ foreach ($itemsRaw as $idx => $itemRaw) {
     }
 
     // 🧮 Server-side line total — NEVER trust a client-supplied lineTotal.
-    $lineTotal = round($unitCost * $quantity, 2);
+    // 💷 Through the ONE rule (ExpenseRules::expenseLine(), #966, D-139): the
+    //    QUOTED amount and currency are kept, and the CONVERTED amount in the
+    //    claim's currency is what the total adds up.
+    $judged = ExpenseRules::expenseLine($itemName, $quantity, $unitCost, $itemRaw['quotedCurrency'] ?? '', $itemRaw['convertedAmount'] ?? '', $claimCurrency);
+    if (is_string($judged) === true) {
+        ApiResponse::error('items[' . $idx . ']: ' . $judged, 400);
+    }
+    $lineTotal = $judged['lineTotal'];
     $totalAmount += $lineTotal;
 
     $items[] = [
@@ -188,6 +201,9 @@ foreach ($itemsRaw as $idx => $itemRaw) {
         'unitCost'     => $unitCost,
         'quantity'     => $quantity,
         'lineTotal'    => $lineTotal,
+        'currency'        => $judged['currency'],
+        'quotedCurrency'  => $judged['quotedCurrency'],
+        'quotedLineTotal' => $judged['quotedLineTotal'],
         'purchaseDate' => $purchaseDate,
         'supplier'     => $supplier,
     ];
@@ -202,15 +218,15 @@ $status = 'Pending';
 App::beginTransaction();
 try {
     $stmt = $db->prepare(
-        'INSERT INTO tblExpenseClaims (siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO tblExpenseClaims (siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, `currency`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         throw new \RuntimeException('Failed to prepare claim insert: ' . $db->error);
     }
     $stmt->bind_param(
-        'iiissds',
-        $siteId, $ownerUserId, $deptId, $claimTitle, $claimDate, $totalAmount, $status
+        'iiissdss',
+        $siteId, $ownerUserId, $deptId, $claimTitle, $claimDate, $totalAmount, $status, $claimCurrency
     );
     if ($stmt->execute() === false) {
         throw new \RuntimeException('Failed to insert claim: ' . $stmt->error);
@@ -220,17 +236,18 @@ try {
 
     $itemStmt = $db->prepare(
         'INSERT INTO tblExpenseClaimItems '
-        . '(claimID, itemName, description, unitCost, quantity, lineTotal, purchaseDate, supplier) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        . '(claimID, itemName, description, unitCost, quantity, lineTotal, purchaseDate, supplier, `currency`, `quotedCurrency`, `quotedLineTotal`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($itemStmt === false) {
         throw new \RuntimeException('Failed to prepare item insert: ' . $db->error);
     }
     foreach ($items as $it) {
         $itemStmt->bind_param(
-            'issdidss',
+            'issdidssssd',
             $claimId, $it['itemName'], $it['description'], $it['unitCost'],
-            $it['quantity'], $it['lineTotal'], $it['purchaseDate'], $it['supplier']
+            $it['quantity'], $it['lineTotal'], $it['purchaseDate'], $it['supplier'],
+            $it['currency'], $it['quotedCurrency'], $it['quotedLineTotal']
         );
         if ($itemStmt->execute() === false) {
             throw new \RuntimeException('Failed to insert item: ' . $itemStmt->error);
@@ -252,9 +269,10 @@ Logger::audit('tblExpenseClaims', $claimId, 'create', null, [
     'claimTitle'  => $claimTitle,
     'claimDate'   => $claimDate,
     'totalAmount' => $totalAmount,
+    'currency'    => $claimCurrency,
     'status'      => $status,
     'itemCount'   => count($items),
 ]);
-Logger::activity('ApiExpenseCreate', 'API: submitted expense claim #' . $claimId . ' (' . \Portal\Core\Currency::formatMajor($totalAmount, \Portal\Core\Currency::ofSite()) . ')');
+Logger::activity('ApiExpenseCreate', 'API: submitted expense claim #' . $claimId . ' (' . \Portal\Core\Currency::formatMajor($totalAmount, $claimCurrency) . ')');
 
 ApiResponse::success(['claimID' => $claimId], 201);

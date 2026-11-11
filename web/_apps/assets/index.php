@@ -99,13 +99,13 @@ if ($isCsvExport === true) {
     // silently starts appearing in an export without a conscious decision
     // here. NEVER includes licenseKey, publicToken, or any other secret —
     // see the file header note.
-    // 💷 The cost column is titled with the organisation's currency, not
-    //    "(GBP)" for everybody (#966): one currency per organisation.
-    $costTitle = 'Purchase Cost' . (\Portal\Core\Currency::ofSite() !== '' ? ' (' . \Portal\Core\Currency::ofSite() . ')' : '');
+    // 💷 Each asset keeps its own currency (#966, D-139), so the cost column
+    //    is a plain number and the next column says which money it is.
+    $costTitle = 'Purchase Cost';
     $csvHeaders = [
         'Name', 'Kind', 'Category', 'Location', 'Manufacturer', 'Model',
         'Serial Number', 'Asset Tag', 'Condition', 'Status',
-        'Purchase Date', $costTitle,
+        'Purchase Date', $costTitle, 'Currency',
     ];
     $csvRows = [];
     foreach ($assets as $asset) {
@@ -122,6 +122,7 @@ if ($isCsvExport === true) {
             'Condition'            => ucwords(str_replace('-', ' ', (string) $asset['conditionState'])),
             'Status'               => ucwords(str_replace('-', ' ', (string) $asset['status'])),
             'Purchase Date'        => $asset['purchaseDate'] !== null ? (string) $asset['purchaseDate'] : '',
+            'Currency'             => (string) ($asset['currency'] ?? ''),
             $costTitle             => $purchaseCostPence !== null ? number_format(((int) $purchaseCostPence) / 100, 2, '.', '') : '',
         ];
     }

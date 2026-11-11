@@ -153,8 +153,12 @@ if (is_array($descRaw) === false || is_array($qtyRaw) === false || is_array($uni
     $refuse('The claim lines could not be read, so nothing has been changed.', $claimID);
 }
 
-$items = [];
-$total = 0.0;
+// 💷 Each line's quoted currency and converted amount (#966, D-139). They are
+//    judged below, once the claim is read, because a line is converted into
+//    the CLAIM's currency — the one it was made in — not today's.
+$curRaw  = is_array($_POST['itemCurrency'] ?? null) === true ? $_POST['itemCurrency'] : [];
+$convRaw = is_array($_POST['itemConverted'] ?? null) === true ? $_POST['itemConverted'] : [];
+$rawLines = [];
 foreach ($descRaw as $i => $descEntry) {
     // 🚮 A line with no description is an empty row on the form, not a fault.
     if (is_string($descEntry) === false) {
@@ -179,16 +183,11 @@ foreach ($descRaw as $i => $descEntry) {
         $refuse('A quantity must be at least 1. Nothing has been changed.', $claimID);
     }
 
-    $unit = round((float) $unitEntry, 2);
-    $line = round($unit * $qty, 2);
-    $total += $line;
-
-    $items[] = ['desc' => $desc, 'qty' => $qty, 'unit' => $unit, 'line' => $line];
-}
-$total = round($total, 2);
-
-if (count($items) === 0 || $total <= 0) {
-    $refuse('A claim needs at least one line, and a total of more than zero. Nothing has been changed.', $claimID);
+    $rawLines[] = [
+        'desc' => $desc, 'qty' => $qty, 'unit' => round((float) $unitEntry, 2),
+        'currency' => is_string($curRaw[$i] ?? null) === true ? $curRaw[$i] : '',
+        'converted' => is_scalar($convRaw[$i] ?? null) === true ? $convRaw[$i] : '',
+    ];
 }
 
 // -----------------------------------------------------------------------------
@@ -217,7 +216,7 @@ if ($deptOk === false) {
 // 📋 An early look at the claim, so an obvious no is answered cheaply
 // -----------------------------------------------------------------------------
 $lookStmt = $mysqli->prepare(
-    'SELECT claimID, userID, status, deptID, claimTitle, claimDate, totalAmount '
+    'SELECT claimID, userID, status, deptID, claimTitle, claimDate, totalAmount, `currency` '
     . 'FROM tblExpenseClaims WHERE claimID = ? AND siteID = ? LIMIT 1'
 );
 if ($lookStmt === false) {
@@ -259,6 +258,28 @@ if ($earlyReason !== ExpenseRules::EDIT_ALLOWED) {
         $refuse($notFound, 0, 'warning');
     }
     $refuse(ExpenseRules::editRefusalWords($earlyReason), $claimID, 'warning');
+}
+
+// 💷 The lines, judged now the claim's currency is known and only AFTER the
+//    not-found and not-yours refusals, so a line's message never tells a
+//    stranger anything about somebody else's claim (#648) (#966, D-139): the
+//    claim's own, or the organisation's for a claim that recorded none.
+$claimCurrency = is_array($claim) === true && (string) $claim['currency'] !== ''
+    ? (string) $claim['currency'] : \Portal\Core\Currency::ofSite();
+$items = [];
+$total = 0.0;
+foreach ($rawLines as $raw) {
+    $judged = ExpenseRules::expenseLine($raw['desc'], $raw['qty'], $raw['unit'], $raw['currency'], $raw['converted'], $claimCurrency);
+    if (is_string($judged) === true) {
+        $refuse($judged . ' Nothing has been changed.', $claimID);
+    }
+    $items[] = $judged;
+    $total  += $judged['lineTotal'];
+}
+$total = round($total, 2);
+
+if (count($items) === 0 || $total <= 0) {
+    $refuse('A claim needs at least one line, and a total of more than zero. Nothing has been changed.', $claimID);
 }
 
 // -----------------------------------------------------------------------------
@@ -392,14 +413,15 @@ try {
     $delStmt->close();
 
     $itemStmt = $mysqli->prepare(
-        'INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal) '
-        . 'VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal, `currency`, `quotedCurrency`, `quotedLineTotal`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($itemStmt === false) {
         throw new \RuntimeException('Failed to prepare item insert: ' . $mysqli->error);
     }
     foreach ($items as $it) {
-        $itemStmt->bind_param('isidd', $claimID, $it['desc'], $it['qty'], $it['unit'], $it['line']);
+        $itemStmt->bind_param('isiddssd', $claimID, $it['desc'], $it['qty'], $it['unit'], $it['lineTotal'],
+            $it['currency'], $it['quotedCurrency'], $it['quotedLineTotal']);
         if ($itemStmt->execute() === false) {
             $itemError = $itemStmt->error;
             $itemStmt->close();
@@ -429,8 +451,8 @@ try {
     Logger::audit('tblExpenseClaims', $claimID, 'update', $oldRecord, $newRecord);
     Logger::activity(
         'ExpenseEdit',
-        'Claim #' . $claimID . ' changed (' . \Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), \Portal\Core\Currency::ofSite())
-        . ' → ' . \Portal\Core\Currency::formatMajor($total, \Portal\Core\Currency::ofSite()) . ')',
+        'Claim #' . $claimID . ' changed (' . \Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), $claimCurrency)
+        . ' → ' . \Portal\Core\Currency::formatMajor($total, $claimCurrency) . ')',
         $userId
     );
 

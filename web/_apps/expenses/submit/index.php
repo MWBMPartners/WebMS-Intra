@@ -96,6 +96,24 @@ unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
 $draftTitle = $draft['claimTitle'] ?? '';
 $draftDept  = $draft['deptID'] ?? 0;
 $draftItems = $draft['items'] ?? [];
+// 💷 QUOTED AND CONVERTED (#966, D-139). A claim is in the organisation's
+//    currency; a line may be QUOTED in another (a receipt from abroad), and
+//    then the claimant also types what it cost in the organisation's
+//    currency from their card or bank statement. No exchange-rate service is
+//    asked. The rule is ExpenseRules::expenseLine(); the boxes are drawn
+//    here. With no organisation currency chosen there is nothing to convert
+//    into, so the currency box is not drawn at all.
+$claimCurrency      = \Portal\Core\Currency::ofSite();
+$claimCurrencyLabel = $claimCurrency !== '' ? $claimCurrency : '';
+$currencyOptionsHtml = '';
+if ($claimCurrency !== '') {
+    $currencyOptionsHtml = '<option value="' . htmlspecialchars($claimCurrency, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($claimCurrency, ENT_QUOTES, 'UTF-8') . '</option>';
+    foreach (array_keys(\Portal\Core\Currency::choices()) as $optCode) {
+        if ($optCode !== $claimCurrency) {
+            $currencyOptionsHtml .= '<option value="' . htmlspecialchars($optCode, ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($optCode, ENT_QUOTES, 'UTF-8') . '</option>';
+        }
+    }
+}
 
 // 📎 What the file chooser offers, built from the ONE list of receipt kinds
 //    (#871). It used to say "image/*,application/pdf", which hid the Word,
@@ -167,7 +185,7 @@ if ($ownUserId > 0) {
         $offset   = ($ownPage - 1) * $ownPerPage;
 
         $list = $mysqli->prepare(
-            'SELECT EC.claimID, EC.claimTitle, EC.totalAmount, EC.status, EC.createdAt, D.deptName '
+            'SELECT EC.claimID, EC.claimTitle, EC.totalAmount, EC.`currency`, EC.status, EC.createdAt, D.deptName '
             . 'FROM tblExpenseClaims EC '
             . 'LEFT JOIN tblDepts D ON D.deptID = EC.deptID '
             . 'WHERE EC.siteID = ? AND EC.userID = ? '
@@ -264,7 +282,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Total: </span>
-                        <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $own['totalAmount'], \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $own['totalAmount'], (string) ($own['currency'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="badge bg-<?php echo $ownStatusClass((string) $own['status']); ?>"><?php echo htmlspecialchars((string) $own['status'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -339,10 +357,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- 📊 Column headings for >= md screens -->
     <div class="d-none d-md-flex fw-semibold border-bottom py-1 mb-2 small text-secondary">
-        <div class="col-md-5">Description</div>
-        <div class="col-md-2 text-end">Qty</div>
-        <div class="col-md-2 text-end">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
-        <div class="col-md-2 text-end">Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="col-md-4">Description</div>
+        <div class="col-md-1 text-end">Qty</div>
+        <div class="col-md-2 text-end">Unit cost, as quoted</div>
+        <div class="col-md-2"><?php echo $claimCurrency !== '' ? 'Quoted in' : ''; ?></div>
+        <div class="col-md-2 text-end">Line, in <?php echo htmlspecialchars($claimCurrencyLabel, ENT_QUOTES, 'UTF-8'); ?></div>
         <div class="col-md-1"></div>
     </div>
 
@@ -355,7 +374,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             $noScriptRows = max(5, count($draftItems));
             ?>
             <?php for ($rowIdx = 1; $rowIdx <= $noScriptRows; $rowIdx++): ?>
-            <?php $kept = $draftItems[$rowIdx - 1] ?? ['desc' => '', 'qty' => '1', 'unit' => '0.00']; ?>
+            <?php $kept = $draftItems[$rowIdx - 1] ?? ['desc' => '', 'qty' => '1', 'unit' => '0.00', 'currency' => '', 'converted' => '']; ?>
             <div class="row g-2 align-items-end mb-2">
                 <div class="col-12 col-md-5">
                     <label class="form-label d-md-none">Description</label>
@@ -366,10 +385,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="<?php echo htmlspecialchars($kept['qty'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-2">
-                    <label class="form-label d-md-none">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></label>
-                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" value="<?php echo htmlspecialchars($kept['unit'], ENT_QUOTES, 'UTF-8'); ?>">
+                    <label class="form-label d-md-none">Unit cost, as quoted</label>
+                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit cost, as quoted" value="<?php echo htmlspecialchars($kept['unit'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
-                <div class="col-4 col-md-3"></div>
+                <?php if ($claimCurrency !== ''): ?>
+                <div class="col-4 col-md-2">
+                    <label class="form-label d-md-none">Quoted in</label>
+                    <select name="itemCurrency[]" class="form-select" aria-label="Quoted in"><?php echo str_replace('value="' . htmlspecialchars((string) ($kept['currency'] ?? ''), ENT_QUOTES, 'UTF-8') . '"', 'value="' . htmlspecialchars((string) ($kept['currency'] ?? ''), ENT_QUOTES, 'UTF-8') . '" selected', $currencyOptionsHtml); ?></select>
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">If quoted in another currency: cost in <?php echo htmlspecialchars($claimCurrencyLabel, ENT_QUOTES, 'UTF-8'); ?>, from your statement</label>
+                    <input type="number" step="0.01" min="0" name="itemConverted[]" class="form-control text-end" value="<?php echo htmlspecialchars((string) ($kept['converted'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
+                </div>
+                <?php endif; ?>
             </div>
             <?php endfor; ?>
             <p class="text-muted small"><i class="fa-solid fa-circle-info me-1"></i>JavaScript is disabled — 5 line items are shown. Blank rows will be ignored. Line totals will be calculated on the server.</p>
@@ -379,7 +407,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <button type="button" id="addRow" class="btn btn-outline-secondary btn-sm mb-3">+ Add item</button>
 
     <div class="mb-3 text-end">
-        <strong>Total: <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?><span id="grandTotal">0.00</span></strong>
+        <strong>Total: <?php echo htmlspecialchars(\Portal\Core\Currency::prefix($claimCurrency), ENT_QUOTES, 'UTF-8'); ?><span id="grandTotal">0.00</span></strong>
+        <div class="small text-muted">The amount you are claiming back, in <?php echo htmlspecialchars($claimCurrency !== '' ? $claimCurrency : 'the organisation\'s money', ENT_QUOTES, 'UTF-8'); ?>. A line quoted in another currency counts at the amount from your statement.</div>
         <input type="hidden" name="totalAmount" id="totalAmount">
     </div>
 
@@ -412,24 +441,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     const list = document.getElementById('items-list');
     const grandTotal = document.getElementById('grandTotal');
     const totalInput = document.getElementById('totalAmount');
+    // 💷 The claim's currency and the currency choices, written by the server
+    //    (#966, D-139). The options are built from the portal's own list, never
+    //    from anything a person typed.
+    const claimCurrency   = <?php echo json_encode($claimCurrency, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    const currencyOptions = <?php echo json_encode($currencyOptionsHtml, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
     function itemTemplate(disabledRemove){
         return `<div class="item-row row g-2 align-items-end mb-2">
-            <div class="col-12 col-md-5">
+            <div class="col-12 col-md-4">
                 <label class="form-label d-md-none">Description</label>
                 <input type="text" name="itemDesc[]" class="form-control" aria-label="Description" required>
             </div>
-            <div class="col-4 col-md-2">
+            <div class="col-4 col-md-1">
                 <label class="form-label d-md-none">Qty</label>
                 <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="1" required>
             </div>
             <div class="col-4 col-md-2">
-                <label class="form-label d-md-none">Unit \u00a3</label>
-                <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" required>
+                <label class="form-label d-md-none">Unit cost, as quoted</label>
+                <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit cost, as quoted" required>
             </div>
-            <div class="col-4 col-md-2 text-end">
-                <label class="form-label d-md-none">Line \u00a3</label>
+            ${currencyOptions !== '' ? `<div class="col-4 col-md-2">
+                <label class="form-label d-md-none">Quoted in</label>
+                <select name="itemCurrency[]" class="form-select" aria-label="Quoted in">${currencyOptions}</select>
+            </div>` : ''}
+            <div class="col-12 col-md-2 text-end">
+                <label class="form-label d-md-none">Line, in ${claimCurrency}</label>
                 <span class="d-block pt-2 lineTotal">0.00</span>
+                <div class="converted d-none">
+                    <label class="form-label small mb-0">Cost in ${claimCurrency}, from your statement</label>
+                    <input type="number" step="0.01" min="0" name="itemConverted[]" class="form-control form-control-sm text-end" aria-label="Cost in ${claimCurrency}, from your statement">
+                    <span class="small text-muted lineRate"></span>
+                </div>
             </div>
             <div class="col-12 col-md-1 text-end">
                 <button type="button" class="btn btn-outline-danger btn-sm removeRow" ${disabledRemove?'disabled':''}>&times;</button>
@@ -437,13 +480,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>`;
     }
 
+    // 💷 A line quoted in another currency counts at the CONVERTED amount the
+    //    claimant typed from their statement (D-139); its box is shown only
+    //    then, and the rate is worked out from the two figures, never looked
+    //    up. The server works it all out again (ExpenseRules::expenseLine()).
     function recalc(){
         let sum = 0;
         list.querySelectorAll('.item-row').forEach(row => {
-            const qty  = parseFloat(row.querySelector('[name="itemQty[]"]').value) || 0;
-            const unit = parseFloat(row.querySelector('[name="itemUnit[]"]').value) || 0;
-            const line = qty * unit;
-            row.querySelector('.lineTotal').textContent = line.toFixed(2);
+            const qty    = parseFloat(row.querySelector('[name="itemQty[]"]').value) || 0;
+            const unit   = parseFloat(row.querySelector('[name="itemUnit[]"]').value) || 0;
+            const quoted = qty * unit;
+            const pick   = row.querySelector('[name="itemCurrency[]"]');
+            const box    = row.querySelector('.converted');
+            const conv   = row.querySelector('[name="itemConverted[]"]');
+            const rate   = row.querySelector('.lineRate');
+            const foreign = pick !== null && pick.value !== claimCurrency;
+            let line = quoted;
+            if (box !== null) {
+                box.classList.toggle('d-none', foreign === false);
+                conv.required = foreign;
+            }
+            if (foreign === true) {
+                line = parseFloat(conv.value) || 0;
+                row.querySelector('.lineTotal').textContent = quoted.toFixed(2) + ' ' + pick.value + ' quoted';
+                rate.textContent = (quoted > 0 && line > 0) ? ('1 ' + pick.value + ' = ' + (line / quoted).toFixed(4) + ' ' + claimCurrency) : '';
+            } else {
+                row.querySelector('.lineTotal').textContent = line.toFixed(2);
+                if (rate !== null) { rate.textContent = ''; }
+            }
             sum += line;
         });
         grandTotal.textContent = sum.toFixed(2);
@@ -471,6 +535,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             row.querySelector('[name="itemDesc[]"]').value = kept.desc;
             row.querySelector('[name="itemQty[]"]').value  = kept.qty;
             row.querySelector('[name="itemUnit[]"]').value = kept.unit;
+            const keptPick = row.querySelector('[name="itemCurrency[]"]');
+            if (keptPick !== null && kept.currency) { keptPick.value = kept.currency; }
+            const keptConv = row.querySelector('[name="itemConverted[]"]');
+            if (keptConv !== null && kept.converted) { keptConv.value = kept.converted; }
         }
     }
 
@@ -479,6 +547,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     });
 
     list.addEventListener('input', recalc);
+    list.addEventListener('change', recalc);
     list.addEventListener('click', e => {
         if (e.target.matches('.removeRow')) {
             e.target.closest('.item-row').remove();

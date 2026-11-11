@@ -155,16 +155,33 @@ if ($deptID === 0 || $claimTitle === '') {
     $sendBack('Missing required fields (department and title).', true);
 }
 
-// 🧮 Recalculate total server-side (do not trust client-side hidden field)
-$totalAmt = 0.0;
+// 🧮 Recalculate total server-side (do not trust client-side hidden field).
+// 💷 Each line through the ONE rule (ExpenseRules::expenseLine(), #966,
+//    D-139): it keeps the QUOTED amount and currency and the CONVERTED
+//    amount in the claim's currency, which is what the total adds up — the
+//    claim's currency is the organisation's, today.
+$claimCurrency = \Portal\Core\Currency::ofSite();
+$claimLines    = [];
+$totalAmt      = 0.0;
 foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
-    if (trim($desc) === '') {
+    if (is_string($desc) === false || trim($desc) === '') {
         continue;
     }
-    $qty  = (int) ($_POST['itemQty'][$i] ?? 1);
-    $unit = (float) ($_POST['itemUnit'][$i] ?? 0);
-    $totalAmt += $qty * $unit;
+    $line = ExpenseRules::expenseLine(
+        trim($desc),
+        $_POST['itemQty'][$i] ?? 1,
+        $_POST['itemUnit'][$i] ?? 0,
+        $_POST['itemCurrency'][$i] ?? '',
+        $_POST['itemConverted'][$i] ?? '',
+        $claimCurrency
+    );
+    if (is_string($line) === true) {
+        $sendBack($line, true);
+    }
+    $claimLines[] = $line;
+    $totalAmt    += $line['lineTotal'];
 }
+$totalAmt = round($totalAmt, 2);
 if ($totalAmt <= 0) {
     $sendBack('Total must be greater than zero.', true);
 }
@@ -280,29 +297,26 @@ $pdfAttempted = false;
 App::beginTransaction();
 try {
     // 1. 📋 Insert claim header
-    $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount, siteID) VALUES (?, ?, ?, CURDATE(), ?, ?)');
+    $stmt = $mysqli->prepare('INSERT INTO tblExpenseClaims (userID, deptID, claimTitle, claimDate, totalAmount, siteID, `currency`) VALUES (?, ?, ?, CURDATE(), ?, ?, ?)');
     if ($stmt === false) {
         throw new \RuntimeException('Failed to prepare claim insert: ' . $mysqli->error);
     }
-    $stmt->bind_param('iisdi', $userId, $deptID, $claimTitle, $totalAmt, $siteId);
+    $stmt->bind_param('iisdis', $userId, $deptID, $claimTitle, $totalAmt, $siteId, $claimCurrency);
     $stmt->execute();
     $claimID = $stmt->insert_id;
     $stmt->close();
 
     // 2. 📦 Items
-    $itemStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal) VALUES (?, ?, ?, ?, ?)');
+    $itemStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal, `currency`, `quotedCurrency`, `quotedLineTotal`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
     if ($itemStmt === false) {
         throw new \RuntimeException('Failed to prepare item insert: ' . $mysqli->error);
     }
-    foreach ($_POST['itemDesc'] as $i => $desc) {
-        $desc = trim($desc);
-        if ($desc === '') {
-            continue;
-        }
-        $qty  = (int) ($_POST['itemQty'][$i] ?? 1);
-        $unit = (float) ($_POST['itemUnit'][$i] ?? 0);
-        $line = $qty * $unit;
-        $itemStmt->bind_param('isidd', $claimID, $desc, $qty, $unit, $line);
+    foreach ($claimLines as $cl) {
+        $itemStmt->bind_param(
+            'isiddssd',
+            $claimID, $cl['desc'], $cl['qty'], $cl['unit'], $cl['lineTotal'],
+            $cl['currency'], $cl['quotedCurrency'], $cl['quotedLineTotal']
+        );
         $itemStmt->execute();
     }
     $itemStmt->close();
@@ -670,7 +684,7 @@ try {
     // 6. 📓 Log activity — a COUNT of receipts not attached, never their names.
     Logger::activity(
         'ExpenseSubmit',
-        'Claim #' . $claimID . ' created (' . \Portal\Core\Currency::formatMajor($totalAmt, \Portal\Core\Currency::ofSite()) . ')'
+        'Claim #' . $claimID . ' created (' . \Portal\Core\Currency::formatMajor($totalAmt, $claimCurrency) . ')'
             . (count($notAttached) > 0 ? '; ' . count($notAttached) . ' file(s) not attached' : ''),
         $userId
     );

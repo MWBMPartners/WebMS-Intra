@@ -28,16 +28,27 @@ $siteId = Site::id();
 $cats = [];
 $stmt = $db->prepare(
     'SELECT c.categoryID, c.name, c.description, c.isActive, c.defaultFund, '
-    . '       COUNT(e.entryID) AS entryCount, COALESCE(SUM(e.amountPence), 0) AS totalPence '
+    // 💷 Per category AND currency (D-139), folded below into one row per
+    //    category carrying a total per currency.
+    . '       COUNT(e.entryID) AS entryCount, COALESCE(SUM(e.amountPence), 0) AS totalPence, e.`currency` AS `currency` '
     . 'FROM tblGivingCategory c LEFT JOIN tblGivingEntry e ON e.categoryID = c.categoryID '
-    . 'WHERE c.siteID = ? GROUP BY c.categoryID ORDER BY c.sortOrder, c.name'
+    . 'WHERE c.siteID = ? GROUP BY c.categoryID, e.`currency` ORDER BY c.sortOrder, c.name'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
-        $cats[] = $r;
+        $catId = (int) $r['categoryID'];
+        if (isset($cats[$catId]) === false) {
+            $cats[$catId] = $r;
+            $cats[$catId]['entryCount'] = 0;
+            $cats[$catId]['totals']     = [];
+        }
+        $cats[$catId]['entryCount'] += (int) $r['entryCount'];
+        if ($r['currency'] !== null) {
+            \Portal\Core\Currency::addTo($cats[$catId]['totals'], (string) $r['currency'], (int) $r['totalPence']);
+        }
     }
     $stmt->close();
 }
@@ -96,7 +107,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-md-4 small text-muted"><?php echo htmlspecialchars((string) ($c['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2 small"><?php echo htmlspecialchars((string) ($c['defaultFund'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
-                    <div class="col-md-2 small text-end"><?php echo (int) $c['entryCount']; ?> · <?php echo htmlspecialchars(Giving::formatAmount((int) $c['totalPence'], $currency), ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-md-2 small text-end"><?php echo (int) $c['entryCount']; ?> · <?php echo \Portal\Core\Currency::totalsHtml($c['totals'], $currency); ?></div>
                     <div class="col-md-1 text-end">
                         <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/cat-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

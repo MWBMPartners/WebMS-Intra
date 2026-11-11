@@ -1501,6 +1501,10 @@ final class ExpenseRules
         $descs = $list($post['itemDesc'] ?? null);
         $qtys  = $list($post['itemQty'] ?? null);
         $units = $list($post['itemUnit'] ?? null);
+        // 💷 Each line's quoted currency and converted amount are kept too
+        //    (#966, D-139), so a refused claim comes back as it was typed.
+        $currs = $list($post['itemCurrency'] ?? null);
+        $convs = $list($post['itemConverted'] ?? null);
         $items = [];
         foreach ($descs as $i => $desc) {
             if (count($items) >= self::DRAFT_MAX_ITEMS) {
@@ -1510,6 +1514,8 @@ final class ExpenseRules
                 'desc' => $text($desc, self::DRAFT_MAX_TEXT),
                 'qty'  => $text($qtys[$i] ?? '', self::DRAFT_MAX_NUMBER),
                 'unit' => $text($units[$i] ?? '', self::DRAFT_MAX_NUMBER),
+                'currency'  => $text($currs[$i] ?? '', 3),
+                'converted' => $text($convs[$i] ?? '', self::DRAFT_MAX_NUMBER),
             ];
             $priced = trim($one['unit']) !== '' && (float) $one['unit'] != 0.0;
             if (trim($one['desc']) === '' && $priced === false) {
@@ -1969,5 +1975,122 @@ final class ExpenseRules
         $ascii = $stem . ($ext === '' ? '' : '.' . $ext);
 
         return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($clean);
+    }
+
+    /**
+     * 💷 ONE EXPENSE LINE, QUOTED AND CONVERTED (#966, D-139) — the ONE rule,
+     * asked by the claim form, the edit page and the API, so they cannot
+     * disagree.
+     *
+     * The owner, 11 November 2026: a claim keeps "the originally quoted
+     * currency and the converted (forex) domestic currency (GBP) for record and
+     * audit accuracy". So a line keeps:
+     *   - its QUOTED amount: quantity × unit cost, in the quoted currency (what
+     *     the receipt says), and
+     *   - its CONVERTED amount, in the CLAIM's currency (the organisation's):
+     *     what is approved and reimbursed.
+     * When the line was quoted in the claim's own currency the two are the
+     * same figure and the form asks once. When it was quoted in another, the
+     * claimant types the converted amount from their own evidence (a card or
+     * bank statement). NO exchange-rate service is asked: an outside call would
+     * need its own decision, and the claimant's statement is the evidence an
+     * auditor wants. The rate shown on the pages is worked out from the two.
+     *
+     * Answers the line, or a sentence saying why it is refused.
+     *
+     * @return array{desc:string, qty:int, unit:float, quotedCurrency:string,
+     *   quotedLineTotal:float, lineTotal:float, currency:string}|string
+     */
+    public static function expenseLine(
+        string $desc,
+        mixed $qty,
+        mixed $unit,
+        mixed $quotedCurrency,
+        mixed $converted,
+        string $claimCurrency
+    ): array|string {
+        $qtyInt    = is_numeric($qty) === true ? (int) $qty : 1;
+        $unitFloat = is_numeric($unit) === true ? (float) $unit : 0.0;
+        $quoted    = round($qtyInt * $unitFloat, 2);
+        $claimCurrency = strtoupper(trim($claimCurrency));
+        $quotedCode = Currency::fromPosted(is_string($quotedCurrency) === true ? $quotedCurrency : '');
+        if ($quotedCode === null) {
+            return 'The currency of "' . $desc . '" is not one the portal can use.';
+        }
+        if ($quotedCode === '') {
+            $quotedCode = $claimCurrency;
+        }
+        if ($quotedCode === $claimCurrency) {
+            // Quoted in the claim's own money: one figure, asked once.
+            return ['desc' => $desc, 'qty' => $qtyInt, 'unit' => $unitFloat, 'quotedCurrency' => $quotedCode,
+                'quotedLineTotal' => $quoted, 'lineTotal' => $quoted, 'currency' => $claimCurrency];
+        }
+        if ($claimCurrency === '') {
+            return '"' . $desc . '" is quoted in ' . $quotedCode . ', but this organisation has no currency chosen to '
+                . 'convert it into. Ask an administrator to choose one on Organisation settings.';
+        }
+        if (is_numeric($converted) === false || (float) $converted <= 0) {
+            return '"' . $desc . '" is quoted in ' . $quotedCode . ': type what it cost in ' . $claimCurrency
+                . ', as your card or bank statement shows it.';
+        }
+
+        return ['desc' => $desc, 'qty' => $qtyInt, 'unit' => $unitFloat, 'quotedCurrency' => $quotedCode,
+            'quotedLineTotal' => $quoted, 'lineTotal' => round((float) $converted, 2), 'currency' => $claimCurrency];
+    }
+
+    /**
+     * 💱 The rate a line was converted at, worked out from its two figures
+     * (D-139): "1 USD = 0.7900 GBP", or '' when the line was not converted or
+     * a figure is missing. Shown, never used to work anything out.
+     */
+    public static function rateWords(float $quotedLineTotal, string $quotedCurrency, float $lineTotal, string $currency): string
+    {
+        if ($quotedCurrency === '' || $currency === '' || $quotedCurrency === $currency || $quotedLineTotal <= 0) {
+            return '';
+        }
+
+        return '1 ' . $quotedCurrency . ' = ' . number_format($lineTotal / $quotedLineTotal, 4) . ' ' . $currency;
+    }
+
+    /**
+     * 💱 For each claim, its lines QUOTED in a currency other than the claim's,
+     * added up per quoted currency (never across two): claimID => list of
+     * "$120.00 quoted" style phrases ("CHF 120.00 quoted" where a currency
+     * has no symbol of its own). So the approval and treasury lists can show
+     * both figures (D-139). An unreadable answer is an empty list.
+     *
+     * @param list<int> $claimIds
+     * @return array<int, list<string>>
+     */
+    public static function quotedElsewhere(mysqli $db, array $claimIds): array
+    {
+        $claimIds = array_values(array_filter(array_map('intval', $claimIds), static fn (int $id): bool => $id > 0));
+        if ($claimIds === []) {
+            return [];
+        }
+        $out = [];
+        try {
+            $marks = implode(', ', array_fill(0, count($claimIds), '?'));
+            $stmt  = $db->prepare(
+                'SELECT `claimID`, `quotedCurrency`, COALESCE(SUM(`quotedLineTotal`), 0) AS `quoted` '
+                . 'FROM `tblExpenseClaimItems` WHERE `claimID` IN (' . $marks . ') '
+                . 'AND `quotedCurrency` <> `currency` AND `quotedCurrency` <> \'\' '
+                . 'GROUP BY `claimID`, `quotedCurrency` ORDER BY `claimID`, `quotedCurrency`'
+            );
+            if ($stmt === false) {
+                return [];
+            }
+            $stmt->bind_param(str_repeat('i', count($claimIds)), ...$claimIds);
+            $stmt->execute();
+            $rs = $stmt->get_result();
+            while (($row = $rs->fetch_assoc()) !== null) {
+                $out[(int) $row['claimID']][] = Currency::formatMajor((float) $row['quoted'], (string) $row['quotedCurrency']) . ' quoted';
+            }
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return [];
+        }
+
+        return $out;
     }
 }

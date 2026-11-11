@@ -63,9 +63,8 @@ declare(strict_types=1);
  * @param int     $userId   Acting user, stamped as matchedByID.
  * @param int     $tolDays  Matching window in days (giving.reconcile.toleranceDays).
  * @param string  $currency Import's currency — entries are matched currency-scoped;
- *                          the deposit pass only runs when this equals the site's
- *                          current currency, Currency::ofSite() (count sessions carry no
- *                          currency column — documented limitation).
+ *                          count sessions are matched only in this same currency
+ *                          (each count keeps its own since #966, D-139).
  *
  * @return int Count of bank txns newly matched by this run.
  */
@@ -113,21 +112,21 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
 
     // 💷 Deposit candidates — closed count sessions not yet matched to any
     // bank txn. Deposit pence is an EXACT DECIMAL*100 ROUND (never a float
-    // comparison). Currency-scoping: tblCountSessions carries no currency
-    // column, so this universe is only meaningful when the import's
-    // currency matches the organisation's currency (Currency::ofSite(), #966).
+    // comparison). Currency-scoping: a count keeps the currency it was
+    // counted in (#966, D-139), so only counts in the IMPORT's currency are
+    // candidates. (Counts used to carry no currency, and this pass ran only
+    // when the import was in the organisation's current currency.)
     $sessByAmount = [];
-    $siteCurrency = \Portal\Core\Currency::ofSite();
-    if ($currency === $siteCurrency) {
+    if ($currency !== '') { // an import with no currency recorded matches no count
         $stmt = $db->prepare(
             'SELECT cs.countSessionID, cs.serviceDate, '
             . 'CAST(ROUND((cs.cashTotal + cs.chequeTotal + cs.envelopeTotal) * 100) AS SIGNED) AS depositPence '
             . 'FROM tblCountSessions cs '
-            . 'WHERE cs.siteID = ? AND cs.status = \'closed\' AND cs.serviceDate BETWEEN ? AND ? '
+            . 'WHERE cs.siteID = ? AND cs.status = \'closed\' AND cs.serviceDate BETWEEN ? AND ? AND cs.`currency` = ? '
             . 'AND NOT EXISTS (SELECT 1 FROM tblBankTxns bt WHERE bt.matchedCountSessionID = cs.countSessionID)'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('iss', $siteId, $windowStart, $maxDate);
+            $stmt->bind_param('isss', $siteId, $windowStart, $maxDate, $currency);
             $stmt->execute();
             $rs = $stmt->get_result();
             while ($r = $rs->fetch_assoc()) {

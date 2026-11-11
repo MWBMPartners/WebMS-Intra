@@ -24,7 +24,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- Treasury Guide -->
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
     <div>
-        <h1 class="mb-1"><i class="fa-solid fa-sterling-sign me-2"></i>Treasury Guide</h1>
+        <h1 class="mb-1"><i class="fa-solid fa-money-bill-wave me-2"></i>Treasury Guide</h1>
         <p class="text-secondary mb-0">For treasury staff: processing reimbursements and recording payments.</p>
     </div>
     <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm mt-2 mt-md-0">
@@ -144,7 +144,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-success rounded-pill mt-1">5</span>
             <div>
                 <strong>Click "Mark as Reimbursed"</strong>
-                <p class="mb-0 small text-secondary">The claim status will change to <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-sterling-sign"></i> Reimbursed</span> and it will be removed from the treasury queue.</p>
+                <p class="mb-0 small text-secondary">The claim status will change to <span class="portal-badge portal-badge-paid"><i class="fa-solid fa-money-bill-wave"></i> Reimbursed</span> and it will be removed from the treasury queue.</p>
             </div>
         </div>
     </div>

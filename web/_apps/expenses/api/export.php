@@ -126,6 +126,7 @@ $sql = "SELECT
             EC.claimTitle    AS Title,
             EC.claimDate     AS Date,
             EC.totalAmount   AS Amount,
+            EC.`currency`    AS Currency,
             EC.status        AS Status
         FROM tblExpenseClaims EC
         JOIN tblUsers U ON U.userID = EC.userID
@@ -209,5 +210,9 @@ $filename = 'expenses-export-' . $today->format('Y-m-d') . '.csv';
 CsvExporter::download(
     $filename,
     $rows,
-    ['claimID', 'Claimant', 'Department', 'Title', 'Date', 'Amount', 'Status']
+    // 💷 `Currency` beside `Amount` (#966, D-139): a claim keeps the currency it
+    //    was made in, so two claims in one file may be in two currencies, and a
+    //    spreadsheet that added the Amount column up without it would add
+    //    across them. Empty for an older claim that recorded none.
+    ['claimID', 'Claimant', 'Department', 'Title', 'Date', 'Amount', 'Currency', 'Status']
 );

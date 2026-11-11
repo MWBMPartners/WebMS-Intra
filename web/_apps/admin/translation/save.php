@@ -132,10 +132,10 @@ if (in_array($provider, ['anthropic','openai','google','deepl','libre'], true) =
 //
 //    **NINE DIGITS, not seven, so that a FIGURE always meets the figure's own
 //    refusal.** With seven, `99999999` was refused by this test — "it has to
-//    be a figure in pounds" — when it plainly is one, and what is wrong with
+//    be a figure" — when it plainly is one, and what is wrong with
 //    it is that it is above the maximum, which the next gate says properly.
-//    Nothing in that range can overflow: nine digits of pounds is under
-//    PHP_INT_MAX in pence by a wide margin.
+//    Nothing in that range can overflow: nine digits of whole units is under
+//    PHP_INT_MAX in hundredths by a wide margin.
 // ⚠️ ASK WHETHER IT IS A STRING FIRST. A request chooses the TYPE of what it
 //    sends as well as the value, so `monthCap[]=7` arrives as an ARRAY — and
 //    `(string)` on an array is "Array" plus a PHP warning in the error log
@@ -150,8 +150,12 @@ if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $capRaw) !== 1) {
         'TranslationCapRefused',
         'A monthly translation limit that could not be read as a figure was refused.'
     );
+    // 💷 "In the installation's currency", never one built-in currency (#966): no
+    //    currency is built in, and this figure is read in whatever currency
+    //    the installation chose (the page labels the box with it).
     $_SESSION['flash_msg'] = 'Nothing was saved. The monthly translation limit has to be a '
-        . 'figure in pounds — for example 50, or 12.50. Enter 0 if you want no limit at all.';
+        . 'figure in the installation\'s currency, in whole units and hundredths — for example 50, or 12.50. '
+        . 'Enter 0 if you want no limit at all.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/translation'));
     exit();

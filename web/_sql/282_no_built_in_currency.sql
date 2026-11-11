@@ -48,8 +48,14 @@
 -- page have always written two of them. So, as migrations 273, 274 and 279 do
 -- for a time zone, a place and a country, the value in force is KEPT: when the
 -- installation-wide rows of the four old settings that hold anything all hold
--- the SAME three letters, that becomes the installation's org.currency (only
--- when org.currency is still empty). When they DISAGREE, nothing is carried
+-- the SAME currency, and it is one the portal can use (counted in hundredths:
+-- the list below is word for word Portal\Core\Currency::choices()), that
+-- becomes the installation's org.currency (only when org.currency is still
+-- empty). A code NOT on that list — a yen, or something typed by hand into
+-- the general Settings editor — is NOT carried: the four old keys are deleted
+-- all the same, the installation has no currency, and Organisation settings
+-- asks for one. Amounts already stored keep the currency stored on them
+-- (migration 283), so nothing is relabelled either way. When they DISAGREE, nothing is carried
 -- over: picking one would be a guess about money, and the organisation page
 -- then asks. (There is no customer installation yet, the owner said on
 -- 2 November 2026, D-135; this is written the way a real upgrade would need.)
@@ -158,7 +164,16 @@ UPDATE `tblSettings` AS `dest`
            AND `settingKey` IN ('giving.currency', 'projects.currency', 'payments.currency', 'venues.currency')
            AND TRIM(`settingValue`) <> ''
         HAVING COUNT(DISTINCT UPPER(TRIM(`settingValue`))) = 1
-       ) AS `old` ON `old`.`code` REGEXP '^[A-Z]{3}$'
+       ) AS `old` ON `old`.`code` IN ('AED', 'AFN', 'ALL', 'AMD', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN', 'BAM', 'BBD', 'BDT', 'BMD', 'BND',
+        'BOB', 'BRL', 'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CAD', 'CDF', 'CHF', 'CNY', 'COP', 'CRC', 'CUP',
+        'CVE', 'CZK', 'DKK', 'DOP', 'DZD', 'EGP', 'ERN', 'ETB', 'EUR', 'FJD', 'FKP', 'GBP', 'GEL', 'GHS',
+        'GIP', 'GMD', 'GTQ', 'GYD', 'HKD', 'HNL', 'HTG', 'HUF', 'IDR', 'ILS', 'INR', 'IRR', 'JMD', 'KES',
+        'KGS', 'KHR', 'KPW', 'KYD', 'KZT', 'LAK', 'LBP', 'LKR', 'LRD', 'MAD', 'MDL', 'MKD', 'MMK', 'MNT',
+        'MOP', 'MUR', 'MVR', 'MWK', 'MXN', 'MYR', 'MZN', 'NAD', 'NGN', 'NIO', 'NOK', 'NPR', 'NZD', 'PAB',
+        'PEN', 'PGK', 'PHP', 'PKR', 'PLN', 'QAR', 'RON', 'RSD', 'RUB', 'SAR', 'SBD', 'SCR', 'SDG', 'SEK',
+        'SGD', 'SHP', 'SLE', 'SOS', 'SRD', 'SSP', 'STN', 'SYP', 'SZL', 'THB', 'TJS', 'TMT', 'TOP', 'TRY',
+        'TTD', 'TWD', 'TZS', 'UAH', 'USD', 'UYU', 'UZS', 'VES', 'WST', 'XCD', 'XCG', 'YER', 'ZAR', 'ZMW',
+        'ZWG')
    SET `dest`.`settingValue` = `old`.`code`
  WHERE `dest`.`settingKey` = 'org.currency'
    AND `dest`.`siteID` IS NULL

@@ -160,7 +160,9 @@ $looseEnvelopePence = $agreedEnvelopePence - $envelopeSumPence;
 // 💾 Write the gift log — one transaction, siteID + serviceDate on every row.
 // -----------------------------------------------------------------------------
 $settings   = App::settings()['giving'] ?? [];
-$currency   = \Portal\Core\Currency::ofSite();
+// 💷 The gifts a count writes are in the COUNT's currency (D-139), the one it
+//    was counted in, even if the organisation's has changed since.
+$currency   = (string) $session['currency'] !== '' ? (string) $session['currency'] : \Portal\Core\Currency::ofSite();
 $categoryId = (int) $session['categoryID'];
 $serviceDate = (string) $session['serviceDate'];
 $reference  = 'Count #' . $countSessionId;

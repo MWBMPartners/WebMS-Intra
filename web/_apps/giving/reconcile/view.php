@@ -123,8 +123,10 @@ foreach ($txns as $t) {
 }
 
 $tolDays      = max(0, (int) (App::settings('giving.reconcile.toleranceDays') ?? '5'));
-$siteCurrency = \Portal\Core\Currency::ofSite();
-$depositsApplicable = ($currency === $siteCurrency);
+// 💷 Count deposits in this statement's OWN currency are offered (#966,
+//    D-139): each count keeps the currency it was counted in.
+$siteCurrency       = $currency;
+$depositsApplicable = true;
 
 // -----------------------------------------------------------------------------
 // 📋 Bulk-load candidate universes over the padded window, once — reused for
@@ -141,12 +143,12 @@ if ($minTxnDate !== null && $maxTxnDate !== null) {
             'SELECT cs.countSessionID, cs.serviceDate, c.name AS categoryName, '
             . 'CAST(ROUND((cs.cashTotal + cs.chequeTotal + cs.envelopeTotal) * 100) AS SIGNED) AS depositPence '
             . 'FROM tblCountSessions cs INNER JOIN tblGivingCategory c ON c.categoryID = cs.categoryID '
-            . 'WHERE cs.siteID = ? AND cs.status = \'closed\' AND cs.serviceDate BETWEEN ? AND ? '
+            . 'WHERE cs.siteID = ? AND cs.status = \'closed\' AND cs.serviceDate BETWEEN ? AND ? AND cs.`currency` = ? '
             . 'AND NOT EXISTS (SELECT 1 FROM tblBankTxns bt WHERE bt.matchedCountSessionID = cs.countSessionID) '
             . 'ORDER BY cs.serviceDate'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('iss', $siteId, $windowStart, $maxTxnDate);
+            $stmt->bind_param('isss', $siteId, $windowStart, $maxTxnDate, $currency);
             $stmt->execute();
             $rs = $stmt->get_result();
             while ($r = $rs->fetch_assoc()) {
