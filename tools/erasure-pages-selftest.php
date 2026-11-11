@@ -840,9 +840,11 @@ $seed(REQ_B_ASK, ORG_B, ADMB, 'pending_confirmation', null);
 // Organisations told apart by the first part of the address: recorded first, put back by the clean-up.
 // #940: the activity log's installation-wide figure is set to the built-in year
 // for the run, because the privacy notice and the Retention page now PRINT it,
-// and their pins are taken at 365 days. Another test on the same database can
-// leave it elsewhere (retention-caps-selftest.php leaves 30), which made this
-// test's pins fail for a reason that had nothing to do with the pages.
+// and their pins are taken at 365 days. Another test on the same database could
+// leave it elsewhere (retention-caps-selftest.php left 30 until #947 made it put
+// every setting back), which made this test's pins fail for a reason that had
+// nothing to do with the pages. Kept after #947 because the pins need a KNOWN
+// figure whatever state the database arrives in, not only after that one test.
 foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365'] as $key => $value) {
     $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
     $state['settings'][$key] = $row;

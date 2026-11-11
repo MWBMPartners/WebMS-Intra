@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 251;  // + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 253;  // + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3507,6 +3507,29 @@ $withoutConsumingIds(static function () use ($adminJar): void {
         $check['status'] === 200 && $day === '2028-06-15',
         said($check) . '; ' . substr($check['body'], 0, 300)
     );
+    // #937: A REQUEST CHOOSES THE TYPE AS WELL AS THE VALUE (the 27 October
+    // lesson). `start[]=x` arrives as a LIST, and the endpoint used to cast it
+    // with `(string)`, which raises PHP's "Array to string conversion" warning:
+    // the portal's error handler writes that into `tblErrors` and lets PHP's own
+    // handler run too, so the request still ended in a 400 but left a fault in
+    // the error log every time anybody sent one. `tz` already treated a list as
+    // absent; `start` and `end` now REFUSE one, before any cast. Both halves are
+    // asked because they are two separate reads, and either could go back alone.
+    // "No new error row" is counted against the highest row number from before
+    // the request, so it fails on ANY row the request wrote, whatever it says.
+    foreach (['N10b' => 'start[]=2028-06-15T20:00&end=2028-06-15T21:00', 'N10c' => 'start=2028-06-15T20:00&end[]=2028-06-15T21:00'] as $label => $query) {
+        $errorsBefore = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS n FROM tblErrors')['n'] ?? 0);
+        $listed       = req($adminJar, 'GET', '/api/venues/check?' . $query . '&venueID=960784');
+        $errorsAfter  = q('SELECT errorID, errorTitle FROM tblErrors WHERE errorID > ?', 'i', [$errorsBefore]);
+        ok(
+            $label . ' /api/venues/check with ' . ($label === 'N10b' ? '`start`' : '`end`') . ' sent as a LIST is refused cleanly: HTTP 400 "invalid-range" in valid JSON, and NOTHING written to the error log (it used to raise "Array to string conversion")',
+            $listed['status'] === 400
+                && is_array(json_decode($listed['body'], true)) === true
+                && str_contains($listed['body'], 'invalid-range') === true
+                && $errorsAfter === [],
+            said($listed) . '; new error rows: ' . json_encode($errorsAfter) . '; ' . substr($listed['body'], 0, 300)
+        );
+    }
     q('DELETE FROM tblEvents WHERE eventID = 960781');
     q("DELETE FROM tblVenueUsageTypes WHERE venueID IN (SELECT venueID FROM tblVenues WHERE venueName LIKE 'Selftest zones hall 782%')");
     q("DELETE FROM tblVenues WHERE venueName LIKE 'Selftest zones hall 782%'");

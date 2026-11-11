@@ -88,8 +88,22 @@ $isValidLocalDateTime = static function (string $s): bool {
     return (int) $m[4] <= 23 && (int) $m[5] <= 59;
 };
 
-$startRaw = trim((string) ($_GET['start'] ?? ''));
-$endRaw   = trim((string) ($_GET['end'] ?? ''));
+// 🧷 A REQUEST CHOOSES THE TYPE AS WELL AS THE VALUE (#937; the 27 October
+//    lesson in .claude/CLAUDE.md). `start[]=x` arrives as a LIST, and these
+//    two lines used to cast it with `(string)`, which raises PHP's "Array to
+//    string conversion" warning — written into `tblErrors` by the portal's
+//    error handler on every such request — before the shape check refused the
+//    resulting "Array". A non-string is now refused HERE, before any cast,
+//    with the same answer a malformed time gets. Unlike `tz` below, a list is
+//    not treated as absent: an absent `start` is itself refused, and an absent
+//    `end` means "no end", which is not what somebody who sent one asked for.
+$startGiven = $_GET['start'] ?? '';
+$endGiven   = $_GET['end'] ?? '';
+if (is_string($startGiven) === false || is_string($endGiven) === false) {
+    ApiResponse::error('invalid-range', 400);
+}
+$startRaw = trim($startGiven);
+$endRaw   = trim($endGiven);
 // 🕰️ No `tz` means the ORGANISATION's own zone (#782), answered by Site::timezone() (#604).
 //    It used to mean "Europe/London" for every customer, and the API description said so out
 //    loud — so a check sent without a zone from a church in Sydney read its times as London's,

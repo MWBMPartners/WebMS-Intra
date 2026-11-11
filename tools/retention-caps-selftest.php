@@ -122,6 +122,11 @@
  * Exit:   0 only when every check ran and passed; 1 otherwise, including when
  *         the number of checks is not the number expected.
  *
+ * Leaves:  `tblSettings` exactly as it found it, on every way out including a
+ *          failure (#947) — see "EVERY SETTINGS ROW IS PUT BACK" below. A run
+ *          killed outright is put right by the next run on the same database.
+ *          Other tables keep this file's fixture rows, as they always have.
+ *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -228,6 +233,233 @@ if (($argv[1] ?? '') === '--hold-activity') {
 }
 
 $mysqli = new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort);
+
+// -----------------------------------------------------------------------------
+// ♻️ EVERY SETTINGS ROW IS PUT BACK AS FOUND, ON EVERY WAY OUT (#947)
+// -----------------------------------------------------------------------------
+// This test changes settings in almost every section: `rc_world()` deletes a
+// key at BOTH levels and writes it again, the race holders change the
+// installation's row from another process, the saves it drives write rows of
+// their own, and the sweeps it runs may record things too. Until #947 none of
+// it was put back, so a run left the installation's `audit.retentionDays` and
+// `errors.retentionDays` at 30, the transcript period at 7, and
+// per-organisation rows nobody chose — and the NEXT test on the same database
+// read those as the installation's real figures. `erasure-pages-selftest.php`
+// had to set 365 at its own start for exactly that reason (#940).
+//
+// WHAT IS CAPTURED: the WHOLE of `tblSettings`, every column of every row
+// (number, organisation, key, value, default, sensitivity and the time it was
+// last changed), not a list of the keys this file happens to name. A list
+// would have to be kept up to date by hand, and it would miss anything a
+// method or a sweep this test drives writes on its own — the shape #668 found
+// four times. Only rows that DIFFER are touched on the way out.
+//
+// HOW A ROW IS PUT BACK: each row is matched by what it IS — its key and its
+// organisation (or "the installation") — because `rc_world()` deletes and
+// re-inserts, so the same setting comes back under a NEW number. A row that is
+// not exactly as captured is deleted, and the captured row is inserted again
+// with its OWN number and its own "last changed" time, so the table's rows are
+// identical to what was there before the run. A row the run added is deleted;
+// a row the run deleted comes back. Nothing refers to `tblSettings`, so
+// deleting a row cascades nowhere. What CANNOT be put back is the table's
+// AUTO_INCREMENT counter, which every insert moves on — a dump of the rows is
+// identical, a dump that includes the table definition is not.
+//
+// LEFTOVERS FROM A RUN THAT DID NOT FINISH (#932's lesson, section M of
+// `tools/activity-log-retention-selftest.php`): the capture is written to a
+// file named for this database, BEFORE anything is changed, and removed only
+// after a successful put-back. A shutdown function does the put-back, and PHP
+// runs it on a normal end, on every `exit()`, and after an uncaught error. Only
+// `kill -9` (or the machine going down) skips it — and then the file is still
+// there, so the next run takes ITS capture as the original and puts that back
+// first. It never takes the rows in the database as the original while that
+// file exists, because they may be the dead run's leftovers. The file name
+// carries the server's port as well as the database name, so two servers each
+// holding a `selftest_retcaps` cannot overwrite each other's capture.
+//
+// WHAT THIS CANNOT DO: put back anything but `tblSettings`. The second
+// organisation this file creates (`tblSites` row 2) and the log, event and
+// registration rows it inserts are left, as they always were; they are
+// fixtures every run creates again, and no other test reads them as a
+// setting. And a capture file somebody has edited by hand is believed.
+$rcSettingsFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR
+    . 'retcaps-original-settings-' . $rcPort . '-' . $dbName . '.json';
+
+/** The columns that make a settings row what it is. `siteScope` is worked out by the database and cannot be written. */
+const RC_SETTING_COLUMNS = ['settingID', 'siteID', 'settingKey', 'settingValue', 'updatedAt', 'isSensitive', 'defaultValue'];
+
+/**
+ * Every settings row as it stands, keyed by what the row IS: its organisation
+ * ('-' for the installation) and its key. Read with an ordinary query, so every
+ * value comes back as text (or null), exactly as it will after a round trip
+ * through the capture file — a prepared statement would hand numbers back as
+ * numbers, and `===` would then call identical rows different.
+ *
+ * @return array<string, array<string, ?string>>
+ */
+$rcSettingsNow = static function (mysqli $db): array {
+    $rows = [];
+    $res  = $db->query(
+        'SELECT `' . implode('`, `', RC_SETTING_COLUMNS) . '` FROM `tblSettings` ORDER BY `settingID`'
+    );
+    while ($row = $res->fetch_assoc()) {
+        $rows[($row['siteID'] ?? '-') . '|' . $row['settingKey']] = $row;
+    }
+    $res->free();
+    ksort($rows, SORT_STRING);
+
+    return $rows;
+};
+
+/**
+ * Put `tblSettings` back exactly as captured, in ONE transaction, touching only
+ * the rows that differ. Answers how many settings it had to change.
+ *
+ * Any transaction this connection still has open is rolled back FIRST: a run
+ * that died part-way through a save would otherwise have the put-back written
+ * INSIDE that transaction, and then thrown away with it when the connection
+ * closes (#694's lesson — the fault and its repair both lost, silently).
+ *
+ * @param array<string, array<string, ?string>> $original
+ */
+$rcSettingsPutBack = static function (mysqli $db, array $original) use ($rcSettingsNow): int {
+    try {
+        $db->rollback();
+    } catch (Throwable $ignored) {
+        // Nothing was open, so there is nothing to roll back.
+    }
+
+    // 🏢 Section F renames `tblSites` for the length of one save and puts it
+    //    back in a `finally`. Only `kill -9` inside that window skips the
+    //    `finally`, and then every later run would fail on a missing table, so
+    //    it is put back here too when that is plainly what happened.
+    $away  = $db->query("SHOW TABLES LIKE 'tblSitesP932Away'")->num_rows > 0;
+    $sites = $db->query("SHOW TABLES LIKE 'tblSites'")->num_rows > 0;
+    if ($away === true && $sites === false) {
+        $db->query('RENAME TABLE `tblSitesP932Away` TO `tblSites`');
+    }
+
+    $now = $rcSettingsNow($db);
+    if ($now === $original) {
+        return 0;
+    }
+
+    $changed = 0;
+    $db->begin_transaction();
+    try {
+        // 1. Delete every row that is not exactly as captured, including rows
+        //    the run ADDED. Done first, so the inserts below can never meet a
+        //    clash on a key or a number.
+        $del = $db->prepare('DELETE FROM `tblSettings` WHERE `settingID` = ?');
+        foreach ($now as $identity => $row) {
+            if (isset($original[$identity]) === true && $original[$identity] === $row) {
+                continue;
+            }
+            $id = (int) $row['settingID'];
+            $del->bind_param('i', $id);
+            $del->execute();
+            $changed++;
+        }
+        $del->close();
+
+        // 2. Insert every captured row that is not there now, under its OWN
+        //    number and with its own values, so the table reads as it did.
+        $ins = $db->prepare(
+            'INSERT INTO `tblSettings` (`' . implode('`, `', RC_SETTING_COLUMNS) . '`) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($original as $identity => $row) {
+            if (isset($now[$identity]) === true && $now[$identity] === $row) {
+                continue;
+            }
+            $id        = $row['settingID'];
+            $site      = $row['siteID'];
+            $key       = $row['settingKey'];
+            $value     = $row['settingValue'];
+            $updatedAt = $row['updatedAt'];
+            $sensitive = $row['isSensitive'];
+            $default   = $row['defaultValue'];
+            // Every value is bound as text and MySQL converts it; a null stays
+            // NULL whatever its letter says, so "no value" survives as itself.
+            $ins->bind_param('sssssss', $id, $site, $key, $value, $updatedAt, $sensitive, $default);
+            $ins->execute();
+            if (isset($now[$identity]) === false) {
+                $changed++;
+            }
+        }
+        $ins->close();
+        $db->commit();
+    } catch (Throwable $e) {
+        $db->rollback();
+        throw $e;
+    }
+
+    // Read it back rather than believing the statements: a put-back that
+    // reports success over a table that still differs is the fault this
+    // exists to stop.
+    if ($rcSettingsNow($db) !== $original) {
+        throw new RuntimeException('tblSettings still differs from the capture after putting it back');
+    }
+
+    return $changed;
+};
+
+$rcSettingsOriginal = null;
+if (is_file($rcSettingsFile) === true) {
+    // An earlier run on this database did not finish. ITS capture is the
+    // original; the rows in the database now may be what it left behind.
+    $rcSettingsOriginal = json_decode((string) file_get_contents($rcSettingsFile), true);
+    if (is_array($rcSettingsOriginal) === false) {
+        // Refused rather than re-captured: the rows now may be a dead run's
+        // leftovers, and taking them as the original would make them permanent.
+        echo "REFUSED — {$rcSettingsFile} is there but cannot be read, so the settings as they were before an\n"
+            . "earlier unfinished run are not known. Reload web/_sql/full_schema.sql into {$dbName}, delete that\n"
+            . "file, and run again.\n";
+        exit(1);
+    }
+    $rcSettingsBack = $rcSettingsPutBack($mysqli, $rcSettingsOriginal);
+    echo "  ! an earlier run on {$dbName} did not finish; its record of the settings was used, and "
+        . $rcSettingsBack . " setting(s) were put back before starting\n";
+} else {
+    $rcSettingsOriginal = $rcSettingsNow($mysqli);
+    // Written to a temporary name and then renamed, so a run killed while
+    // writing leaves either no file or a whole one, never half of one.
+    $rcSettingsTemp = $rcSettingsFile . '.' . bin2hex(random_bytes(4)) . '.part';
+    file_put_contents($rcSettingsTemp, json_encode($rcSettingsOriginal, JSON_THROW_ON_ERROR));
+    rename($rcSettingsTemp, $rcSettingsFile);
+}
+
+register_shutdown_function(static function () use (
+    $mysqli,
+    $rcHost,
+    $rcUser,
+    $rcPass,
+    $dbName,
+    $rcPort,
+    $rcSettingsFile,
+    $rcSettingsOriginal,
+    $rcSettingsPutBack
+): void {
+    try {
+        try {
+            $back = $rcSettingsPutBack($mysqli, $rcSettingsOriginal);
+        } catch (Throwable $first) {
+            // The run's own connection may be the thing that broke (lost, or
+            // closed). One fresh connection is tried before giving up.
+            $back = $rcSettingsPutBack(new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort), $rcSettingsOriginal);
+        }
+        @unlink($rcSettingsFile);
+        echo "\nSettings put back as they were before this run (" . $back . " setting(s) changed).\n";
+    } catch (Throwable $e) {
+        // The file is deliberately KEPT, so the next run puts these back first.
+        echo "\n! COULD NOT put the settings back: " . $e->getMessage() . "\n"
+            . "  The record of them is kept at {$rcSettingsFile}; the next run on {$dbName} puts it back first.\n";
+        // A run that leaves the database changed has not passed, however its
+        // checks went: the next test on this database would read the leftover
+        // figures as real. `exit()` inside a shutdown function sets the
+        // process's exit status, so a runner sees this as a failure.
+        exit(1);
+    }
+});
 
 $rcPasses   = 0;
 $rcFailures = 0;
@@ -771,11 +1003,23 @@ rc_head('F. #491 — the activity-log and error clear-outs, one organisation at 
 //
 // THE THREE KINDS OF ROW, and the third is the one a per-organisation loop
 // quietly loses: a row of organisation 1's, a row of organisation 2's, and a
-// row belonging to NO organisation. `siteID` is empty on both tables for a
-// record written before the organisation was decided, for one written by a
-// scheduled job, and for one whose organisation has since been deleted (both
-// links are `ON DELETE SET NULL`). Those follow the INSTALLATION's figure; a
-// loop over `tblSites` alone would keep them for ever.
+// row belonging to NO organisation. HOW a row comes to have no organisation
+// differs by table, and this used to say "written before the organisation was
+// decided, or by a scheduled job" for both — which is untrue of the activity
+// log (#940 measured it; corrected here by #947):
+//   - `tblActivityLogs`: `Logger::activity()` binds `Site::id()`, a whole
+//     number from 1 on every request and job, and `fk_logs_site` refuses 0 or
+//     an organisation that does not exist. So a new record always has one. An
+//     empty `siteID` comes only from the key's `ON DELETE SET NULL` (its
+//     organisation was deleted), or from `ActivityLogCleaner` copying the
+//     empty `siteID` of such a row.
+//   - `tblErrors`: the same `ON DELETE SET NULL` (`fk_errors_site`), and also
+//     when `Site` itself could not be loaded (`Logger::errorPlatform()` then
+//     records "not known") or when a caller deliberately names no
+//     organisation (`Logger::errorPlatformForSite(null, ...)`).
+// The rows below are written with an empty `siteID` directly, which is the
+// state those paths leave. They follow the INSTALLATION's figure; a loop over
+// `tblSites` alone would keep them for ever.
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
     . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 

@@ -33,6 +33,26 @@ migration 217's mark as missing from the install script, and migration 220 as
 advice would have written the record with no test, which is the very fault
 the test is there to prevent. Both forms are read now.
 
+A `--` INSIDE A QUOTED STRING IS NOT A COMMENT (#937). Until 11 November
+2026 this script removed every `--` to the end of its line, inside strings
+too. A column comment containing `--` then lost its closing quote, the
+statement splitter lost track of which quotes open and which close, and every
+later statement was cut in the wrong place — so ten migrations (262-264 and
+268-274), each correctly marked by its own `INSERT INTO tblMigrations ...
+VALUES (...)` beside its block in full_schema.sql, were listed as "not marked"
+on every run while it exited 0, and one seeded setting
+(`public.door.testCopies.permitted`) was listed as missing. #937 first
+described those marks as written "in their own per-block way"; they are the
+ordinary form, which this script already reads — the fault was the comment
+stripping. It now tracks quotes the same way the splitter does, so the list
+holds only a migration with no mark ANYWHERE in full_schema.sql (proved by
+deleting one mark from a scratch copy, for 263 and for 100). The same fault
+could hide a real gap in the silent direction, since a statement cut in the
+wrong place is not read at all: a check that names correct migrations every
+run trains people to ignore it (#483), and one that cannot read a statement
+cannot report it either. `check_api_spec_matches_code.py` met the same trap in
+#675.
+
 WHAT IT CANNOT SEE: the test itself. A row written with a test counts as
 seeded whatever the test says, so this script cannot tell a right test from a
 wrong one. tools/e2e-migrations/run.sh (phase 7) and
@@ -64,7 +84,46 @@ KEY_COLUMNS = {"tblsettings": "settingkey", "tblroutes": "routekey",
 
 
 def strip_sql_comments(text: str) -> str:
-    return re.sub(r"--[^\n]*", "", text)
+    """Remove `-- ...` comments, but NEVER a `--` inside a quoted string (#937).
+
+    This used to be one regular expression, `--[^\\n]*`, which also removed
+    `--` and the rest of its line from INSIDE a quoted string. A column comment
+    such as 'Pledge campaign this gift counts toward -- ...' then lost its
+    closing quote, `split_statements()` lost track of which quotes open and
+    which close, and every statement after that point was cut in the wrong
+    place. A migration mark that landed inside a mis-cut statement was not
+    read, so ten correctly marked migrations (262-264, 268-274) were listed as
+    "not marked" on every run. Nine lines of full_schema.sql hold `--` inside a
+    string today.
+
+    Quotes are tracked exactly as `split_statements()` tracks them ('' and a
+    backslash both escape), so the two can never disagree about where a string
+    ends. The newline that ends a comment is kept, so nothing else moves.
+    """
+    out: list[str] = []
+    in_q = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_q:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 2; continue
+            if c == "'":
+                if i + 1 < n and text[i + 1] == "'":
+                    out.append("'"); i += 2; continue
+                in_q = False
+        elif c == "'":
+            in_q = True; out.append(c)
+        elif text.startswith("--", i):
+            end = text.find("\n", i)
+            i = n if end == -1 else end
+            continue
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def split_statements(text: str) -> list[str]:
