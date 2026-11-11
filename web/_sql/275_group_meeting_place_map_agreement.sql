@@ -1,13 +1,26 @@
 -- =============================================================================
--- Migration 275: who entered a small group's meeting place, and whether they
---                agreed to a map of it (#809; the owner's decision D-120)
+-- Migration 275: who entered a small group's meeting place, whether they
+--                agreed to a map of it, and the homes a group takes turns
+--                meeting in (#809; the owner's decisions D-120 and D-123)
 -- =============================================================================
--- Two new columns on `tblSmallGroups` and one link to `tblUsers`. No row is
--- deleted and no existing value is changed.
+-- No row is deleted and no existing value is changed.
 --
---   placeEnteredByID   who last entered or changed where the group meets
---   placeMapAgreed     1 = that person agreed a map of the place may be shown
---   fk_sg_place_enterer  placeEnteredByID -> tblUsers.userID, ON DELETE SET NULL
+--   tblSmallGroups.placeEnteredByID   who last entered or changed the USUAL place
+--   tblSmallGroups.placeMapAgreed     1 = that person agreed to a map of it
+--   fk_sg_place_enterer               placeEnteredByID -> tblUsers, SET NULL
+--   tblSmallGroupPlaces (new)         the hosts' homes a group rotates between,
+--                                     each with its OWN host and agreement
+--   tblSmallGroupMeetings.placeID     which of those a meeting was held in;
+--                                     empty = the group's usual place
+--   fk_sgmt_place                     placeID -> tblSmallGroupPlaces, SET NULL
+--   tblRoutes                         small-groups/place, small-groups/place-save
+--
+-- D-123 (11 November 2026): a group may meet in a different host's home from
+-- one meeting to the next, and each place belongs to its own host: its map
+-- needs THAT host's agreement, and one host's agreement never stands for
+-- another's home. So the agreement lives on each place's own row, never on the
+-- group. The usual place stays on tblSmallGroups, so a group that meets in one
+-- place works exactly as before.
 --
 -- -----------------------------------------------------------------------------
 -- WHY (the owner's decision D-120, 11 November 2026)
@@ -87,6 +100,79 @@ SET @sql := IF(@fk_exists = 0,
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ── tblSmallGroupPlaces (D-123) ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS `tblSmallGroupPlaces` (
+    `placeID`          INT           NOT NULL AUTO_INCREMENT,
+    `siteID`           INT           NOT NULL COMMENT 'Copied from tblSmallGroups.siteID by the save handler, never taken from a form',
+    `groupID`          INT           NOT NULL COMMENT 'FK to tblSmallGroups: the group that meets here',
+    `placeLabel`       VARCHAR(100)  DEFAULT NULL COMMENT 'A short name to choose the place by, typed by whoever entered it (for example a family name). Optional',
+    `addressLine1`     VARCHAR(255)  DEFAULT NULL,
+    `addressLine2`     VARCHAR(255)  DEFAULT NULL,
+    `city`             VARCHAR(100)  DEFAULT NULL,
+    `region`           VARCHAR(100)  DEFAULT NULL COMMENT 'County / state / province',
+    `postcode`         VARCHAR(20)   DEFAULT NULL,
+    `countryCode`      CHAR(2)       DEFAULT NULL COMMENT 'ISO 3166-1 alpha-2. No default: a place is never assumed to be in any one country (#935)',
+    `latitude`         DECIMAL(10,7) DEFAULT NULL,
+    `longitude`        DECIMAL(10,7) DEFAULT NULL,
+    `what3words`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `placeEnteredByID` INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last entered or changed this place. Under D-120 and D-123 this place is THAT host''s home: their agreement alone decides its map (#809, migration 275)',
+    `placeMapAgreed`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the person in placeEnteredByID agreed that a map of this place may be shown (D-120). 0 = not agreed',
+    `isActive`         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = removed from the group''s list. A removed place keeps its row so a past meeting can say it met somewhere no longer recorded, but its address, who entered it and the agreement are emptied',
+    `createdAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`placeID`),
+    KEY `idx_sgp_group_active` (`groupID`, `isActive`),
+    KEY `idx_sgp_site` (`siteID`),
+    CONSTRAINT `fk_sgp_site`    FOREIGN KEY (`siteID`)           REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_sgp_group`   FOREIGN KEY (`groupID`)          REFERENCES `tblSmallGroups`(`groupID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_sgp_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Small Groups — the homes a group takes turns meeting in, each its own host''s (#809, D-123)';
+
+-- ── tblSmallGroupMeetings.placeID and its link ──────────────────────────────
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSmallGroupMeetings'
+      AND COLUMN_NAME  = 'placeID'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblSmallGroupMeetings` ADD COLUMN `placeID` INT DEFAULT NULL COMMENT ''FK to tblSmallGroupPlaces: where this meeting was held, when it was one of the hosts'''' homes the group takes turns in (D-123). Empty = the group''''s usual place (#809, migration 275)'' AFTER `meetingTime`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @idx_exists := (
+    SELECT COUNT(*) FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSmallGroupMeetings'
+      AND INDEX_NAME   = 'idx_sgmt_place'
+);
+SET @sql := IF(@idx_exists = 0,
+    'ALTER TABLE `tblSmallGroupMeetings` ADD KEY `idx_sgmt_place` (`placeID`)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @fk_exists := (
+    SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS
+    WHERE TABLE_SCHEMA    = DATABASE()
+      AND TABLE_NAME      = 'tblSmallGroupMeetings'
+      AND CONSTRAINT_NAME = 'fk_sgmt_place'
+      AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+);
+SET @sql := IF(@fk_exists = 0,
+    'ALTER TABLE `tblSmallGroupMeetings` ADD CONSTRAINT `fk_sgmt_place` FOREIGN KEY (`placeID`) REFERENCES `tblSmallGroupPlaces`(`placeID`) ON DELETE SET NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- ── the two addresses that add, change and remove a place ───────────────────
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('small-groups/place',        'small-groups/place.php',        1),
+    ('small-groups/place-save',   'small-groups/place-save.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('275_group_meeting_place_map_agreement.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

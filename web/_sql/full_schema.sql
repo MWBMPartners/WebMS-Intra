@@ -9700,6 +9700,35 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Small Groups — groups/classes register; groupID is the stable scope anchor for #304 messaging and #321 watch rooms (#150)';
 
+-- #809, D-123 (migration 275): the homes a group takes turns meeting in.
+CREATE TABLE IF NOT EXISTS `tblSmallGroupPlaces` (
+    `placeID`          INT           NOT NULL AUTO_INCREMENT,
+    `siteID`           INT           NOT NULL COMMENT 'Copied from tblSmallGroups.siteID by the save handler, never taken from a form',
+    `groupID`          INT           NOT NULL COMMENT 'FK to tblSmallGroups: the group that meets here',
+    `placeLabel`       VARCHAR(100)  DEFAULT NULL COMMENT 'A short name to choose the place by, typed by whoever entered it (for example a family name). Optional',
+    `addressLine1`     VARCHAR(255)  DEFAULT NULL,
+    `addressLine2`     VARCHAR(255)  DEFAULT NULL,
+    `city`             VARCHAR(100)  DEFAULT NULL,
+    `region`           VARCHAR(100)  DEFAULT NULL COMMENT 'County / state / province',
+    `postcode`         VARCHAR(20)   DEFAULT NULL,
+    `countryCode`      CHAR(2)       DEFAULT NULL COMMENT 'ISO 3166-1 alpha-2. No default: a place is never assumed to be in any one country (#935)',
+    `latitude`         DECIMAL(10,7) DEFAULT NULL,
+    `longitude`        DECIMAL(10,7) DEFAULT NULL,
+    `what3words`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
+    `placeEnteredByID` INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last entered or changed this place. Under D-120 and D-123 this place is THAT host''s home: their agreement alone decides its map (#809, migration 275)',
+    `placeMapAgreed`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the person in placeEnteredByID agreed that a map of this place may be shown (D-120). 0 = not agreed',
+    `isActive`         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = removed from the group''s list. A removed place keeps its row so a past meeting can say it met somewhere no longer recorded, but its address, who entered it and the agreement are emptied',
+    `createdAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updatedAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`placeID`),
+    KEY `idx_sgp_group_active` (`groupID`, `isActive`),
+    KEY `idx_sgp_site` (`siteID`),
+    CONSTRAINT `fk_sgp_site`    FOREIGN KEY (`siteID`)           REFERENCES `tblSites`(`siteID`),
+    CONSTRAINT `fk_sgp_group`   FOREIGN KEY (`groupID`)          REFERENCES `tblSmallGroups`(`groupID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_sgp_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Small Groups — the homes a group takes turns meeting in, each its own host''s (#809, D-123)';
+
 CREATE TABLE IF NOT EXISTS `tblSmallGroupMembers` (
     `membershipID` INT          NOT NULL AUTO_INCREMENT,
     `siteID`       INT          NOT NULL DEFAULT 1 COMMENT 'Denormalised from tblSmallGroups.siteID by the save choke-point',
@@ -9730,6 +9759,7 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroupMeetings` (
     `groupID`             INT          NOT NULL COMMENT 'FK to tblSmallGroups',
     `meetingDate`         DATE         NOT NULL,
     `meetingTime`         TIME         DEFAULT NULL,
+    `placeID`             INT          DEFAULT NULL COMMENT 'FK to tblSmallGroupPlaces: where this meeting was held, when it was one of the hosts'' homes the group takes turns in (D-123). Empty = the group''s usual place (#809, migration 275)',
     `topic`               VARCHAR(255) DEFAULT NULL COMMENT 'Lesson/study title for this meeting',
     `notes`               TEXT         DEFAULT NULL,
     `visitorCount`        INT          NOT NULL DEFAULT 0 COMMENT 'Non-member guests, counted not named',
@@ -9741,10 +9771,12 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroupMeetings` (
     UNIQUE KEY `uq_sgmt_group_date` (`groupID`, `meetingDate`),
     KEY `idx_sgmt_site_date` (`siteID`, `meetingDate`),
     KEY `idx_sgmt_attsess` (`attendanceSessionID`),
+    KEY `idx_sgmt_place` (`placeID`),
     CONSTRAINT `fk_sgmt_site`     FOREIGN KEY (`siteID`)              REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sgmt_group`    FOREIGN KEY (`groupID`)             REFERENCES `tblSmallGroups`(`groupID`) ON DELETE CASCADE,
     CONSTRAINT `fk_sgmt_attsess`  FOREIGN KEY (`attendanceSessionID`) REFERENCES `tblAttendanceSessions`(`sessionID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_sgmt_recorder` FOREIGN KEY (`recordedByID`)        REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_sgmt_recorder` FOREIGN KEY (`recordedByID`)        REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_sgmt_place`    FOREIGN KEY (`placeID`)             REFERENCES `tblSmallGroupPlaces`(`placeID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Small Groups — meetings/rolls; additive link into the untouched Attendance app (#150)';
 
@@ -11641,13 +11673,21 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('273_no_built_in_time_zone.sql'
 INSERT INTO `tblMigrations` (`filename`) VALUES ('274_no_built_in_place.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
--- ── from 275_group_meeting_place_map_agreement.sql (#809; D-120) ────────────
--- tblSmallGroups.placeEnteredByID and placeMapAgreed, and the link
--- fk_sg_place_enterer, are written above in the table itself: who entered a
--- group's meeting place, and whether they agreed that a map of it may be
--- shown. Every existing group starts with nobody recorded and no agreement,
--- so no map, which is the safe reading; a database built from this script has
--- no existing groups. This is the record.
+-- ── from 275_group_meeting_place_map_agreement.sql (#809; D-120, D-123) ─────
+-- Written above in the tables themselves: tblSmallGroups.placeEnteredByID and
+-- placeMapAgreed with the link fk_sg_place_enterer (who entered the group's
+-- usual meeting place, and whether they agreed to a map of it); the table
+-- tblSmallGroupPlaces (the homes a group takes turns meeting in, each with its
+-- own host and agreement); and tblSmallGroupMeetings.placeID with
+-- fk_sgmt_place (which of those a meeting was held in). Every existing group
+-- starts with nobody recorded and no agreement, so no map, which is the safe
+-- reading; a database built from this script has no existing groups. Below:
+-- the two addresses that add, change and remove a place.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('small-groups/place',        'small-groups/place.php',        1),
+    ('small-groups/place-save',   'small-groups/place-save.php',   1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblMigrations` (`filename`) VALUES ('275_group_meeting_place_map_agreement.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 

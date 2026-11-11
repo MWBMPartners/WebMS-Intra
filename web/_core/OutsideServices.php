@@ -680,9 +680,13 @@ final class OutsideServices
      * 🚦 May a small group's page draw a map of where the group meets?
      *
      * The ONE place this is decided (#809, D-120); `small-groups/group.php`
-     * asks it and then, only on a yes, widens its page rule with
-     * `mapTileSource()`. The page never names the tile host itself
+     * and `small-groups/meeting.php` ask it and then, only on a yes, widen the
+     * page rule with `mapTileSource()`. Neither page names the tile host itself
      * (`tools/audit-checks/check_outside_services_gated.py`).
+     *
+     * ONE PLACE AT A TIME (D-123). A group may take turns meeting in several
+     * hosts' homes; the caller passes THAT place's own row's host and
+     * agreement, so one host's agreement never stands for another's home.
      *
      * @param int  $groupSiteId     The organisation the GROUP belongs to.
      * @param ?int $enteredById     `tblSmallGroups.placeEnteredByID`: who entered the place, or null.

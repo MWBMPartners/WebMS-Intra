@@ -94,9 +94,22 @@ $hasPin  = $locVisible === true && $group['latitude'] !== null && $group['longit
 $showMap = $hasPin === true
     && OutsideServices::allowsMeetingPlaceMap($siteId, (int) ($group['placeEnteredByID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1) === true;
 
+// 🔁 #809, D-123 — THE HOMES THE GROUP TAKES TURNS IN. Each is its OWN host's,
+//    so each is decided on its own row: one host's agreement never stands for
+//    another's home. The same "who can see the meeting address" gate as the
+//    usual place decides whether any of them is shown at all.
+$places        = $locVisible === true ? SmallGroups::placesOf($siteId, $groupId) : [];
+$placeMapShown = [];
+foreach ($places as $pl) {
+    $plId = (int) $pl['placeID'];
+    $placeMapShown[$plId] = $pl['latitude'] !== null && $pl['longitude'] !== null
+        && OutsideServices::allowsMeetingPlaceMap($siteId, (int) ($pl['placeEnteredByID'] ?? 0), (int) ($pl['placeMapAgreed'] ?? 0) === 1) === true;
+}
+$anyMap = $showMap === true || in_array(true, $placeMapShown, true) === true;
+
 // 🗺️ Page-scoped widening for the map squares, ONLY when a map will actually
 // be drawn (#386 precedent) — must be set BEFORE header.php.
-if ($showMap === true) {
+if ($anyMap === true) {
     $cspImgExtra = OutsideServices::mapTileSource();
 }
 
@@ -110,7 +123,7 @@ $recentMeetings = [];
 if ($canManageHere === true) {
     $db = App::db();
     $stmt = $db->prepare(
-        'SELECT meetingID, meetingDate, topic, visitorCount, attendanceSessionID '
+        'SELECT meetingID, meetingDate, `placeID`, topic, visitorCount, attendanceSessionID '
         . 'FROM tblSmallGroupMeetings WHERE groupID = ? AND siteID = ? ORDER BY meetingDate DESC LIMIT 10'
     );
     if ($stmt !== false) {
@@ -118,6 +131,14 @@ if ($canManageHere === true) {
         $stmt->execute();
         $recentMeetings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
+    }
+}
+// Every place the group has ever listed, removed ones included, so a past
+// meeting held in a removed home can say so rather than look like the usual one.
+$placeNames = [];
+if ($canManageHere === true) {
+    foreach (SmallGroups::placesOf($siteId, $groupId, false) as $pl) {
+        $placeNames[(int) $pl['placeID']] = SmallGroups::placeName($pl);
     }
 }
 
@@ -244,6 +265,44 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                 <?php if ($locVisible === false): ?>
                     <p class="text-muted small mb-0"><i class="fa-solid fa-lock me-1"></i>Meeting location is visible to group members only.</p>
                 <?php endif; ?>
+
+                <?php if ($places !== [] || ($canManageHere === true && $locVisible === true)): ?>
+                    <hr>
+                    <p class="mb-1"><strong>Homes the group takes turns in</strong></p>
+                    <?php if ($places === []): ?>
+                        <p class="text-muted small mb-1">None listed. Add one if the group meets in different members' homes.</p>
+                    <?php endif; ?>
+                    <?php foreach ($places as $pl): ?>
+                        <?php $plId = (int) $pl['placeID']; ?>
+                        <div class="portal-group-place mb-3" data-place-id="<?php echo $plId; ?>">
+                            <?php portal_location_display([
+                                'address' => [
+                                    'line1' => $pl['addressLine1'], 'line2' => $pl['addressLine2'],
+                                    'city' => $pl['city'], 'region' => $pl['region'],
+                                    'postcode' => $pl['postcode'],
+                                ],
+                                'lat'     => $pl['latitude'] !== null ? (float) $pl['latitude'] : null,
+                                'lng'     => $pl['longitude'] !== null ? (float) $pl['longitude'] : null,
+                                'w3w'     => $pl['what3words'],
+                                'visible' => true,
+                                'coarsen' => false,
+                                'showMap' => $placeMapShown[$plId] ?? false,
+                                'mapId'   => 'sgPlaceMap' . $plId,
+                                'label'   => SmallGroups::placeName($pl),
+                            ]); ?>
+                            <?php if ($pl['latitude'] !== null && $pl['longitude'] !== null && ($placeMapShown[$plId] ?? false) === false): ?>
+                                <p class="small text-secondary mb-1 portal-place-no-map">No map is shown: it appears only when the
+                                    person who entered this home has agreed to it and you allow maps.</p>
+                            <?php endif; ?>
+                            <?php if ($canManageHere === true): ?>
+                                <a class="small" href="<?php echo htmlspecialchars(Site::url('small-groups/place'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>&amp;placeID=<?php echo $plId; ?>">Edit this home</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                    <?php if ($canManageHere === true): ?>
+                        <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars(Site::url('small-groups/place'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>"><i class="fa-solid fa-house-medical me-1"></i>Add a host's home</a>
+                    <?php endif; ?>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -296,7 +355,11 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                         <?php foreach ($recentMeetings as $mt): ?>
                             <div class="portal-data-row">
                                 <div class="col-6 col-md-3"><?php echo $esc(date('D, j M Y', strtotime((string) $mt['meetingDate']))); ?></div>
-                                <div class="col-6 col-md-5"><?php echo $esc($mt['topic'] ?? '—'); ?></div>
+                                <div class="col-6 col-md-3"><?php echo $esc($mt['topic'] ?? '—'); ?></div>
+                                <div class="col-6 col-md-2 small text-secondary portal-meeting-place"><?php
+                                    $mtPlace = $mt['placeID'] !== null ? (int) $mt['placeID'] : 0;
+                                    echo $esc($mtPlace > 0 ? ($placeNames[$mtPlace] ?? 'A place no longer recorded') : 'The usual place');
+                                ?></div>
                                 <div class="col-6 col-md-2">
                                     <?php if ($mt['attendanceSessionID'] !== null): ?>
                                         <span class="badge bg-success">pushed</span>
@@ -317,7 +380,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
 
 <?php
 // The map script is loaded only when a map is drawn (the directory's shape).
-if ($showMap === true) {
+if ($anyMap === true) {
     portal_location_map_assets(App::cspNonce());
 }
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';

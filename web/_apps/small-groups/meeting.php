@@ -10,6 +10,11 @@
  * `tblSmallGroupMeetingAttendance` rows in edit mode. "Copy last meeting's
  * topic" mirrors the Attendance app's copy-from-last convenience.
  *
+ * 🔁 #809, D-123: a meeting says WHERE it was held — the group's usual place,
+ * or one of the hosts' homes the group takes turns in. In edit mode the page
+ * shows that place, and its map only where `OutsideServices` says yes for
+ * THAT place's own host (D-120); otherwise the written address.
+ *
  * @package   Portal\SmallGroups
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -23,10 +28,14 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\OutsideServices;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\SmallGroups;
+
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-display.php';
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-map-assets.php';
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -89,6 +98,33 @@ if ($editMeeting === null) {
 }
 
 $activeMembers = SmallGroups::membersOf($siteId, $groupId, 'active');
+
+// 🔁 Where the meeting was held (#809, D-123). The choices are the usual place
+//    and the hosts' homes still listed; a meeting already pointing at a home
+//    that has since been removed keeps that choice, named as no longer recorded.
+$placeChoices = SmallGroups::placesOf($siteId, $groupId);
+$meetingPlaceId = $editMeeting !== null && $editMeeting['placeID'] !== null ? (int) $editMeeting['placeID'] : 0;
+$meetingPlace = $meetingPlaceId > 0 ? SmallGroups::getPlace($siteId, $groupId, $meetingPlaceId) : null;
+if ($meetingPlace !== null && (int) $meetingPlace['isActive'] !== 1) {
+    $placeChoices[] = $meetingPlace;
+}
+// The place this meeting shows, and whether its map may be drawn: decided by
+// THAT place's own host, never by the group's usual place or another home.
+$shownPlace = null;
+$showPlaceMap = false;
+if ($editMeeting !== null) {
+    $shownPlace = $meetingPlace ?? ($meetingPlaceId === 0 ? $group : null);
+    if ($shownPlace !== null && $shownPlace['latitude'] !== null && $shownPlace['longitude'] !== null) {
+        $showPlaceMap = OutsideServices::allowsMeetingPlaceMap(
+            $siteId,
+            (int) ($shownPlace['placeEnteredByID'] ?? 0),
+            (int) ($shownPlace['placeMapAgreed'] ?? 0) === 1
+        ) === true;
+    }
+}
+if ($showPlaceMap === true) {
+    $cspImgExtra = OutsideServices::mapTileSource();
+}
 
 $pushSetting = (string) Settings::get('small-groups.push_attendance', '1');
 $pushSiteOn  = $pushSetting === '1' || $pushSetting === 'true';
@@ -153,6 +189,38 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
                     <label for="visitorCount" class="form-label">Visitors</label>
                     <input type="number" name="visitorCount" id="visitorCount" class="form-control" min="0"
                            value="<?php echo (int) ($editMeeting['visitorCount'] ?? 0); ?>">
+                </div>
+                <div class="col-12 col-md-6">
+                    <label for="placeID" class="form-label">Where it was held</label>
+                    <select name="placeID" id="placeID" class="form-select">
+                        <option value="">The usual place</option>
+                        <?php foreach ($placeChoices as $choice): ?>
+                            <?php $choiceId = (int) $choice['placeID']; ?>
+                            <option value="<?php echo $choiceId; ?>" <?php echo $choiceId === $meetingPlaceId ? 'selected' : ''; ?>><?php echo $esc(SmallGroups::placeName($choice)); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php if ($editMeeting !== null && $shownPlace !== null): ?>
+                        <div class="mt-2 portal-meeting-shown-place">
+                            <?php portal_location_display([
+                                'address' => [
+                                    'line1' => $shownPlace['addressLine1'], 'line2' => $shownPlace['addressLine2'],
+                                    'city' => $shownPlace['city'], 'region' => $shownPlace['region'],
+                                    'postcode' => $shownPlace['postcode'],
+                                ],
+                                'lat'     => $shownPlace['latitude'] !== null ? (float) $shownPlace['latitude'] : null,
+                                'lng'     => $shownPlace['longitude'] !== null ? (float) $shownPlace['longitude'] : null,
+                                'w3w'     => $shownPlace['what3words'],
+                                'visible' => true,
+                                'coarsen' => false,
+                                'showMap' => $showPlaceMap,
+                                'mapId'   => 'sgMeetingMap',
+                            ]); ?>
+                            <?php if ($shownPlace['latitude'] !== null && $shownPlace['longitude'] !== null && $showPlaceMap === false): ?>
+                                <p class="small text-secondary mb-0 portal-place-no-map">No map is shown: it appears only when the
+                                    person who entered this place has agreed to it and you allow maps.</p>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
                 </div>
                 <div class="col-12">
                     <label for="notes" class="form-label">Notes <small class="text-muted">(optional)</small></label>
@@ -220,5 +288,8 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
 </script>
 
 <?php
+if ($showPlaceMap === true) {
+    portal_location_map_assets(App::cspNonce());
+}
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

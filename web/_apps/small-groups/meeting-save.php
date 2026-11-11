@@ -13,8 +13,17 @@
  *
  * bind_param arity (literal type-strings, check_bind_param_arity.py is the
  * source of truth):
- *   meeting upsert  — 8  ('iissssii': siteID, groupID, meetingDate,
- *                     meetingTime, topic, notes, visitorCount, recordedByID)
+ *   meeting upsert  — 9  ('iississii': siteID, groupID, meetingDate,
+ *                     meetingTime, placeID, topic, notes, visitorCount,
+ *                     recordedByID)
+ *
+ * 🔁 #809, D-123 — WHERE IT WAS HELD. `placeID` names one of the hosts' homes
+ * the group takes turns in, or is empty for the group's usual place. A posted
+ * number must be a home of THIS group in THIS organisation that is still
+ * listed — or the one this meeting already points at, so editing an old
+ * meeting held in a since-removed home does not lose that fact. Anything else
+ * is REFUSED, never quietly stored as "the usual place". A form that did not
+ * send the field at all leaves the meeting's place as it was (#677).
  *   mark insert     — 3  ('iii': meetingID, userID, markedByID)
  *   unmark delete   — 2  ('ii': meetingID, userID)
  *
@@ -91,6 +100,35 @@ $visitorCount = max(0, (int) ($_POST['visitorCount'] ?? 0));
 $recordedByID = $userId > 0 ? $userId : null;
 $wantsPush = isset($_POST['pushAttendance']);
 
+// 🔁 Where it was held (#809, D-123).
+$db = App::db();
+$already = null;
+$findExisting = $db->prepare('SELECT `placeID` FROM `tblSmallGroupMeetings` WHERE `groupID` = ? AND `siteID` = ? AND `meetingDate` = ? LIMIT 1');
+$findExisting->bind_param('iis', $groupId, $siteId, $meetingDate);
+$findExisting->execute();
+$already = $findExisting->get_result()->fetch_assoc();
+$findExisting->close();
+$storedPlaceId = $already !== null && $already['placeID'] !== null ? (int) $already['placeID'] : null;
+if (array_key_exists('placeID', $_POST) === false) {
+    $placeId = $storedPlaceId;
+} else {
+    $postedPlace = trim((string) $_POST['placeID']);
+    if ($postedPlace === '') {
+        $placeId = null;
+    } else {
+        $candidate = SmallGroups::getPlace($siteId, $groupId, (int) $postedPlace);
+        $usable = $candidate !== null
+            && ((int) $candidate['isActive'] === 1 || (int) $candidate['placeID'] === $storedPlaceId);
+        if ($usable === false) {
+            $_SESSION['flash_msg']  = 'That place is not one of this group\'s homes. Nothing was saved.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . $backUrl);
+            exit();
+        }
+        $placeId = (int) $candidate['placeID'];
+    }
+}
+
 // 📋 Whitelist of posted present-userIDs restricted to ACTIVE members of
 // THIS group — never trust the raw checkbox list from the client.
 $activeMemberIds = [];
@@ -105,7 +143,6 @@ foreach ($postedPresent as $pid) {
     }
 }
 
-$db = App::db();
 $meetingId = 0;
 
 try {
@@ -116,10 +153,10 @@ try {
     // -------------------------------------------------------------------
     $stmt = $db->prepare(
         'INSERT INTO tblSmallGroupMeetings '
-        . '(siteID, groupID, meetingDate, meetingTime, topic, notes, visitorCount, recordedByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
+        . '(siteID, groupID, meetingDate, meetingTime, `placeID`, topic, notes, visitorCount, recordedByID) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
         . 'ON DUPLICATE KEY UPDATE '
-        . 'meetingTime = VALUES(meetingTime), topic = VALUES(topic), notes = VALUES(notes), '
+        . 'meetingTime = VALUES(meetingTime), `placeID` = VALUES(`placeID`), topic = VALUES(topic), notes = VALUES(notes), '
         . 'visitorCount = VALUES(visitorCount), recordedByID = VALUES(recordedByID)'
     );
     if ($stmt === false) {
@@ -127,8 +164,8 @@ try {
     }
     // 8 placeholders: i i s s s s i i
     $stmt->bind_param(
-        'iissssii',
-        $siteId, $groupId, $meetingDate, $meetingTime, $topic, $notes, $visitorCount, $recordedByID
+        'iississii',
+        $siteId, $groupId, $meetingDate, $meetingTime, $placeId, $topic, $notes, $visitorCount, $recordedByID
     );
     $stmt->execute();
     $stmt->close();

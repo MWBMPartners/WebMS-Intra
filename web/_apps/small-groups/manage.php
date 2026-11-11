@@ -30,12 +30,12 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
-use Portal\Core\OutsideServices;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\SmallGroups;
 
 require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-input.php';
+require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'place-map-agreement.php';
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -94,22 +94,13 @@ if ($stmtTypes !== false) {
 //    a map of it. A map is shown only where that person agreed, so the form
 //    says whose agreement stands and what a tick from THIS person would do.
 //    The rule for what a save does with the tick is
-//    `SmallGroups::placeAgreementAfterSave()`; this only describes it.
+//    `SmallGroups::placeAgreementAfterSave()`; the shared partial
+//    `portal_place_map_agreement()` only describes it, in the same words the
+//    rotating hosts' places use (D-123).
 $viewerId       = (int) (App::user()['userID'] ?? 0);
 $placeEnteredBy = $editGroup !== null ? (int) ($editGroup['placeEnteredByID'] ?? 0) : 0;
 $placeAgreed    = $editGroup !== null && (int) ($editGroup['placeMapAgreed'] ?? 0) === 1;
-$placeIsMine    = $placeEnteredBy > 0 && $placeEnteredBy === $viewerId;
-$placeEntererName = '';
-if ($placeEnteredBy > 0 && $placeIsMine === false) {
-    $nameStmt = $db->prepare('SELECT `fullName` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-    if ($nameStmt !== false) {
-        $nameStmt->bind_param('i', $placeEnteredBy);
-        $nameStmt->execute();
-        $placeEntererName = (string) ($nameStmt->get_result()->fetch_assoc()['fullName'] ?? '');
-        $nameStmt->close();
-    }
-}
-$placeTickBlocked = OutsideServices::meetingPlaceTickBlockedFor();
+$placeEntererName = $placeEnteredBy > 0 && $placeEnteredBy !== $viewerId ? SmallGroups::entererName($placeEnteredBy) : '';
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
@@ -296,41 +287,18 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
             ]); ?>
 
             <?php
-            // 🗺️ #809, D-120 — "a map of this place may be shown". The hidden
-            //    marker says the box was DRAWN, so the handler can tell an
-            //    unticked box from a form that never offered it (#677).
+            // 🗺️ #809, D-120 — "a map of this place may be shown", for the
+            //    group's USUAL place. The rotating hosts' homes (D-123) are
+            //    listed on the group's page and entered one at a time.
+            portal_place_map_agreement([
+                'isNew'       => $isCreate,
+                'enteredBy'   => $placeEnteredBy,
+                'agreed'      => $placeAgreed,
+                'viewerId'    => $viewerId,
+                'entererName' => $placeEntererName,
+                'what'        => 'this meeting place',
+            ]);
             ?>
-            <div class="mt-3 portal-place-map-agreement">
-                <input type="hidden" name="placeMapAsked" value="1">
-                <div class="form-check">
-                    <input type="checkbox" class="form-check-input" name="placeMapAgreed" id="placeMapAgreed" value="1"
-                           <?php echo ($placeIsMine === true && $placeAgreed === true) ? 'checked' : ''; ?>>
-                    <label class="form-check-label" for="placeMapAgreed">
-                        A map of this meeting place may be shown on the group's page
-                    </label>
-                </div>
-                <p class="small text-secondary mb-1">
-                    The map is drawn by OpenStreetMap, an outside company: showing it tells OpenStreetMap where the
-                    group meets, together with the internet address of whoever is looking. A group often meets in
-                    somebody's home, so the map is shown only when the person who entered the meeting place has
-                    agreed. The address itself is still shown as text, to whoever may see it, either way.
-                </p>
-                <p class="small text-secondary mb-0">
-                    <?php if ($isCreate === true || $placeEnteredBy === 0): ?>
-                        <?php if ($isCreate === false): ?>Nobody is recorded as having entered this meeting place. <?php endif; ?>
-                        If you tick this, you are recorded as the person who entered it, and your agreement counts.
-                    <?php elseif ($placeIsMine === true): ?>
-                        You entered this meeting place, so this is your agreement to give or take back.
-                    <?php else: ?>
-                        This meeting place was entered by <?php echo $esc($placeEntererName !== '' ? $placeEntererName : 'somebody else'); ?>,
-                        who has <?php echo $placeAgreed === true ? 'agreed' : 'not agreed'; ?> to a map. Only they can change
-                        that. If you change the place, you become the person who entered it, and your own tick counts instead.
-                    <?php endif; ?>
-                    <?php if ($placeTickBlocked !== ''): ?>
-                        <br><strong>No map will be shown from your agreement:</strong> <?php echo $esc($placeTickBlocked); ?>
-                    <?php endif; ?>
-                </p>
-            </div>
         </div>
     </div>
 

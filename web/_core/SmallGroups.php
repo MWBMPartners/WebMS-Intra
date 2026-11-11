@@ -684,7 +684,11 @@ final class SmallGroups
      *
      * D-120: a map of the place is shown only where WHOEVER ENTERED IT has
      * agreed. So an agreement belongs to one person and one place, and must
-     * never end up attached to a place that person did not enter:
+     * never end up attached to a place that person did not enter. D-123: a
+     * group may take turns in several hosts' homes, each its own host's, so
+     * this ONE rule serves both the group's usual place (`tblSmallGroups`) and
+     * every home on its list (`tblSmallGroupPlaces`, the same column names) —
+     * asked separately for each row, so one host's tick never touches another's:
      *
      *   1. the place is now EMPTY            → nobody, not agreed;
      *   2. the place CHANGED (or is new)     → the person saving entered it;
@@ -736,6 +740,109 @@ final class SmallGroups
         }
 
         return ['enteredBy' => $recorded, 'agreed' => $hadAgreed];
+    }
+
+    // -------------------------------------------------------------------------
+    // 🔁 The homes a group takes turns meeting in (#809, D-123)
+    // -------------------------------------------------------------------------
+
+    /**
+     * The places a group rotates between, oldest first. Site-scoped, like
+     * every read here: another organisation's group answers nothing.
+     *
+     * Each row carries its OWN host (`placeEnteredByID`) and agreement
+     * (`placeMapAgreed`): under D-123 each place is its own host's home, so
+     * one host's agreement never stands for another's.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function placesOf(int $siteId, int $groupId, bool $activeOnly = true): array
+    {
+        $stmt = self::db()->prepare(
+            'SELECT * FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `siteID` = ?'
+            . ($activeOnly === true ? ' AND `isActive` = 1' : '')
+            . ' ORDER BY `placeID`'
+        );
+        if ($stmt === false) {
+            return [];
+        }
+        $stmt->bind_param('ii', $groupId, $siteId);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        return $rows;
+    }
+
+    /**
+     * One place of ONE group, or null. A place of another group, or another
+     * organisation, is indistinguishable from a missing one.
+     *
+     * @return array<string,mixed>|null
+     */
+    public static function getPlace(int $siteId, int $groupId, int $placeId): ?array
+    {
+        if ($placeId <= 0) {
+            return null;
+        }
+        $stmt = self::db()->prepare(
+            'SELECT * FROM `tblSmallGroupPlaces` WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('iii', $placeId, $groupId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? $row : null;
+    }
+
+    /**
+     * What a place is called on the pages: its own short name, else the first
+     * line of its address and its town, else — for a place that was removed
+     * and emptied — a plain statement that it is no longer recorded.
+     *
+     * @param array<string,mixed> $place
+     */
+    public static function placeName(array $place): string
+    {
+        $label = trim((string) ($place['placeLabel'] ?? ''));
+        if ($label !== '') {
+            return $label;
+        }
+        $parts = array_values(array_filter([
+            trim((string) ($place['addressLine1'] ?? '')),
+            trim((string) ($place['city'] ?? '')),
+        ], static fn (string $p): bool => $p !== ''));
+        if ($parts !== []) {
+            return implode(', ', $parts);
+        }
+
+        return 'A place no longer recorded';
+    }
+
+    /**
+     * The name of the person recorded as having entered a place, for the edit
+     * forms only (so a leader knows whose agreement stands). '' when there is
+     * nobody, or the account cannot be read.
+     */
+    public static function entererName(int $userId): string
+    {
+        if ($userId <= 0) {
+            return '';
+        }
+        $stmt = self::db()->prepare('SELECT `fullName` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        if ($stmt === false) {
+            return '';
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $name = (string) ($stmt->get_result()->fetch_assoc()['fullName'] ?? '');
+        $stmt->close();
+
+        return $name;
     }
 
     // -------------------------------------------------------------------------

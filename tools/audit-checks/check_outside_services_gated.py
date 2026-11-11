@@ -49,9 +49,14 @@ WHAT IT LOOKS FOR
    `OutsideServices::allows(OutsideServices::MEMBER_MAP, $id)` and widens the
    rule with `OutsideServices::mapTileSource()`.
 6. `web/_apps/small-groups/group.php`, in code, decides its meeting-place map
-   with `OutsideServices::allowsMeetingPlaceMap(` (#809, D-120), widens the
-   rule with `OutsideServices::mapTileSource()` inside `if ($showMap === true)`,
+   with `OutsideServices::allowsMeetingPlaceMap(` (#809, D-120) — TWICE: once
+   for the group's usual place and once inside the loop over the hosts' homes
+   the group takes turns in (D-123), each by its own row's host — widens the
+   rule with `OutsideServices::mapTileSource()` inside `if ($anyMap === true)`,
    and hands the partial `'showMap' => $showMap` rather than `true`.
+7. `web/_apps/small-groups/meeting.php`, in code, decides the shown place's map
+   with `OutsideServices::allowsMeetingPlaceMap(` and widens the rule only
+   inside `if ($showPlaceMap === true)`.
 
 WHAT THIS CANNOT SEE, said plainly because an overstated guarantee is worse
 than none
@@ -62,7 +67,7 @@ than none
    services #778 governs; the follow-ups recorded on #778 (video players,
    address look-up, what3words, content-delivery libraries, the robot check)
    are NOT covered here.
-3. Whether the gated code RUNS. Checks 2, 3, 5 and 6 are PRESENCE only (D-065:
+3. Whether the gated code RUNS. Checks 2, 3, 5, 6 and 7 are PRESENCE only (D-065:
    "is this code reached" is behavioural). `tools/outside-services-selftest.php`
    drives the real pages and is what proves the decision is obeyed.
 
@@ -123,6 +128,7 @@ AVATAR = "_core/Avatar.php"
 HEADER = "_core/templates/header.php"
 PROFILE = "_apps/directory/profile.php"
 GROUP = "_apps/small-groups/group.php"
+MEETING = "_apps/small-groups/meeting.php"
 
 AVATAR_CALLS = (
     "OutsideServices::providerPhotoIfAllowed(",
@@ -142,7 +148,11 @@ GROUP_DECIDE = re.compile(
     r"\$showMap\s*=\s*\$hasPin\s*===\s*true\s*&&\s*OutsideServices::allowsMeetingPlaceMap\(", re.S
 )
 GROUP_WIDEN = re.compile(
-    r"if\s*\(\s*\$showMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
+    r"if\s*\(\s*\$anyMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
+)
+DECIDE_CALL = "OutsideServices::allowsMeetingPlaceMap("
+MEETING_WIDEN = re.compile(
+    r"if\s*\(\s*\$showPlaceMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
 )
 GROUP_PARTIAL = re.compile(r"'showMap'\s*=>\s*\$showMap\s*,")
 CSP_ASSIGN = re.compile(r"\$cspImgExtra\s*(?:\.?=)[^;]*;", re.S)
@@ -234,6 +244,7 @@ def main() -> int:
         header = code_only(WEB / HEADER)
         profile = code_only(WEB / PROFILE)
         group = code_only(WEB / GROUP)
+        meeting = code_only(WEB / MEETING)
         php_files = sorted(WEB.rglob("*.php"))
         all_code = {p.relative_to(WEB).as_posix(): code_only(p) for p in php_files
                     if "cspImgExtra" in p.read_text(encoding="utf-8", errors="ignore")}
@@ -284,10 +295,21 @@ def main() -> int:
             "   A group often meets in somebody's home, so the map is drawn only where the person who "
             "entered the place agreed, on the terms of a member's own home map (#809, D-120)." % GROUP
         )
+    if group.count(DECIDE_CALL) != 2:
+        problems.append(
+            "✗ %s calls %s %d time(s); 2 were expected -- once for the group's usual place and once for "
+            "EACH host's home it takes turns in. Each home is its own host's, so each must be decided on its "
+            "own row (#809, D-123)." % (GROUP, DECIDE_CALL, group.count(DECIDE_CALL))
+        )
     if GROUP_WIDEN.search(group) is None:
         problems.append(
             "✗ %s no longer widens the page rule with OutsideServices::mapTileSource() inside "
-            "`if ($showMap === true)`." % GROUP
+            "`if ($anyMap === true)`." % GROUP
+        )
+    if DECIDE_CALL not in meeting or MEETING_WIDEN.search(meeting) is None:
+        problems.append(
+            "✗ %s no longer decides the shown place's map with %s and widens the page rule only inside "
+            "`if ($showPlaceMap === true)` (#809, D-120, D-123)." % (MEETING, DECIDE_CALL)
         )
     if GROUP_PARTIAL.search(group) is None:
         problems.append(
@@ -303,8 +325,8 @@ def main() -> int:
 
     total = sum(len(v) for v in found.values())
     print("✓ Outside services are gated: %d file mention(s) of a member-identifying host, all accounted "
-          "for; Avatar, the page rule, the directory map and the small-group meeting-place map all go "
-          "through OutsideServices. "
+          "for; Avatar, the page rule, the directory map and the small-group meeting-place maps (group page "
+          "and meeting page) all go through OutsideServices. "
           "(Presence only -- tools/outside-services-selftest.php proves the pages obey it.)" % total)
     return 0
 
