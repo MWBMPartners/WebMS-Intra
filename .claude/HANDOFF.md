@@ -6,19 +6,19 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927).
-Last whole suite (with #941/#942/#907): 118/118 green. Decisions D-129 to D-136 recorded on 11 November (D-135 is the
-owner's 2 November no-live-install statement, found unrecorded).
+#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968.
+Last whole suite (with #968): green. Decisions D-129 to D-139 recorded on 11 November (D-135 is the owner's
+2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #968 — events detail keeps moderators' notes for signed-in admins (D-136); public pages name their columns | integrated locally (dce78b0e), unpushed | Four check rounds; last finding wording only, corrected by me. Whole suite running, then push |
-| #977 — an erased account cannot be changed through any page | `p977-build`, 1b5020d8 | Check round 1 running (protected) |
-| #966 — currency not built in (D-133; migration 282 if needed) | `p966-build` | Building: plan first, may raise an owner question about changing currency once money is recorded |
+| #977 — an erased account cannot be changed through any page | integrated locally (6e57601b + docs), unpushed | Check CLEAN. Whole suite running, then push and close. Follow-ups #985, #986 |
+| #933 — activity descriptions keep no personal details an erasure cannot reach | `p933-build`, 4f734052 + 06d5fe16 | Round 2 applied D-137 (failed sign-in keeps the typed name) and D-138 (organisation labels stay). Check round 2 running (protected) |
+| #966 — currency not built in | `p966-build`, 5b9b2983 | Owner chose per-record currency (D-139): every money record keeps its own, totals per currency, expenses keep quoted + converted amount. Round 2 building; round 1 check found £ escapes and totals ignoring a record's currency |
 
-**Migration numbers taken:** 269-279 landed. Next free: 282 (#966). 280/281 assigned and unused.
+**Migration numbers taken:** 269-279 landed. 282 is #966's (unintegrated); its round 2 may take 283. 280/281 unused.
 **The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923); the whole-suite runner does not yet (#983).**
 
 ## Next, in this order
@@ -71,4 +71,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#983.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#986.
