@@ -1045,11 +1045,17 @@ if ($foundBoth === false) {
         // and are stored as it, exactly like `2026-03-29 01:30`.
         ['Europe/London',    '2026-03-29 01:30 +0 hours',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
         ['Europe/London',    '2026-03-29 01:30 +1 hour -1 hour', '2026-03-29 02:30', '2026-03-29 01:30:00'],
-        // ... in mixed units too, where `date_parse()` sees the hour and not
-        // the msec. Round 2's "no relative hours" test sent this one to the
-        // old line while storing `+1 hour -1 hour` as written; the equality
-        // treats every zero the same.
-        ['Europe/London',    '2026-03-29 01:30 +1 hour -3600000 msec', '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        // ⚠️ THREE CELLS THE INDEPENDENT CHECK'S ROUND 3 FOUND UNPINNED: each
+        //    of these step-(d) faults put the moved hour back with section K
+        //    at 184 of 184 --
+        //      d5, the FRACTION left out of the canonical cell;
+        //      d7, the WEEKDAY left out of the canonical cell;
+        //      d1, the `weekdays` rule left out of the canonical cell.
+        //    Each cell below needs that part of the canonical cell to match.
+        ['Europe/London',    '03/29/2026 01:30:07.25',       '2026-03-29 02:30', '2026-03-29 01:30:07'],
+        ['Europe/London',    'sunday 2026-03-28 01:30',      '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    'Sun, 28 Mar 2026 01:30',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Africa/Cairo',     '2027-04-29 00:30 +1 weekday',  '2027-04-30 01:30', '2027-04-30 00:30:00'],
     ];
     $premiseWrong = [];
     $gapWrong     = [];
@@ -1096,6 +1102,15 @@ if ($foundBoth === false) {
         ['2026-03-29 00:30 +1 hour',      '2026-03-29 02:30:00'],
         ['2026-03-29 00:45 +45 minutes',  '2026-03-29 02:30:00'],
         ['2026-03-28 01:30 +24 hours',    '2026-03-29 02:30:00'],
+        // A MIXED zero -- an hour `date_parse()` reports, cancelled by msec it
+        // does not -- is refused by step (d)'s first test and keeps the old
+        // answer (round 3 stored it as written; round 4 does not).
+        ['2026-03-29 01:30 +1 hour -3600000 msec',      '2026-03-29 02:30:00'],
+        // A misreported date rule cancelled by REPORTED time arithmetic: the
+        // canonical cell is fooled, the first test is not. Round 3, which had
+        // dropped that test as "redundant", stored both at 01:30.
+        ['next sunday 2026-03-29 01:30 -168 hours',     '2026-03-29 02:30:00'],
+        ['last sunday of april 2026 01:30 -672 hours',  '2026-03-29 02:30:00'],
         // msec and usec on an ordinary day: exact time, nothing to move.
         ['2026-03-28 10:00 +3600000 msec',       '2026-03-28 11:00:00'],
         ['2026-03-28 10:00 +3600000000 usec',    '2026-03-28 11:00:00'],
@@ -1106,7 +1121,7 @@ if ($foundBoth === false) {
             $keepWrong[] = $keepCell . ' gave ' . ($keepGot ?? 'REFUSED');
         }
     }
-    check('K07c and nothing outside the skipped hour changes',
+    check('K07c nothing outside the skipped hour changes, and REPORTED time arithmetic keeps its old answer',
         $keepWrong === [] ? 'all stored' : implode(' | ', $keepWrong), 'all stored');
     // A cell IN the skipped hour that names its own zone or offset is an
     // INSTANT, and must still be converted onto the organisation's clock --

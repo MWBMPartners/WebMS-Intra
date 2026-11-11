@@ -672,61 +672,82 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        the change it lands an hour later on the clock, and that is the
     //        right answer, so such a cell keeps the line below.
     //
-    //        HOW "NO TIME ARITHMETIC" IS DECIDED -- by ONE equality, not a
-    //        list. PHP also reads, in UTC, a CANONICAL cell built from only
-    //        what `date_parse()` says was WRITTEN: the date and time fields,
-    //        plus the relative DATE parts it reports (years, months, days, a
-    //        weekday, weekdays, first/last day of) and NO relative time at
-    //        all. The step acts only when the two readings agree to the
-    //        microsecond; any time arithmetic -- reported or not -- makes them
-    //        differ, and the cell keeps the line below. The weekday goes FIRST
-    //        in the canonical cell: written after the time, a day name resets
-    //        the time to 00:00 (measured).
+    //        HOW "NO TIME ARITHMETIC" IS DECIDED -- by TWO tests, both needed:
     //
-    //        ⚠️ WHY NOT JUST ASK `date_parse()` FOR RELATIVE HOURS, MINUTES AND
-    //           SECONDS, which is what round 2 did: msec, ms, milliseconds,
-    //           usec and microseconds are applied by PHP and reported NOWHERE
-    //           in its `relative` array, so `2026-03-29 00:30 +3600000 msec`
-    //           passed that test and was stored at 01:30, an hour early (the
-    //           independent check found 2,444 such cells). A list of units
-    //           would be defeated by the next unit. Comparing only the clock
-    //           TIME would not do either: `+86400000 msec` is exactly a day and
-    //           leaves the time of day unchanged. Once the equality existed,
-    //           round 3 also measured the old relative-time test as redundant
-    //           -- removing it changed nothing over 255,094 generated cells
-    //           except to make net-zero mixtures consistent (below) -- so it
-    //           is gone, leaving one rule.
+    //          1. `date_parse()` reports no relative hours, minutes or
+    //             seconds. On its own this is not enough: msec, ms,
+    //             milliseconds, usec and microseconds are applied by PHP and
+    //             reported NOWHERE in its `relative` array, so round 2 of #785,
+    //             which had only this test, stored `2026-03-29 00:30 +3600000
+    //             msec` at 01:30, an hour early (2,444 such cells in the
+    //             independent check's sweep).
+    //          2. PHP also reads, in UTC, a CANONICAL cell built from only what
+    //             `date_parse()` says was WRITTEN -- the date and time fields,
+    //             plus the relative DATE parts it reports (years, months, days,
+    //             a weekday, weekdays, first/last day of) and no relative time
+    //             -- and the step acts only when that reading equals the cell's
+    //             own to the microsecond. Hidden msec/usec make them differ,
+    //             including `+86400000 msec`, exactly a day, which a test of
+    //             the clock time alone could not see. The weekday goes FIRST in
+    //             the canonical cell: written after the time, a day name resets
+    //             the time to 00:00 (measured).
     //
-    //           That canonical cell is only ever a CHECK and never the stored
-    //           value, so a mistake in building it can only hand a cell back
-    //           to the answer this reader gave before #785 -- never store a
-    //           wrong date. That is the lesson of round 1, which rebuilt the
-    //           reading from these same fields and STORED it, with the wrong
-    //           date for three kinds of cell.
+    //        ⚠️ ROUND 3 REMOVED TEST 1 AS "MEASURED REDUNDANT", AND IT WAS NOT.
+    //           `date_parse()` MISREPORTS two date rules -- `next <weekday>` is
+    //           reported exactly as `<weekday>`, and `last <weekday> of
+    //           <month>` as day 1 minus 7 days -- so the canonical cell lands
+    //           on a different day, and REPORTED time arithmetic of exactly
+    //           that difference made the two readings match again:
+    //           `next sunday 2026-03-29 01:30 -168 hours` and `last sunday of
+    //           april 2026 01:30 -672 hours` were stored at 01:30, where an
+    //           exact count of hours gives 02:30 (676 such cells across zones
+    //           in the independent check's round 3). Test 1 refuses those. My
+    //           own sweep had not tried a misreported rule COMBINED with
+    //           arithmetic, so "redundant" was a claim about the cells I had
+    //           thought of.
     //
-    //        DELIBERATE: arithmetic that adds up to NOTHING is no arithmetic.
-    //        `+0 hours`, `+1 hour -1 hour`, `+3600000 msec -3600000 msec` and
-    //        `+1 hour -3600000 msec` all leave PHP's reading equal to the
-    //        written one, so `2026-03-29 01:30 +0 hours` is stored as the 01:30
-    //        it names, exactly like `2026-03-29 01:30`, in whatever units the
-    //        zero is written.
+    //        THE LIMIT THAT REMAINS, stated rather than implied: a date rule
+    //        `date_parse()` misreports (`next <weekday>`, `last <weekday> of`)
+    //        combined with HIDDEN time arithmetic (msec or usec) that exactly
+    //        cancels the misreport -- `next sunday 2026-03-29 01:30
+    //        -604800000 msec` -- passes both tests and is stored as the
+    //        reading written (01:30) where an exact count gives 02:30. Neither
+    //        test can see it: test 1 cannot see the msec, and the comparison
+    //        is fooled by the misreport. Nobody writes such a cell in a
+    //        spreadsheet; it is recorded on #946 with the two misreported forms.
+    //        So these tests do NOT prove that no time arithmetic was applied.
+    //        They catch every REPORTED time arithmetic, and every HIDDEN one
+    //        that a misreported date rule does not exactly cancel.
     //
-    //        KNOWN AND LEFT: a cell PHP reads but the canonical cell cannot
-    //        reproduce keeps the line below, which is what it stored before
-    //        #785. The one measured is `next sunday 2026-03-22 01:30`:
-    //        `date_parse()` reports `next sunday` exactly as it reports
-    //        `sunday`, hiding the "strictly after" rule, so if that Sunday's
-    //        01:30 is in the skipped hour it is still stored moved. Trying a
-    //        `next` variant as well was rejected: a hidden msec amount of
-    //        exactly seven days could then match by coincidence and STORE a
-    //        wrong value, where today the worst case is the old answer.
+    //        The canonical cell is only ever a CHECK and never the stored
+    //        value -- the lesson of round 1, which rebuilt the reading from
+    //        these same fields and STORED it, with the wrong date for three
+    //        kinds of cell. A mismatch therefore hands the cell to the line
+    //        below; the only way a wrong value is stored is the limit above.
+    //
+    //        DELIBERATE: arithmetic that adds up to NOTHING is no arithmetic,
+    //        within each test's sight: `+0 hours` and `+1 hour -1 hour`
+    //        (`date_parse()` reports a net zero) and `+3600000 msec -3600000
+    //        msec` (the readings match) store the 01:30 they name, exactly like
+    //        `2026-03-29 01:30`. A MIXTURE whose zero needs both kinds of unit
+    //        (`+1 hour -3600000 msec`) is refused by test 1 and keeps the line
+    //        below.
+    //
+    //        KNOWN AND LEFT, safe in direction: a cell the canonical cell
+    //        cannot reproduce keeps the line below, which is what it stored
+    //        before #785 -- `next sunday 2026-03-22 01:30`, because of the
+    //        misreport above, is still stored moved if that Sunday's 01:30 is
+    //        in the skipped hour. So is a fraction that rounds up to a whole
+    //        second (`01:30:00.9999995`): it becomes 1,000,000 microseconds,
+    //        which the canonical cell carries into the next second, so the
+    //        readings differ.
     //
     //        Three earlier versions were wrong: the first REFUSED such a cell
     //        (a refusal by spelling, which round 14 of #777 rules out); the
     //        second STORED a reading rebuilt from fields (the wrong date for
     //        `+1 weekday`, `first/last day of` and an ordinal `+1 month`); the
-    //        third trusted `date_parse()` to report all time arithmetic, and
-    //        stored msec/usec cells an hour early (above).
+    //        third had test 1 alone and stored msec/usec cells an hour early.
+    //        The fourth (round 3) had test 2 alone (above).
     //
     //        What this returns still passes the `$fmtStore` wrapper's year
     //        floor (1000) and its four-digit year shape test, which is what
@@ -737,7 +758,10 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     if ($parsed['is_localtime'] === false
         && is_int($parsed['year']) === true
         && is_int($parsed['month']) === true
-        && is_int($parsed['day']) === true) {
+        && is_int($parsed['day']) === true
+        && (int) ($relative['hour'] ?? 0) === 0
+        && (int) ($relative['minute'] ?? 0) === 0
+        && (int) ($relative['second'] ?? 0) === 0) {
         $utc = new \DateTimeZone('UTC');
         $asRead = null;
         $asWritten = null;

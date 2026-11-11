@@ -212,22 +212,28 @@ CLASSIFIED: dict[str, object] = {
 #
 #    An entry may need MORE THAN ONE pin, so the guard is a tuple of whole
 #    statements, each required exactly once. The import's step (d) has five:
-#    the condition that decides a cell has no zone or offset and a full date
-#    (with the `$relative` line it reads, pinned in the same string so
-#    emptying it cannot pass); the zone the readings are made in; PHP's own
-#    UTC reading of the cell; the canonical cell built from what was WRITTEN;
-#    and the test that returns the UTC reading only when the two agree and
-#    the reading is in the skipped hour.
+#    the condition that decides a cell has no zone or offset, a full date and
+#    no REPORTED relative time (with the `$relative` line it reads, pinned in
+#    the same string so emptying it cannot pass); the zone the readings are
+#    made in; PHP's own UTC reading of the cell; the canonical cell built from
+#    what was WRITTEN; and the test that returns the UTC reading only when the
+#    two agree and the reading is in the skipped hour.
 #
 #    What the pins cannot see: whether the guarded code is REACHED, and what
-#    the lines between them compute (the written base and its date rules).
-#    That is behavioural, and K07 to K07f drive it (D-065). One pinned clause
-#    guards something no behaviour can: removing the `readingIsReal()` test
-#    was measured to change NOTHING over 255,094 generated cells (the UTC read
-#    agrees with the zone on every reading that exists), so it is pinned as a
-#    statement of what the step is for, not as a fault guard.
+#    the lines BETWEEN them compute. That is behavioural, and section K of
+#    tools/clock-change-selftest.php drives it (D-065) -- measured part by
+#    part, not assumed: leaving out of the canonical cell the fraction, the
+#    weekday, the `weekdays` rule, the year/month/day rules or `last day of`,
+#    putting the weekday after the time, or dropping seconds from what is
+#    stored, each turns K07b red. (Until round 4 the first three did NOT:
+#    each left section K at 184 of 184 while putting the moved hour back.)
+#    One pinned clause guards something no behaviour can: removing the
+#    `readingIsReal()` test was measured to change NOTHING over 315,043
+#    generated cells (the UTC read agrees with the zone on every reading that
+#    exists), so it is pinned as a statement of what the step is for, not as
+#    a fault guard.
 #
-# ⚠️ THREE EARLIER VERSIONS OF STEP (d) WERE PINNED HERE, AND ALL THREE WERE
+# ⚠️ FOUR EARLIER VERSIONS OF STEP (d) WERE PINNED HERE, AND ALL FOUR WERE
 #    WRONG. **A pin pins whatever is there; it is never evidence that what is
 #    there is right.**
 #    * Round 0 REFUSED such a cell -- a refusal by SPELLING, which round 14
@@ -235,16 +241,23 @@ CLASSIFIED: dict[str, object] = {
 #    * Round 1 rebuilt the reading from `date_parse()`'s fields and STORED
 #      it: the wrong DATE for `+1 weekday`, `first/last day of` and an
 #      ordinal `+1 month`. Planted back it fails K07b and K07e.
-#    * Round 2 stored PHP's UTC reading whenever `date_parse()` reported no
-#      relative hours, minutes or seconds -- and msec/usec are reported
-#      NOWHERE, so `+3600000 msec` was stored an hour early. Planted back it
-#      fails K07b and K07f2.
+#    * Round 2 had only the reported-relative-time test, and msec/usec are
+#      reported NOWHERE, so `+3600000 msec` was stored an hour early.
+#      Planted back it fails K07f2.
+#    * Round 3 had only the comparison, having called the reported-relative-
+#      time test "measured redundant" -- and `date_parse()` misreports
+#      `next <weekday>` and `last <weekday> of`, so `next sunday 2026-03-29
+#      01:30 -168 hours` matched and was stored an hour early. Planted back
+#      it fails K07c.
 IMPORT_STEP3_GUARD = (
     "$relative = $parsed['relative'] ?? []; "
     "if ($parsed['is_localtime'] === false "
     "&& is_int($parsed['year']) === true "
     "&& is_int($parsed['month']) === true "
-    "&& is_int($parsed['day']) === true) {",
+    "&& is_int($parsed['day']) === true "
+    "&& (int) ($relative['hour'] ?? 0) === 0 "
+    "&& (int) ($relative['minute'] ?? 0) === 0 "
+    "&& (int) ($relative['second'] ?? 0) === 0) {",
     "$utc = new \\DateTimeZone('UTC');",
     "$asRead = (new \\DateTimeImmutable($trimmed, $utc))->format('Y-m-d H:i:s.u');",
     "$dayName . $writtenBase->format('Y-m-d H:i:s.u') . ($dateRules === [] ? '' : ' ' . implode(' ', $dateRules)),",
@@ -259,14 +272,18 @@ _IMPORT_REASON = (
     "The CSV import's loose-spreadsheet step (`$fmtClockRaw` step 3) builds a "
     "moment with strtotime() ON PURPOSE: it is the only reader of Excel's long "
     "date, US slash dates and the rest, and the strict steps before it store "
-    "the text without one. Since #785, for a cell with no zone or offset, step "
-    "(d) also reads the cell in UTC, where nothing moves, and returns THAT when "
-    "it equals PHP's reading of a canonical cell built from only what was "
-    "WRITTEN (so no time arithmetic, reported or hidden) and is in the hour "
-    "the zone skipped -- so what reaches this column is the reading the cell "
-    "wrote. Measured over 255,094 generated cells: the only change from the "
-    "original reader is skipped-hour readings now stored as written. Driven "
-    "by K07-K07f of tools/clock-change-selftest.php."
+    "the text without one. Since #785, for a cell with no zone, no offset and "
+    "no relative time date_parse() reports, step (d) also reads the cell in "
+    "UTC, where nothing moves, and returns THAT when it equals PHP's reading "
+    "of a canonical cell built from what was WRITTEN and is in the hour the "
+    "zone skipped -- so for a plain reading, what reaches this column is the "
+    "reading the cell wrote. Known limit: a date rule date_parse() misreports "
+    "(`next <weekday>`, `last <weekday> of`) combined with msec/usec that "
+    "exactly cancel the misreport can still match and store the written "
+    "reading (#946). Measured over 315,043 generated cells: apart from that "
+    "limit, the only change from the original reader is skipped-hour readings "
+    "now stored as written. Driven by section K of "
+    "tools/clock-change-selftest.php."
 )
 ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":

@@ -246,6 +246,142 @@ $stmt = $mysqli->prepare('INSERT INTO tblEvents (endDateTime) VALUES (?)');
 $stmt->bind_param('s', $text);
 """, {("$text", "tblEvents.endDateTime")}),
 
+    # ⚠️ P17-P30 EXIST BECAUSE THE INDEPENDENT CHECK'S ROUND 3 SWITCHED OFF
+    #    `foreach` FOLLOWING (`true ||` on its test) WITH THIS TEST AT 80 OF
+    #    80. So every construct the probe's header says it follows, and every
+    #    write shape it says it reads, now has a plant here, and each has a
+    #    switch-off that was measured to turn that plant red (the list and
+    #    the results are in the commit for round 4 of #785).
+    ("P17 a compound assignment (.=)",
+     HEAD + """
+$s = '';
+$s .= date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P18 a moment held in an array and read back by foreach",
+     HEAD + """
+$m = [strtotime((string) $_POST['s'])];
+foreach ($m as $one) {
+    $s = date('Y-m-d H:i:s', $one);
+}
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P19 through a method's return ($this->...)",
+     HEAD + """
+final class Saver
+{
+    private function toStore(string $x): string
+    {
+        return date('Y-m-d H:i:s', strtotime($x));
+    }
+
+    public function save(\\mysqli $db, string $raw): void
+    {
+        $s = $this->toStore($raw);
+        $stmt = $db->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+        $stmt->bind_param('s', $s);
+    }
+}
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P20 through a static method's return (self::...)",
+     HEAD + """
+final class StaticSaver
+{
+    private static function toStore(string $x): string
+    {
+        return date('Y-m-d H:i:s', strtotime($x));
+    }
+
+    public static function save(\\mysqli $db, string $raw): void
+    {
+        $s = self::toStore($raw);
+        $stmt = $db->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+        $stmt->bind_param('s', $s);
+    }
+}
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P21 through an arrow function held in a variable",
+     HEAD + """
+$fmt = fn (string $x): string => date('Y-m-d H:i:s', strtotime($x));
+$s = $fmt((string) $_POST['s']);
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P22 a moment carried through strtotime()'s base argument",
+     HEAD + """
+$m = strtotime((string) $_POST['s']);
+$later = strtotime('+1 day', $m);
+$s = date('Y-m-d H:i:s', $later);
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P23 a moment's timestamp handed to a constructor ('@' . $ts)",
+     HEAD + """
+$ts = mktime((int) $_POST['h'], (int) $_POST['m'], 0);
+$s = (new \\DateTimeImmutable('@' . $ts))->format('Y-m-d H:i:s');
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P24 SQL assembled with .= before prepare()",
+     HEAD + """
+$s = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+$sql = 'UPDATE tblEvents ';
+$sql .= 'SET startDateTime = ? WHERE eventID = ?';
+$id = 1;
+$stmt = $mysqli->prepare($sql);
+$stmt->bind_param('si', $s, $id);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P25 mysqli_prepare(), the procedural spelling",
+     HEAD + """
+$s = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+$stmt = mysqli_prepare($mysqli, 'INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P26 execute_query(), the SQL and its values in one call",
+     HEAD + """
+$s = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+$mysqli->execute_query('INSERT INTO tblEvents (startDateTime) VALUES (?)', [$s]);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P27 mysqli_query() with the value written into the SQL",
+     HEAD + """
+$t = date('H:i:s', strtotime((string) $_POST['t']));
+mysqli_query($mysqli, "UPDATE tblSessions SET sessionTime = '$t' WHERE sessionID = 1");
+""", {("$t", "tblSessions.sessionTime")}),
+
+    ("P28 ON DUPLICATE KEY UPDATE filling a clock column",
+     HEAD + """
+$id = 9;
+$t = date('H:i:s', strtotime((string) $_POST['t']));
+$stmt = $db->prepare('INSERT INTO tblSessions (sessionID) VALUES (?) ON DUPLICATE KEY UPDATE sessionTime = ?');
+$stmt->bind_param('is', $id, $t);
+""", {("$t", "tblSessions.sessionTime")}),
+
+    ("P29 INSERT ... SET",
+     HEAD + """
+$t = date('H:i:s', strtotime((string) $_POST['t']));
+$stmt = $db->prepare('INSERT INTO tblSessions SET sessionID = 3, sessionTime = ?');
+$stmt->bind_param('s', $t);
+""", {("$t", "tblSessions.sessionTime")}),
+
+    ("P30 INSERT ... SELECT, judged as a whole statement",
+     HEAD + """
+$s = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) SELECT ?');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
     ("P14 a single value carried into a closure through its use list",
      HEAD + """
 $start = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
@@ -640,9 +776,14 @@ print(f"\n{len(results)} checks: {len(results) - len(failed)} passed, {len(faile
 #    printing "all passed" over less than it used to test (#697, #485). The
 #    generated count follows the pinned lists, which the LIST checks hold to
 #    the probe and the check, so it is pinned through them.
-if plants != 16 or greens != 11 or refusals != 9 or lists != 6:
+# ⚠️ AND THE GENERATED COUNT IS PINNED TOO (round 4 of #785). The LIST checks
+#    hold the pinned copy to the real lists, so an entry removed from ONE of
+#    them fails -- but an entry removed from BOTH in one edit left every
+#    remaining case green and silently tested one thing fewer.
+if plants != 30 or greens != 11 or refusals != 9 or lists != 6 or generated != 38:
     print(f"FAIL: a case list has changed size ({plants} plants / {greens} green / "
-          f"{refusals} refusals / {lists} list pins; pinned 16 / 11 / 9 / 6). "
+          f"{refusals} refusals / {lists} list pins / {generated} generated; "
+          f"pinned 30 / 11 / 9 / 6 / 38). "
           f"Change the pin in the same edit, deliberately.")
     sys.exit(1)
 sys.exit(1 if len(failed) > 0 else 0)

@@ -35,12 +35,22 @@
  *
  * HOW FAR IT FOLLOWS A VALUE -- and where it stops, said plainly (D-065)
  * ---------------------------------------------------------------------
- *   * Within ONE function body (or a file's top level), by VARIABLE NAME:
+ *   * Within ONE function body (or a file's top level), by VARIABLE NAME,
+ *     through `=` and the compound operators (`.=`, `??=`, `+=` ...), and
+ *     into an array (`$p[] = ...`, `$p['k'] = ...`):
  *     `$a = strtotime($x); $b = (int) $a; $c = date('Y-m-d H:i:s', $b - 60);`
  *     -- `$c` came through a moment.
- *   * Through operators, casts, `?:`/`??`, string joining, array literals and
- *     `foreach`, and through a SHORT list of functions that hand their
- *     argument back changed only in form (`PASS_THROUGH`: trim, substr ...).
+ *   * Through operators, casts, `?:`/`??`, string joining, array literals,
+ *     `foreach`, arrow functions (read as part of the function they sit in),
+ *     a moment handed to another moment function (`strtotime('+1 day', $m)`),
+ *     and through a SHORT list of functions that hand their argument back
+ *     changed only in form (`PASS_THROUGH`: trim, substr ...).
+ *   * EVERY construct in this list and in the two below has a case in
+ *     `tools/wall-clock-writes-selftest.py` that was measured to go red when
+ *     that construct's handling is switched off (36 of 36 in round 4 of #785).
+ *     That was not true before round 4: switching `foreach` off left the
+ *     self-test green, and an arrow function's body was never read at all
+ *     although this list said it was -- `=>` ended the expression.
  *   * NOT into the arguments of any other call. That is deliberate and was
  *     MEASURED: the first version let a value flow through every call, and
  *     `import.php`'s `Events::alreadyInCalendar($db, ..., $storedStart)` --
@@ -48,8 +58,9 @@
  *     though it came through a moment: twenty-six false reports in one file.
  *     A check that cries wolf gets switched off (#483).
  *   * Through a RETURN, one hop, inside the same file: a closure held in a
- *     variable or a named function/method whose `return` hands back such a
- *     value makes every call to it in that file such a value too. That is how
+ *     variable, a named function, or a method called as `$this->m()` or
+ *     `self::m()`, whose `return` hands back such a value makes every call to
+ *     it in that file such a value too. That is how
  *     `calendar/manage/import.php`'s `$fmtStore()` is seen.
  *   * It is FLOW-INSENSITIVE: a variable is "through a moment" if ANY
  *     assignment to it in that function is. That over-approximates on purpose.
@@ -767,6 +778,28 @@ function expressionEnd(array $file, int $from): int
             continue;
         }
         $k = $t[$j][0];
+        // ⚠️ AN ARROW FUNCTION'S OWN `=>` IS NOT THE END. `=>` ends an array
+        //    key or a `foreach` key, so the first version stopped there and
+        //    cut `$fmt = fn ($x) => date(..., strtotime($x));` off at the
+        //    arrow -- the body was never read, while the header said arrow
+        //    functions are read as part of the function they sit in (found
+        //    by plant P21 in round 4 of #785). Step over the parameters, any
+        //    return type and the arrow, and read the body as part of this
+        //    expression.
+        if ($k === T_FN) {
+            $p = $j + 1;
+            while ($p < $file['n'] && $t[$p][0] !== '(') {
+                $p++;
+            }
+            if ($p < $file['n']) {
+                $p = $file['match'][$p] + 1;
+                while ($p < $file['n'] && $t[$p][0] !== T_DOUBLE_ARROW) {
+                    $p++;
+                }
+                $j = $p;
+                continue;
+            }
+        }
         if ($k === '(' || $k === '[' || $k === '{' || $k === T_CURLY_OPEN || $k === T_DOLLAR_OPEN_CURLY_BRACES) {
             $j = $file['match'][$j];
             continue;
@@ -904,26 +937,24 @@ function momentIn(array $file, int $s, int $from, int $to): ?int
         $argsCarry = momentIn($file, $s, $open + 1, $close);
         if ($prev === T_NEW) {
             // `new DateTime(...)` / `new \DateTimeImmutable(...)`
-            if (in_array($name, CONSTRUCTED, true) === true) {
-                if (isset($args[0]) === true && holdsVariable($file, $args[0][0], $args[0][1]) === true) {
-                    return $t[$j][2];
-                }
-                if ($argsCarry !== null) {
-                    return $argsCarry;
-                }
+            // (No "carried moment" test here: a moment in the value
+            // argument is a variable there, so the test above already
+            // fires, and a moment passed as the ZONE is not a thing anybody
+            // writes. The first version had one, and round 4 of #785
+            // measured it unreachable -- no case could turn it red.)
+            if (in_array($name, CONSTRUCTED, true) === true
+                && isset($args[0]) === true && holdsVariable($file, $args[0][0], $args[0][1]) === true) {
+                return $t[$j][2];
             }
             $j = $close;
             continue;
         }
         if ($prev === T_DOUBLE_COLON) {
             // `X::createFromFormat(format, VALUE)`
-            if ($name === 'createfromformat') {
-                if (isset($args[1]) === true && holdsVariable($file, $args[1][0], $args[1][1]) === true) {
-                    return $t[$j][2];
-                }
-                if ($argsCarry !== null) {
-                    return $argsCarry;
-                }
+            // (Likewise no "carried moment" test: unreachable, see `new`.)
+            if ($name === 'createfromformat'
+                && isset($args[1]) === true && holdsVariable($file, $args[1][0], $args[1][1]) === true) {
+                return $t[$j][2];
             }
             if (isset($file['retM'][$name]) === true) {
                 return $file['retM'][$name];
