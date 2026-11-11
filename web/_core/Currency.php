@@ -341,12 +341,15 @@ final class Currency
 
     /**
      * ✏️ THE ONE RULE for the currency an EDITED money record is written with
-     * (#966, D-139). It returns the record's STORED currency unless a currency
-     * was deliberately posted AND the record may change it; then the posted
-     * one. Never today's currency: an edit after the organisation changed its
-     * own must not relabel a record, and a record with no recorded currency
-     * ('') STAYS '' unless one is posted for it, so a parent and its children
-     * keep agreeing (an unrecorded parent's children are unrecorded too).
+     * (#966, D-139). It returns the record's STORED currency when no currency
+     * was posted, and the POSTED one when one was. Never today's currency: an
+     * edit after the organisation changed its own must not relabel a record,
+     * and a record with no recorded currency ('') STAYS '' unless one is posted
+     * for it. It does NOT decide whether a posted change is allowed: that is
+     * the caller's refusal (whyCurrencyCannotChange() for an asset,
+     * whyInvoiceCurrencyCannotChange() for an invoice), and a caller may ask
+     * this rule more than once — saveInvoice() asks it before the invoice's
+     * lock and again under it, with the stored currency the lock read.
      *
      * Every UPDATE of a money table under web/ that writes `currency` asks this
      * (tools/audit-checks/check_currency_writes.py is the hard gate). "An edit
@@ -356,10 +359,7 @@ final class Currency
      *
      * $posted: null or '' when no currency was posted; otherwise a code the
      * caller has ALREADY checked with isChoosable() (an unusable code is the
-     * caller's refusal, in its own words). Whether the record MAY change
-     * (no child in another currency) is the caller's refusal too, asked again
-     * under the parent row's lock: a refused change never reaches this. (A
-     * third parameter for it was passed by nobody and is removed, round 5.)
+     * caller's refusal, in its own words).
      */
     public static function onEdit(string $stored, ?string $posted): string
     {
@@ -369,6 +369,75 @@ final class Currency
         }
 
         return $wanted;
+    }
+
+    /**
+     * 🔒 The parent tables whose currency can CHANGE after the row is made, and
+     * the key column of each: the only tables withParentLocked() will lock. An
+     * asset's currency changes on its edit page; a venue invoice's on its own.
+     * Every other parent keeps the currency it was made in (only the labelling
+     * of unrecorded rows ever writes it, in its own transaction).
+     */
+    public const LOCKABLE_PARENTS = [
+        'tblAssets'        => 'assetID',
+        'tblVenueInvoices' => 'invoiceID',
+    ];
+
+    /**
+     * 🔒 THE ONE OWNER of "lock the parent, re-read, write" for money (#966,
+     * D-139; #647's rule). It BEGINS a transaction, then locks the parent row
+     * FOR UPDATE as its FIRST statement, then calls $work with the currency
+     * that locked read answered (null when there is no such row in this
+     * organisation), then COMMITS. On ANY \Throwable — a failed statement under
+     * the portal's strict reporting, a lock-wait timeout (1205), a bug — it
+     * ROLLS BACK and rethrows, so nothing escapes with the transaction open.
+     *
+     * $work re-reads what it needs (the parent's children, its own refusal)
+     * UNDER that lock and writes; it returns its own answer, which this
+     * returns. It must not begin, commit or roll back itself. A refusal is a
+     * plain return: nothing was written, and the empty commit is harmless.
+     *
+     * Why one helper: the round-5 copies in six methods each began, locked and
+     * rolled back by hand, and a lock-wait timeout threw past three of them with
+     * the transaction still open, so the error row written next vanished with
+     * it on disconnect (#694's round-3 shape). `if ($stmt === false)` cannot
+     * catch that: under MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR the
+     * statement THROWS. Every parent-currency writer and child insert of a
+     * table in LOCKABLE_PARENTS calls this (check_currency_writes.py pins it).
+     *
+     * The lock only means something inside the transaction (#697): a locking
+     * read in autocommit is released at once. tools/currency-selftest.php
+     * (section L) proves the transaction is open while $work runs.
+     *
+     * @template T
+     * @param callable(?string): T $work
+     * @return T
+     */
+    public static function withParentLocked(\mysqli $db, string $parentTable, int $parentId, int $siteId, callable $work): mixed
+    {
+        $key = self::LOCKABLE_PARENTS[$parentTable] ?? null;
+        if ($key === null) {
+            throw new \InvalidArgumentException('withParentLocked(): ' . $parentTable . ' is not a parent whose currency can change.');
+        }
+        $db->begin_transaction();
+        try {
+            $stmt = $db->prepare('SELECT `currency` FROM `' . $parentTable . '` WHERE `' . $key . '` = ? AND `siteID` = ? FOR UPDATE');
+            $stmt->bind_param('ii', $parentId, $siteId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            $result = $work(is_array($row) === true ? (string) $row['currency'] : null);
+            $db->commit();
+
+            return $result;
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+                // The connection itself has gone: there is nothing left to roll back.
+            }
+            throw $e;
+        }
     }
 
     /** 💷 The currency's own symbol ("£"), or '' when it is written with its code. */

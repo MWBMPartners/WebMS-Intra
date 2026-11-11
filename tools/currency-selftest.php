@@ -71,6 +71,8 @@ declare(strict_types=1);
 
 /** The made-up global administrator. Nothing else in tools/ uses 9669xx. */
 const CU_ADMIN = 966901;
+/** A second made-up member (section L), removed at the end with the first. */
+const CU_HELPER = 966902;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -463,6 +465,7 @@ $removeAll = static function () use ($db, &$made, $site): void {
     run($db, 'DELETE FROM `tblGivingStatementLog` WHERE `donorID` = ?', 'i', [CU_ADMIN]);
     foreach ($made['invoices'] as $id) {
         run($db, 'DELETE FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ?', 'i', [$id]);
+        run($db, 'DELETE FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblVenueInvoices` WHERE `invoiceID` = ?', 'i', [$id]);
     }
     foreach ($made['venues'] as $id) {
@@ -511,6 +514,10 @@ $removeAll = static function () use ($db, &$made, $site): void {
     run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [CU_ADMIN]);
     $db->query('SET FOREIGN_KEY_CHECKS = 0');
     run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [CU_ADMIN]);
+    run($db, 'DELETE FROM `tblAssetMaintenance` WHERE `performedByUserID` = ?', 'i', [CU_HELPER]);
+    run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [CU_HELPER]);
+    run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [CU_HELPER]);
+    run($db, "DELETE FROM `tblErrors` WHERE `errorTitle` = 'Currency selftest marker'");
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
 };
 $touched = "'org.currency', 'org.address.countryCode', 'giving.enabled', 'payments.enabled', 'payments.provider', 'translation.enabled', 'transcription.enabled', 'sms.enabled', 'ai_assist.enabled'";
@@ -1230,10 +1237,10 @@ for ($i = 0; $i < 100 && $waiting === false; $i++) {
 }
 check('T1 the premise: the real edit is WAITING on the asset row this test holds (the database says so), and has not finished',
     $waiting === true && $running > 0, 'waiting ' . var_export($waiting, true) . ', running ' . $running);
-$child = $holder->prepare("INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest race repair', 700, 'EUR')");
-$child->bind_param('ii', $site, $stand);
-$child->execute();
-$child->close();
+$raceRepair = $holder->prepare("INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest race repair', 700, 'EUR')");
+$raceRepair->bind_param('ii', $site, $stand);
+$raceRepair->execute();
+$raceRepair->close();
 $holder->commit();
 $holder->close();
 do {
@@ -1246,6 +1253,198 @@ curl_multi_remove_handle($multi, $edit);
 curl_multi_close($multi);
 check('T2 a repair in EUR recorded WHILE the edit waited makes the edit refuse once it gets the lock: the asset is still EUR, agreeing with its repair',
     $assetCurrency($stand) === 'EUR', var_export($assetCurrency($stand), true));
+
+/**
+ * Run one real request in the web server while this test holds a lock in its own
+ * connection; wait until the database reports that request WAITING on a statement
+ * naming $waitsOn (asserted, never slept on); run $meanwhile (which may use the
+ * holding connection); then let go and wait for the request to finish. Answers
+ * whether the request was seen waiting.
+ */
+$raceRequest = static function (string $path, array $post, mysqli $holder, string $waitsOn, callable $meanwhile) use ($port, $jar, $db): bool {
+    $multi = curl_multi_init();
+    $req = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($req, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($post),
+        CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+    curl_multi_add_handle($multi, $req);
+    $seen = false;
+    $running = 0;
+    for ($i = 0; $i < 100 && $seen === false; $i++) {
+        curl_multi_exec($multi, $running);
+        $seen = (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `information_schema`.`INNODB_TRX` WHERE `trx_state` = 'LOCK WAIT' AND `trx_query` LIKE ?", 's', ['%' . $waitsOn . '%'])[0]['n'] ?? 0) > 0;
+        if ($seen === false) {
+            usleep(100000);
+        }
+    }
+    $meanwhile($seen && $running > 0);
+    do {
+        curl_multi_exec($multi, $running);
+        if ($running > 0) {
+            curl_multi_select($multi, 1.0);
+        }
+    } while ($running > 0);
+    curl_multi_remove_handle($multi, $req);
+    curl_multi_close($multi);
+    return $seen;
+};
+$holdRow = static function (string $table, string $key, int $id) use ($dbHost, $dbUser, $dbPass, $dbName, $dbPort): mysqli {
+    $h = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $h->set_charset('utf8mb4');
+    $h->begin_transaction();
+    $st = $h->prepare('SELECT 1 FROM `' . $table . '` WHERE `' . $key . '` = ? FOR UPDATE');
+    $st->bind_param('i', $id);
+    $st->execute();
+    $st->get_result()->fetch_all();
+    $st->close();
+    return $h;
+};
+
+// T3/T4: the INVOICE edit's re-check UNDER the lock (round 6: replacing it with
+// if (false) must go red). An unpaid EUR invoice is edited to USD while this test
+// holds the invoice row; meanwhile a payment in EUR is recorded. The edit's early
+// check saw no payment; only the re-check under the lock can see it.
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$raceInvoice = (int) $db->insert_id;
+$made['invoices'][] = $raceInvoice;
+$invoiceHolder = $holdRow('tblVenueInvoices', 'invoiceID', $raceInvoice);
+$invoiceWaited = false;
+$raceRequest('/venues/invoice-save', array_merge($invoicePost($raceInvoice, 'USD'), ['amount' => '20.00']), $invoiceHolder, 'tblVenueInvoices',
+    static function (bool $waiting) use ($invoiceHolder, $site, $raceInvoice, &$invoiceWaited): void {
+        $invoiceWaited = $waiting;
+        $p = $invoiceHolder->prepare("INSERT INTO `tblVenueInvoicePayments` (`siteID`, `invoiceID`, `paidDate`, `amountPence`, `currency`) VALUES (?, ?, CURDATE(), 500, 'EUR')");
+        $p->bind_param('ii', $site, $raceInvoice);
+        $p->execute();
+        $p->close();
+        $invoiceHolder->commit();
+        $invoiceHolder->close();
+    });
+check('T3 the premise: the invoice edit was seen WAITING on the invoice row this test held', $invoiceWaited === true);
+check('T4 a payment in EUR recorded while it waited makes the invoice edit refuse UNDER the lock: still EUR, agreeing with its payment',
+    $invoiceCurrency($raceInvoice) === 'EUR', var_export($invoiceCurrency($raceInvoice), true));
+
+// T5/T6: the EXPENSE edit's refusal when the claim's currency changed under it.
+// An UNRECORDED claim is edited while this test holds its row; meanwhile it is
+// labelled EUR. The lines were judged with no currency, so the edit must refuse.
+run($db, "INSERT INTO `tblExpenseClaims` (`siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, 'Currency selftest raced claim', CURDATE(), 5.00, 'Pending', '')",
+    'iii', [$site, CU_ADMIN, $dept]);
+$raceClaim = (int) $db->insert_id;
+$claimHolder = $holdRow('tblExpenseClaims', 'claimID', $raceClaim);
+$claimWaited = false;
+$raceRequest('/expenses/edit/save', ['csrf_token' => $freshToken('/expenses/edit?id=' . $raceClaim), 'claimID' => (string) $raceClaim,
+    'claimTitle' => 'Currency selftest raced claim, edited', 'deptID' => (string) $dept,
+    'itemDesc' => ['Stamps'], 'itemQty' => ['1'], 'itemUnit' => ['5.00'], 'itemCurrency' => [''], 'itemConverted' => ['']], $claimHolder, 'tblExpenseClaims',
+    static function (bool $waiting) use ($claimHolder, $raceClaim, &$claimWaited): void {
+        $claimWaited = $waiting;
+        $u = $claimHolder->prepare("UPDATE `tblExpenseClaims` SET `currency` = 'EUR' WHERE `claimID` = ?");
+        $u->bind_param('i', $raceClaim);
+        $u->execute();
+        $u->close();
+        $claimHolder->commit();
+        $claimHolder->close();
+    });
+$raceClaimAfter = rows($db, 'SELECT `claimTitle`, `currency` FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [$raceClaim]);
+$raceLines = rows($db, 'SELECT COUNT(*) AS `n` FROM `tblExpenseClaimItems` WHERE `claimID` = ?', 'i', [$raceClaim]);
+check('T5 the premise: the claim edit was seen WAITING on the claim row this test held', $claimWaited === true);
+check('T6 the claim was given a currency while the edit waited, so the edit REFUSED: the title is unchanged and no line was written in the old answer',
+    ($raceClaimAfter[0]['claimTitle'] ?? '') === 'Currency selftest raced claim' && ($raceClaimAfter[0]['currency'] ?? '') === 'EUR' && (int) ($raceLines[0]['n'] ?? -1) === 0,
+    json_encode([$raceClaimAfter, $raceLines]));
+
+// =============================================================================
+// L. The ONE locking helper, Currency::withParentLocked() (round 6)
+// =============================================================================
+head('Section L — the locking helper: the transaction is open before the lock, and a throw leaves nothing open');
+// L1/L2: the transaction must begin BEFORE the parent lock (#691's method), proved
+// on the HELPER itself. A second PHP process calls Currency::withParentLocked() on an
+// invoice; its work waits on a NAMED lock (GET_LOCK) this test holds — a wait that
+// touches no row, so nothing but the helper's own transaction can still be holding
+// the invoice row. While it waits, this test asks for the invoice row FOR UPDATE
+// NOWAIT: with the transaction open that fails with 3572; with begin_transaction()
+// removed the helper's lock was released at the end of its own statement and the
+// request succeeds. (T1-T6 cannot tell: a locking read waits even in autocommit.
+// Three earlier versions drove a real repair or line and passed with the
+// transaction removed, because a waiting child INSERT holds a lock on its parent row
+// of its own — through its foreign key, or through the subquery reading the parent's
+// currency. Each was planted and caught.)
+run($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `createdAt`) VALUES (?, ?, ?, 1, NOW())', 'iss', [CU_HELPER, 'Selftest currency helper', 'currency-helper@selftest.invalid']);
+run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`) VALUES (?, 'Currency selftest font', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(16))]);
+$font = (int) $db->insert_id;
+$made['assets'][] = $font;
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2500, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$lockInvoice = (int) $db->insert_id;
+$made['invoices'][] = $lockInvoice;
+$lockName = 'currency-selftest-' . bin2hex(random_bytes(4));
+$gate = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+$gate->query("SELECT GET_LOCK('" . $lockName . "', 0)");
+$worker = $state['child'] . $sep . 'helper-worker.php';
+file_put_contents($worker, '<?php declare(strict_types=1);' . "\n"
+    . 'require ' . var_export($repo . $sep . 'web' . $sep . '_core' . $sep . 'Currency.php', true) . ";\n"
+    . 'mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);' . "\n"
+    . '$db = new mysqli(' . implode(', ', array_map(static fn ($v): string => var_export($v, true), [$dbHost, $dbUser, $dbPass, $dbName, $dbPort])) . ');' . "\n"
+    . 'echo \Portal\Core\Currency::withParentLocked($db, "tblVenueInvoices", ' . $lockInvoice . ', ' . $site . ', static function (?string $c) use ($db): string {' . "\n"
+    . '    $db->query("SELECT GET_LOCK(' . var_export($lockName, true) . ', 30)");' . "\n"
+    . '    return "worked in " . (string) $c;' . "\n"
+    . '});' . "\n");
+$proc = proc_open([PHP_BINARY, $worker], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+$waitingOnName = false;
+for ($i = 0; $i < 100 && $waitingOnName === false; $i++) {
+    $waitingOnName = (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `information_schema`.`PROCESSLIST` WHERE `INFO` LIKE ? AND `STATE` LIKE '%lock%'", 's', ['%GET_LOCK(\'' . $lockName . '\', 30)%'])[0]['n'] ?? 0) > 0;
+    if ($waitingOnName === false) {
+        usleep(100000);
+    }
+}
+$nowait = 'not tried';
+$probe = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+$probe->begin_transaction();
+try {
+    $q = $probe->prepare('SELECT `currency` FROM `tblVenueInvoices` WHERE `invoiceID` = ? FOR UPDATE NOWAIT');
+    $q->bind_param('i', $lockInvoice);
+    $q->execute();
+    $q->get_result()->fetch_all();
+    $q->close();
+    $nowait = 'got the lock';
+} catch (mysqli_sql_exception $e) {
+    $nowait = (string) $e->getCode();
+}
+$probe->rollback();
+$probe->close();
+$gate->query("SELECT RELEASE_LOCK('" . $lockName . "')");
+$gate->close();
+$workerSaid = stream_get_contents($pipes[1]);
+$workerErr  = stream_get_contents($pipes[2]);
+proc_close($proc);
+check('L1 the premise: the helper\'s work, in a second process, was seen WAITING on the named lock this test held (it had already locked the invoice)', $waitingOnName === true);
+check('L2 while it waited, the invoice row was STILL LOCKED by the helper\'s open transaction: a NOWAIT request for it failed with 3572 (in autocommit it would have succeeded) — and the work then finished, given the invoice\'s EUR',
+    $nowait === '3572' && trim((string) $workerSaid) === 'worked in EUR', 'NOWAIT: ' . $nowait . '; worker: ' . trim((string) $workerSaid) . ' ' . trim((string) $workerErr));
+
+// L3: a THROW inside the work leaves no transaction open: what the work wrote is
+// gone, and the next row written (an error row, as a caller would write) is
+// committed and seen from another connection.
+$threw = false;
+try {
+    Currency::withParentLocked($db, 'tblAssets', $font, $site, static function (?string $c) use ($db, $site, $font): void {
+        run($db, "INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPenc`, `currency`) VALUES (?, ?, 'x', 1, 'EUR')", 'ii', [$site, $font]);
+    });
+} catch (Throwable $e) {
+    $threw = true;
+}
+$writtenBefore = static fn (): int => (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `tblAssetMaintenance` WHERE `assetID` = ? AND `title` = 'Currency selftest rolled back'", 'i', [$font])[0]['n'] ?? 0);
+$threwAfterWrite = false;
+try {
+    Currency::withParentLocked($db, 'tblAssets', $font, $site, static function (?string $c) use ($db, $site, $font): void {
+        run($db, "INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest rolled back', 1, 'EUR')", 'ii', [$site, $font]);
+        throw new RuntimeException('planted failure after a write');
+    });
+} catch (RuntimeException $e) {
+    $threwAfterWrite = $e->getMessage() === 'planted failure after a write';
+}
+$openHere = (int) (rows($db, 'SELECT COUNT(*) AS `n` FROM `information_schema`.`INNODB_TRX` WHERE `trx_mysql_thread_id` = CONNECTION_ID()')[0]['n'] ?? -1);
+run($db, "INSERT INTO `tblErrors` (`siteID`, `errorTitle`) VALUES (?, 'Currency selftest marker')", 'i', [$site]);
+$observer = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+$markerSeen = (int) ($observer->query("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorTitle` = 'Currency selftest marker'")->fetch_assoc()['n'] ?? 0);
+$observer->close();
+check('L3 a THROW inside the work — a failing statement, then a plain exception after a write — reaches the caller, leaves NO transaction open on the connection, undoes the write, and the error row written next is committed (seen from another connection)',
+    $threw === true && $threwAfterWrite === true && $openHere === 0 && $writtenBefore() === 0 && $markerSeen === 1,
+    json_encode(['threw' => $threw, 'threwAfterWrite' => $threwAfterWrite, 'open' => $openHere, 'kept' => $writtenBefore(), 'marker' => $markerSeen]));
 
 // A giving statement for a donor who gave in several currencies (EUR, USD and GBP here,
 // and one gift with none). The unrecorded GIFT is unlabelled; the statement must not be.

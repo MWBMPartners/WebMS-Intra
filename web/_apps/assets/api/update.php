@@ -59,6 +59,15 @@ $data = assets_api_build_data($body, $existing);
 $actorUserId = ApiAuth::actorUserId() ?? 0;
 $ok = AssetRegister::updateAsset($assetId, $data, $actorUserId);
 if ($ok === false) {
+    // 💷 A refusal UNDER the asset's lock (a repair recorded in another
+    //    currency a moment ago, #966 round 6) is said as such, not blamed on
+    //    the tag code.
+    if (isset($data['currency']) === true) {
+        $currencyRefusal = AssetRegister::whyCurrencyCannotChange($assetId, (string) $data['currency']);
+        if ($currencyRefusal !== '') {
+            ApiResponse::error($currencyRefusal, 409);
+        }
+    }
     // 🪞 Most likely cause: assetTagCode collides with another asset on
     // this site (uq_asset_tag) — see AssetRegister::updateAsset()'s own
     // comment. The existence check above already ruled out "not found".

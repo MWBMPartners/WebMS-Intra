@@ -34,6 +34,13 @@ from web/_core/Currency.php, never typed here):
      entry that no longer matches a write is reported, because a stale
      exception reads as a guarantee.
 
+  3. Each writer named in LOCKED_WRITERS — every write of a currency that can
+     change on a parent (an asset, a venue invoice) and every child insert
+     under such a parent — must call `Currency::withParentLocked(` in its own
+     code: the one helper that begins the transaction, locks the parent row
+     first and rolls back on any throw (#966 round 6). A listed function that
+     no longer exists is reported too.
+
 SQL keywords are matched in any capitals (`update`, `Set`, `where`).
 
 An INSERT of a NEW own-table record is not judged: a new record takes the
@@ -41,8 +48,9 @@ currency posted for it or the organisation's, which is right. A WHERE clause
 comparing `currency` is not a write and is not judged.
 
 WHAT IT CANNOT SEE, said plainly (D-065: a static check tests PRESENCE; the
-behaviour is DRIVEN by tools/currency-selftest.php, sections D3b, D3c, H5-H14
-and the lock test, and those are the real guard). Measured blind spots:
+behaviour is DRIVEN by tools/currency-selftest.php — sections D3b and D3c, H5
+to H13e, T (the parent lock and its re-check) and L (the helper itself) — and
+those are the real guard). Measured blind spots:
   - whether the helper's answer is the value actually bound: it checks that
     Currency::onEdit( is CALLED in the function, not that its result reaches
     the `?` — and a STRING LITERAL that mentions it counts as a call;
@@ -89,6 +97,16 @@ ON_PURPOSE = {
         "the repair's currency is the asset row's own value, read by lockAssetCurrency() under the asset's lock in the same function",
 }
 
+# (path under the repository, function) that must call Currency::withParentLocked(.
+LOCKED_WRITERS = {
+    ('web/_core/AssetRegister.php', 'updateAsset'),
+    ('web/_core/AssetRegister.php', 'addMaintenance'),
+    ('web/_core/AssetRegister.php', 'recordValueSnapshot'),
+    ('web/_core/Venues.php', 'saveInvoice'),
+    ('web/_core/Venues.php', 'allocateInvoiceLine'),
+    ('web/_core/Venues.php', 'recordPayment'),
+}
+
 IGNORED_FUNCTIONS = {
     # Currency::labelUnlabelled() names its tables from a variable: it is the
     # deliberate labelling of rows with NO currency, never an edit. Only that
@@ -125,11 +143,13 @@ SET_CURRENCY = re.compile(r'\bcurrency`?\s*=(?!=)', re.I)
 FIELD_CURRENCY = re.compile(r"""['"]currency['"]\s*=>""")
 
 
-def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, str]]]:
+def findings(root: str, on_purpose: dict, locked_writers: set | None = None) -> tuple[list[str], list[tuple[str, str]]]:
     own, child = money_tables(root)
     tables = sorted(set(own) | set(child))
     problems: list[str] = []
     used: set[tuple[str, str, str]] = set()
+    locked = LOCKED_WRITERS if locked_writers is None else locked_writers
+    seen_writers: set[tuple[str, str]] = set()
     for base in ('web/_apps', 'web/_core', 'web/_install'):
         top = os.path.join(root, base)
         for d, _, files in os.walk(top):
@@ -139,13 +159,20 @@ def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, st
                 full = os.path.join(d, f)
                 rel = os.path.relpath(full, root).replace(os.sep, '/')
                 raw = open(full, encoding='utf-8', errors='replace').read()
-                if 'currency' not in raw:
+                # A quick skip for files that never mention a currency, in any
+                # capitals (a listed writer may say only "Currency::").
+                if 'currency' not in raw.lower():
                     continue
                 for sc in scopes_of(full):
                     if (rel, sc['name']) in IGNORED_FUNCTIONS:
                         continue
                     code = sc['code']
                     where = f"{rel}: {sc['name']}() (line {sc['line']})"
+                    # Rule 3: a listed writer calls the one locking helper.
+                    if (rel, sc['name']) in locked:
+                        seen_writers.add((rel, sc['name']))
+                        if 'Currency::withParentLocked(' not in code:
+                            problems.append(f'{where}: writes a currency that can change, or a child under such a parent, without Currency::withParentLocked() — the transaction, the parent lock and the rollback on any throw belong to that ONE helper')
                     for t in tables:
                         # Rule 1: an UPDATE that sets the currency.
                         # A statement is often built in pieces ('UPDATE tblX ' . 'SET …'),
@@ -185,6 +212,8 @@ def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, st
                                 used.add(key)
                                 continue
                             problems.append(f"{where}: an INSERT into {t} names `currency` but does not take its parent's ({child[t]}) — use a subquery reading the parent, or name it in ON_PURPOSE with the reason")
+    for rel, fn in sorted(locked - seen_writers):
+        problems.append(f'{rel}: {fn}() is named in LOCKED_WRITERS but was not found — renamed or moved? Update the list, do not drop the rule')
     stale = [k for k in on_purpose if k not in used]
     return problems, stale
 
@@ -198,7 +227,8 @@ def run(root: str, on_purpose: dict) -> int:
     if problems or stale:
         print(f'\nA money record\'s currency: {len(problems)} write(s) outside the one rule, {len(stale)} stale exception(s).')
         return 1
-    print('✓ No UPDATE this check can read writes a money record\'s currency without Currency::onEdit() in its function, and no child INSERT it can read skips its parent\'s currency. '
+    print('✓ No UPDATE this check can read writes a money record\'s currency without Currency::onEdit() in its function, no child INSERT it can read skips its parent\'s currency, '
+          f'and all {len(LOCKED_WRITERS)} listed writers call Currency::withParentLocked(). '
           'It reads PRESENCE only, and its blind spots are listed in its header; the behaviour is driven by tools/currency-selftest.php.')
     return 0
 
@@ -306,6 +336,26 @@ function labelUnlabelled($db) {
     $s = $db->prepare('UPDATE tblParent SET currency = ? WHERE parentID = ?');
 }
 """, True, {}),
+    ('a listed writer that does not call the locking helper', """<?php
+function writeParent($db) {
+    $db->begin_transaction();
+}
+""", True, {}, {('web/_apps/x/a.php', 'writeParent')}),
+    ('a listed writer that calls the locking helper', """<?php
+function writeParent($db) {
+    return Currency::withParentLocked($db, 'tblParent', 1, 1, static fn (?string $c): bool => true);
+}
+""", False, {}, {('web/_apps/x/a.php', 'writeParent')}),
+    ('the helper named only in a comment does not count for a listed writer', """<?php
+function writeParent($db) {
+    // Currency::withParentLocked( would go here
+    $db->begin_transaction();
+}
+""", True, {}, {('web/_apps/x/a.php', 'writeParent')}),
+    ('a listed writer that no longer exists is reported', """<?php
+function somethingElse($db) {
+}
+""", True, {}, {('web/_apps/x/a.php', 'writeParent')}),
     ('an UPDATE at file level, outside any function', """<?php
 $s = $db->prepare('UPDATE `tblParent` SET `currency` = ? WHERE `parentID` = ?');
 """, True, {}),
@@ -314,14 +364,14 @@ $s = $db->prepare('UPDATE `tblParent` SET `currency` = ? WHERE `parentID` = ?');
 
 def self_test() -> int:
     failed = 0
-    for name, src, expect, op in PLANTS:
+    for name, src, expect, op, *lw in PLANTS:
         tmp = tempfile.mkdtemp(prefix='currency-writes-')
         try:
             os.makedirs(os.path.join(tmp, 'web', '_core'))
             os.makedirs(os.path.join(tmp, 'web', '_apps', 'x'))
             open(os.path.join(tmp, 'web', '_core', 'Currency.php'), 'w').write(FAKE_CURRENCY)
             open(os.path.join(tmp, 'web', '_apps', 'x', 'a.php'), 'w').write(src)
-            problems, stale = findings(tmp, op)
+            problems, stale = findings(tmp, op, lw[0] if lw else set())
             got = bool(problems or stale)
             ok = got == expect
             failed += 0 if ok else 1

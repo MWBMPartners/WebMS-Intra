@@ -312,6 +312,13 @@ $data = [
 // -----------------------------------------------------------------------------
 if ($assetId > 0) {
     $ok = AssetRegister::updateAsset($assetId, $data, $userId);
+    if ($ok === false && $currency !== null) {
+        // 💷 A refusal UNDER the asset's lock (#966 round 6) is said as such.
+        $currencyRefusal = AssetRegister::whyCurrencyCannotChange($assetId, $currency);
+        if ($currencyRefusal !== '') {
+            $fail($currencyRefusal . ' Nothing was saved.');
+        }
+    }
     if ($ok === false) {
         $fail('Could not save the asset — it may no longer exist, or the asset tag code is already in use on this site.');
     }
