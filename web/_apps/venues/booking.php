@@ -71,7 +71,27 @@ if ($bookingId > 0) {
     $venueId = (int) $booking['venueID'];
 } else {
     $venueId = (int) ($_GET['venue'] ?? 0);
-    $prefillDate = (string) ($_GET['date'] ?? '');
+    // 📅 A day from the address is kept only when it is a REAL day (#891,
+    //    #892). It is bound below into DATE_SUB(?, ...) / DATE_ADD(?, ...) to
+    //    choose which events the picker offers, and until this change the
+    //    DATABASE was left to make sense of whatever was typed. MySQL 8.0,
+    //    8.4 and MariaDB answer NULL for a day that does not exist, so the
+    //    picker came up empty; MySQL 9.7 does NOT (measured on 9.7.4:
+    //    '2027-02-31 10:00:00' bound into DATE_SUB/DATE_ADD gives 2 and 4
+    //    March), so the same address offered events from another week.
+    //    Nothing was ever STORED wrongly -- the save handler's own column
+    //    refuses an impossible date on every engine measured, 9.7 included
+    //    -- but which events are offered must not depend on the engine.
+    //    Anything else is ignored, exactly as an absent ?date= is, and the
+    //    picker centres on today. (A list sent as ?date[]=… is not a string
+    //    and is ignored too, rather than becoming the word "Array".)
+    $askedDate = $_GET['date'] ?? '';
+    if (is_string($askedDate) === true
+        && preg_match('/\A(\d{4})-(\d{2})-(\d{2})\z/', $askedDate, $dayPart) === 1
+        && checkdate((int) $dayPart[2], (int) $dayPart[3], (int) $dayPart[1]) === true
+    ) {
+        $prefillDate = $askedDate;
+    }
     if ($isMgr === false) {
         // Viewers may only view existing bookings, never create.
         header('Location: ' . Site::url('venues') . '?venue=' . $venueId);

@@ -31,6 +31,10 @@
 #                                        waiting for approval (#514 part 9);
 #                                        a database. It sends nothing: mail
 #                                        and push go to recorders inside it.
+#   tools/held-texts-selftest.php        texts held for quiet hours (#610);
+#                                        here because MySQL 9.7 reads a bound
+#                                        impossible date as a real one
+#                                        (#891, #892); a database only.
 #
 # THE THROWAWAY DATABASE
 # ----------------------
@@ -258,7 +262,7 @@ jobs:
             sleep 1
           done
           docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
-          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport selftest_eventaddress selftest_signinlimits; do
+          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport selftest_eventaddress selftest_signinlimits selftest_heldtexts; do
             docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
             docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -449,3 +453,32 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/sign-in-limits-selftest.php
+
+      # 📱 Texts held for quiet hours, on EVERY engine in this matrix (#891, #892).
+      #
+      #    WHY IT IS HERE AS WELL AS IN portal-selftests.yml. That workflow runs
+      #    it on MySQL 8.0.36 and 8.4.11 only, and MySQL 9.7 reads a date that
+      #    does not exist differently: handed '2027-02-31 10:00:00' as a BOUND
+      #    value, TIMESTAMPDIFF counts the seconds to 3 March, where 8.0, 8.4
+      #    and MariaDB answer NULL. Sms::hold() leaned on that NULL, so on 9.7
+      #    a text whose use-by moment does not exist was KEPT for up to 48
+      #    hours. Check C7 is the one that catches it, and it can only fail on
+      #    an engine that behaves like 9.7 -- so it must run on 9.7, and this
+      #    matrix is the one that has it. (The same reason, the same shape, as
+      #    the sign-in step above for #887.)
+      #    A database of its own and nothing else: no web server, no port, and
+      #    SELFTEST_WEB_DIR must NOT be given (here it means "test this copy of
+      #    web/ instead", so an empty folder would test nothing). It makes a
+      #    TRIGGER for one check and drops two columns for a moment (root may)
+      #    and sets its connections' time zones by NAME, which every image in
+      #    the matrix loads itself. Sends nothing: the provider is a recorder.
+      #    ⚠️ Like every step here, not yet a live gate (#754). Run locally,
+      #    121 of 121, on MySQL 8.0.36, 8.4.11 and 9.7.4 and on MariaDB 11.4.13
+      #    and 12.3.3.
+      #    The name is QUOTED: an unquoted " #" starts a YAML comment and cut it
+      #    to "Held texts self-test, on this engine (#891," (the parse showed it).
+      - name: 'Held texts self-test, on this engine (#891, #892)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_heldtexts
+        run: php -d memory_limit=512M tools/held-texts-selftest.php

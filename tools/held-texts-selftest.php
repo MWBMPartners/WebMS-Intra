@@ -146,7 +146,13 @@
  *     to the microsecond.
  *   - Whether a late text is still TRUE. The portal cannot read a text; the
  *     lengths in Sms::HELD_USE_WITHIN are a judgement by kind.
- *   - MariaDB. Run on MySQL 8.0.36 and 8.4.11.
+ *   - Engines it has not been run on. Run on MySQL 8.0.36, 8.4.11 and 9.7.4
+ *     and MariaDB 11.4.13 and 12.3.3 (#891, #892, 11 November 2026). The
+ *     engines DIFFER on a date that does not exist, which is why C7's cases
+ *     are built to fail on the engines that read one as real: with the PHP
+ *     check in Sms::hold() taken out, C7 goes red on MySQL 8.0, 8.4 (month
+ *     and day 00) and 9.7 (those and 31 February), and stays green on both
+ *     MariaDB versions, which refuse every one of them by themselves.
  *
  * SAFETY
  *   - It writes rows, so it REFUSES unless the database's name starts with
@@ -1224,14 +1230,46 @@ ok(
 
 fresh();
 at($FRI20);
-$unreadable = ['not known', '2027-02-31 10:00:00', '2027-06-01', '', utc($FRI20 - 60), utc($FRI20)];
+// 📅 THE DATES THAT DO NOT EXIST ARE WORKED OUT FROM THE TEST'S OWN CLOCK
+//    (#891, #892). The second case used to be a fixed '2027-02-31 10:00:00'.
+//    MySQL 9.7 reads a bound 31 February as 3 March, so that case only ever
+//    caught the fault while 3 March 2027 was still AHEAD: from March 2027 it
+//    would have read as "already passed" and been refused for the wrong
+//    reason, and C7 would have gone green on 9.7 with the fault still there.
+//    Each is therefore at least a year ahead of $FRI20, so that if an engine
+//    (or a broken check in Sms::hold()) reads it as a real date, it is a
+//    date still to come, and the text is wrongly KEPT -- which is what turns
+//    C7 red.
+//      31 February   9.7 rolls it into March; 8.0, 8.4 and MariaDB say NULL
+//      month 00      8.0 and 8.4 answer a NUMBER for it too (measured), so
+//                    this one was never only 9.7's; two years ahead, because
+//                    month 00 of a year reads as December of the year before
+//      day 00        the same, for the day
+//      hour 25       every engine measured (MySQL 8.0, 8.4, 9.7, MariaDB
+//                    11.4) says NULL for it, so this case CANNOT tell the
+//                    range check in Sms::hold() from no check at all:
+//                    planted, loosening that pattern back to \d{2} left C7
+//                    GREEN on 9.7 and MariaDB. It stays as a statement of
+//                    the behaviour, not as a guard of the PHP check.
+$aheadYear  = (int) gmdate('Y', $FRI20) + 2;
+$unreadable = [
+    'not known',
+    $aheadYear . '-02-31 10:00:00',
+    $aheadYear . '-00-10 10:00:00',
+    $aheadYear . '-03-00 10:00:00',
+    $aheadYear . '-03-01 25:00:00',
+    $aheadYear . '-06-01',
+    '',
+    utc($FRI20 - 60),
+    utc($FRI20),
+];
 $notKept    = [];
 foreach ($unreadable as $i => $given) {
     $body      = 'ZQXT C7 use-by number ' . $i;
     $notKept[] = array_merge(text('follow', 'prayer_assignment', $body, $given), story(rowOf($body)), [rowOf($body)['heldUseBy'] ?? null]);
 }
 ok(
-    'C7 a use-by moment that cannot be read (words, a date that does not exist, a date with no time, nothing) or that has already passed: the text is NOT kept. It is recorded at once as not sent, with the reason, and nothing is held',
+    'C7 a use-by moment that cannot be read (words; a date that does not exist -- 31 February, month 00, day 00, hour 25, each still to come if read as real; a date with no time; nothing) or that has already passed: the text is NOT kept. It is recorded at once as not sent, with the reason, and nothing is held',
     $notKept === array_fill(0, count($unreadable), [false, 'not-sent', 'failed', Sms::NOT_SENT_NOT_KEPT, null, null, null]) && RecordingSms::$calls === []
         && (int) one("SELECT COUNT(*) AS n FROM tblSmsMessage WHERE status = 'queued'")['n'] === 0,
     json_encode($notKept)

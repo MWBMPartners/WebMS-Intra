@@ -778,9 +778,29 @@ class Sms
             // empty: either way the text is not kept. Kept without its
             // use-by moment, a "starts in an hour" text could go out a day
             // after the start.
+            //
+            // 📅 WHETHER THE DATE EXISTS IS DECIDED HERE, IN PHP, NEVER BY
+            //    THE DATABASE (#891, #892). This used to check only the SHAPE
+            //    and leave "does 31 February exist?" to the database, which
+            //    answered NULL on MySQL 8.0, 8.4 and MariaDB. MySQL 9.7 does
+            //    NOT: handed '2027-02-31 10:00:00' as a BOUND value,
+            //    TIMESTAMPDIFF counts the seconds to 3 March (measured on
+            //    9.7.4; written as a literal it still answers NULL), so on
+            //    9.7 such a text was KEPT for up to 48 hours instead of being
+            //    refused -- check C7 of tools/held-texts-selftest.php.
+            //    So the hour, minute and second are range-checked by the
+            //    pattern, and the day by checkdate(), as
+            //    I18n::wallClockFromInput() does. checkdate() also refuses a
+            //    month or day of 00 and the year 0000, which TIMESTAMPDIFF
+            //    answers with a NUMBER on MySQL 8.0 and 8.4 as well (also
+            //    measured): a hole that was never only 9.7's.
+            //    Nothing else changes: a real moment still goes to the
+            //    database, which still does the counting on its own clock.
             $left = null;
-            if (preg_match('/\A\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\z/', $useBy) === 1) {
-                $stmt = $db->prepare('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ?) AS secondsLeft');
+            if (preg_match('/\A(\d{4})-(\d{2})-(\d{2}) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d\z/', $useBy, $part) === 1
+                && checkdate((int) $part[2], (int) $part[3], (int) $part[1]) === true
+            ) {
+                $stmt = $db->prepare('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ?) AS `secondsLeft`');
                 $stmt->bind_param('s', $useBy);
                 $stmt->execute();
                 $left = $stmt->get_result()->fetch_assoc()['secondsLeft'] ?? null;
