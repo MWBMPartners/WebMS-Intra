@@ -290,7 +290,10 @@ $mysqli = new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort);
 // and left stale row numbers and times in place for ever, while the run passed.
 // So the file also records WHICH table it captured — the server's own id and
 // the moment `tblSettings` was created, which a write never changes and a
-// rebuild always does — and a file that does not match is REFUSED, the
+// drop-and-recreate always does (loading `full_schema.sql` over the existing
+// database does NOT: its `CREATE TABLE IF NOT EXISTS` keeps the table, so the
+// file still matches and is put back, which is right — the table it came
+// from is still there) — and a file that does not match is REFUSED, the
 // database untouched, with the same "delete that file" advice an unreadable
 // one gets. The limit: `CREATE_TIME` counts whole seconds, so a database
 // dropped and rebuilt within the second it was first created would look the
@@ -461,8 +464,11 @@ $rcSettingsIdentity = static function (mysqli $db) use ($dbName): array {
 /** Refuse this run, saying why and what to do, having changed nothing. */
 $rcSettingsRefuse = static function (string $why) use ($rcSettingsFile, $dbName): never {
     echo "REFUSED — {$why}\n"
-        . "Nothing in {$dbName} was changed. If an earlier run was stopped part-way, reload\n"
-        . "web/_sql/full_schema.sql into {$dbName}, delete {$rcSettingsFile}, and run again.\n";
+        . "Nothing in {$dbName} was changed. If an earlier run was stopped part-way, DROP and\n"
+        . "recreate {$dbName}, load web/_sql/full_schema.sql into it, delete {$rcSettingsFile},\n"
+        . "and run again. Loading the install script WITHOUT dropping the database first does\n"
+        . "not undo the stopped run's changes (it creates only missing tables and adds only\n"
+        . "missing rows), so deleting the file then would keep them.\n";
     exit(1);
 };
 

@@ -162,8 +162,10 @@
 # E2E_NAME_SUFFIX (letters, digits, "_" and "-"; empty by default) is added to
 # the container name (portal-e2e-mysql-<suffix>) and to the compose project
 # (e2e-migrations-<suffix>); E2E_HOST_PORT (33069 by default) is the port
-# offered on this machine. With neither set, a run behaves exactly as it always
-# has. The harness REFUSES to start when a container of the chosen name, or
+# offered on this machine. With neither set, a run uses the same names and port
+# as before #923; what changed for a default run is that it now REFUSES where it
+# used to attach to an existing container of that name and wipe its database,
+# and it no longer passes --remove-orphans. The harness REFUSES to start when a container of the chosen name, or
 # any container in the chosen compose project, already exists — running or
 # stopped — and it never removes a container it did not create.
 # -----------------------------------------------------------------------------
@@ -385,7 +387,9 @@ mysql_file() {
 }
 
 # Drops and recreates DB_NAME so each phase that needs a clean slate starts
-# from a genuinely empty database (also self-healing across --keep re-runs).
+# from a genuinely empty database. (Before #923 this also cleaned up after a
+# --keep run whose container was reused; a kept container now makes the next
+# run with that name refuse to start instead, so that case no longer arises.)
 reset_db() {
     docker exec -i "${E2E_CONTAINER_NAME}" "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -e \
         "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
@@ -1498,8 +1502,9 @@ if [[ -n "${existing_by_name}" || -n "${existing_in_project}" ]]; then
         echo "  It may be another run in progress, or one left up with --keep. This run has not touched it."
         echo "  To run alongside it, choose another name and port, for example:"
         echo "    E2E_NAME_SUFFIX=<something-unique> E2E_HOST_PORT=<a free port> tools/e2e-migrations/run.sh"
-        echo "  If it is a container you left behind yourself, remove it first:"
-        echo "    docker stop ${E2E_CONTAINER_NAME} && docker rm -v ${E2E_CONTAINER_NAME}"
+        echo "  If one of those is a container you left behind yourself, remove it by the name"
+        echo "  shown above (it may not be '${E2E_CONTAINER_NAME}' when it is only in the same project):"
+        echo "    docker stop <name> && docker rm -v <name>"
     } >&2
     exit 75
 fi

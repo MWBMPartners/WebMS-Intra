@@ -268,8 +268,10 @@ E2E_NAME_SUFFIX=p923a E2E_HOST_PORT=34923 tools/e2e-migrations/run.sh   # a seco
 
 **Two runs at once on one machine need different names and ports (#923).**
 By default a run uses the container `portal-e2e-mysql`, the compose project
-`e2e-migrations` and host port `33069`, exactly as it always has. Set
-`E2E_NAME_SUFFIX` (lower-case letters, digits, `_` and `-`) to give a run its
+`e2e-migrations` and host port `33069`, the same as before #923 (except that
+it now refuses, rather than reuses, an existing container of that name). Set
+`E2E_NAME_SUFFIX` (lower-case letters, digits, `_` and `-`, starting with a
+letter or digit) to give a run its
 own container (`portal-e2e-mysql-<suffix>`) and compose project
 (`e2e-migrations-<suffix>`), and `E2E_HOST_PORT` to give it its own port.
 

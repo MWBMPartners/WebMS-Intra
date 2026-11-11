@@ -4,6 +4,39 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Two migration test runs can share one machine, and an interrupt stops one (#923)
+
+- **The migration harness can run twice at once (#923).** `tools/e2e-migrations/run.sh` used one fixed
+  container name, one compose project and one host port, so two packages built side by side shared one
+  database: on 10 November 2026 one run attached to the other's mid-load and then tore it down.
+  `E2E_NAME_SUFFIX` now gives a run its own container (`portal-e2e-mysql-<suffix>`) and compose project
+  (`e2e-migrations-<suffix>`), and `E2E_HOST_PORT` its own port. With neither set the names and port are the
+  same as before, so `e2e-migrations.yml` is unchanged; what changed for a default run is that it now REFUSES
+  (exit 75) when a container of its name, or anything in its compose project, already exists, where it used to
+  reuse it and wipe its database. Teardown removes only its own project's containers, with `docker stop` then
+  `docker rm -v`. Two runs given the SAME suffix in the same second can still meet: #950.
+- **Ctrl-C and SIGTERM stop the run (#923).** The INT/TERM trap ran teardown and bash then carried on: measured
+  with the old trap, an interrupt in phase 2 went on to try 110 migrations against the removed container and
+  reported "installer replay FAILED". It now tears down once and exits 130 or 143.
+- **Phase 7 picks "migrations before 217" by number, not text.** Same files selected today.
+
+### The retention-caps test leaves the settings as it found them; two small fixes (#947, #937)
+
+- **`tools/retention-caps-selftest.php` puts `tblSettings` back (#947).** A run used to leave the
+  installation's activity-log and error-log periods at 30 days and the transcript period at 7, and add five
+  per-organisation rows. It now captures the whole table first and restores it on every way the script ends
+  itself (normal end, failure, uncaught error). A run stopped from outside (`kill`, Ctrl-C, SIGTERM) leaves its
+  record file, which the next run on the SAME database puts back first; a record that does not match the
+  table it would be put onto (another server, or a dropped and rebuilt database) is REFUSED with the database
+  untouched. Two runs at once on one database, an empty record, and an unreadable one are refused too.
+- **`/api/venues/check` refuses `start` or `end` sent as a list (#937)** with its usual `invalid-range`
+  answer, instead of PHP's "Array to string conversion" warning reaching the error log first. The API
+  description's summary no longer says a missing `tz` means `Europe/London`: since #782 it means the
+  organisation's own zone, as the parameter's own description already said.
+- **`check_schema_seed_parity.py` no longer lists ten correctly recorded migrations as unrecorded (#937,
+  #894, #911).** Its comment stripping removed `--` to the end of a line even inside a quoted string, which put
+  the statement splitter out of step. It now reads all 268 migration marks. Making it a hard gate is #949.
+
 ### No place is built in, Sabbath sunsets fall on the right day, and the Sabbath page saves only what it is sent (#935, #936, migration 274)
 
 - **No place is built in any more (#935, migration 274).** The Sabbath quiet

@@ -23081,3 +23081,46 @@ section K (the file runs 186):
   nothing while they are in the future, then count again for one window once UTC catches up —
   never a block longer than its window.
 - The sign-in counts read `tblActivityLogs.timestamp` (Logger, server clock): #920.
+
+
+## Two migration harness runs on one machine (#923)
+
+- **The compose project was shared too, although nothing named it.** Compose names a project after the folder
+  holding the compose file, which is `e2e-migrations` in every worktree, so every checkout was one project and
+  the old teardown (`down -v --remove-orphans`) removed every checkout's harness container. `run.sh` now
+  passes `-p` on every compose call, so `COMPOSE_PROJECT_NAME` in the environment is ignored on purpose.
+- **Teardown does nothing until the start check has passed** (`UP_ATTEMPTED`): the refusal exits through the
+  same EXIT trap, and a teardown there would remove the container it had just refused to touch.
+- **A trap on INT or TERM replaces the signal's effect; it does not end the script.** `trap teardown EXIT INT
+  TERM` tidied up and carried on. Teardown now runs from the EXIT trap only; the INT and TERM traps call
+  `exit 130` / `exit 143`, which fires it, so it runs exactly once however the run ends.
+- **Testing an interrupt: a background `&` job from a non-interactive shell inherits SIGINT IGNORED**, and bash
+  cannot trap a signal ignored at its start, so `run.sh & kill -INT $!` proves nothing either way. Reset SIGINT
+  to its default first (the test used Python with its own process group).
+- **Limits:** two runs with the SAME suffix in the same second can both pass the check (#950); an interrupt in
+  the fraction of a second while `up` is creating the container can leave it "Created" (once in about five
+  tries) — it holds no volume, and the next run with that suffix refuses and says how to remove it.
+
+## A test that puts settings back, and only onto the table it came from (#947)
+
+- **It captures the WHOLE of `tblSettings`**, not a list of keys, because the sweeps it drives write rows of
+  their own. Rows are matched by key and organisation (`rc_world()` deletes and re-inserts); a differing row is
+  deleted and the captured one inserted again under its own number and "last changed" time, so a
+  `mysqldump --no-create-info` of the table is byte-identical afterwards.
+- **PHP runs shutdown functions only when the script ends itself.** SIGTERM and SIGINT skip them as well as
+  `kill -9`, so a left-behind record file is an ordinary event, not a rare one.
+- **The record names its table:** the server's id (`@@server_uuid`; host and port on MariaDB, which has none)
+  and `information_schema.TABLES.CREATE_TIME` for `tblSettings`, read from the data dictionary, not the cached
+  statistics. A write never changes it; DROP and recreate always does. Loading `full_schema.sql` over an
+  existing database does NOT (`CREATE TABLE IF NOT EXISTS`), so the record still matches and is put back —
+  which is right, and is why the refusal's advice says to drop and recreate before deleting the file.
+- **`GET_LOCK` held by the run's own connection** keeps two runs apart, and the server frees it however the
+  run ends. Neither guard is pinned by an automatic check; both were proved by planting.
+
+## A comment stripper must know where strings are (#937)
+
+`check_schema_seed_parity.py` removed SQL comments with `--[^\n]*`, which also matches inside a quoted string;
+nine lines of `full_schema.sql` hold `--` in a column comment. Each lost its closing quote, eight statements
+began mid-string, and every migration mark in a mis-cut statement went unread (258 of 268). It now tracks
+quotes exactly as the splitter does. A near relative is #675, where a `;` inside a `--` comment ended a
+statement early: a reader that blanks or splits SQL must track strings and comments together.
