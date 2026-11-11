@@ -2369,12 +2369,16 @@ check(
 // listed, or regenerated over.
 check(
     'the tax claim file reads the KEPT name when there is one, and an erased donor is never rendered for, listed for, or regenerated over',
-    // 🔁 #941 check round 3: the KEPT name and nothing else when a kept row
-    //    joins - never COALESCE'd with the account's, which beside an emptied
-    //    account is "[Deleted User]" - and the made-up name is never used.
-    str_contains($method($givingCode, 'buildHmrcCsv'), 'CASE WHEN `k`.`keptDonorID` IS NOT NULL THEN `k`.`fullName` ')
-    && str_contains($method($givingCode, 'buildHmrcCsv'), "WHEN `u`.`fullName` = '\" . GdprEraser::TOMBSTONE_NAME . \"' THEN NULL ELSE `u`.`fullName` END")
-    && str_contains($method($givingCode, 'buildHmrcCsv'), 'COALESCE(') === false
+    // 🔁 #941 check rounds 3 and 5: WHICH name the file carries is no longer
+    //    pinned here as text. Two rounds running, an extra branch inserted
+    //    between the pinned pieces left both text pins green while it put
+    //    "[Deleted User]" back in the file. The rule is now held by BEHAVIOUR:
+    //    section 23 of tools/gdpr-eraser-selftest.php builds one donor for every
+    //    combination of kept row, account on/off, account name and e-mail, and
+    //    requires each row's exact name. What stays here is structure that
+    //    table does not read as text: no COALESCE (which falls through to the
+    //    account's made-up name), and the join's own conditions below.
+    str_contains($method($givingCode, 'buildHmrcCsv'), 'COALESCE(') === false
     && str_contains($method($givingCode, 'buildHmrcCsv'), '`k`.`clearedAt` IS NULL')
     // The kept name is read only beside an EMPTIED account, and "an erased
     // donor" is one whose account is emptied: a kept row beside a live

@@ -226,7 +226,13 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 311; // 310 until #941's check round 4 added one: an erased account
+const EXPECTED_CHECKS = 311; // Still 311 after #941's check round 5: the single case it had
+                             // added (an erased account switched back ON) is REPLACED by one
+                             // table-driven check over every combination of kept row,
+                             // switched on/off, account name and e-mail - 100 donors, each
+                             // with its exact expected name - because single cases had pinned
+                             // the rule from one side only, two rounds running.
+                             // 310 until #941's check round 4 added one: an erased account
                              // switched back ON, so no kept row joins, still gives an empty
                              // name in the claim file and never "[Deleted User]".
                              // 309 until a ninth: a declaration whose address is only a tab
@@ -421,6 +427,8 @@ const P_K_G = 920727; const REQ_K_G = 940727; // an account already emptied befo
 const P_K_H = 920728; const REQ_K_H = 940728; // a kept row an older version wrote with ''
 const P_K_I = 920729; const REQ_K_I = 940729; // an earlier run's row, emptied by step 4
 const P_K_J = 920730; const REQ_K_J = 940730; // a declaration whose address is only a tab
+const SITE_C4       = 16;     // section 23: the claim file's name rule over every combination (#941 check round 5)
+const P_TABLE_FIRST = 920800; // section 23: the first of that table's 100 donors (920800-920899)
 const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
 const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
@@ -7034,29 +7042,9 @@ ge_ok('...and for a donor whose account was ALREADY EMPTIED before the run (no n
     $ranOk($runG) && $kept4(P_K_G) !== null && $kept4(P_K_G)['fullName'] === null && $nameCells('11.07') === ['', '']
     && str_contains($line4(REQ_K_G, SITE_C3), 'Kept on this record: no name and a home address.'),
     json_encode(['row' => $kept4(P_K_G), 'claim row' => $claimRowsK['11.07'] ?? null, 'line' => $line4(REQ_K_G, SITE_C3)]));
-// 🔌 #941 check round 4: AN ERASED ACCOUNT SWITCHED BACK ON. A global
-//    administrator can save an erased account with Active ticked
-//    (admin/users/save.php - read, not driven: this test has no web server, so
-//    the switch is made in SQL). The account still reads "[Deleted User]", and
-//    the kept row no longer joins, because the join asks for an account that is
-//    switched OFF. So the claim file's name comes from the account rule alone,
-//    and that rule must key on the made-up name and never on `isActive`: a
-//    branch letting a switched-on account through put "[Deleted,User]" back.
-ge_q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [P_K_G]);
-$claimOn   = Giving::buildHmrcCsv(SITE_C3, $ago(400), $todayG1);
-$claimOnG  = null;
-foreach (array_filter(explode("\n", $claimOn)) as $csvLine) {
-    $cells = str_getcsv($csvLine, ',', '"', '');
-    if (($cells[8] ?? '') === '11.07') {
-        $claimOnG = $cells;
-    }
-}
-$stillTomb = ge_one('SELECT `fullName`, `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_K_G]);
-ge_ok('AN ERASED ACCOUNT SWITCHED BACK ON (so no kept row joins) still gives an EMPTY name in the claim file, and "Deleted" appears nowhere in it',
-    $stillTomb !== null && $stillTomb['fullName'] === GdprEraser::TOMBSTONE_NAME && (int) $stillTomb['isActive'] === 1
-    && GdprEraser::accountIsEmptied($mysqli, P_K_G) === false
-    && $claimOnG !== null && $claimOnG[1] === '' && $claimOnG[2] === '' && stripos($claimOn, 'Deleted') === false,
-    json_encode(['account' => $stillTomb, 'claim row' => $claimOnG]) . ' | ' . $claimOn);
+// (#941 check round 5: an erased account switched back ON is now one row of
+// the table at the end of this section, which builds every combination; the
+// single case that stood here left this donor switched on afterwards.)
 
 // H: a row an OLDER version wrote, holding '' rather than NULL, beside an
 // emptied account. Written by hand, said plainly: no version of the code in
@@ -7107,5 +7095,106 @@ $runJ = $case4(P_K_J, REQ_K_J, 'Jay Tab', '10 Jay Road', ["\t", 'JJ1 1JJ'], 1008
 ge_ok('A DECLARATION ADDRESS OF ONLY A TAB IS NO ADDRESS: the account\'s address is kept instead, and the postcode of that empty declaration is not',
     $ranOk($runJ) && $kept4(P_K_J) !== null && $kept4(P_K_J)['address'] === '10 Jay Road' && $kept4(P_K_J)['postcode'] === null,
     json_encode($kept4(P_K_J)));
+
+// =============================================================================
+// 🧮 THE CLAIM FILE'S NAME RULE, OVER THE WHOLE TABLE (#941 check rounds 4 and 5)
+// =============================================================================
+// Two rounds running, a single extra case pinned the rule from one side only:
+// a branch keyed on `isActive` one way passed every check, then a branch keyed
+// on it the OTHER way passed the next one. So the rule is no longer tested by
+// examples. One donor is made for EVERY combination of the facts the query can
+// see, and each must come out with exactly the name worked out below:
+//
+//   the kept row     none, named, nameless (NULL), blank (''), or cleared
+//   the account      switched on, or off
+//   the account name the made-up "[Deleted User]", a real name, '', NULL, or white space
+//   the e-mail       the made-up one an erasure writes, or a real one
+//
+// 5 x 2 x 5 x 2 = 100 donors. Many combinations no portal page produces (an
+// erased account switched back on; an erased account whose e-mail was changed,
+// #977; a kept row beside a live member). They are built in SQL anyway,
+// because the rule must hold for EVERY row the query can see, not only for
+// the rows today's pages happen to write.
+//
+// THE RULE, worked out here and not read from the code under test:
+//   - the kept row JOINS only when it is live AND the account is emptied:
+//     switched off, named "[Deleted User]", with the made-up e-mail
+//     (GdprEraser::emptiedAccountSql(), which buildHmrcCsv()'s join asks);
+//   - when it joins, the kept row's name and nothing else;
+//   - otherwise the account's name - except that "[Deleted User]" is never
+//     used, and gives an empty name;
+//   - a name that is empty, NULL or only white space is an empty name.
+// And whatever the combination, "Deleted" appears nowhere in the file.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_insert('tblSites', [], ['siteID' => SITE_C4, 'timezone' => 'Europe/London']);
+$catC4 = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_C4]));
+$tableCases = [];
+$n          = 0;
+foreach (['none', 'named', 'nameless', 'blank', 'cleared'] as $keptState) {
+    foreach ([0, 1] as $active) {
+        foreach (['tombstone' => GdprEraser::TOMBSTONE_NAME, 'real' => 'Rhea Real', 'empty' => '', 'null' => null, 'spaces' => "  \t "] as $nameKind => $accountName) {
+            foreach (['made-up', 'real'] as $emailKind) {
+                $person = P_TABLE_FIRST + $n;
+                $email  = $emailKind === 'made-up'
+                    ? str_replace('{rid}', (string) (990000 + $n), GdprEraser::TOMBSTONE_EMAIL)
+                    : 'table' . $n . '@selftest.invalid';
+                ge_user($person, 'Placeholder', 'table-placeholder' . $n . '@selftest.invalid');
+                ge_q('UPDATE `tblUsers` SET `fullName` = ?, `emailAddress` = ?, `isActive` = ? WHERE `userID` = ?', 'ssii',
+                    [$accountName, $email, $active, $person]);
+                $declRef = ge_declaration(SITE_C4, $person, $ago(400), ($n + 1) . ' Table Road', 'TT1 1TT');
+                $pence   = 30000 + $n;   // a different amount for every donor: how its row is found in the file
+                ge_gift(SITE_C4, $person, $ago(30), $pence, $catC4);
+                if ($keptState !== 'none') {
+                    $keptName = match ($keptState) {
+                        'named'   => 'Kept Kirby',
+                        'blank'   => '',
+                        default   => null,
+                    };
+                    ge_q('INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `fullName`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`, `clearedAt`) '
+                        . 'VALUES (?, ?, ?, \'all\', ?, 1, UTC_TIMESTAMP(), ' . ($keptState === 'cleared' ? 'UTC_TIMESTAMP()' : 'NULL') . ')',
+                        'iiss', [SITE_C4, $person, $keptName, $ago(30)]);
+                }
+                $joins    = in_array($keptState, ['named', 'nameless', 'blank'], true) && $active === 0
+                    && $nameKind === 'tombstone' && $emailKind === 'made-up';
+                $expected = $joins === true
+                    ? ($keptState === 'named' ? 'Kept Kirby' : '')
+                    : ($nameKind === 'real' ? 'Rhea Real' : '');
+                $tableCases[number_format($pence / 100, 2, '.', '')] = [
+                    'facts' => $keptState . ' kept row, ' . ($active === 1 ? 'on' : 'off') . ', name ' . $nameKind . ', e-mail ' . $emailKind,
+                    'joins' => $joins, 'expected' => $expected,
+                ];
+                $n++;
+            }
+        }
+    }
+}
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+$tableFile = Giving::buildHmrcCsv(SITE_C4, $ago(400), $todayG1);
+$tableRows = [];
+foreach (array_filter(explode("\n", $tableFile)) as $csvLine) {
+    $cells = str_getcsv($csvLine, ',', '"', '');
+    $tableRows[(string) ($cells[8] ?? '')] = $cells;
+}
+// The file splits a name into first and last at the first space, after
+// trimming: the same is done to the expected name, so a row is compared as the
+// two cells HMRC receives.
+$asCells = static function (string $name): array {
+    $parts = explode(' ', trim($name), 2);
+
+    return [$parts[0] ?? '', $parts[1] ?? ''];
+};
+$tableWrong = [];
+foreach ($tableCases as $amount => $case) {
+    $got = isset($tableRows[$amount]) === true ? [$tableRows[$amount][1], $tableRows[$amount][2]] : null;
+    if ($got !== $asCells($case['expected'])) {
+        $tableWrong[] = $case['facts'] . ': expected ' . json_encode($asCells($case['expected'])) . ', got ' . json_encode($got);
+    }
+}
+$joinedCount = count(array_filter($tableCases, static fn (array $c): bool => $c['joins'] === true));
+ge_ok('THE CLAIM FILE\'S NAME, FOR EVERY COMBINATION (' . count($tableCases) . ' donors: kept row x switched on/off x account name x e-mail): each row carries exactly the expected name - the kept name when a kept row joins, the real name for a donor with one, and an empty name otherwise - and "Deleted" appears nowhere in the file',
+    count($tableCases) === 100 && $joinedCount === 3 && count($tableRows) === 101 && $tableWrong === []
+    && stripos($tableFile, 'Deleted') === false,
+    count($tableWrong) . ' wrong (of ' . count($tableCases) . ', ' . $joinedCount . ' joining; ' . (count($tableRows) - 1) . ' rows in the file): '
+    . implode(' | ', array_slice($tableWrong, 0, 8)));
 
 ge_finish();
