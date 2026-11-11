@@ -3250,7 +3250,7 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   that loads start-up hands a door request over straight after it (`Site::isDoorRequest()`,
   `Site::publicAddressUnknown()`; hard gate `check_webroot_door_handoff.py`). A public address is the door's
   only once the installation's global administrator approves it (D-101); `PublicWebsiteSetup::publicHostStatus()`
-  is the ONE answer to where it stands. `.htaccess`'s deny rule is driven on a real Apache by
+  is the ONE answer to where it stands. Several organisations may ASK for one public address; only one may be APPROVED for it (D-121, #895, migration 276). `approvePublicHost()` is where that is enforced — a transaction, every row for the name read `FOR UPDATE`, then the ask — and the unique key on the worked-out column `approvedHost` is the backstop. A request that lost is kept and reads as `HOST_TAKEN`; never store a "refused" mark, and never look a name up with a bare `LIMIT 1` (several rows may hold it: read the approved one first). **An approval decision is recorded only through `approvalRefused()` / `recordApprovalDecision()`**: the activity log is stamped with the organisation the installation's administrator has OPEN and its own administrators read it, so a record must never carry another organisation's name, number or address (#895, round 1 of its check found the winner's name in the loser's log). `.htaccess`'s deny rule is driven on a real Apache by
   `tools/htaccess-apache-selftest.php` (D-065). Test: `tools/public-door-selftest.php`; the record is
   DEV_NOTES.md, "The public door (#493, package P4a)". The script a website pastes in
   (`web/_core/data/public-door.js`, #493 P4b) is outside the web root and served only by `PublicDoor`; it is

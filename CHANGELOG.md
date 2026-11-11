@@ -144,6 +144,43 @@
 - Organisation names in these sentences are shown as text, never markup.
 - Open: #926–#931, #933, #934, #938–#941. #940 (the activity log's "never delete" wording) follows next.
 
+### Several organisations may ask for one public address; only one is approved (#895, D-121, migration 276)
+
+- **An organisation can no longer block another by asking first.** A public address was unique the
+  moment it was REQUESTED, so organisation B could type organisation A's real website address
+  before A did, and A could then not enter its own. Now any number of organisations may ask for
+  the same address while it waits for the installation's global administrator (D-101). That
+  administrator sees that the requests clash and approves one; the others are then shown the
+  address as **taken**, on their own card and on the installation's list.
+- **Uniqueness is enforced at approval, twice over.** `PublicWebsiteSetup::approvePublicHost()`
+  locks every row asking for the name inside a transaction before it asks whether another
+  organisation is already approved, so two administrators approving at the same moment leave
+  exactly one approved; and the database itself refuses a second approved row (migration 276: a
+  unique key on a worked-out column that holds the name only once it is approved).
+- **The organisation's card** says "Waiting" and, when another organisation has asked for the
+  same address, that only one of them can be approved; once another is approved it says "Taken".
+  It never names the other organisation.
+- **The installation's list** shows "Waiting, clashes" with the other organisations' names, and
+  "Taken" (approved for whom, and no Approve button) for a request that lost.
+- **Asking for an address another organisation is already APPROVED for is refused** as taken,
+  without naming it. An address another organisation has only asked for is accepted.
+- **A request that lost is kept, not cleared.** If the winner's approval is withdrawn, the others
+  read as waiting again and one of them can be approved.
+- **The door answers only on the approved address.** Its look-up now reads the approved row first;
+  with several rows for one name, a bare `LIMIT 1` could have read an unapproved one and stopped
+  answering for the approved organisation.
+- **Approval decisions never put another organisation's name, number or address into the open
+  organisation's activity log**, where that organisation's own administrators read it (found by the
+  independent check: the losing organisation could read the winner's name). The screen still names it
+  for the installation's administrator.
+- A losing organisation saving its address again unchanged is told it is taken, not "Saved".
+- Tests: section Q of `tools/public-door-selftest.php` (Q01–Q15: the clash, the lock held from read to
+  write with the key in place, a real two-server race, what each organisation's log AND export show with a
+  third organisation holding the address, a losing organisation's re-save; plants
+  PQ1–PQ17; 341 checks); W8, W19 and P91 of
+  `tools/public-website-tick-selftest.php` changed to the new rule (241 checks).
+- Open: #948.
+
 ### What members and administrators read about the activity log's period is the real one (#940; D-117, D-118)
 
 - **The privacy page and the privacy notice print this organisation's real activity-log period:** a number of

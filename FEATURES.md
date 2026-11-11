@@ -223,10 +223,7 @@ screens and didn't say what it meant.
   public address for the portal's own public pages (one organisation each, D-095), which outside websites may
   frame its public pages (D-082), the installation's framing switch (D-094), and "Check my set-up". Gate:
   `website.setup` (D-085), held out of the box by global administrators only; only a global administrator may
-  hand it out (D-093). An organisation's public address does nothing until the installation's global
-  administrator approves it on the same page, which lists every organisation's address with Approve and
-  Withdraw approval (D-101, #493 P4a); the organisation's card says Waiting, Approved, Approved but not in use
-  (members sign in at it), or Approved but not checked.
+  hand it out (D-093). An organisation's public address does nothing until the installation's global administrator approves it on the same page, which lists every organisation's address with Approve and Withdraw approval (D-101, #493 P4a). Several organisations may ask for the same address; the list shows the clash, only one can be approved, and the others are then shown it as taken (D-121, #895). The organisation's card says Waiting (and whether another organisation asked too), Taken, Approved, Approved but not in use (members sign in at it), or Approved but not checked.
 - **The public door** (#493 P4a; D-056, D-097, D-098): a card at the top of Admin → Public website turns an
   organisation's door on, replaces its name and switches it off (each recorded; every door starts off). Once
   on, the organisation's own website can read `events.json` (published, Public, ticked for the website,

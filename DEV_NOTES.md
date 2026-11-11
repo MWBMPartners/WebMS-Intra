@@ -22295,6 +22295,123 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### Several organisations may ask for one public address (#895, D-121, migration 276)
+
+**What changed.** `tblPublicHosts` lost its unique key on `hostName` (`uq_public_host_name`). It gained
+`approvedHost`, a VIRTUAL worked-out column that is `hostName` while `approvedAtUtc` is set and NULL
+otherwise, with a unique key on it (`uq_public_host_approved`), and an ordinary key on `hostName`
+(`idx_public_host_name`) for look-ups by name.
+
+**Why a worked-out column.** A unique key stands aside for any row where a part of it is empty (#487).
+That is usually a trap; here it is exactly the rule wanted: every request has an empty `approvedHost`,
+so any number may share a name, while an approved row holds the name, so two approvals cannot. VIRTUAL
+because nothing needs it stored. (STORED would also work: MySQL's ERROR 1215, migration 187's reason, applies
+only when a cascading foreign key sits on a column the worked-out one is made FROM, and neither `hostName`
+nor `approvedAtUtc` carries one — measured on MySQL 8.0.36, and on MariaDB 11.4.13 by the check. Round 1 of
+#895's check found the first version of this note, the migration and both column comments giving ERROR 1215
+as the reason, which was untrue.) The column takes
+the table's collation, so two spellings differing only in capitals still clash — measured on MySQL
+8.0.36: an approved `x.example.org` refuses an approved `X.example.org` with 1062.
+
+**Approval is where uniqueness is enforced.** `approvePublicHost()` opens a transaction FIRST, then reads
+every row with that name `FOR UPDATE`, then asks whether another organisation is approved, then writes.
+Every read inside is a locking read: a plain read inside a REPEATABLE READ transaction would see a
+snapshot from before the other approver's commit. The unique key is the backstop: a 1062 there is
+refused with the same words plus "(The database itself refused a second approval of this address.)",
+so the record shows which guard acted — and that suffix is how the self-test tells the lock apart from
+the key, the only way to prove the lock does anything while the key stands behind it.
+
+**The save takes no lock, deliberately.** Saving refuses a name another organisation is APPROVED for,
+but that refusal is advice: a save racing an approval can store a request for a name approved a moment
+later, and that request simply reads as taken. Locking at save would make two organisations saving the
+same NEW name both take the same gap lock and then deadlock on their inserts.
+
+**A request that lost is kept, not cleared, and not marked.** "Taken" is worked out
+(`publicHostStatus()` → `HOST_TAKEN`) from another organisation's approved row, never stored. Clearing
+the row would throw away the organisation's own typing; a stored "refused" mark would go stale the
+moment the winner's approval was withdrawn. Kept, it reads as waiting again and can be approved.
+
+**Several rows may now hold one name, so every "which row has this name" question had to change.**
+`publicHostRow()` (the door's look-up at start-up) used `WHERE hostName = ? LIMIT 1`, which hands back
+whichever row the server meets first — so an organisation merely asking for an approved name could
+have stopped that name being the door (planted: it does, PQ3). It now orders the approved row first,
+using only columns from migrations 262/263, so it works before 276 has run. `hostOwner()` and
+`hostOwnerCount()` assumed one row per name and were removed; `otherRequestsFor()` asks the question
+that still has one answer. The set-up check's "is used by this organisation only" row follows the one
+status now.
+
+**Two statuses were added to `publicHostStatus()`**: `HOST_CLASHING` (waiting, and another organisation
+asked too) and `HOST_TAKEN` (another organisation is approved for it). A failed read of the other
+requests answers `HOST_WAITING` — still not the door, which is the part that matters.
+
+**`INSERT … ON DUPLICATE KEY UPDATE` is still never used to save an address.** Since 276 an insert can
+clash only on the organisation's own key, so the upsert can no longer take another organisation's name
+— but files reach a server before anybody presses "Run migrations", and on a database still holding the
+old unique key it could. The tick test's old P91 (that upsert) could no longer fail, and now plants the
+save's taken refusal instead.
+
+**Testing the lock — and the round that found it was not tested.** Section Q of
+`tools/public-door-selftest.php`:
+- **Q11** holds the lock on the test's own connection exactly as `approvePublicHost()` does, approves B
+  uncommitted, sends A's approval through the real page, asserts the request is still running after 1.5 s,
+  commits, and requires the refusal to come from the ask. It shows a second approval WAITS and is refused
+  by the ask. **It cannot see a lock taken OUTSIDE the transaction** (round 1 of #895's check, plant MP1:
+  `begin_transaction()` moved after the locking read): the request's read waits on the TEST's lock and
+  on waking reads the committed approval anyway. The first version of these notes called Q11 "the
+  deterministic proof of the lock"; that was untrue.
+- **Q12** starts a second web server on the next port (`SELFTEST_WEB_PORT` + 1, which must be free), signs
+  the installation's administrator in twice (one session's file lock would make two requests take turns)
+  and sends both approvals at once, five times. Exactly one must be approved, AND the other must be
+  refused by the ask, never by the backstop's "(The database itself refused…)". That second half is what
+  can see MP1 with the key in place — but only when the two requests happen to overlap inside a few
+  milliseconds, so it is not a reliable catch. Measured once against MP1 with the key in place: the
+  backstop acted in 3 of the 5 rounds, so Q12 went red — on that run. It is kept as a second line, not
+  relied on.
+- **Q13 is the deterministic proof that the lock is HELD from the read to the write, with the key in
+  place.** The test takes a gap lock on the unique key where the approved name would go
+  (`WHERE approvedHost = ? FOR UPDATE`, finding no row): the request's locking read, through the ordinary
+  key on `hostName`, is not held up, but its UPDATE — which puts the name into the unique key — waits.
+  While it waits, a second connection asks for the OTHER organisation's row with `FOR UPDATE NOWAIT`.
+  The right code still holds that row, so the ask is refused at once (3572); with MP1 it is free.
+- Plants: lock removed → the refusal comes from the backstop (PQ4); key removed → a second approved row
+  is accepted (PQ5); key removed but lock kept → still exactly one (PQ6); BOTH removed → two
+  organisations approved for one name (PQ7); MP1 with the key in place → Q13 sees the row free (PQ12).
+  The test's own held lock in Q11 also blocks the request's later UPDATE of its row, so "the request
+  waited" holds even with the code's `FOR UPDATE` removed: there the message, not the wait, tells the two
+  guards apart.
+
+**What the activity log says about approvals, and to whom (round 1 of #895's check found a leak).**
+`Logger::activity()` stamps every record with the organisation the person has OPEN, and that
+organisation's ordinary administrators read it on Admin, Activity. The installation's global
+administrator approves every organisation's address from whichever organisation is open. So the first
+version leaked, measured over HTTP by the check: the refusal "…already approved for another organisation
+(Selftest Door B)…" went into the LOSING organisation's log, and the approval line — older, from P4a —
+named the winner by number with its address. Now `approvalRefused()` and `recordApprovalDecision()` are
+the one place approval decisions are recorded: "this organisation's" with its own address when it is the
+open organisation's own, "another organisation's" with nothing identifying otherwise, and a refusal is
+recorded in words that never name the holder (`takenWords(…, $nameHolder = false)`); the words SHOWN to
+the installation's administrator still name it. **The cost:** a decision about B made with A open is
+recorded in A's log without saying which organisation it was about, and nothing goes into B's. There is
+no installation-only place in this log: a record with no organisation is hidden on Admin, Activity from
+all but a global administrator, but the page's EXPORT includes `siteID IS NULL` rows for every
+organisation's administrator, so an empty organisation would not have been private either. Q14 drives it:
+A's ordinary administrator reads A's log after the approval and after the refusal, B's after decisions
+about A made with B open; PQ13 and PQ14 put the old wording back and both go red. Round 2 of the check found
+two holes in that test, each passed by a plant: with only two organisations, a refusal about B made with A
+open can only have A as the holder, so a recorder writing the SHOWN words for any refusal about another
+organisation (plant M2) stayed green — Q14 now has C, the third organisation, holding the address, and PQ15
+is M2; and the EXPORT, which the privacy argument rests on, was read by no test — Q14 now reads each
+ordinary administrator's export too, and PQ16 ("export left unfiltered") goes red.
+
+**A losing organisation re-saving its unchanged address** used to be told "Saved. Nothing was different."
+while its card said "Taken"; the approved-elsewhere refusal is now asked first. Q15 drives that re-save over
+HTTP, and PQ17 (the old order back) goes red.
+
+**What is not tested.** Q12 does not measure how far the two requests really overlapped in time; Q13 is
+the deterministic proof that the lock is held. The self-tests ran on MySQL 8.0.36 only (the migration harness ran on three
+engines; see the report). An upgrade from a database holding two rows for one name cannot arise (the old
+key forbade it), so it is not tested.
+
 ### No place is built in, and the Sabbath page (#935, #936)
 
 **`Sabbath::place()` is the ONE answer to where sunset is worked out**:
