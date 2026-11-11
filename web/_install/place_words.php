@@ -39,6 +39,24 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Countries.php';
 
 /**
+ * 🌍 A stored country AS THE PORTAL READS IT: two letters in any case become
+ * capitals, and anything else is no country at all ('').
+ *
+ * The same rule as `Countries::readRows()`, which every reader of the setting
+ * goes through. The installer's sentences, and its decision whether to write
+ * over a stored value, must judge it that way too: round 3 of #942's check
+ * found the last page calling a stored "GBR" a country that "was kept" while
+ * the portal ignored it and the country actually chosen was dropped, and a
+ * stored "gb" reported as a conflict with a chosen United Kingdom.
+ */
+function installUsableCountry(string $stored): string
+{
+    $code = strtoupper(trim($stored));
+
+    return preg_match('/^[A-Z]{2}$/', $code) === 1 ? $code : '';
+}
+
+/**
  * 🌍 What the database already holds for the two "where" questions: the
  * installation's country (its own row of `org.address.countryCode`) and the
  * first organisation's time zone (`tblSites.timezone` for organisation 1).
@@ -96,18 +114,29 @@ function installHeldPlace(?\mysqli $db): array
 function installPreviewPlaceWords(array $held, string $countryChosen, string $zoneChosen, string $ownEarlierCountry, bool $writesZone): array
 {
     $name       = static fn (string $code): string => \Portal\Core\Countries::name($code);
-    $heldCode   = (string) ($held['country'] ?? '');
+    // Judged as the portal reads it (installUsableCountry()): "gb" IS the
+    // United Kingdom, and "GBR" is no country at all, so the finish writes the
+    // chosen country over it (installFillSetting() is given the same rule).
+    $heldText   = trim((string) ($held['country'] ?? ''));
+    $heldCode   = installUsableCountry($heldText);
     $heldZone   = (string) ($held['zone'] ?? '');
     $keepsHeld  = $heldCode !== '' && $heldCode !== $ownEarlierCountry;
+    $unusable   = $heldText !== '' && $heldCode === '';
 
     if (($held['read'] ?? false) !== true) {
         $country = $countryChosen === ''
             ? 'Not chosen. If this database already holds a country, it is kept; if not, no country is known until somebody sets one in Admin, Settings, Organisation.'
             : $name($countryChosen) . ', unless this database already holds a country, which is kept.';
+    } elseif ($countryChosen === '' && $unusable === true) {
+        $country = 'Not chosen. This database holds "' . $heldText . '" as its country, which is not a country code, so the '
+            . 'portal ignores it and no country is in force until somebody sets one in Admin, Settings, Organisation.';
     } elseif ($countryChosen === '') {
         $country = $keepsHeld === true
             ? 'Not chosen here, so the country this database already holds is kept: ' . $name($heldCode) . '.'
             : 'Not chosen. No country is known until somebody sets one in Admin, Settings, Organisation.';
+    } elseif ($unusable === true) {
+        $country = $name($countryChosen) . '. This database holds "' . $heldText . '" as its country, which is not a country '
+            . 'code and is ignored, so ' . $name($countryChosen) . ' replaces it.';
     } elseif ($keepsHeld === true && $heldCode !== $countryChosen) {
         $country = 'You chose ' . $name($countryChosen) . ', but this database already holds a country, '
             . $name($heldCode) . ', and it is kept. Change it later in Admin, Settings, Organisation.';
@@ -137,7 +166,8 @@ function installPreviewPlaceWords(array $held, string $countryChosen, string $zo
  * 📝 The last page's lines: what the finish DID with the country and the zone.
  *
  * @param array<string, mixed> $report The finish's own record: `country` (what
- *        the setting holds now), `countryTyped`, `zoneTyped`, `zoneWritten`,
+ *        the setting holds now, as the portal reads it), `countryTyped`,
+ *        `countryHeldText` (what it held before, as text), `zoneTyped`, `zoneWritten`,
  *        `zoneKept` (chosen, but this database was carried on with) and
  *        `zoneNow` (organisation 1's zone, read back after the finish).
  *
@@ -146,16 +176,24 @@ function installPreviewPlaceWords(array $held, string $countryChosen, string $zo
  */
 function installDonePlaceWords(array $report): array
 {
-    $country      = (string) ($report['country'] ?? '');
+    $country      = installUsableCountry((string) ($report['country'] ?? ''));
     $countryTyped = (string) ($report['countryTyped'] ?? '');
+    // What the setting held BEFORE the finish, as text: only to say so when it
+    // was not a country code (the portal ignores such a value).
+    $heldText     = trim((string) ($report['countryHeldText'] ?? ''));
+    $heldUnusable = $heldText !== '' && installUsableCountry($heldText) === '';
     $zoneTyped    = (string) ($report['zoneTyped'] ?? '');
     $zoneNow      = (string) ($report['zoneNow'] ?? '');
 
     $countryLine = $country === ''
-        ? 'None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.'
+        ? ($heldUnusable === true
+            ? 'None is in force: this database holds "' . $heldText . '" as its country, which is not a country code, so the portal ignores it. Set one in Admin, Settings, Organisation.'
+            : 'None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.')
         : \Portal\Core\Countries::name($country) . '. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.';
     $countryNote = '';
-    if ($country !== '' && $countryTyped === '') {
+    if ($country !== '' && $heldUnusable === true) {
+        $countryNote = 'This database held "' . $heldText . '" as its country, which is not a country code, so the country you chose replaced it.';
+    } elseif ($country !== '' && $countryTyped === '') {
         $countryNote = 'You chose none, so the country this database already had saved was kept.';
     } elseif ($country !== '' && $country !== $countryTyped) {
         $countryNote = 'That is not the country you chose (' . \Portal\Core\Countries::name($countryTyped)

@@ -192,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 149; // 136 + N01, N01b, N02, N03-N12 (#942; N02b's traps were replaced by tools/installer-country-script-selftest.mjs)
+const EXPECTED_CHECKS = 151; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N13 (#942; N02b's traps were replaced by a whole-script pin and a browser test)
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -1528,10 +1528,11 @@ ok('N01 the web addresses page ASKS for the country and the time zone, and choos
     && str_contains($zoneList, '<option value="Europe/London" data-country="GB">') === true,
     count($countryOptions[1]) . ' countries; selected in country list: ' . substr_count($countryList, ' selected'));
 // N01b is a QUICK TEXT TRIPWIRE and nothing more. A text search cannot show that a script sends nothing (round 1 of
-// the #942 check passed it with a planted `new WebSocket('wss://…')`, and round 2 with a send hidden behind a timer
-// and a computed name). The guard for "nothing is sent" is tools/installer-country-script-selftest.mjs, which runs the
-// real script in a real browser and records every request.
-ok('N01b (a quick text tripwire only: the guard is the browser test) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
+// the #942 check passed it with a planted `new WebSocket('wss://…')`). Nor can a browser that samples what it sees
+// (round 3 sent the zone out four ways past one). The GUARD is that the script is pinned WHOLE as text by
+// tools/audit-checks/check_installer_country_script_pinned.py, so any change to it must be re-pinned and read by a
+// person; tools/installer-country-script-selftest.mjs is supporting evidence.
+ok('N01b (a quick text tripwire only: the guard is the whole-script pin) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
     str_contains($suggestJs, 'Intl.DateTimeFormat().resolvedOptions().timeZone') === true && preg_match('/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|new\s+Image|wss?:\/\/|https?:\/\/|\.src\s*=|location|window\.open/i', $suggestJs) !== 1,
     $suggestJs === '' ? 'no such script on the page' : 'a request or an address was found in the script');
 
@@ -1646,6 +1647,10 @@ $corrected = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_ad
 @file_put_contents($authA . $sep . 'enc.key', '');
 // And the owner has made the code file read-only, as the code page suggests against somebody who keeps sending wrong codes.
 chmod($authA . $sep . 'install-code.php', 0440);
+// #942: the installation's country holds "GBR", which is not a country code and which the portal ignores. The country
+// chosen (France) must be written over it, not dropped in favour of it (round 3 of the check: the last page called
+// "GBR" a country that "was kept").
+q($databases['a'], "UPDATE `tblSettings` SET `settingValue` = 'GBR' WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL");
 $done = post($owner, '/?step=5', ['action' => 'finalize', 'owner_code' => strtolower(codeOf($rootA))]);
 ok('I37 the address corrected after that stopped finish REPLACES the one it had stored (this run filled it in itself), and the last page does not claim that the database "already had an address saved"',
     $corrected['status'] === 302 && page($done) === 'done' && setting($databases['a'], 'site.url') === ADDRESS_TYPED && setting($databases['a'], 'portal.support.email') === SUPPORT_TYPED
@@ -1697,6 +1702,9 @@ ok('N05 the country chosen (typed in small letters) is the INSTALLATION\'s: exac
 ok('N06 the last page says the country by name and the time zone set',
     str_contains($done['body'], 'data-done="country" data-country="FR"') === true && str_contains(words($done), 'France. Each organisation starts from it') === true
     && str_contains($done['body'], 'data-zone-written="1"') === true && str_contains(words($done), 'Europe/Paris. Change it in Admin, Organisations.') === true,
+    said($done));
+ok('N06b the stored "GBR" (not a country code, so ignored) was REPLACED by the country chosen, and the last page says so (it said "GBR" was a country that was kept, and France was dropped)',
+    str_contains(words($done), 'This database held "GBR" as its country, which is not a country code, so the country you chose replaced it.') === true,
     said($done));
 ok('I30 the whole installation raised no PHP warning or notice, shown or not', errorLog() === '', errorLog());
 
@@ -2084,7 +2092,8 @@ if ($otherServer !== null) {
 // This database "already holds" an address for the portal, as one being carried on with might: it must be kept.
 q($databases['b'], "UPDATE tblSettings SET settingValue = 'https://kept.installer-selftest.invalid' WHERE settingKey = 'site.url' AND siteID IS NULL");
 // #942: and it already holds a country and a time zone of its own, which a database carried on with must keep.
-q($databases['b'], "UPDATE `tblSettings` SET `settingValue` = 'IE' WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL");
+// Stored in SMALL letters on purpose: the portal reads "ie" as Ireland, so every sentence below must too (round 3).
+q($databases['b'], "UPDATE `tblSettings` SET `settingValue` = 'ie' WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL");
 q($databases['b'], "UPDATE `tblSites` SET `timezone` = 'America/Chicago' WHERE `siteID` = 1");
 $typed = post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland']);
 ok('L13 a bare host name is taken to mean https, and the support address may be left empty', $typed['status'] === 302 && $typed['location'] === '?step=5'
@@ -2151,7 +2160,7 @@ $doneLine = static function (array $page, string $which): string {
         ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))) : '(no such line)';
 };
 ok('N07 a database CARRIED ON with keeps the country and the time zone it already had although others were CHOSEN, and the last page names the STORED ones and the chosen ones as not saved: Ireland kept, not New Zealand; America/Chicago kept, Pacific/Auckland not saved (#942)',
-    setting($databases['b'], 'org.address.countryCode') === 'IE' && (q($databases['b'], 'SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')[0]['timezone'] ?? '') === 'America/Chicago'
+    setting($databases['b'], 'org.address.countryCode') === 'ie' && (q($databases['b'], 'SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')[0]['timezone'] ?? '') === 'America/Chicago'
     && $doneLine($done, 'country') === 'Country Ireland. Each organisation starts from it and can choose its own in Admin, Settings, Organisation. That is not the country you chose (New Zealand). This database already had a country saved, and it was kept.'
     && str_contains($done['body'], 'data-zone-written="0"') === true
     && $doneLine($done, 'timezone') === 'Time zone of your organisation Kept as it was, America/Chicago, because you chose to carry on with a database that already had one. The time zone you chose, Pacific/Auckland, was not saved: check it in Admin, Organisations.',
@@ -2168,6 +2177,18 @@ $cases = [
         ['Ireland. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.', 'You chose none, so the country this database already had saved was kept.', 'Not chosen, so your organisation is on America/Chicago, the time zone this database holds. Change it in Admin, Organisations.']],
     'carried on, both chosen' => [['country' => 'IE', 'countryTyped' => 'NZ', 'zoneTyped' => 'Pacific/Auckland', 'zoneWritten' => false, 'zoneKept' => true, 'zoneNow' => 'America/Chicago'],
         ['Ireland. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.', 'That is not the country you chose (New Zealand). This database already had a country saved, and it was kept.', 'Kept as it was, America/Chicago, because you chose to carry on with a database that already had one. The time zone you chose, Pacific/Auckland, was not saved: check it in Admin, Organisations.']],
+    // The two branches where the zone could not be read back after the finish.
+    'nothing chosen, zone not read back' => [['country' => '', 'countryTyped' => '', 'zoneTyped' => '', 'zoneWritten' => false, 'zoneKept' => false, 'zoneNow' => ''],
+        ['None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.', '', 'Not chosen, so your organisation keeps the time zone this database holds. Check it in Admin, Organisations.']],
+    'carried on, zone chosen, zone not read back' => [['country' => '', 'countryTyped' => '', 'zoneTyped' => 'Pacific/Auckland', 'zoneWritten' => false, 'zoneKept' => true, 'zoneNow' => ''],
+        ['None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.', '', 'Kept as it was, because you chose to carry on with a database that already had one. The time zone you chose, Pacific/Auckland, was not saved: check it in Admin, Organisations.']],
+    // A stored country that is not two capital letters, judged as the portal reads it.
+    'stored "GBR", France chosen (written over it)' => [['country' => 'FR', 'countryTyped' => 'FR', 'countryHeldText' => 'GBR', 'zoneTyped' => '', 'zoneWritten' => false, 'zoneKept' => false, 'zoneNow' => 'UTC'],
+        ['France. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.', 'This database held "GBR" as its country, which is not a country code, so the country you chose replaced it.', 'Not chosen, so your organisation is on UTC, the time zone this database holds. Change it in Admin, Organisations.']],
+    'stored "GBR", nothing chosen (left, and ignored)' => [['country' => 'GBR', 'countryTyped' => '', 'countryHeldText' => 'GBR', 'zoneTyped' => '', 'zoneWritten' => false, 'zoneKept' => false, 'zoneNow' => 'UTC'],
+        ['None is in force: this database holds "GBR" as its country, which is not a country code, so the portal ignores it. Set one in Admin, Settings, Organisation.', '', 'Not chosen, so your organisation is on UTC, the time zone this database holds. Change it in Admin, Organisations.']],
+    'stored "gb", the United Kingdom chosen (the same, not a conflict)' => [['country' => 'gb', 'countryTyped' => 'GB', 'countryHeldText' => 'gb', 'zoneTyped' => '', 'zoneWritten' => false, 'zoneKept' => false, 'zoneNow' => 'Europe/London'],
+        ['United Kingdom. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.', '', 'Not chosen, so your organisation is on Europe/London, the time zone this database holds. Change it in Admin, Organisations.']],
 ];
 $wrongWords = [];
 foreach ($cases as $what => [$report, $want]) {
@@ -2176,8 +2197,28 @@ foreach ($cases as $what => [$report, $want]) {
         $wrongWords[] = $what . ': ' . json_encode($got);
     }
 }
-ok('N12 the last page\'s sentences in EVERY case (new database or carried on, something chosen or nothing): each names what the database really holds, never "UTC" or "no country" about a database that holds another',
+ok('N12 the last page\'s sentences on EVERY branch of installDonePlaceWords() (new database or carried on; something chosen or nothing; the zone read back or not; a stored country in small letters or not a code at all): each says what the portal really has',
     $wrongWords === [], implode(' | ', $wrongWords));
+// The finish page's lines for a stored country that is not two capital letters, from the ONE function that makes them.
+$previewCases = [
+    'stored "GBR", France chosen' => [['country' => 'GBR', 'zone' => 'UTC', 'read' => true], 'FR', '', '', true,
+        'France. This database holds "GBR" as its country, which is not a country code and is ignored, so France replaces it.'],
+    'stored "GBR", nothing chosen' => [['country' => 'GBR', 'zone' => 'UTC', 'read' => true], '', '', '', false,
+        'Not chosen. This database holds "GBR" as its country, which is not a country code, so the portal ignores it and no country is in force until somebody sets one in Admin, Settings, Organisation.'],
+    'stored "gb", the United Kingdom chosen' => [['country' => 'gb', 'zone' => 'Europe/London', 'read' => true], 'GB', '', '', false,
+        'United Kingdom'],
+    'stored "gb", France chosen' => [['country' => 'gb', 'zone' => 'Europe/London', 'read' => true], 'FR', '', '', false,
+        'You chose France, but this database already holds a country, United Kingdom, and it is kept. Change it later in Admin, Settings, Organisation.'],
+];
+$wrongPreview = [];
+foreach ($previewCases as $what => [$held, $chosenCountry, $chosenZone, $ownEarlier, $writesZone, $want]) {
+    $got = installPreviewPlaceWords($held, $chosenCountry, $chosenZone, $ownEarlier, $writesZone)['country'];
+    if ($got !== $want) {
+        $wrongPreview[] = $what . ': ' . $got;
+    }
+}
+ok('N13 the finish page judges a stored country as the portal reads it: "GBR" is no country (a chosen one replaces it; with none chosen, none is in force), and "gb" IS the United Kingdom (no conflict with choosing it, a conflict with France)',
+    $wrongPreview === [], implode(' | ', $wrongPreview));
 $private = preg_match('/<div class="alert [a-z-]+" id="install-done-private">(.*?)<\/div>/s', $done['body'], $m) === 1
     ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))) : '(no such part)';
 ok('L24 a rules file that held a comment and no rule (_uploads) was written again by the finish; one of somebody\'s own that holds a rule (_backups) was left exactly as it is; and the last page says which two folders refuse and that _backups does NOT hold the refusal',

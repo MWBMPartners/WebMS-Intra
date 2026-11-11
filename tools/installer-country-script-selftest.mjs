@@ -1,66 +1,67 @@
 /**
- * The installer's country suggestion sends nothing anywhere, measured in a real browser.
+ * What the installer's country suggestion asks for in a real browser — SUPPORTING EVIDENCE, not the guard.
  *
  * Path: tools/installer-country-script-selftest.mjs
  *
- * WHY THIS EXISTS
- * ---------------
+ * WHAT THE GUARD IS, AND WHY THIS IS NOT IT
+ * -----------------------------------------
  * D-133 (#942): the installer suggests a country and a time zone from the
  * installing person's own browser time zone, and "nothing is looked up or sent
- * anywhere". The suggestion is a small script on the installer's Web addresses
- * page. The owner chose the browser's time zone precisely BECAUSE the first
- * idea, looking up the installer's internet address, would have sent something
- * to an outside company. So "this script sends nothing" is the property that
- * matters, and it is a property of what the script DOES, not of what it says.
+ * anywhere". **The guard for that promise is a pin**:
+ * `tools/audit-checks/check_installer_country_script_pinned.py` requires the
+ * script to equal its pinned copy, so no statement in it can change without a
+ * person reading the change.
  *
- * Two earlier guards in installer-selftest.php failed at exactly that, and the
- * reason is the lesson. N01b searched the script's TEXT and passed on a planted
- * `new WebSocket('wss://…')`. N02b then ran the script in node with a trap for
- * each way of sending something, and passed on a DEFERRED send
- * (`setTimeout(() => window['fe' + 'tch'](…), 0)`, because the harness read its
- * answer straight after running the script) and on an image built through
- * `innerHTML`, a CSS `url()` and `import()`, none of which a list of traps can
- * enumerate. Nothing proved the traps were live either. **A list of ways to
- * send is always one short.** So this asks the browser itself, which sees every
- * request whatever made it.
+ * That was settled after three rounds of trying to PROVE the absence of a send
+ * by watching for one, each defeated: a text search missed a WebSocket; a list
+ * of traps in node missed a timer, an `innerHTML` picture, CSS `url()` and
+ * `import()`; and this file's first version — which claimed to see every
+ * request — missed a `pagehide` beacon, a `<link rel=preconnect>`, a timer past
+ * its window and a send on the zone box's change, with the zone reaching a real
+ * listener and every check green. Proving absence by sampling routes is
+ * unbounded.
  *
- * WHAT IT PROVES
- * --------------
- *   1. The REAL script — read out of web/_install/index.php verbatim, not a
- *      copy — run in headless Chrome, Chromium or Edge with the browser's time
- *      zone set by the DevTools protocol (`Emulation.setTimezoneOverride`) to
- *      each of London, New York, Chicago and UTC, makes NO request to anything
- *      but the page's own address. Every request is recorded through
- *      `Network.requestWillBeSent` (which a picture, a fetch, a beacon, an
- *      import, a style sheet's `url()` and a navigation all produce), every
- *      WebSocket through `Network.webSocketCreated`, and every new window
- *      through `Target.targetCreated`. Recording runs from before the page is
- *      asked for until the network has been quiet for half a second AND at
- *      least two seconds have passed since it loaded, so a send put off with a
- *      timer is still seen.
- *   2. The same while somebody then CHOOSES a country (France, then
- *      Australia), because the script's change handler runs then.
- *   3. The script really makes its suggestion in that browser (the right
- *      country and zone for each time zone), so a script that silently failed
- *      to run cannot pass check 1 by doing nothing.
- *   4. THE CAPTURE IS LIVE: a control page that runs the same script and then
- *      sends something after a delay, by fetch, by an `innerHTML` picture and
- *      by a WebSocket, must have all three recorded. Without this a recorder
- *      that saw nothing would read as "nothing was sent".
+ * WHAT THIS DOES SHOW
+ * -------------------
+ *   1. The real script — read out of web/_install/index.php verbatim — run in
+ *      headless Chrome, Chromium or Edge with the browser's time zone set by
+ *      `Emulation.setTimezoneOverride` to London, New York, Chicago and UTC,
+ *      makes the right suggestion in each (so it really RUNS there).
+ *   2. While it loads, while the country box AND the zone box are changed, and
+ *      while the page is left for another page, the browser's Network domain
+ *      records no request to any address but the page's own:
+ *      `Network.requestWillBeSent`,
+ *      `Network.webSocketCreated` and new windows. Each recording lasts at
+ *      least two seconds and until the network has been quiet for half a
+ *      second.
+ *   3. The recording is LIVE: a control page sends three things (a fetch with
+ *      a built-up name, an `innerHTML` picture, a WebSocket) 1.2 seconds after
+ *      loading — AFTER the half-second quiet spell, INSIDE the two-second
+ *      minimum — and all three must be recorded. A recorder that stopped at
+ *      the first quiet spell would miss them and go red.
  *
- * WHAT IT CANNOT DO, said plainly
- * -------------------------------
- *   * It runs the script on a FIXTURE page, not the installer's real page: the
- *     real one needs an installation code, a database and a session. The script
- *     is the real one, read from the installer's source each run, and the two
- *     lists are built by PHP from the same `Portal\Core\Countries` and zone data
- *     the installer uses. What the rest of the real page might send is not
- *     covered (it loads no outside resource today; nothing here pins that).
- *   * It needs PHP (to build the two lists) and a Chromium-family browser. It
- *     REFUSES (exit 2) without either, never skips.
- *   * It cannot see a request a browser makes outside the page's own
- *     networking (an extension, a DNS prefetch the browser decides on itself).
- *     The headless browser starts with a fresh profile and no extensions.
+ * WHAT IT CANNOT SEE, said plainly
+ * --------------------------------
+ *   * PRE-CONNECTION AND DNS HINTS. `<link rel=preconnect>` and `dns-prefetch`
+ *     send a server name over DNS and TLS, which never reach the Network
+ *     domain. A zone written into such a name is invisible here.
+ *   * A BEACON ON LEAVING. A planted `pagehide` `sendBeacon` was NOT recorded,
+ *     whether the page was left for `about:blank` or for another page on the
+ *     same origin (measured, both). So leaving the page is exercised, but a
+ *     beacon sent as it goes is not seen; and a tab or browser that is CLOSED
+ *     is not tried at all.
+ *   * TIMERS PAST ITS WINDOW. Anything put off beyond the recording (a few
+ *     seconds) is not seen.
+ *   * SAME-ORIGIN SENDS. A request to the page's own address is allowed, so
+ *     `fetch('/?z=' + zone)` passes. On the real installer that address is the
+ *     customer's own server, which is where the person is anyway, but it is a
+ *     send all the same.
+ *   * The rest of the installer's page. It runs the script on a FIXTURE page
+ *     (the real page needs an installation code, a database and a session),
+ *     with the two lists built by PHP from the same `Portal\Core\Countries`
+ *     and zone data the installer uses.
+ *   * It needs PHP and a Chromium-family browser, and REFUSES (exit 2)
+ *     without either, never skips.
  *
  * HOW IT IS BUILT
  * ---------------
@@ -78,7 +79,7 @@
  * Package: WebMS-Intra / self-tests
  * Author: Claude Opus 5.5 (for MWBM Partners Ltd, t/a MWservices)
  * Copyright: All Rights Reserved -- MWBM Partners Ltd
- * Version: 1.0.0
+ * Version: 1.1.0
  */
 
 import { spawn, execFileSync } from 'node:child_process';
@@ -269,8 +270,9 @@ async function main() {
     const script = await realScript();
     LISTS = lists();
 
-    /* The CONTROL: the same script, then three sends put off with a timer. If
-       the recorder misses these, it would miss a real one too. */
+    /* The CONTROL: the same script, then three sends 1.2 seconds after load —
+       after settle()'s half-second quiet spell, inside its two-second minimum.
+       A recorder that stopped at the first quiet spell misses them. */
     const control = `<script>
 setTimeout(function () {
     window['fe' + 'tch']('//control-fetch.invalid/a').catch(function () {});
@@ -278,9 +280,13 @@ setTimeout(function () {
     d.innerHTML = '<img src="//control-image.invalid/i">';
     document.body.appendChild(d);
     try { new WebSocket('ws://control-socket.invalid/s'); } catch (e) {}
-}, 300);
+}, 1200);
 </script>`;
-    const pages = { '/page.html': page(script, ''), '/control.html': page(script, control) };
+    // `/left.html` is somewhere to LEAVE to, on the same origin, so a send
+    // made while leaving that is an ordinary request is recorded. A planted
+    // `pagehide` BEACON was not recorded either way (here, or leaving for
+    // about:blank) — measured — so this test does not claim beacons.
+    const pages = { '/page.html': page(script, ''), '/control.html': page(script, control), '/left.html': '<!doctype html><title>left</title>' };
 
     const work = await mkdtemp(path.join(tmpdir(), 'installer-country-'));
     const profile = path.join(work, 'profile');
@@ -347,7 +353,7 @@ setTimeout(function () {
         check('A2 and the control page asked for itself first, so recording began before the page arrived',
             browser.requests[0], `${origin}/control.html`);
 
-        console.log('B. The real script, in four time zones: it suggests, and sends nothing');
+        console.log('B. The real script, in four time zones: it suggests, and the Network domain sees nothing leave');
         for (const [zone, want] of [
             ['Europe/London', 'GB|Europe/London'],
             ['America/New_York', 'US|America/New_York'],
@@ -356,13 +362,16 @@ setTimeout(function () {
         ]) {
             await browser.visit(`${origin}/page.html`, zone);
             check(`B ${zone}: the script suggests ${want === '|' ? 'nothing' : want}`, await chosen(), want);
-            check(`B ${zone}: NOTHING was asked of any address but the page's own, for two seconds and until the network was quiet`, foreign(), []);
-            // Recorded afresh, so this check is about the change handler alone.
+            check(`B ${zone}: the Network domain saw nothing asked of any address but the page's own (see the header for what it cannot see)`, foreign(), []);
+            // Recorded afresh, so this check is about the two change handlers and leaving the page.
             browser.requests = [];
             await browser.evaluate('var c = document.getElementById("country"); c.value = "FR"; c.dispatchEvent(new Event("change")); '
-                + 'c.value = "AU"; c.dispatchEvent(new Event("change")); return 1;');
+                + 'c.value = "AU"; c.dispatchEvent(new Event("change")); '
+                + 'var z = document.getElementById("timezone"); z.value = "Australia/Perth"; z.dispatchEvent(new Event("change")); return 1;');
             await browser.settle();
-            check(`B ${zone}: and nothing after a country is chosen (France, then Australia)`, foreign(), []);
+            await browser.send('Page.navigate', { url: `${origin}/left.html` });
+            await browser.settle();
+            check(`B ${zone}: and nothing while a country and a zone are chosen, or while the page is left (a beacon sent as it goes is NOT seen; see the header)`, foreign(), []);
         }
     } finally {
         await stop();
@@ -370,7 +379,7 @@ setTimeout(function () {
 
     console.log('');
     console.log(`${passed + failed} checks: ${passed} passed, ${failed} failed.`);
-    console.log('A fixture page running the REAL script; see the header for what it cannot show.');
+    console.log('Supporting evidence only: the guard is check_installer_country_script_pinned.py. See the header.');
     process.exit(failed === 0 ? 0 : 1);
 }
 

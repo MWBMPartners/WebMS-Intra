@@ -1665,7 +1665,17 @@ jobs:
       #    a list of traps each missed a planted send (two check rounds), so this
       #    asks the browser. Needs a browser and PHP (the runner image has both);
       #    it REFUSES rather than skipping without them.
-      - name: 'The installer country suggestion sends nothing, in a real browser (#942)'
+      # 🌍 #942, D-133: the installer's country suggestion promises to send
+      #    nothing anywhere, and three check rounds showed no test can prove an
+      #    absence. So the script is PINNED WHOLE: any change to a statement
+      #    fails here until it is re-pinned with --repin, which puts the change
+      #    in front of a reviewer. The browser test below is supporting evidence.
+      - name: 'The installer country suggestion script is as pinned (hard gate, #942)'
+        id: installer_country_pinned
+        if: always()
+        run: python3 -I tools/audit-checks/check_installer_country_script_pinned.py
+
+      - name: 'What the installer country suggestion asks for, in a real browser (#942)'
         id: installer_country_browser
         if: always()
         run: node tools/installer-country-script-selftest.mjs
@@ -2080,7 +2090,8 @@ jobs:
             echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
             echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
             echo "- Every audit check's own self-test passes: ${AUDIT_SELFTESTS_OUTCOME} (hard gate, #919)"
-            echo "- The installer country suggestion sends nothing, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
+            echo "- The installer country suggestion script is as pinned: ${{ steps.installer_country_pinned.outcome }} (hard gate, #942)"
+            echo "- What the installer country suggestion asks for, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

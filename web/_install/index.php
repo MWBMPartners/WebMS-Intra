@@ -2116,13 +2116,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    value THIS RUN wrote, and keeps a country a database it was
                 //    asked to carry on with already had.
                 $finishReport['countryTyped'] = (string) ($addresses['country'] ?? '');
+                // What the country setting held BEFORE this finish, as text, so
+                // the last page can say so when it was not a country code.
+                $finishReport['countryHeldText'] = installHeldPlace($writeDb)['country'];
                 foreach ([
                     'address' => [\Portal\Core\PortalAddress::SETTING, $finishReport['addressTyped']],
                     'support' => ['portal.support.email', $finishReport['supportTyped']],
                     'country' => [\Portal\Core\Countries::SETTING, $finishReport['countryTyped']],
                 ] as $which => [$settingKey, $typedValue]) {
                     $ownEarlier = is_string($filledBefore[$settingKey] ?? null) === true ? $filledBefore[$settingKey] : null;
-                    $stored     = installFillSetting($writeDb, $settingKey, $typedValue, $ownEarlier);
+                    // The country is judged as the portal reads it (see
+                    // installUsableCountry() and installFillSetting()).
+                    $stored     = installFillSetting($writeDb, $settingKey, $typedValue, $ownEarlier,
+                        $which === 'country' ? 'installUsableCountry' : null);
                     $finishReport[$which] = $stored['value'];
                     if ($stored['wrote'] === true) {
                         $filledBefore[$settingKey] = $stored['value'];
@@ -2394,15 +2400,29 @@ function installAccountCount(\mysqli $db): int
  * somebody's saved one, so the corrected value replaces it. If anything else
  * is there (somebody changed it in between), it is kept like any other.
  *
- * @param string|null $ownEarlier What this run itself wrote here earlier, or
- *                                null when it wrote nothing.
+ * AS THE PORTAL READS IT (#942). `$asRead`, when given, turns what is stored
+ * into what the portal makes of it, and every comparison here uses that. For
+ * the country it is installUsableCountry(): a stored "gb" IS the United
+ * Kingdom, so choosing the United Kingdom is not a conflict; and a stored
+ * "GBR" is no country at all, so it counts as EMPTY and a chosen country is
+ * written over it. That is deliberate: a value the portal ignores is not a
+ * choice anybody can be relying on, and keeping it would drop the country the
+ * person has just chosen in favour of one that does nothing. With nothing
+ * chosen, "GBR" is left exactly as it is (writing '' over it would change
+ * nothing the portal reads) and the last page says it is ignored.
  *
- * @return array{value: string, wrote: bool} What the setting holds now, and
- *         whether this call is what put it there.
+ * @param string|null   $ownEarlier What this run itself wrote here earlier, or
+ *                                  null when it wrote nothing.
+ * @param callable|null $asRead     Turns a stored value into what the portal
+ *                                  reads; null compares the text as stored.
+ *
+ * @return array{value: string, wrote: bool} What the setting holds now (as the
+ *         portal reads it, when `$asRead` is given), and whether this call is
+ *         what put it there.
  *
  * @throws \mysqli_sql_exception When the table cannot be read or written.
  */
-function installFillSetting(\mysqli $db, string $key, string $value, ?string $ownEarlier = null): array
+function installFillSetting(\mysqli $db, string $key, string $value, ?string $ownEarlier = null, ?callable $asRead = null): array
 {
     $find = $db->prepare('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL ORDER BY settingID ASC LIMIT 1');
     $find->bind_param('s', $key);
@@ -2420,6 +2440,9 @@ function installFillSetting(\mysqli $db, string $key, string $value, ?string $ow
     }
 
     $held = (string) ($row['settingValue'] ?? '');
+    if ($asRead !== null) {
+        $held = (string) $asRead($held);
+    }
     // An empty setting may be filled. A setting that holds this run's own
     // earlier value may be changed, to nothing as well: a support address
     // typed by mistake can be taken out again.
