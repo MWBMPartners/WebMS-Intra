@@ -226,7 +226,17 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 290; // 276 before two packages landed together: #892 added six
+const EXPECTED_CHECKS = 297; // 290 before #941 and #927 added seven: section 23 (#941)
+                             // added six - the cleared row is reached by the real code
+                             // beside a live account; what My data said beforehand is
+                             // what the run then did; the row is worked out again and
+                             // kept; no gift is left naming her with nothing to clear
+                             // it; the line says what happened; and beside an emptied
+                             // account a gift still carrying the number loses it. And
+                             // section 4c gained one (#927): the label inventory()
+                             // gives each anonymised kind of record agrees with
+                             // whether the real run left the account number on it.
+                             // 276 before two packages landed together: #892 added six
                              // (statement periods naming an impossible day, and both ends of
                              // a period tried with a kept and an unkept gift), and section 22
                              // (#809) added eight: two on erasing the leader who only TYPED
@@ -289,7 +299,7 @@ const EXPECTED_CHECKS = 290; // 276 before two packages landed together: #892 ad
                              // with a kept gift inside, is DELETED. 282.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -361,6 +371,15 @@ const REQ_HOST_A    = 940601;
 const REQ_LEADER_SG = 940602;
 const SG_HOSTS = 960601;    // section 22: the group whose places those are
 const SG_HALL  = 960602;    // section 22: a group whose usual place is marked "not anybody's home"
+// #941 (section 23): a kept row an earlier run CLEARED, beside a live account
+// and beside an emptied one. Two organisations of their own, so nothing any
+// earlier section left at another organisation can answer for these.
+const P_CL     = 920701; // section 23: her runs stop twice, the second clears her kept row, she gives again
+const P_CE     = 920702; // section 23: an emptied account beside a cleared row, with a gift still carrying the number
+const REQ_CL   = 940701;
+const REQ_CE   = 940702;
+const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
+const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
 const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
 const REQ_AUDIT = 940401;
@@ -2326,6 +2345,10 @@ $ownRequest = static function (int $person): ?array {
 };
 $heldA = $ownRequest(P_A);
 $heldC = $ownRequest(C);
+// #927: what "what we hold about you" says, BEFORE the run, about whether each
+// anonymised kind of record keeps the account number. Section 4c holds it to
+// what the run really leaves.
+$inventoryBeforeA = GdprEraser::inventory(P_A);
 ge_ok('"what we hold about you" lists the person\'s own erasure requests, with the state of each',
     $heldA !== null && $heldA['rows'] === 5 && $heldA['action'] === 'anonymise'
     && str_contains($heldA['reason'], '2 processing') && str_contains($heldA['reason'], '2 pending review')
@@ -3103,6 +3126,42 @@ ge_ok('after the erasure, the columns that still hold the person\'s number are E
     $stillNamed === $knownStillNamed,
     'still named and NOT on the list: ' . implode(', ', array_diff($stillNamed, $knownStillNamed))
     . ' | on the list but no longer named: ' . implode(', ', array_diff($knownStillNamed, $stillNamed)));
+
+// 🔢 #927: the LABEL a member reads beside each anonymised kind of record
+//    (GdprEraser::inventoryWords(), worked out from inventory()'s
+//    `keepsNumber`) must agree with what the real run left. The truth here is
+//    MEASURED, from the rows above - which columns of an anonymise instruction
+//    still hold the person's number - not read from the rule that made the
+//    label. Request erasure used to call an expense claim "kept, with some
+//    details about you removed" while the run left the claimant's number on
+//    it on purpose (D-113). Per TABLE, because inventory() lists rows and not
+//    columns: a table counts as keeping the number when any anonymise
+//    instruction of it does. The giving tables are worded from the giving
+//    outlook, the account row IS the number, and the person's own request is
+//    added by hand; each of those is pinned elsewhere, so they are left out.
+$labelSays = [];
+foreach ($inventoryBeforeA as $held) {
+    if ($held['action'] !== 'anonymise' || in_array($held['table'], ['tblGivingEntry', 'tblCountEnvelopes', 'tblGiftAidDeclaration', 'tblUsers', 'tblErasureRequest'], true) === true) {
+        continue;
+    }
+    $labelSays[$held['table']] = ($labelSays[$held['table']] ?? false) || $held['keepsNumber'] === true;
+}
+$runLeft = [];
+foreach ($worldA['instructions'] as $instruction) {
+    $key = $instruction['table'] . '.' . (string) $instruction['userCol'];
+    if ($instruction['action'] === 'anonymise' && isset($labelSays[$instruction['table']]) === true) {
+        $runLeft[$instruction['table']] = ($runLeft[$instruction['table']] ?? false) || in_array($key, $stillNamed, true);
+    }
+}
+ksort($labelSays);
+ksort($runLeft);
+$labelWrong = array_keys(array_filter($labelSays, static fn (bool $says, string $t): bool => ($runLeft[$t] ?? null) !== $says, ARRAY_FILTER_USE_BOTH));
+ge_ok('#927: for every anonymised kind of record, the label on Request erasure and My data says the account number stays EXACTLY where the run really left it (' . count($labelSays)
+    . ' kinds; ' . count(array_filter($labelSays)) . ' keep it, among them the expense claim)',
+    $labelSays !== [] && $labelWrong === [] && ($labelSays['tblExpenseClaims'] ?? false) === true && in_array(false, $labelSays, true) === true
+    && GdprEraser::inventoryWords(['action' => 'anonymise', 'keepsNumber' => true]) === 'kept, with some details about you removed but still carrying your account number',
+    'label and run disagree on: ' . implode(', ', $labelWrong) . ' | label says it stays on: '
+    . implode(', ', array_keys(array_filter($labelSays))) . ' | the run left it on: ' . implode(', ', array_keys(array_filter($runLeft))));
 
 // =============================================================================
 ge_section('5', 'The tables #535 was about, each by name');
@@ -6570,5 +6629,156 @@ ge_ok('A PLACE MARKED "NOT ANYBODY\'S HOME" HAS NO HOST, SO NO ERASURE EMPTIES I
 ge_ok('a meeting held in the erased host\'s home still points at that (now empty) place, so it reads "a place no longer recorded", never "the usual place"',
     (int) (ge_one('SELECT `placeID` FROM `tblSmallGroupMeetings` WHERE `groupID` = ? AND `meetingDate` = ?', 'is', [SG_HOSTS, '2026-10-01'])['placeID'] ?? 0) === $homeA);
 
+
+// =============================================================================
+ge_section('23', 'A kept giving row an earlier run CLEARED: beside a live account it is worked out again; beside an emptied one nothing keeps the donor (#941)');
+// =============================================================================
+// 🧹 WHY THIS SECTION EXISTS. The keep step used to return at once for ANY
+//    kept row that had been cleared, writing "Nothing was changed". A row is
+//    cleared beside a LIVE account when a run that stopped before the account
+//    was emptied is run again and finds nothing that needs the name any more
+//    (step 4 of keepGivingRecordsAtSite()). If that run then stops again, the
+//    person is still a member and may go on giving - and the next run left
+//    every gift since carrying their account number, with no kept row to
+//    say why and nothing that would ever clear it, and closed the request as
+//    COMPLETED. The independent check of #703 round 9 measured it in a world
+//    it built by hand (a giver kept 4 gifts naming them).
+//
+//    This section reaches that state with the REAL code and nothing written
+//    by hand: two runs that stop at a second organisation (a planted fault,
+//    as in section 14), and between them the organisation changing its rule
+//    from "every gift" to "tax gifts only" - so the second run clears the row
+//    while the account still names her.
+//
+//    The decision (keepGivingRecordsAtSite(), 1c): beside a live account the
+//    row is worked out AGAIN FROM THE START, as a first run would, and kept
+//    again on the same row if anything must be kept; beside an emptied
+//    account the row stays cleared and any gift still carrying the number
+//    loses it.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+foreach ([SITE_C1, SITE_C2] as $siteId) {
+    ge_insert('tblSites', [], ['siteID' => $siteId, 'timezone' => 'Europe/London']);
+}
+$catC1 = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_C1]));
+$catC2 = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_C2]));
+ge_user(P_CL, 'Clara Cleared', 'clara.cleared@selftest.invalid');
+$cl = [];
+$cl['giftFirst'] = ge_gift(SITE_C1, P_CL, $ago(300), 1500, $catC1);   // no declaration: kept only while the rule is "every gift"
+$cl['giftC2']    = ge_gift(SITE_C2, P_CL, $ago(200), 1600, $catC2);   // kept at the second organisation, which keeps every gift
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_setting(SITE_C1, GivingRetention::KEY_SCOPE, GivingRetention::SCOPE_ALL);
+ge_setting(SITE_C2, GivingRetention::KEY_SCOPE, GivingRetention::SCOPE_ALL);
+$keptCl    = static fn (int $siteId, int $donor): ?array => ge_one('SELECT * FROM `tblGivingKeptDonors` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$siteId, $donor]);
+$donorCl   = static fn (array $gift): ?int => (static fn (?array $row): ?int => $row === null || $row['donorID'] === null ? null : (int) $row['donorID'])(ge_row($gift));
+$accountCl = static fn (int $id): array => ge_one('SELECT `fullName`, `emailAddress`, `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [$id]);
+$statusCl  = static fn (int $requestId): string => (string) (ge_one('SELECT `status` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [$requestId])['status'] ?? '');
+// The second organisation refuses its kept row, so every run stops there,
+// AFTER the first organisation is dealt with and BEFORE the account is emptied.
+ge_trigger('selftest_gdpr_stop_c2', 'CREATE TRIGGER `selftest_gdpr_stop_c2` BEFORE INSERT ON `tblGivingKeptDonors` FOR EACH ROW BEGIN '
+    . 'IF NEW.`siteID` = ' . SITE_C2 . " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'planted by the self-test'; END IF; END");
+
+ge_request(REQ_CL, P_CL, 'clara.cleared@selftest.invalid', 'Clara Cleared', 'processing');
+ge_q('UPDATE `tblErasureRequest` SET `siteID` = ? WHERE `requestID` = ?', 'ii', [SITE_C1, REQ_CL]);
+$runCl1  = ge_execute(REQ_CL, P_CL);
+$keptCl1 = $keptCl(SITE_C1, P_CL);
+// The organisation narrows its rule. Today's rule is the one a run beside a
+// live account sorts by, so nothing at the first organisation needs her name.
+ge_setting(SITE_C1, GivingRetention::KEY_SCOPE, GivingRetention::SCOPE_RECEIPTED);
+ge_q("UPDATE `tblErasureRequest` SET `status` = 'processing' WHERE `requestID` = ?", 'i', [REQ_CL]);
+$runCl2  = ge_execute(REQ_CL, P_CL);
+$keptCl2 = $keptCl(SITE_C1, P_CL);
+ge_ok('THE STATE #941 IS ABOUT, REACHED BY THE REAL CODE: the first run kept her name at the first organisation and stopped; the second, under the narrower rule, CLEARED that row and took her off the gift, and stopped again - while her account still names her and the request waits at "pending review"',
+    $runCl1 instanceof Throwable && $keptCl1 !== null && $keptCl1['fullName'] === 'Clara Cleared' && $keptCl1['clearedAt'] === null
+    && $runCl2 instanceof Throwable && $keptCl2 !== null && $keptCl2['clearedAt'] !== null && $keptCl2['fullName'] === null
+    && $donorCl($cl['giftFirst']) === null && $donorCl($cl['giftC2']) === P_CL
+    && $accountCl(P_CL) === ['fullName' => 'Clara Cleared', 'emailAddress' => 'clara.cleared@selftest.invalid', 'isActive' => 1]
+    && $statusCl(REQ_CL) === 'pending_review',
+    json_encode(['run 1' => $runCl1 instanceof Throwable ? 'stopped' : $runCl1, 'run 2' => $runCl2 instanceof Throwable ? 'stopped' : $runCl2,
+        'row after 1' => $keptCl1, 'row after 2' => $keptCl2, 'account' => $accountCl(P_CL), 'status' => $statusCl(REQ_CL)]));
+
+// She is still a member, and goes on giving: a tax declaration, a gift it
+// covers, and a gift from before it (entered late) that it does not.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+$cl['declaration'] = ge_declaration(SITE_C1, P_CL, $ago(100), '3 Clara Close', 'CC3 3CC');
+$cl['giftCovered'] = ge_gift(SITE_C1, P_CL, $ago(50), 2500, $catC1);
+$cl['giftBefore']  = ge_gift(SITE_C1, P_CL, $ago(150), 900, $catC1);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_dropTrigger('selftest_gdpr_stop_c2');
+
+// What My data and Request erasure tell her NOW, before the run that does it.
+$outlookCl     = GdprEraser::givingOutlook(P_CL);
+$auditBeforeCl = (int) (ge_one('SELECT COALESCE(MAX(`auditID`), 0) AS `n` FROM `tblErasureAudit` WHERE `requestID` = ?', 'i', [REQ_CL])['n'] ?? 0);
+ge_q("UPDATE `tblErasureRequest` SET `status` = 'processing' WHERE `requestID` = ?", 'i', [REQ_CL]);
+$runCl3    = ge_execute(REQ_CL, P_CL);
+$keptCl3   = $keptCl(SITE_C1, P_CL);
+$stillHers = static fn (): int => (int) (ge_one('SELECT COUNT(*) AS `n` FROM `tblGivingEntry` WHERE `donorID` = ?', 'i', [P_CL])['n'] ?? -1);
+$outlookSays = static fn (string $kind): array => array_intersect_key($outlookCl[$kind], ['keep' => 1, 'loseRule' => 1, 'loseDue' => 1]);
+ge_ok('WHAT SHE WAS TOLD BEFOREHAND IS WHAT THE RUN DID: her page counted 2 gifts keeping her name (the covered one here, the one at the organisation that keeps every gift), 1 losing it and 1 declaration kept; afterwards exactly 2 gifts carry her number and her declaration has a live kept name beside it',
+    is_array($runCl3) === true && $outlookSays('gifts') === ['keep' => 2, 'loseRule' => 1, 'loseDue' => 0]
+    && $outlookSays('declarations') === ['keep' => 1, 'loseRule' => 0, 'loseDue' => 0]
+    && $stillHers() === 2 && $keptCl3 !== null && $keptCl3['clearedAt'] === null,
+    json_encode(['told' => ['gifts' => $outlookSays('gifts'), 'declarations' => $outlookSays('declarations')],
+        'gifts still hers' => $stillHers(), 'row' => $keptCl3]));
+ge_ok('THE CLEARED ROW IS WORKED OUT AGAIN AND KEPT AGAIN, as a first run would: her name read from the account before it was emptied, the address from the new declaration, today\'s rule, counted from the covered gift, tied to THIS request; the covered gift keeps her number, the one from before the declaration loses it; and the request is COMPLETED with her account emptied',
+    is_array($runCl3) === true && (int) $runCl3['failed'] === 0 && $statusCl(REQ_CL) === 'completed'
+    && $keptCl3 !== null && (int) $keptCl3['keptDonorID'] === (int) $keptCl2['keptDonorID']
+    && $keptCl3['fullName'] === 'Clara Cleared' && $keptCl3['address'] === '3 Clara Close' && $keptCl3['postcode'] === 'CC3 3CC'
+    && $keptCl3['scope'] === GivingRetention::SCOPE_RECEIPTED && $keptCl3['lastGiftDate'] === $ago(50)
+    && (int) $keptCl3['keptGiftCount'] === 1 && (int) $keptCl3['erasureRequestID'] === REQ_CL
+    && $donorCl($cl['giftCovered']) === P_CL && $donorCl($cl['giftBefore']) === null && $donorCl($cl['giftFirst']) === null
+    && $accountCl(P_CL)['fullName'] === '[Deleted User]',
+    json_encode(['run' => is_array($runCl3) === true ? ['failed' => $runCl3['failed']] : (string) $runCl3, 'status' => $statusCl(REQ_CL),
+        'row' => $keptCl3, 'covered' => $donorCl($cl['giftCovered']), 'before' => $donorCl($cl['giftBefore']), 'account' => $accountCl(P_CL)]));
+// The issue's own statement of the fault, asked of the whole database: after a
+// completed request, a gift may carry the person's number only where a LIVE
+// kept row stands beside it - the one thing that will ever clear it.
+$orphanCl = (int) (ge_one(
+    'SELECT COUNT(*) AS `n` FROM `tblGivingEntry` `e` WHERE `e`.`donorID` = ? AND NOT EXISTS '
+    . '(SELECT 1 FROM `tblGivingKeptDonors` `k` WHERE `k`.`siteID` = `e`.`siteID` AND `k`.`donorID` = `e`.`donorID` AND `k`.`clearedAt` IS NULL)',
+    'i',
+    [P_CL]
+)['n'] ?? -1);
+ge_ok('NO GIFT IS LEFT NAMING HER WITH NOTHING TO CLEAR IT: every gift that still carries her number has a live kept row beside it at its organisation (the fault left two)',
+    $orphanCl === 0, $orphanCl . ' gift(s) carry her number with no live kept row beside them');
+$lineCl = ge_one(
+    "SELECT `action`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `auditID` > ? AND `tableName` = 'GivingRecords' AND `recordKey` = ?",
+    'iis',
+    [REQ_CL, $auditBeforeCl, 'organisation #' . SITE_C1]
+);
+ge_ok('...and the line on the trail SAYS what happened - kept again after an earlier run had cleared it, worked out from the start - and never "Nothing was changed", and never her name',
+    $lineCl !== null && $lineCl['action'] === 'retain' && str_contains((string) $lineCl['details'], 'later emptied them, while the account still named')
+    && str_contains((string) $lineCl['details'], 'worked them out again from the start') && str_contains((string) $lineCl['details'], 'Nothing was changed') === false
+    && str_contains((string) $lineCl['details'], 'Clara') === false,
+    json_encode($lineCl));
+
+// ---- Beside an EMPTIED account --------------------------------------------
+// The row stays cleared and no name is written: the account names nobody.
+// The state is written by hand here, said plainly: a cleared row beside an
+// emptied account is what the retention job's clearing leaves (it takes the
+// donor off every gift there at that moment), and a gift carrying the number
+// afterwards would have to have been recorded against the emptied account
+// since. The portal's own gift form matches a donor by an active membership,
+// which the erasure deletes, so none is expected - read, not measured. What
+// this checks is that a completed request does not depend on that.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_CE, 'Cecil Emptied', 'cecil.emptied@selftest.invalid');
+ge_q("UPDATE `tblUsers` SET `fullName` = '[Deleted User]', `emailAddress` = ?, `isActive` = 0 WHERE `userID` = ?", 'si',
+    [str_replace('{rid}', (string) REQ_CE, GdprEraser::TOMBSTONE_EMAIL), P_CE]);
+ge_q('INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `erasureRequestID`, `fullName`, `address`, `postcode`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`, `clearedAt`) '
+    . "VALUES (?, ?, NULL, NULL, NULL, NULL, 'receipted', ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())", 'iis', [SITE_C1, P_CE, $ago(4000)]);
+$ce = ge_gift(SITE_C1, P_CE, $ago(20), 700, $catC1);
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_request(REQ_CE, P_CE, str_replace('{rid}', (string) REQ_CE, GdprEraser::TOMBSTONE_EMAIL), '[Deleted User]', 'processing');
+$runCe  = ge_execute(REQ_CE, P_CE);
+$keptCe = $keptCl(SITE_C1, P_CE);
+$lineCe = ge_one("SELECT `action`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `tableName` = 'GivingRecords' AND `recordKey` = ?", 'is',
+    [REQ_CE, 'organisation #' . SITE_C1]);
+ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name written, a gift still carrying the number loses it, the line says so, and the request completes',
+    is_array($runCe) === true && (int) $runCe['failed'] === 0 && $statusCl(REQ_CE) === 'completed'
+    && $keptCe !== null && $keptCe['clearedAt'] !== null && $keptCe['fullName'] === null && $keptCe['address'] === null
+    && $donorCl($ce) === null && $lineCe !== null && $lineCe['action'] === 'anonymise'
+    && str_contains((string) $lineCe['details'], 'recorded against the emptied account since then'),
+    json_encode(['run' => is_array($runCe) === true ? ['failed' => $runCe['failed']] : (string) $runCe, 'status' => $statusCl(REQ_CE),
+        'row' => $keptCe, 'gift' => $donorCl($ce), 'line' => $lineCe]));
 
 ge_finish();

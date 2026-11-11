@@ -88,18 +88,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit();
 }
 
-// What each instruction will do, in words. The page used to print the
-// instruction's own name followed by a "d", which reads well for "delete" and
-// gave "anonymised" and "retaind" for the other two.
-// #703 round 7: "kept, with your details removed" was untrue of an expense claim,
-// which is "anonymised" and still keeps the claimant's account number on purpose
-// (D-113). What is removed differs by record, so the reason beside it says which.
-$inWords = [
-    'delete'    => 'deleted',
-    'anonymise' => 'kept, with some details about you removed',
-    'retain'    => 'kept',
-];
-
+// What each instruction will do, in words: GdprEraser::inventoryWords(), the
+// ONE place a row becomes words (#927). The page used to hold its own map of
+// action to words. Before that it printed the instruction's own name followed
+// by a "d", which read well for "delete" and gave "anonymised" and "retaind"
+// for the other two. #703 round 7 then changed "kept, with your details
+// removed" to "kept, with some details about you removed", because an expense
+// claim is "anonymised" and still keeps the claimant's account number on
+// purpose (D-113) - but the LABEL still read as though nothing linked the
+// claim to the person, and only the reason beside it said otherwise. The words
+// now follow whether the number stays, asked of the same rule the erasure
+// itself follows, so the two cannot drift apart.
 $inventory = GdprEraser::inventory($userId);
 $csrf = Auth::csrfToken();
 
@@ -129,7 +128,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <li>
                 <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
                 — <strong><?php echo (int) $i['rows']; ?></strong> row(s) will be
-                <strong><?php echo htmlspecialchars($inWords[(string) $i['action']] ?? 'dealt with as set out beside it', ENT_QUOTES, 'UTF-8'); ?></strong>.
+                <strong><?php echo htmlspecialchars(GdprEraser::inventoryWords($i), ENT_QUOTES, 'UTF-8'); ?></strong>.
                 <?php if (($i['reason'] ?? '') !== ''): ?>
                     <span class="text-muted">— <?php echo htmlspecialchars((string) $i['reason'], ENT_QUOTES, 'UTF-8'); ?></span>
                 <?php endif; ?>

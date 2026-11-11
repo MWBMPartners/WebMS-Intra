@@ -3376,6 +3376,69 @@ class GdprEraser
     }
 
     /**
+     * 🔢 Will an ANONYMISE instruction leave the person's account number on
+     *    the rows it changes? (#927)
+     *
+     * THE ONE RULE, asked by processEntry() when it decides whether to empty
+     * the link, and by inventory() when it words the row a member reads. It
+     * exists because the two used to be separate: the step kept the number
+     * wherever the database refuses to empty the column (an expense claim's
+     * `userID`), while Request erasure labelled every anonymise row "kept,
+     * with some details about you removed" - true word by word, and read as
+     * "nothing links it to me any more", which is not true of a claim (D-113).
+     *
+     *   - A row found through its PARENT (#709) holds no number of the
+     *     person's: what links it to them is on the parent. False.
+     *   - The account row itself (`tblUsers`) IS the number; it stays, with
+     *     its details replaced. True.
+     *   - Otherwise the number stays exactly when the database will not let
+     *     the column be empty (`$canBeEmptied` is the database's own answer,
+     *     nullableColumns(), never the schema file's).
+     *
+     * @param array<string, mixed>|null $via     The instruction's `subjectVia`, or null.
+     * @param list<string>              $canBeEmptied
+     */
+    private static function anonymiseKeepsNumber(string $table, string $col, ?array $via, array $canBeEmptied): bool
+    {
+        if ($via !== null) {
+            return false;
+        }
+        if ($table === 'tblUsers') {
+            return true;
+        }
+
+        return in_array($col, $canBeEmptied, true) === false;
+    }
+
+    /**
+     * 🗣️ The words beside one inventory() row: what the erasure will do to
+     *    those records, as a member reads it on Request erasure and My data.
+     *
+     * THE ONE PLACE (#927). Worked out from the row's `action` AND its
+     * `keepsNumber`, so a row that keeps the account number can never be
+     * labelled as though nothing about the person stays: the label and the
+     * erasure ask the same rule (anonymiseKeepsNumber()). Request erasure used
+     * to hold its own map of action to words, which is how "kept, with some
+     * details about you removed" came to sit beside an expense claim that
+     * keeps the claimant's number on purpose (D-113).
+     *
+     * @param array{action: string, keepsNumber?: bool} $row
+     */
+    public static function inventoryWords(array $row): string
+    {
+        return match ((string) $row['action']) {
+            'delete'    => 'deleted',
+            'anonymise' => ($row['keepsNumber'] ?? true) === true
+                ? 'kept, with some details about you removed but still carrying your account number'
+                // Unchanged from the page's own map before #927: true of every
+                // row that does NOT keep the number, which is the only change.
+                : 'kept, with some details about you removed',
+            'retain'    => 'kept',
+            default     => 'dealt with as set out beside it',
+        };
+    }
+
+    /**
      * "What we hold about you" — JSON-serialisable inventory built by
      * querying every catalogue table for rows referencing the user.
      * Used by /account/my-data and /account/erasure-request.
@@ -3390,7 +3453,12 @@ class GdprEraser
      * (see catalogue()), and a request already carried out - its account
      * number has been cleared, so nothing links it to anybody.
      *
-     * @return array<int, array{table: string, rows: int, action: string, reason: string}>
+     * Each row says, in `keepsNumber`, whether the records it counts will
+     * still carry the person's ACCOUNT NUMBER after the erasure (#927), so a
+     * page can word the row truthfully: inventoryWords() is the ONE place that
+     * turns a row into the words beside it.
+     *
+     * @return array<int, array{table: string, rows: int, action: string, reason: string, keepsNumber: bool}>
      */
     public static function inventory(int $userId): array
     {
@@ -3450,11 +3518,20 @@ class GdprEraser
                     $stmt->close();
                 }
                 if ($count > 0) {
+                    $action = (string) $entry['action'];
                     $out[] = [
-                        'table'  => $table,
-                        'rows'   => (int) $count,
-                        'action' => (string) $entry['action'],
-                        'reason' => (string) ($entry['reason'] ?? ''),
+                        'table'       => $table,
+                        'rows'        => (int) $count,
+                        'action'      => $action,
+                        'reason'      => (string) ($entry['reason'] ?? ''),
+                        // #927: asked of the rule processEntry() follows, with
+                        // the database's own answer about which columns may be
+                        // empty - not of the instruction's name or reason.
+                        'keepsNumber' => match ($action) {
+                            'delete'    => false,
+                            'anonymise' => self::anonymiseKeepsNumber($table, $col, $via, self::nullableColumns($db, $table)),
+                            default     => true,
+                        },
                     ];
                 }
             } catch (\Throwable $ignored) {
@@ -3482,12 +3559,14 @@ class GdprEraser
             }
             if ($total > 0) {
                 $out[] = [
-                    'table'  => 'tblErasureRequest',
-                    'rows'   => $total,
-                    'action' => 'anonymise',
-                    'reason' => 'Your request to be erased (' . implode(', ', $states) . '). The record that it was asked '
+                    'table'       => 'tblErasureRequest',
+                    'rows'        => $total,
+                    'action'      => 'anonymise',
+                    'reason'      => 'Your request to be erased (' . implode(', ', $states) . '). The record that it was asked '
                         . 'for, and when, is kept; your name, email address and notes are cleared from it once the '
                         . 'erasure is done.',
+                    // closeRequest() empties the account number on it too.
+                    'keepsNumber' => false,
                 ];
             }
         } catch (\Throwable $ignored) {
@@ -4371,8 +4450,11 @@ class GdprEraser
                 $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', $sets) . ' WHERE ' . $where;
             } else {
                 // Anonymise = drop the link to the person as well, where the
-                // database allows it to be dropped.
-                if (in_array($col, $canBeEmptied, true) === true) {
+                // database allows it to be dropped. Asked of
+                // anonymiseKeepsNumber(), which is ALSO what inventory() asks
+                // to word the label a member reads on Request erasure and My
+                // data (#927), so the label and this step are one rule.
+                if (self::anonymiseKeepsNumber($table, $col, null, $canBeEmptied) === false) {
                     $sets[] = '`' . $col . '` = NULL';
                 } else {
                     $refused[] = (string) $col;
@@ -4684,7 +4766,13 @@ class GdprEraser
      *     erasure: the name and address are read again from the account,
      *     and today's rule sorts the gifts, as on a first run.
      *
-     *   In both cases the counts are worked out again: which gifts are kept,
+     *   - It kept a name and then CLEARED it (#941). Beside a live account
+     *     the row is worked out again from the start, as on a first run, and
+     *     re-used if anything must be kept; beside an emptied account it stays
+     *     cleared, and any gift still carrying the number loses it. The reasons
+     *     are at 1c in keepGivingRecordsAtSite().
+     *
+     *   In the first two cases the counts are worked out again: which gifts are kept,
      *   the last of them, how many, and any gift recorded since the earlier
      *   run that is not kept loses its donor. The date is never moved
      *   EARLIER than the one already recorded.
@@ -5087,10 +5175,18 @@ class GdprEraser
      * in the checks of rounds 8 and 9; these are the only disagreements found
      * once "due" is counted):
      *   - an organisation where an earlier run's kept row has already been
-     *     CLEARED: the keep step returns early there and changes nothing,
-     *     while this counts by today's rule. Round 9's check reached that
-     *     state beside a LIVE account (it is not only an emptied account's),
-     *     so a member can see a count the run will not match there;
+     *     CLEARED, beside an EMPTIED account: the keep step then takes the
+     *     donor off every gift still carrying the number (#941, case b of
+     *     keepGivingRecordsAtSite()'s 1c), while this counts by today's rule.
+     *     A member is not shown that: an emptied account is switched off, and
+     *     Auth ends the session of a switched-off account on its next request.
+     *     (Until #941 this disagreed beside a LIVE account too - the keep step
+     *     returned early and changed nothing, so gifts this counted as losing
+     *     the name kept it. The keep step now works such a row out again from
+     *     the start, by today's rule with no earlier row, which is exactly how
+     *     this counts it: sortingScope() and keptCountedFrom() are given no
+     *     row for a cleared one. Section 23 of tools/gdpr-eraser-selftest.php
+     *     holds the two to the same numbers);
      *   - a clearing that FAILS at the end of the run (a file that cannot be
      *     deleted, say): the name then stays until the request is run again.
      *     "Due" is counted as lost, which is what a run that succeeds does.
@@ -5261,7 +5357,7 @@ class GdprEraser
      * @param array{keep: int, loseRule: int, loseDue: int, kept: list<array<string, mixed>>, dueAt: list<string>, ruleAt: list<string>} $outlook
      * @param int $otherKeep How many of the OTHER kind will keep the name (gifts and envelopes speak for each other:
      *                       an envelope that will keep the name becomes a gift that does).
-     * @return list<array{table: string, rows: int, action: string, reason: string}>
+     * @return list<array{table: string, rows: int, action: string, reason: string, keepsNumber: bool}>
      */
     private static function givingRows(string $table, array $outlook, int $otherKeep = 0): array
     {
@@ -5317,9 +5413,10 @@ class GdprEraser
                 $parts[] = 'At ' . $at['site'] . ': ' . $noun((int) $at['n']) . ', ' . $why((string) $at['scope']) . ', ' . $until((string) $at['state']) . '.';
             }
             $rows[] = [
-                'table'  => $table,
-                'rows'   => $outlook['keep'],
-                'action' => 'retain',
+                'table'       => $table,
+                'rows'        => $outlook['keep'],
+                'action'      => 'retain',
+                'keepsNumber' => true,
                 'reason' => match ($kind) {
                     'gift'     => 'these gifts will keep your name, and any home address held for you is kept with them. ',
                     'envelope' => 'offering envelopes in a count that is not closed yet: when it is closed each becomes a gift that keeps '
@@ -5346,9 +5443,14 @@ class GdprEraser
                     . 'hold is on, so the erasure takes your name off as it runs';
             }
             $rows[] = [
-                'table'  => $table,
-                'rows'   => $lost,
-                'action' => 'anonymise',
+                'table'       => $table,
+                'rows'        => $lost,
+                'action'      => 'anonymise',
+                // #927: a gift or envelope that loses the name loses the
+                // account number with it (the keep step empties `donorID` /
+                // `giverID`); a tax declaration CANNOT lose it (the database
+                // does not allow `donorID` to be empty there), as its reason says.
+                'keepsNumber' => $kind === 'declaration',
                 'reason' => match ($kind) {
                     'gift'     => 'these gifts keep their amount, date and method and will lose your name, ',
                     'envelope' => 'offering envelopes that will lose your name, ',
@@ -5413,29 +5515,109 @@ class GdprEraser
             'ii',
             [$siteId, $userId]
         );
-        if ($existing !== null && $existing['clearedAt'] !== null) {
-            self::$unkeptGiftDates[$siteId] = null;
-            self::logAudit(
-                $db,
-                $requestId,
-                'retain',
-                'GivingRecords',
-                $where,
-                'Giving records at ' . $where . ' were already dealt with by an earlier run, and the name and address '
-                . 'kept then have since been cleared. Nothing was changed.'
-            );
-
-            return ['changed' => false, 'due' => null];
-        }
-        $earlierRun = $existing !== null;
 
         // 1b. The account, as it is now. "Already emptied" is deliberately
         //     WIDER here than emptiedAccountSql(): either the made-up name or
         //     the made-up address is enough, because the mistakes to avoid
         //     at this point are writing "[Deleted User]" over a real name and
         //     re-deciding what an already-erased donor's record keeps.
+        //     (Read BEFORE the cleared-row question below since #941, because
+        //     the answer to that question depends on it.)
         $account = $one('SELECT fullName, emailAddress, displayAddress FROM tblUsers WHERE userID = ?', 'i', [$userId]);
         $emptiedAlready = self::accountEmptiedForGiving($account);
+
+        // 1c. 🧹 A KEPT ROW THAT HAS ALREADY BEEN CLEARED (#941). Two cases,
+        //     told apart by the account, and they need opposite answers.
+        //
+        //     WHAT WAS WRONG. This step used to return at once for ANY cleared
+        //     row, writing "Nothing was changed". A row is cleared beside a
+        //     LIVE account by step 4 below: a run that stopped before the
+        //     account was emptied is run again, nothing needs the name any
+        //     more (the organisation narrowed its rule, say), so the name goes
+        //     and every gift loses its donor - and the run then stops again.
+        //     The person is still a member and may go on giving. On the next
+        //     run the early return left every gift recorded since carrying
+        //     their account number, with no kept row to say why and nothing
+        //     that would ever clear it, and the request then closed as
+        //     COMPLETED. Measured by the independent check of #703 round 9:
+        //     a giver kept 4 gifts naming them after a completed request.
+        //     Section 23 of tools/gdpr-eraser-selftest.php reaches it with the
+        //     real code - two stopped runs and a changed rule - and no
+        //     hand-written state.
+        //
+        //     (a) BESIDE A LIVE ACCOUNT the row is worked out AGAIN FROM THE
+        //         START, as a first run would, and if anything must be kept it
+        //         is kept on the same row (the database allows one row per
+        //         organisation and donor), its clearing undone. Chosen, and
+        //         not "take the name off everything", for three reasons:
+        //           - this method's own rule, in keepGivingRecords(): when an
+        //             earlier run stopped BEFORE the account was emptied, "this
+        //             run is the erasure", and today's rule sorts the gifts as
+        //             on a first run. A cleared row beside a live account is
+        //             exactly what such a run leaves;
+        //           - the clearing was about the records held THEN. A gift
+        //             made since, under a tax declaration made since, is tax
+        //             evidence the organisation must keep for a statutory
+        //             period, and taking the donor off it cannot be undone -
+        //             the direction D-032 calls dangerous;
+        //           - the erasure keeps what a record must keep and nothing
+        //             else, which is the shape of D-016 (and of D-111 for a
+        //             safeguarding record); here the record is a tax claim.
+        //         Everything NOT kept loses the donor in this run, and what is
+        //         kept is cleared by the retention job at its keep-until date,
+        //         as for any other erased donor - so a completed request no
+        //         longer leaves a gift naming them with nothing to clear it.
+        //
+        //     (b) BESIDE AN EMPTIED ACCOUNT the row stays cleared, and no name
+        //         is written again: the account names nobody, so there is no
+        //         name to keep ("never a made-up name over a real one"). The
+        //         clearing that emptied this row (clearKeptGivingIdentity(),
+        //         the only thing that clears beside an emptied account - step 4
+        //         never does, see keepsNothing()) took the donor off every gift
+        //         there at that moment. A gift that still carries the number
+        //         now was recorded against the emptied account since; nothing
+        //         keeps it, so it loses the donor here. (The portal's own gift
+        //         form matches a donor by an active membership, which the
+        //         erasure deletes, so none is expected - read, not measured -
+        //         but a completed request must not depend on that.)
+        //
+        //     NOT CHANGED: the declarations and statement records beside a
+        //     cleared row in case (b). Their personal details were emptied by
+        //     the same clearing, and `donorID` cannot be emptied on them.
+        $reopenKeptDonorId = null;
+        if ($existing !== null && $existing['clearedAt'] !== null) {
+            if ($emptiedAlready === true) {
+                self::$unkeptGiftDates[$siteId] = null;
+                $stmt = $db->prepare('UPDATE `tblGivingEntry` SET `donorID` = NULL, `donorName` = NULL WHERE `siteID` = ? AND `donorID` = ?');
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('ii', $siteId, $userId);
+                $stmt->execute();
+                $strays = (int) $stmt->affected_rows;
+                $stmt->close();
+                self::logAudit(
+                    $db,
+                    $requestId,
+                    $strays > 0 ? 'anonymise' : 'retain',
+                    'GivingRecords',
+                    $where,
+                    'Giving records at ' . $where . ' were already dealt with by an earlier run, and the name and address '
+                    . 'kept then have since been cleared. '
+                    . ($strays === 0
+                        ? 'Nothing was changed.'
+                        : $plural($strays, 'gift', 'gifts') . ' recorded against the emptied account since then '
+                            . ($strays === 1 ? 'keeps' : 'keep') . ' the amount, date and method and no longer '
+                            . ($strays === 1 ? 'names' : 'name') . ' the donor: nothing there keeps the donor\'s name any more.')
+                );
+
+                return ['changed' => $strays > 0, 'due' => null];
+            }
+            // (a): a first run, except that the row is re-used.
+            $reopenKeptDonorId = (int) $existing['keptDonorID'];
+            $existing          = null;
+        }
+        $earlierRun = $existing !== null;
 
         // 🛑 AN EARLIER RUN KEPT A NAME HERE, AND THE ACCOUNT IS ALREADY
         //    EMPTIED. The walk empties the account about half way through a
@@ -5504,8 +5686,10 @@ class GdprEraser
         // statement-file step later in this run: a statement the donor made
         // for themselves is kept only when none of these falls inside it. On
         // a later run the gifts the EARLIER run took the donor off cannot be
-        // listed any more, so "not known" is recorded instead.
-        if ($earlierRun === true) {
+        // listed any more, so "not known" is recorded instead. The same is
+        // true beside a row an earlier run kept and then cleared (#941, 1c):
+        // that run took the donor off gifts this one cannot list.
+        if ($earlierRun === true || $reopenKeptDonorId !== null) {
             self::$unkeptGiftDates[$siteId] = null;
         } else {
             $dates = [];
@@ -5574,6 +5758,9 @@ class GdprEraser
                 . $plural($emptied, 'gift keeps', 'gifts keep') . ' the amount, date and method and no longer '
                 . ($emptied === 1 ? 'names' : 'name') . ' the donor. Why: ' . $scopeWords . ', and this donor has none of those there.'
                 . ($earlierRun === true ? ' An earlier run had kept a name and address here; nothing needs them any more, so they were emptied.' : '')
+                // #941: the row stays cleared; nothing is written to it.
+                . ($reopenKeptDonorId !== null ? ' An earlier run had kept a name and address here and later emptied them, while the '
+                    . 'account still named the person; nothing needs them now either, so nothing was kept again.' : '')
             );
 
             return ['changed' => $emptied > 0 || $earlierRun === true, 'due' => null];
@@ -5597,7 +5784,28 @@ class GdprEraser
         $address  = $declared !== null ? (string) $declared['address'] : ($emptiedAlready === true ? null : ($account['displayAddress'] ?? null));
         $postcode = $declared !== null && $declared['postcode'] !== null ? (string) $declared['postcode'] : null;
 
-        if ($earlierRun === false) {
+        if ($reopenKeptDonorId !== null) {
+            // #941 (1c, case a): the row an earlier run kept and then cleared,
+            // brought back into use by THIS request, which is the one erasing
+            // the person. Written as a first run writes a new row: this run's
+            // name, address, rule, date and count, its own request number (the
+            // clearing line went on the earlier request's trail, and the line
+            // written when this name is cleared must go on this one's), and a
+            // new `createdAt`, because this erasure made this record. Emptying
+            // `clearedAt` is what puts the row back in front of the retention
+            // job, which is the only thing that will ever clear it.
+            $keptDonorId = $reopenKeptDonorId;
+            $stmt = $db->prepare(
+                'UPDATE `tblGivingKeptDonors` SET `erasureRequestID` = ?, `fullName` = ?, `address` = ?, `postcode` = ?, `scope` = ?, '
+                . '`lastGiftDate` = ?, `keptGiftCount` = ?, `createdAt` = UTC_TIMESTAMP(), `clearedAt` = NULL WHERE `keptDonorID` = ?'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('isssssii', $requestId, $name, $address, $postcode, $scope, $lastGift, $keptGifts, $keptDonorId);
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($earlierRun === false) {
             $stmt = $db->prepare(
                 'INSERT INTO tblGivingKeptDonors (siteID, donorID, erasureRequestID, fullName, address, postcode, scope, lastGiftDate, keptGiftCount, createdAt) '
                 . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())'
@@ -5704,7 +5912,12 @@ class GdprEraser
         if ($rule['hold'] !== false) {
             $line .= ' A hold is switched on (an audit or enquiry is open), so nothing will be cleared until it is switched off.';
         }
-        if ($earlierRun === true) {
+        if ($reopenKeptDonorId !== null) {
+            $line .= ' An earlier run had kept a name and address here and later emptied them, while the account still named '
+                . 'the person; that run then stopped before the account was emptied. Its clearing was about the records held '
+                . 'then, so this run worked them out again from the start, as a first run does, and kept the name and address '
+                . 'again, read from the account, for what has to be kept now.';
+        } elseif ($earlierRun === true) {
             $line .= $emptiedAlready === true
                 ? ' The account had already been emptied, so the name and address kept by the earlier run were left as they are: what was kept was not overwritten.'
                 : ' The earlier run stopped before the account was emptied, so the name and address held were read again from the account.';

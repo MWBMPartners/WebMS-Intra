@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 113; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 114; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -227,6 +227,9 @@ const EXPECTED_CHECKS = 113; // 80 until #703 (D-016) added two: the two writers
                             // views, and the three "Never delete" messages). 112.
                             // Round 4 added L9 (the organisation's form's own
                             // refusals, under never and under 30 days). 113.
+                            // #927 added one: an expense claim that keeps the
+                            // account number says so in its LABEL, on Request
+                            // erasure and on My data, both pinned as rendered. 114.
 
 function refuse(string $why): never
 {
@@ -1045,6 +1048,46 @@ head('B. "Request data erasure"');
 // =============================================================================
 $askPage = req($jar['cal'], 'GET', '/account/erasure-request');
 $askText = text($askPage['body']);
+// 🧾 #927: Cal's expense claim is "anonymised" and KEEPS his account number
+//    on purpose (D-113). Its label used to be "kept, with some details about
+//    you removed" - true word by word, and read as "nothing links it to me any
+//    more". The label is GdprEraser::inventoryWords() now, which asks whether
+//    the number stays (the rule the erasure itself follows), and the row is
+//    pinned AS RENDERED, on both pages that print one, so the words cannot
+//    drift back without the pin being changed on purpose. One `<li>` on Request
+//    erasure, one `.row` on My data, each found exactly once.
+$askClaimRow = renderedRegion($askPage['body'], static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+            $rows[] = $li;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$calDataHtml  = (string) req($jar['cal'], 'GET', '/account/my-data')['body'];
+$dataClaimRow = renderedRegion($calDataHtml, static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
+        $code = $row->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+            $rows[] = $row;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+// Both compared on their own lines, so neither can be skipped by an && that
+// stops early (which left a pin "compared by no check" once before).
+$askClaimPinned  = renderedPin('request erasure tblExpenseClaims', $askClaimRow);
+$dataClaimPinned = renderedPin('my-data tblExpenseClaims', $dataClaimRow);
+ok('AN EXPENSE CLAIM THAT KEEPS THE ACCOUNT NUMBER SAYS SO IN ITS LABEL: Cal\'s claim row on Request erasure and on My data, each found exactly once and as pinned, says "still carrying your account number" beside the reason that explains it (#927, D-113)',
+    $askClaimPinned === true && $dataClaimPinned === true
+    && str_contains($askClaimRow, 'kept, with some details about you removed but still carrying your account number')
+    && str_contains($dataClaimRow, 'kept, with some details about you removed but still carrying your account number'),
+    mb_substr($askClaimRow, 0, 400) . ' | ' . mb_substr($dataClaimRow, 0, 400));
 ok('the page says in words what happens to each kind of record: "kept" for a Gift Aid declaration, and never "retaind"',
     $askPage['status'] === 200 && preg_match('/tblGiftAidDeclaration — 1 row\(s\) will be kept\s*\./', $askText) === 1
     && str_contains($askText, 'retaind') === false, mb_substr($askText, 0, 700));
@@ -2411,11 +2454,26 @@ q("INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, me
 $givingShown = static function (string $html): array {
     $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
     $shown = ['tblGivingEntry' => [], 'tblCountEnvelopes' => [], 'tblGiftAidDeclaration' => [], 'reasons' => []];
+    // 🔁 #927: My data's badge printed the instruction's own word ("retain",
+    //    "anonymise"), which these checks read. It prints the member's words
+    //    now (GdprEraser::inventoryWords()), so they are read back to the word
+    //    the checks below were written in. EXACT words only: anything else is
+    //    left as printed, so it fails every check rather than passing as one
+    //    of them. Both "removed" spellings read as `anonymise` here - whether
+    //    the number-keeping one is printed where it should be is pinned by K7
+    //    and by the expense-claim pins in section B, not by these.
+    $asWord = [
+        'kept'                                                                            => 'retain',
+        'kept, with some details about you removed'                                       => 'anonymise',
+        'kept, with some details about you removed but still carrying your account number' => 'anonymise',
+        'deleted'                                                                         => 'delete',
+    ];
     foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
         $cells = [];
         foreach ($row->children as $cell) {
             $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
         }
+        $cells[2] = $asWord[$cells[2] ?? ''] ?? ($cells[2] ?? '');
         if (isset($shown[$cells[0] ?? '']) === true && $cells[0] !== 'reasons') {
             $shown[$cells[0]][]  = ($cells[2] ?? '') . ':' . ($cells[1] ?? '');
             $shown['reasons'][] = $cells[0] . ' ' . ($cells[2] ?? '') . ': ' . ($cells[3] ?? '');
@@ -2525,8 +2583,14 @@ foreach ($patAsks->querySelectorAll('li') as $li) {
         $patSaid[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
     }
 }
-ok('K7 REQUEST ERASURE says the same to Pat: his two gifts and his declaration are "kept, with some details about you removed", none simply "kept" (#703 round 9)',
-    $patSaid === ['tblGivingEntry 2 kept, with some details about you removed', 'tblGiftAidDeclaration 1 kept, with some details about you removed'],
+// 🔁 CHANGED BY #927: the declaration's label used to be "kept, with some
+//    details about you removed", and a declaration that loses the name kept
+//    beside it still carries the account number (the database will not let
+//    `donorID` be empty there; its reason says so). The label says so now too.
+//    The gifts lose the number with the name, so theirs is unchanged.
+ok('K7 REQUEST ERASURE says the same to Pat: his two gifts are "kept, with some details about you removed", and his declaration, which keeps his account number, says THAT; none simply "kept" (#703 round 9, #927)',
+    $patSaid === ['tblGivingEntry 2 kept, with some details about you removed',
+        'tblGiftAidDeclaration 1 kept, with some details about you removed but still carrying your account number'],
     json_encode($patSaid));
 
 // ── #703 round 10: under a HOLD nothing is cleared, and the pages must say so.
