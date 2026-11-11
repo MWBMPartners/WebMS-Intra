@@ -32,7 +32,24 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 // 🤖 Captcha gate (#348). Skip if no provider configured.
 if (class_exists(Captcha::class) === true && Captcha::isConfigured() === true) {
     if (Captcha::verify($_POST, 'event-registration') === false) {
-        Logger::activity('EventRegistrationCaptchaFailed', 'Slug=' . ($_POST['slug'] ?? ''));
+        // #933: the event address a failed bot check was for is worth
+        //    recording, but it arrives from the visitor and could be any text
+        //    at all - a name, an e-mail address, a whole message - and the
+        //    log's words are the one part of a record an erasure cannot empty.
+        //    So it is written only when it has the shape of an event address
+        //    (letters, digits and hyphens, at most 80 characters: the same rule
+        //    the check below applies), and otherwise as "(not an event
+        //    address)"; a value that is not text at all (`slug[]=x`) too.
+        //    Stripping the other characters instead was tried and rejected: it
+        //    kept the letters of a typed name ("Pia Privacy" became
+        //    "PiaPrivacy"). What this still lets through, said plainly: a name
+        //    written in an event address's own shape ("pia-privacy") is
+        //    indistinguishable from one, and is kept.
+        $slugTried = (is_string($_POST['slug'] ?? null) === true
+                && preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', trim($_POST['slug'])) === 1)
+            ? trim($_POST['slug'])
+            : '(not an event address)';
+        Logger::activity('EventRegistrationCaptchaFailed', 'Slug=' . $slugTried);
         http_response_code(400); exit('Captcha failed — please go back and try again.');
     }
 }
@@ -205,8 +222,11 @@ $stmt->close();
 
 // #933: the registration's NUMBER, never the registrant's name. The person
 //    registered is often a child, or somebody with no account, and the log's
-//    words are the one place an erasure cannot reach; the name is on the
-//    registration row, which the registrations clear-out and an erasure do.
+//    words are the one place an erasure cannot reach. The name is on the
+//    registration row, which the registrations clear-out removes in time, and
+//    which an erasure deletes when the registration is the erased person's
+//    OWN (`registeredForUserID`); one they only typed in for somebody else
+//    stays, because it is not theirs to erase (GdprEraser::catalogue()).
 Logger::activity('EventRegistrationReceived', 'Event #' . $eventIdInt . ' registration #' . $newId);
 
 // 📧 Email confirmation to registrant (#348).

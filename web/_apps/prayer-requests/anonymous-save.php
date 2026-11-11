@@ -189,8 +189,12 @@ if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_FAIL', $mysqli->error, '');
 } else {
     // #933: never the visitor's network address in the words. Logger already
-    //    keeps it in the record's own column (visitorIP), and the response row has
-    //    its own copy; words are the one part of a record nothing can empty.
+    //    keeps it in the record's own column (visitorIP) and the request's own
+    //    row has a copy (submitterIP), so a third copy in the words added
+    //    nothing. Be exact about what removes them: this visitor is anonymous,
+    //    so the record names nobody and an erasure cannot find it; the activity
+    //    log's own clear-out removes it (or nothing does, where the log is kept
+    //    for ever, D-117).
     Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
 
     // 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless

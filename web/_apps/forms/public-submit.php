@@ -202,8 +202,11 @@ $newId = FormEngine::saveResponse($formId, $formSiteId, 'public', null, $ip, $an
 // -----------------------------------------------------------------------------
 if ($newId > 0) {
     // #933: never the visitor's network address in the words. Logger already
-    //    keeps it in the record's own column (visitorIP), and the response row has
-    //    its own copy; words are the one part of a record nothing can empty.
+    //    keeps it in the record's own column (visitorIP) and the response row has
+    //    its own copy, so a third copy in the words added nothing. Be exact about
+    //    what removes them: this visitor is not signed in, so the record names
+    //    nobody and an erasure cannot find it; the activity log's own clear-out
+    //    removes it (or nothing does, where the log is kept for ever, D-117).
     Logger::activity('FormResponsePublic', 'Form #' . $formId . ' response #' . $newId . ' from a visitor');
 } else {
     Logger::errorPlatform('MySQL', 'Error', 'FORM_PUBLIC_RESPONSE_FAIL', 'saveResponse() returned 0', 'formID=' . $formId);

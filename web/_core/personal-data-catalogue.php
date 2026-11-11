@@ -1561,15 +1561,18 @@ return [
         // tools/gdpr-coverage-selftest.php fail if it is taken away or hidden.
         // 🗣️ #703 round 6: "the link to the person is cut, so it can no longer be
         //    traced back to them" was untrue - what a record SAYS is kept, and it
-        //    can name the person, give their account number or quote a sign-in
-        //    provider's e-mail address. Said as it is now.
+        //    can name the person or give their account number. Said as it is now.
+        //    (Until #933 its example was a sign-in provider's e-mail address on a
+        //    link or unlink record; #933 made those numbers only, so the example
+        //    is now a failed sign-in, which keeps the typed name by D-137.)
         // 🗣️ #940 (D-117, D-118, D-119): the period is the organisation's own
         //    (set by its own administrator, within the installation's), a
         //    record belonging to no organisation follows the installation's,
         //    and either level may choose to keep the log for ever - the
         //    organisation only where the installation has. #933: a record's
-        //    words can give a full name or an e-mail address, and under "for
-        //    ever" they last for ever.
+        //    words can still give a name or an e-mail address (a failed
+        //    sign-in, D-137; a refused child collection; an organisation's
+        //    labels, D-138), and under "for ever" they last for ever.
         'reason'   => 'Kept for running and repairing the portal, until the nightly clear-out deletes it after'
                     . ' audit.retentionDays for the organisation it was recorded under (365 days unless changed;'
                     . ' that organisation\'s own administrator sets it, within the limit for the whole installation),'
@@ -1582,8 +1585,8 @@ return [
                     . ' the person\'s own records the account number, the address, the browser, the headers and'
                     . ' the session details are removed, but what each record SAYS is kept as written for as long'
                     . ' as the record is: it can still name them, give their e-mail address or give their account'
-                    . ' number, and a record of linking or unlinking a sign-in provider gives that provider\'s'
-                    . ' e-mail address. Records other people made can mention them too',
+                    . ' number: a failed sign-in, for instance, keeps the sign-in name that was typed, which is'
+                    . ' often an e-mail address (D-137). Records other people made can mention them too',
         'columns'  => ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
     ],
     'tblAnnouncements' => [

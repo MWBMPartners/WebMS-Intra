@@ -39,20 +39,22 @@
  * DESCRIPTION that names somebody is not rewritten. Most descriptions name
  * nobody at all (check round 3 of #932 measured well under a third of the
  * several hundred `Logger::activity(` calls naming a person). Of those that
- * do name somebody, most do so by account number; some by full name or e-mail
- * address. FOR EXAMPLE — this list is not complete, and #933 is the record of
- * the full count:
- * `UserCreated` (admin/users/save.php: full name and own e-mail address), the
- * password-reset records (auth/forgot-password/save.php: the e-mail address,
- * in six of them), `EventInviteSent` (the invitee's e-mail address),
- * `EventSubmitted` (an anonymous submitter's e-mail address — in records
- * written before #963 only; a visitor's suggestion is now recorded with no
- * address),
- * `KidProfileAdded`/`KidProfileEdited` (a child's name), an event registration
- * received, and an account linked or unlinked (a sign-in provider's e-mail
- * address). Until #932 the clear-out was what eventually removed such a line;
- * under "never" it stays for ever. The page says so in general words that
- * are true — not every description names anybody — and claims no list.
+ * do name somebody, most do so by account number; a few by name or e-mail
+ * address. Since #933 those few are deliberate: a failed or rate-limited
+ * sign-in keeps the sign-in name that was typed, often an e-mail address
+ * (Auth.php, `LoginFailed` / `LoginBlocked`, D-137); a refused child
+ * collection keeps the name typed for the adult (kids/checkout.php,
+ * `KidCheckoutBlocked`); and an organisation's own labels stay, a task's title
+ * among them, which can name somebody (D-138). #933 changed 41 others to
+ * numbers only — `UserCreated`, the six password-reset records,
+ * `EventInviteSent`, the children's-profile records, an event registration
+ * received and a sign-in provider linked or unlinked among them — so records
+ * written by those before #933 are the other place a name or address can be
+ * found (no customer installation existed then, D-135). `EventSubmitted`
+ * carried an anonymous submitter's e-mail address only before #963. Until #932
+ * the clear-out was what eventually removed such a line; under "never" it
+ * stays for ever. The page says so in general words that are true — not every
+ * description names anybody — and claims no list.
  *
  * WHO WRITES IT, MEASURED (10 November 2026)
  * -----------------------------------------------------------------------------

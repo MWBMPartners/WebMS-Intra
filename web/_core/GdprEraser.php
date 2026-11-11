@@ -1252,15 +1252,21 @@ class GdprEraser
              // 🗣️ #703 round 6: this said "everything that could point it back at
              //    the person is removed". Untrue, read from the code that writes the
              //    log (not measured on an erased account): a record's description is
-             //    kept as written, and some descriptions name the person - an event
-             //    registration records "(<their full name>)"
-             //    (calendar/event-register-save.php, `EventRegistrationReceived`), a
-             //    record of linking or unlinking a sign-in provider gives that
-             //    provider's e-mail address (Auth.php, `AccountLink` /
-             //    `AccountUnlink`), and records other people made give their number
-             //    ("Added user #N to site #M", admin/sites/users.php). So the
+             //    kept as written, and some descriptions name the person. So the
              //    sentence says what is removed AND what stays, and how the log is
              //    cleared (the nightly clear-out, `log_sweep_tables()`).
+             //    #933 changed WHICH descriptions those are: 41 writers that put a
+             //    person's details in the words now write numbers - the two
+             //    examples this comment used to give, an event registration's
+             //    "(<their full name>)" and a sign-in provider's e-mail address on
+             //    `AccountLink` / `AccountUnlink`, are among them. What still keeps
+             //    a name or address in its words, on purpose: a failed or
+             //    rate-limited sign-in (the sign-in name typed, D-137), a refused
+             //    child collection (the name typed, kids/checkout.php), and an
+             //    organisation's own labels such as a task's title (D-138); and
+             //    records other people made still give a person's NUMBER ("Added
+             //    user #N to site #M", admin/sites/users.php). The sentence's
+             //    example is therefore a failed sign-in.
              // 🗣️ #940 (D-117, D-118, D-119): the activity log may now be kept
              //    for ever, by the installation's choice or, where the
              //    installation allows it, an organisation's; and an
@@ -1268,8 +1274,8 @@ class GdprEraser
              //    installation's. A record that belongs to no organisation
              //    (its organisation removed - `fk_logs_site` is ON DELETE SET
              //    NULL) is swept by the installation's figure (`log_sweep()`).
-             //    And #933: what a record SAYS can give a full name or an
-             //    e-mail address, not only a provider's, so it says "your
+             //    And #933: what a record SAYS can still give a name or an
+             //    e-mail address (the kept cases above), so it says "your
              //    e-mail address" and that the words last as long as the
              //    record - which under "for ever" is for ever.
              'reason' => 'the record of what happened is kept for running and repairing the portal, until the activity log '
@@ -1283,8 +1289,9 @@ class GdprEraser
                  . 'after it. Removed from your own records: your account number, the address the request came from, the browser\'s name, '
                  . 'the request\'s headers, the session\'s fingerprint and the facts about the session. What each record '
                  . 'says is kept as it was written for as long as the record is, so it can still name you, give your e-mail '
-                 . 'address or give your account number - a record of linking or unlinking a sign-in provider, for '
-                 . 'instance, gives that provider\'s e-mail address. Records other people made can also mention you'],
+                 . 'address or give your account number - a failed attempt to sign in, for instance, keeps the '
+                 . 'sign-in name that was typed, which is often an e-mail address. Records other people made can '
+                 . 'also mention you'],
 
             // 📅 `calendarToken` and `notifyPrefs` are cleared since the same
             //    day. The token is the key inside the person's private

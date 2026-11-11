@@ -340,13 +340,16 @@ $alrOwnMax    = max(ActivityLogRetention::HARD_MAX_DAYS, $alrOwn ?? 0);
 $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
 // What "never" costs, in words no stronger than is true: an erasure unlinks a
 // person's records but does not rewrite descriptions. Most descriptions name
-// nobody; of those that name somebody, most do so by account number, and some
-// by full name or e-mail address — for example UserCreated, six of the
-// password-reset records, EventInviteSent, EventSubmitted (in records written
-// before #963 only) and the children's-profile records. That list is NOT complete: #933 holds the full
-// count, and ActivityLogRetention's header gives the same examples (with the
-// file for two of them). Because not every description names anybody, the
-// sentence the page shows is general.
+// nobody; of those that name somebody, most do so by account number, and a few
+// by name or e-mail address — since #933 on purpose only: a failed or
+// rate-limited sign-in keeps the typed sign-in name (D-137), a refused child
+// collection keeps the typed name, and an organisation's labels such as a
+// task's title stay (D-138). (UserCreated, the password-reset records,
+// EventInviteSent, the children's-profile records and the provider link and
+// unlink records named people before #933 and are numbers only now; EventSubmitted
+// carried an address only before #963.) ActivityLogRetention's header says the
+// same. Because not every description names anybody, the sentence the page
+// shows is general — and still true.
 $alrNeverCost = 'The log then grows without limit. Some records describe a person — usually by account number, '
     . 'and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after '
     . 'that person has asked to be erased.';

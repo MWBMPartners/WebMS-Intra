@@ -204,8 +204,14 @@ class Debug
                 // The address goes into the activity log, so a scheduled
                 // job's token is cut out of it first (Logger::withoutJobToken()).
                 // #933: the visitor's NETWORK address is not written into the
-                // words: Logger already keeps it in the record's own column,
-                // which an erasure empties, and words are never emptied.
+                // words, because Logger already keeps it in the record's own
+                // column (visitorIP) and a second copy in the words would only
+                // be harder to remove. Be exact about what removes it: an
+                // erasure empties that column only on a record that names the
+                // person in `userID`, and this record usually names nobody (the
+                // attempt is rarely made signed in), so in practice the
+                // activity log's own clear-out is what removes it — or nothing,
+                // where the log is kept for ever (D-117).
                 Logger::activity('DebugBlocked', 'Debug mode attempt in prod at ' . Logger::withoutJobToken($path));
             } catch (\Throwable) {
                 // 🤷 Logging failure must never break the request.

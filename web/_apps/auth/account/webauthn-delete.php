@@ -67,7 +67,12 @@ if ($del !== false) {
     $del->execute();
     $del->close();
 
-    // #933: the passkey's NUMBER, never its name. A person names a passkey in their own words ("Lance's iPhone"), and the log's words are the one part of a record an erasure cannot empty; the name is on the passkey's own row.
+    // #933: the passkey's NUMBER, never its name. A person names a passkey in
+    //    their own words ("Lance's iPhone"), and the log's words are the one part
+    //    of a record an erasure cannot empty. The name was on the passkey's own
+    //    row, which the statement above has just deleted, so after this nothing
+    //    records it: the record says only which passkey number was removed, and
+    //    that it was this account's (Logger puts the account in `userID`).
     Logger::activity('WebAuthnDelete', 'Removed passkey #' . $credID);
 }
 

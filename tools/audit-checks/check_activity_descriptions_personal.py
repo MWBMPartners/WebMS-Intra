@@ -75,7 +75,20 @@ WHAT IT CANNOT SEE — this is a PRESENCE check (D-065), and its limits are real
 - A value that reaches the description through a local variable built earlier
   (`$detail = 'Assigned ' . $fullName; Logger::activity('X', $detail)`): only
   `detail` is seen. (`leadership/save.php` did exactly this.)
-- A value passed through a pass-through wrapper's CALLERS.
+- A value passed through a pass-through wrapper's CALLERS — and a wrapper that
+  adds words of its own (`Logger::activity($type, 'Note: ' . $words)`) is not a
+  pass-through at all, so it is not even asked about.
+- NAMED arguments in another order (`Logger::activity(description: $x, type:
+  'T')`): the probe takes the SECOND argument as the description, whatever its
+  name, so it reads `'T'` and misses `$x`. (No call is written that way today.)
+- A name spelled differently from the list: a plural (`implode(', ',
+  $emails)`), a snake_case key (`$row['full_name']`), or a getter
+  (`$user->getEmail()`) — each is a name the list does not hold, measured by
+  the independent check of round 2. Widening the list to catch them would start
+  catching organisation labels too (D-138); review is the guard there.
+- Two calls of the SAME record type in one file share an exception: when one
+  of the two `LoginFailed` lines in `Auth.php` stopped carrying the typed name
+  (planted), this check stayed green. The HTTP self-test is what catches that.
 - Whether the words are TRUE, or whether a number is somebody's phone number.
 - Writers that do not use `Logger::activity()` — there is one,
   `ActivityLogCleaner`, which writes fixed words and an account number.
@@ -157,9 +170,6 @@ ON_PURPOSE = {
     ("_apps/admin/settings/organisation/save.php", "'PortalAddressSaved'", "supportEmail"):
         "the ORGANISATION's support e-mail address, a published setting that an "
         "administrator changes on purpose; the record says what it was set to",
-    ("_apps/calendar/event-register-save.php", "'EventRegistrationCaptchaFailed'", "_POST"):
-        "the event's address (`slug`) a failed bot check was for, which names an "
-        "event, not a person",
     ("_apps/admin/maintenance/demo-data.php", "'DemoDataActionRefused'", "_POST"):
         "the refused ACTION's name, cut to a-z and _ and 30 characters first",
     ("_apps/admin/maintenance/backup.php", "'BackupActionRefused'", "_POST"):
