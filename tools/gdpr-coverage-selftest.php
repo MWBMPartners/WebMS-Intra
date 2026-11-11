@@ -2369,7 +2369,7 @@ check(
 // listed, or regenerated over.
 check(
     'the tax claim file reads the KEPT name when there is one, and an erased donor is never rendered for, listed for, or regenerated over',
-    // 🔁 #941 check rounds 3 and 5: WHICH name the file carries is no longer
+    // 🔁 #941 rounds 4 and 6 (answering check rounds 3 and 5): WHICH name the file carries is no longer
     //    pinned here as text. Two rounds running, an extra branch inserted
     //    between the pinned pieces left both text pins green while it put
     //    "[Deleted User]" back in the file. The rule is now held by BEHAVIOUR:

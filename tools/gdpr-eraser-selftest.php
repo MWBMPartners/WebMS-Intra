@@ -226,34 +226,35 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 311; // Still 311 after #941's check round 5: the single case it had
-                             // added (an erased account switched back ON) is REPLACED by one
-                             // table-driven check over every combination of kept row,
-                             // switched on/off, account name and e-mail - 100 donors, each
-                             // with its exact expected name - because single cases had pinned
-                             // the rule from one side only, two rounds running.
-                             // 310 until #941's check round 4 added one: an erased account
-                             // switched back ON, so no kept row joins, still gives an empty
-                             // name in the claim file and never "[Deleted User]".
-                             // 309 until a ninth: a declaration whose address is only a tab
-                             // is no declaration address, so the account's address is kept
-                             // and the declaration's postcode is not.
-                             // 301 until #941's check round 3 added eight: a home address kept
-                             // from the ACCOUNT; white space stored as NULL; a blank
-                             // declaration postcode stored as NULL; a blank, missing or
-                             // white-space name stored as NULL; the tax claim file never
-                             // carrying "[Deleted User]", for a just-erased donor and for one
-                             // whose account was already emptied; a row an older version
-                             // wrote with '' read as nothing; and step 4's line saying what
-                             // the earlier record held.
-                             // 298 until #941's check round 2 added three: the kept-record
-                             // line read back from the row says "no home address" for an
-                             // account address of '', for none at all, and for an address
-                             // held only at another organisation - and each row holds NULL.
-                             // 297 until #941's check round 1 added one: the clearing
-                             // of a row kept again by a SECOND request goes on THAT
-                             // request's trail (section 23 had run every run under one
-                             // request, so keeping the earlier request's number passed).
+const EXPECTED_CHECKS = 311; // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
+                             // that answered "check round N-1" (the independent check of the
+                             // round before). Counts, newest first:
+                             //   311 since round 5 (answering check round 4), which added one
+                             //       check: an erased account switched back ON gives an empty
+                             //       name in the claim file. Round 6 (answering check round
+                             //       5) REPLACED that single check with one table-driven check
+                             //       over every combination of the facts the claim file's
+                             //       query reads, so the count stayed 311. Round 7 (answering
+                             //       check round 6) widened that table - a cleared kept row
+                             //       WITH a name, and the made-up name in other capitals -
+                             //       without adding a check, so it is still 311.
+                             //   310 after round 4 (answering check round 3) added nine:
+                             //       a home address kept from the ACCOUNT; white space stored
+                             //       as NULL; a blank declaration postcode stored as NULL; a
+                             //       blank, missing or white-space name stored as NULL; the
+                             //       claim file never carrying "[Deleted User]", for a
+                             //       just-erased donor and for one whose account was already
+                             //       emptied; a row an older version wrote with '' read as
+                             //       nothing; step 4's line saying what the earlier record
+                             //       held; and a declaration address of only a tab (301 -> 310).
+                             //   301 after round 3 (answering check round 2) added three: the
+                             //       kept-record line, read back from the row, says "no home
+                             //       address" for an account address of '', for none at all,
+                             //       and for an address held only at another organisation -
+                             //       and each row holds NULL (298 -> 301).
+                             //   298 after round 2 (answering check round 1) added one: the
+                             //       clearing of a row kept again by a SECOND request goes on
+                             //       THAT request's trail (297 -> 298).
                              // 290 before #941 and #927 added seven: section 23 (#941)
                              // added six - the cleared row is reached by the real code
                              // beside a live account; what My data said beforehand is
@@ -427,8 +428,8 @@ const P_K_G = 920727; const REQ_K_G = 940727; // an account already emptied befo
 const P_K_H = 920728; const REQ_K_H = 940728; // a kept row an older version wrote with ''
 const P_K_I = 920729; const REQ_K_I = 940729; // an earlier run's row, emptied by step 4
 const P_K_J = 920730; const REQ_K_J = 940730; // a declaration whose address is only a tab
-const SITE_C4       = 16;     // section 23: the claim file's name rule over every combination (#941 check round 5)
-const P_TABLE_FIRST = 920800; // section 23: the first of that table's 100 donors (920800-920899)
+const SITE_C4       = 16;     // section 23: the claim file's name rule over every combination (#941 rounds 6 and 7)
+const P_TABLE_FIRST = 920800; // section 23: the first of that table's 144 donors (920800-920943)
 const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
 const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
@@ -7042,9 +7043,9 @@ ge_ok('...and for a donor whose account was ALREADY EMPTIED before the run (no n
     $ranOk($runG) && $kept4(P_K_G) !== null && $kept4(P_K_G)['fullName'] === null && $nameCells('11.07') === ['', '']
     && str_contains($line4(REQ_K_G, SITE_C3), 'Kept on this record: no name and a home address.'),
     json_encode(['row' => $kept4(P_K_G), 'claim row' => $claimRowsK['11.07'] ?? null, 'line' => $line4(REQ_K_G, SITE_C3)]));
-// (#941 check round 5: an erased account switched back ON is now one row of
-// the table at the end of this section, which builds every combination; the
-// single case that stood here left this donor switched on afterwards.)
+// (#941 round 6, answering check round 5: an erased account switched back ON
+// is now one row of the table at the end of this section; the single case
+// that stood here, added in round 5, left this donor switched on afterwards.)
 
 // H: a row an OLDER version wrote, holding '' rather than NULL, beside an
 // emptied account. Written by hand, said plainly: no version of the code in
@@ -7097,29 +7098,43 @@ ge_ok('A DECLARATION ADDRESS OF ONLY A TAB IS NO ADDRESS: the account\'s address
     json_encode($kept4(P_K_J)));
 
 // =============================================================================
-// 🧮 THE CLAIM FILE'S NAME RULE, OVER THE WHOLE TABLE (#941 check rounds 4 and 5)
+// 🧮 THE CLAIM FILE'S NAME RULE, OVER THE WHOLE TABLE (#941 rounds 6 and 7)
 // =============================================================================
-// Two rounds running, a single extra case pinned the rule from one side only:
-// a branch keyed on `isActive` one way passed every check, then a branch keyed
-// on it the OTHER way passed the next one. So the rule is no longer tested by
-// examples. One donor is made for EVERY combination of the facts the query can
-// see, and each must come out with exactly the name worked out below:
+// Rounds 4 and 5 each added one case, and each round's case pinned the rule
+// from one side only: a branch keyed on `isActive` one way passed every check,
+// then a branch keyed on it the OTHER way passed the next. So round 6 (answering
+// check round 5) stopped testing the rule by examples and built one donor per
+// combination. Round 7 (answering check round 6) widened two dimensions the
+// first table had collapsed: a CLEARED kept row was always nameless, so code
+// that joined cleared rows changed nothing the table could see; and the made-up
+// name appeared only in its own capitals, so a case-sensitive comparison passed.
 //
-//   the kept row     none, named, nameless (NULL), blank (''), or cleared
-//   the account      switched on, or off
-//   the account name the made-up "[Deleted User]", a real name, '', NULL, or white space
-//   the e-mail       the made-up one an erasure writes, or a real one
+// The facts this check varies, and nothing else (the declaration, the gift and
+// its date are the same for every donor). Each is varied independently:
 //
-// 5 x 2 x 5 x 2 = 100 donors. Many combinations no portal page produces (an
+//   the kept row     none; live and named, nameless (NULL) or blank (''); or
+//                    cleared and named or nameless (6)
+//   the account      switched on, or off (2)
+//   the account name the made-up "[Deleted User]", the same in other capitals
+//                    ("[deleted user]"), a real name, '', NULL, or white space (6)
+//   the e-mail       the made-up one an erasure writes, or a real one (2)
+//
+// 6 x 2 x 6 x 2 = 144 donors. Many combinations no portal page produces (an
 // erased account switched back on; an erased account whose e-mail was changed,
-// #977; a kept row beside a live member). They are built in SQL anyway,
-// because the rule must hold for EVERY row the query can see, not only for
-// the rows today's pages happen to write.
+// #977; a kept row beside a live member; a cleared kept row that still holds a
+// name). They are built in SQL anyway, because the rule must hold for every
+// row the query can see, not only for the rows today's pages write.
 //
 // THE RULE, worked out here and not read from the code under test:
-//   - the kept row JOINS only when it is live AND the account is emptied:
-//     switched off, named "[Deleted User]", with the made-up e-mail
+//   - the kept row JOINS only when it is live (not cleared) AND the account is
+//     emptied: switched off, named "[Deleted User]", with the made-up e-mail
 //     (GdprEraser::emptiedAccountSql(), which buildHmrcCsv()'s join asks);
+//   - "named [Deleted User]" ignores CAPITALS, in the join and in the name rule
+//     alike: `tblUsers.fullName` is `utf8mb4_general_ci`, so the database's own
+//     `=` does. That is the safe direction - "[deleted user]" is treated as the
+//     made-up name and gives an EMPTY name, which HMRC refuses, so a person
+//     looks - and a case-SENSITIVE comparison would put the made-up name into
+//     the file in other capitals;
 //   - when it joins, the kept row's name and nothing else;
 //   - otherwise the account's name - except that "[Deleted User]" is never
 //     used, and gives an empty name;
@@ -7130,9 +7145,10 @@ ge_insert('tblSites', [], ['siteID' => SITE_C4, 'timezone' => 'Europe/London']);
 $catC4 = ge_id(ge_insert('tblGivingCategory', [], ['siteID' => SITE_C4]));
 $tableCases = [];
 $n          = 0;
-foreach (['none', 'named', 'nameless', 'blank', 'cleared'] as $keptState) {
+foreach (['none', 'named', 'nameless', 'blank', 'cleared-named', 'cleared-nameless'] as $keptState) {
     foreach ([0, 1] as $active) {
-        foreach (['tombstone' => GdprEraser::TOMBSTONE_NAME, 'real' => 'Rhea Real', 'empty' => '', 'null' => null, 'spaces' => "  \t "] as $nameKind => $accountName) {
+        foreach (['tombstone' => GdprEraser::TOMBSTONE_NAME, 'tombstone-capitals' => strtolower(GdprEraser::TOMBSTONE_NAME),
+            'real' => 'Rhea Real', 'empty' => '', 'null' => null, 'spaces' => "  \t "] as $nameKind => $accountName) {
             foreach (['made-up', 'real'] as $emailKind) {
                 $person = P_TABLE_FIRST + $n;
                 $email  = $emailKind === 'made-up'
@@ -7145,17 +7161,21 @@ foreach (['none', 'named', 'nameless', 'blank', 'cleared'] as $keptState) {
                 $pence   = 30000 + $n;   // a different amount for every donor: how its row is found in the file
                 ge_gift(SITE_C4, $person, $ago(30), $pence, $catC4);
                 if ($keptState !== 'none') {
+                    // A cleared row normally has its name emptied by the clearing;
+                    // one that still holds a name is built on purpose, so that code
+                    // joining CLEARED rows would show (round 7).
                     $keptName = match ($keptState) {
-                        'named'   => 'Kept Kirby',
-                        'blank'   => '',
-                        default   => null,
+                        'named', 'cleared-named' => 'Kept Kirby',
+                        'blank'                  => '',
+                        default                  => null,
                     };
+                    $cleared = str_starts_with($keptState, 'cleared-');
                     ge_q('INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `fullName`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`, `clearedAt`) '
-                        . 'VALUES (?, ?, ?, \'all\', ?, 1, UTC_TIMESTAMP(), ' . ($keptState === 'cleared' ? 'UTC_TIMESTAMP()' : 'NULL') . ')',
+                        . 'VALUES (?, ?, ?, \'all\', ?, 1, UTC_TIMESTAMP(), ' . ($cleared === true ? 'UTC_TIMESTAMP()' : 'NULL') . ')',
                         'iiss', [SITE_C4, $person, $keptName, $ago(30)]);
                 }
                 $joins    = in_array($keptState, ['named', 'nameless', 'blank'], true) && $active === 0
-                    && $nameKind === 'tombstone' && $emailKind === 'made-up';
+                    && in_array($nameKind, ['tombstone', 'tombstone-capitals'], true) && $emailKind === 'made-up';
                 $expected = $joins === true
                     ? ($keptState === 'named' ? 'Kept Kirby' : '')
                     : ($nameKind === 'real' ? 'Rhea Real' : '');
@@ -7191,8 +7211,8 @@ foreach ($tableCases as $amount => $case) {
     }
 }
 $joinedCount = count(array_filter($tableCases, static fn (array $c): bool => $c['joins'] === true));
-ge_ok('THE CLAIM FILE\'S NAME, FOR EVERY COMBINATION (' . count($tableCases) . ' donors: kept row x switched on/off x account name x e-mail): each row carries exactly the expected name - the kept name when a kept row joins, the real name for a donor with one, and an empty name otherwise - and "Deleted" appears nowhere in the file',
-    count($tableCases) === 100 && $joinedCount === 3 && count($tableRows) === 101 && $tableWrong === []
+ge_ok('THE CLAIM FILE\'S NAME, FOR EVERY COMBINATION (' . count($tableCases) . ' donors: kept row - live or cleared, named or not - x switched on/off x account name, the made-up one in any capitals included x e-mail): each row carries exactly the expected name - the kept name when a kept row joins, the real name for a donor with one, and an empty name otherwise - and "Deleted" appears nowhere in the file, in any capitals',
+    count($tableCases) === 144 && $joinedCount === 6 && count($tableRows) === 145 && $tableWrong === []
     && stripos($tableFile, 'Deleted') === false,
     count($tableWrong) . ' wrong (of ' . count($tableCases) . ', ' . $joinedCount . ' joining; ' . (count($tableRows) - 1) . ' rows in the file): '
     . implode(' | ', array_slice($tableWrong, 0, 8)));
