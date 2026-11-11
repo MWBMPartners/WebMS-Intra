@@ -70,10 +70,11 @@
  *      proves the lock exists, not that the read and writes are one unit
  *   X  A COMMIT THAT DOES NOT CONFIRM, driven through the real page with the
  *      fault injected at the commit line: the server committed and the reply
- *      was lost, and the COMMIT never arrived. Either way the member must read
+ *      was lost, and an injected failure of commit() on a connection that is
+ *      still alive with the transaction open. Either way the member must read
  *      "We could not confirm…" and NOT "nothing was changed", and the error
- *      log must keep the line naming the request — even when the transaction
- *      was still open (round 5 called this untestable; it was not).
+ *      log must keep the line naming the request (round 5 called this
+ *      untestable; it was not).
  *   P  THE PLANTS: each fault put into the COPY of the code (count them
  *      from the list in section P — no number is written here, because one
  *      already went stale here), each of which must turn the check that
@@ -963,10 +964,18 @@ $scnAllOrNothing = static function () use ($newSlot, $ask, $answer, $holder, $sw
  *   'lost'    the server COMMITS and the reply is lost (commit() runs, then a
  *             2013 "lost connection" is thrown). The decline IS stored —
  *             which is exactly why the page must not say "nothing was changed".
- *   'dropped' the COMMIT never reaches the server (a 2006 "server has gone
- *             away" is thrown instead of committing). The transaction is still
- *             OPEN on the connection, so this is the case where the error-log
- *             line would be lost with it unless `respond()` rolls back first.
+ *   'dropped' an INJECTED failure of commit() on a connection that is still
+ *             ALIVE, with the transaction still OPEN: commit() is not called
+ *             and an exception is thrown in its place. A REAL dropped
+ *             connection cannot produce this state — measured on MySQL
+ *             8.0.36, after a real drop commit(), rollback() and the log
+ *             write all fail with 2006, the server has already discarded the
+ *             write, and `Logger` sends the line to its fallback. This case
+ *             exists to pin the PRECAUTION in `respond()`: on a still-usable
+ *             connection the log line would land inside the open transaction
+ *             and vanish unless `respond()` rolls back first. (The exception
+ *             carries the code 2006 only because it needs one; it does not
+ *             imitate a real drop.)
  */
 $scnLostCommit = static function (string $fault) use ($newSlot, $ask, $answer, $swap, $copyCore, $A, $B): array {
     $slot = $newSlot($A);
@@ -976,7 +985,7 @@ $scnLostCommit = static function (string $fault) use ($newSlot, $ask, $answer, $
     $line = 'if ($db->commit() === false) {';
     $with = $fault === 'lost'
         ? 'if ($db->commit() === false || throw new \mysqli_sql_exception(\'injected by tools/rota-swaps-selftest.php: the reply to COMMIT was lost\', 2013)) {'
-        : 'if (throw new \mysqli_sql_exception(\'injected by tools/rota-swaps-selftest.php: the connection dropped before COMMIT\', 2006)) {';
+        : 'if (throw new \mysqli_sql_exception(\'injected by tools/rota-swaps-selftest.php: commit() failed on a live connection\', 2006)) {';
     $injected = substr_count($was, $line) === 1;
     try {
         if ($injected === true) {
@@ -1639,9 +1648,9 @@ check('X2 …and the member reads "We could not confirm whether your answer was 
 check('X3 …and is NOT told "nothing was changed" — which here would be untrue', $xl['notNothing'], $xl['detail']);
 check('X4 …and the error log keeps one line naming the request', $xl['logged'], $xl['detail']);
 $xd = $scnLostCommit('dropped');
-check('X5 (the premise) the COMMIT never arrived: the decline is not stored and the transaction was left open', $xd['injected'] && $xd['premise'], $xd['detail']);
+check('X5 (the premise) an injected commit() failure on a LIVE connection: the decline is not stored and the transaction was left open', $xd['injected'] && $xd['premise'], $xd['detail']);
 check('X6 …the member still reads "We could not confirm…", never "nothing was changed"', $xd['unknown'] && $xd['notNothing'], $xd['detail']);
-check('X7 …and the error-log line SURVIVES the open transaction (respond() rolls back before logging)', $xd['logged'], $xd['detail']);
+check('X7 …and the error-log line SURVIVES the still-open transaction — the precaution of rolling back before logging', $xd['logged'], $xd['detail']);
 
 // =============================================================================
 section('P  the plants: each fault must turn its check red');
@@ -1765,7 +1774,7 @@ $plants  = [
         static fn (): bool => ($r = $scnLostCommit('lost'))['unknown'] && $r['notNothing'],
     ],
     'P33 the UNKNOWN branch no longer rolls back before logging' => ['_core/RotaSwaps.php',
-        ["                try {\n                    \$db->rollback();\n                } catch (\\Throwable \$ignored) {\n                    // The connection has gone; nothing is open on it.\n                }\n", ''],
+        ["                try {\n                    \$db->rollback();\n                } catch (\\Throwable \$ignored) {\n                    // The connection has gone; the server has discarded\n                    // anything uncommitted, and Logger falls back.\n                }\n", ''],
         static fn (): bool => $scnLostCommit('dropped')['logged'],
     ],
     'P28 the decline e-mail back to "the duty is still yours"' => ['_core/RotaSwaps.php',

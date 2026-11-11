@@ -511,20 +511,27 @@ final class RotaSwaps
                 // The commit itself failed or its reply was lost: whether the
                 // answer was stored is not known, and is not guessed at.
                 //
-                // ⚠️ ROLL BACK BEFORE LOGGING, even here. A COMMIT that never
-                //    reached the server (section X of the self-test injects
-                //    exactly that) leaves this connection's transaction OPEN, and
-                //    `Logger` may write on this same connection — so the log
-                //    row would land inside the open transaction and vanish
-                //    when the connection closes, leaving no record anywhere
-                //    (#694 round 3's shape). A rollback never undoes a commit
-                //    that did happen, so it cannot make anything worse; it
-                //    does not make the outcome KNOWN either, so the answer
-                //    stays UNKNOWN.
+                // ⚠️ ROLL BACK BEFORE LOGGING — a PRECAUTION. It matters only
+                //    when commit() fails on a connection that is STILL USABLE
+                //    with the transaction still open (section X of the
+                //    self-test injects that state): `Logger` may write on this
+                //    same connection, and without the rollback the log row
+                //    would land inside the open transaction and vanish when
+                //    the connection closed (#694 round 3's shape).
+                //    It is NOT what saves the record after a real dropped
+                //    connection — measured on MySQL 8.0.36, there commit(),
+                //    this rollback and the log INSERT all fail with 2006, the
+                //    server has already discarded the uncommitted write, and
+                //    `Logger` sends the line to its fallback instead of
+                //    tblErrors; that was true before this rollback existed.
+                //    A rollback never undoes a commit that did happen, so it
+                //    cannot make anything worse; it does not make the outcome
+                //    KNOWN either, so the answer stays UNKNOWN.
                 try {
                     $db->rollback();
                 } catch (\Throwable $ignored) {
-                    // The connection has gone; nothing is open on it.
+                    // The connection has gone; the server has discarded
+                    // anything uncommitted, and Logger falls back.
                 }
                 // The request's NUMBER is logged (a number names nobody,
                 // D-138), so an administrator can look the request up.
@@ -789,7 +796,8 @@ final class RotaSwaps
      * `whereDutyIsNow()` for why). The rest is read here: the duty's role and
      * date and the asker's address, which no answer changes, the asker's
      * message, and the reply (`responseMessage`) — which THIS answer has just
-     * written, so reading it back gives exactly what the answerer typed.
+     * written, so reading it back gives the reply as stored: what the
+     * answerer typed, trimmed and cut to 500 characters by `respond()`.
      *
      * @param array<string,mixed> $did What `respond()` answered (outcome DONE).
      */
