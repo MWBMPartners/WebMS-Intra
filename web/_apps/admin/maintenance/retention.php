@@ -267,8 +267,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                 'A change to how long ' . $alrLevel . ' keeps the activity log was refused: the number of days was not a whole number of 1 or more. Nothing was saved.',
                 $alrWho
             );
-            $alrFinish('A number of days has to be a whole number from 1 to ' . ActivityLogRetention::HARD_MAX_DAYS
-                . '. For no time limit, choose "Never delete" instead. Nothing was saved.', 'danger');
+            // 🗣️ #940 round 4: worded PER FORM. The installation's form may
+            //    choose 1 to 3650 or "Never delete", so its words are fixed. The
+            //    organisation's form may choose only what the installation allows,
+            //    and is offered "Never delete" only where the installation has
+            //    chosen it, so its words come from ActivityLogRetention, the one
+            //    place that already words the organisation's refusals.
+            $alrFinish($alrForSite === true
+                ? ActivityLogRetention::refusalWordsForSite('not-a-number', (string) $activityInstallationDays, 0)
+                : 'A number of days has to be a whole number from 1 to ' . ActivityLogRetention::HARD_MAX_DAYS
+                    . '. For no time limit, choose "Never delete" instead. Nothing was saved.', 'danger');
         }
         $alrDays = (int) $alrRaw;
     }
@@ -465,7 +473,7 @@ if ($isGlobalAdmin === false) {
             <?php // 🗣️ #940 round 3: "keeps every record for ever" said whose: this organisation's. ?>
             <p class="small text-muted" data-activity-log-explained="organisation">
                 The activity log records who did what, and when. The nightly clear-out deletes records
-                older than the figure below. <strong>&ldquo;Never delete&rdquo;</strong> keeps this
+                older than the figure below, if that scheduled job has been set up. <strong>&ldquo;Never delete&rdquo;</strong> keeps this
                 organisation&rsquo;s records for ever, where this installation allows it. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
             </p>
             <?php $alrOrganisationForm(); ?>
@@ -655,7 +663,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                       //    and that organisation's 40- to 5000-day rows were deleted). ?>
                 <p class="small text-muted" data-activity-log-explained="installation">
                     The activity log records who did what, and when. The nightly clear-out deletes records
-                    older than the figures below. <strong>&ldquo;Never delete&rdquo;</strong> for every
+                    older than the figures below, if that scheduled job has been set up. <strong>&ldquo;Never delete&rdquo;</strong> for every
                     organisation is the most an organisation may choose, not a rule for all: it keeps for
                     ever the records that belong to no organisation and those of every organisation that has
                     not chosen a number of days of its own, while an organisation that has chosen a number of

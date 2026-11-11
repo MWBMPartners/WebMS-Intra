@@ -420,11 +420,33 @@ final class ActivityLogRetention
     {
         self::needSettingLimit();
 
-        if ($reason === 'above-hard-max') {
-            return 'A number of days can be at most ' . self::HARD_MAX_DAYS . ' (ten years). Nothing was saved.';
-        }
-
         $allowed = SettingLimit::ceilingFrom($installationStored, self::DEFAULT_DAYS, self::HARD_MAX_DAYS, true);
+        $forEver = SettingLimit::allowsForEverFrom($installationStored, self::DEFAULT_DAYS, self::HARD_MAX_DAYS);
+
+        // 🔢 #940 round 4: the ORGANISATION's form is worded here for every
+        //    refusal of a number, because what it may choose depends on the
+        //    installation. The page used to give both forms one sentence,
+        //    "a whole number from 1 to 3650 ... For no time limit, choose
+        //    'Never delete'" - untrue on the organisation's form under an
+        //    installation of, say, 30 days, where it may choose only 1 to 30
+        //    and "Never delete" is not even offered (measured by the
+        //    independent check). So "Never delete" is named only where the
+        //    installation allows it, and the range is the one really allowed.
+        //    `not-a-number` is a box left empty, at 0, or not a whole number.
+        if ($reason === 'not-a-number') {
+            return $forEver === true
+                ? 'A number of days has to be a whole number from 1 to ' . self::HARD_MAX_DAYS
+                    . '. For no time limit, choose "Never delete" instead. Nothing was saved.'
+                : 'A number of days has to be a whole number from 1 to ' . $allowed . '. Nothing was saved.';
+        }
+        if ($reason === 'above-hard-max') {
+            // Past ten years: true but unhelpful under a lower installation
+            // figure, so the installation's real limit is given there.
+            return $forEver === true
+                ? 'A number of days can be at most ' . self::HARD_MAX_DAYS . ' (ten years). For no time limit, '
+                    . 'choose "Never delete" instead. Nothing was saved.'
+                : SettingLimit::refusalWords('above-installation', $allowed, 'days', false);
+        }
         if ($reason === 'above-installation' && $days === self::NEVER) {
             // 🏷️ The page calls this choice "Never delete", so the refusal does
             //    too: SettingLimit's own words say "keep for ever", and two names

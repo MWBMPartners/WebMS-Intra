@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 112; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 113; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -225,6 +225,8 @@ const EXPECTED_CHECKS = 112; // 80 until #703 (D-016) added two: the two writers
                             // which ignored "never"). 109.
                             // Round 3 added L6-L8 (the card's explanation in both
                             // views, and the three "Never delete" messages). 112.
+                            // Round 4 added L9 (the organisation's form's own
+                            // refusals, under never and under 30 days). 113.
 
 function refuse(string $why): never
 {
@@ -3019,6 +3021,52 @@ foreach ($alrMessages as $case => [$got, $want]) {
 }
 ok('L8 the three messages a global administrator is shown about "Never delete" for the installation (a 0 refused, a figure over ten years refused, Never delete saved) are exactly the literal words here, and none says the installation\'s choice keeps every record (#940 round 3)',
     count($alrMessages) === 3 && $alrMessagesWrong === [], implode(' || ', $alrMessagesWrong));
+// #940 round 4: the ORGANISATION's form, pressed by an organisation
+// administrator (ADM), with a 0, an EMPTY box and a figure past ten years,
+// under an installation that keeps the log for ever AND under one of 30 days.
+// Both forms used to share the installation's words, "from 1 to 3650 ... choose
+// 'Never delete'", which under 30 days names a range the organisation may not
+// use and a choice its form does not offer. Every case is written here
+// literally, and nothing may be saved for the organisation.
+$alrOrgPress = static function (array $fields) use ($jar, $alrFlash): string {
+    $form = req($jar['adm'], 'GET', '/admin/maintenance/retention');
+    req($jar['adm'], 'POST', '/admin/maintenance/retention', ['csrf_token' => token($form['body']), 'action' => 'activity-retention-organisation'] + $fields);
+
+    return $alrFlash((string) req($jar['adm'], 'GET', '/admin/maintenance/retention')['body']);
+};
+$alrUnderNever = 'A number of days has to be a whole number from 1 to 3650. For no time limit, choose "Never delete" instead. Nothing was saved.';
+$alrUnder30    = 'A number of days has to be a whole number from 1 to 30. Nothing was saved.';
+$alrOrgCases   = [];
+try {
+    // (string): PHP makes the key '0' an INT, and an int is never === '0'.
+    foreach (['0' => 'never', '30' => '30 days'] as $installationKey => $named) {
+        $installation = (string) $installationKey;
+        q("UPDATE tblSettings SET settingValue = ? WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'", 's', [$installation]);
+        q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
+        $alrOrgCases['installation ' . $named . ', a 0'] = [$alrOrgPress(['choice' => 'days', 'days' => '0']),
+            $installation === '0' ? $alrUnderNever : $alrUnder30];
+        $alrOrgCases['installation ' . $named . ', an empty box'] = [$alrOrgPress(['choice' => 'days', 'days' => '']),
+            $installation === '0' ? $alrUnderNever : $alrUnder30];
+        $alrOrgCases['installation ' . $named . ', 99999'] = [$alrOrgPress(['choice' => 'days', 'days' => '99999']),
+            $installation === '0'
+                ? 'A number of days can be at most 3650 (ten years). For no time limit, choose "Never delete" instead. Nothing was saved.'
+                : 'This installation allows at most 30 days, so that number was not saved. You can choose 30 or fewer. '
+                    . 'Ask whoever runs this installation if you need more.'];
+        $alrOrgCases['installation ' . $named . ', nothing saved for the organisation'] = [
+            json_encode(one("SELECT settingValue FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A])), 'null'];
+    }
+} finally {
+    q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
+    q("UPDATE tblSettings SET settingValue = '365' WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'");
+}
+$alrOrgWrong = [];
+foreach ($alrOrgCases as $case => [$got, $want]) {
+    if ($got !== $want) {
+        $alrOrgWrong[] = $case . ': ' . $got;
+    }
+}
+ok('L9 the ORGANISATION\'s form refuses a 0, an empty box and a figure past ten years in its own words: under an installation that keeps the log for ever it offers "Never delete", under one of 30 days it gives 1 to 30 and never names "Never delete", each exactly the literal words here, and nothing is saved (#940 round 4)',
+    count($alrOrgCases) === 8 && $alrOrgWrong === [], implode(' || ', $alrOrgWrong));
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

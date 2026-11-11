@@ -839,8 +839,12 @@ check('F2 ...the reason is given in the page\'s own words: "Never delete" is not
      str_contains($r['flash']['text'], 'global administrator')], [true, true, false]);
 check('F3 ...and each refusal is recorded', $activityCount('ActivityLogRetentionRefused'), $beforeRefused + 2);
 $r = $forOrg(['choice' => 'days', 'days' => '0']);
-check('F4 0 typed as a NUMBER is refused — never is its own choice — and nothing is stored',
-    [$setting(AL_KEY, $siteOne), str_contains($r['flash']['text'], 'choose "Never delete" instead')], [null, true]);
+// #940 round 4: this used to REQUIRE the words 'choose "Never delete" instead'
+// here - under an installation of 30 days, where the organisation's form does
+// not offer "Never delete" and may choose only 1 to 30. The check pinned the
+// untruth. It now requires the range really allowed and no "Never delete".
+check('F4 0 typed as a NUMBER is refused — never is its own choice — nothing is stored, and the words give the range this organisation may really choose (1 to 30) and do not offer "Never delete", which its form does not',
+    [$setting(AL_KEY, $siteOne), $r['flash']['text']], [null, 'A number of days has to be a whole number from 1 to 30. Nothing was saved.']);
 $r = $forOrg(['choice' => 'days', 'days' => '31']);
 check('F5 31 days is refused, never clamped to 30', [$setting(AL_KEY, $siteOne), $r['flash']['type']], [null, 'danger']);
 $r = $forOrg(['choice' => 'days', 'days' => '20']);
