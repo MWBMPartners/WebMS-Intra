@@ -2,7 +2,7 @@
 // Path: _core/RotaSwaps.php
 /**
  * -----------------------------------------------------------------------------
- * Rota swap requests: asked, answered, and the people told 🔁 (#657)
+ * Rota swap requests: asked, answered, and e-mailed about 🔁 (#657)
  * -----------------------------------------------------------------------------
  * On the Duty Roster a member may ask somebody else to take one of their
  * duties. This class is the ONE place that decides:
@@ -10,7 +10,9 @@
  *   - who a request may be aimed at          (`whyNotTarget()`)
  *   - who may answer it, and how             (`whyNotAllowed()`, taking FACTS)
  *   - what an answer does to the duty        (`respond()`, under a row lock)
- *   - who is e-mailed, and what it says        (`tellAsked()`, `tellAnswered()`)
+ *   - who is e-mailed, and what it says      (`tellAsked()`, `tellAnswered()`)
+ *   - what a member reads after answering    (`answerWords()`)
+ *   - where a duty is, on the asker's list   (`whereDutyIsNow()`)
  *
  * WHAT WAS WRONG (#657). `rota/swap.php` saved a request and told the member
  * "the other member will be notified", and nobody was: there was no e-mail,
@@ -88,11 +90,22 @@
  * cancelled because another was accepted first: the request simply leaves
  * their page.
  *
- * THE RULE FOR WORDS SHOWN TO A MEMBER (#657 rounds 1-3, each of which found
- * this class broken somewhere new): no page says that anybody "is told" or
- * "is sent" an e-mail, because none can know; and every sentence about where
- * a duty IS is built by `whereDutyIsNow()` from the duty's row as it stands,
- * never predicted from the answer just given.
+ * THE RULE FOR WORDS SHOWN TO A MEMBER (#657; rounds 1-3 each found this
+ * class broken somewhere new, so round 4 simplified it rather than refining
+ * it again):
+ *   - no page says that anybody "is told" or "is sent" an e-mail, because
+ *     none can know;
+ *   - a message about an ANSWER (the page's message to whoever answered,
+ *     and the e-mail to the asker) says what THAT ANSWER DID, from facts
+ *     `respond()` established inside its own locked transaction
+ *     (`answerWords()`, `tellAnswered()`) — never where the duty is "now";
+ *   - only a page that reads the duty's row while drawing itself says where
+ *     the duty IS (`whereDutyIsNow()`, the asker's "Swap requests you made"
+ *     list).
+ *   REPLACED: rounds 2-3 built every such message from the duty's row read
+ *   again AFTER the commit. It kept going untrue at the edges, and the read
+ *   after the commit could throw and show an error page for an answer that
+ *   had been stored.
  *
  * A person is sent nothing when their account is switched off, when they are
  * no longer a member of the organisation (asked of `Site::isOwnOrganisation()`,
@@ -359,9 +372,13 @@ final class RotaSwaps
      * `$openAllowed` is the organisation's `rota.allow_open_swap` setting,
      * passed in by the caller (see `whyNotAllowed()`).
      *
-     * `askerID` is who asked (DONE only), for the words built afterwards.
+     * WHAT IT ANSWERS: what THIS answer did, as established inside its own
+     * locked transaction — the outcome, who asked, who answered (number and
+     * name, read inside the transaction), and on an accept who the duty was
+     * moved to. Every message and e-mail about the answer is built from these
+     * facts and nothing read afterwards (#657 round 4).
      *
-     * @return array{outcome:string, reason:string, slotID:int, askerID:?int}
+     * @return array{outcome:string, reason:string, slotID:int, action:string, askerID:?int, answererID:?int, answererName:string, movedToID:?int}
      */
     public static function respond(\mysqli $db, int $siteId, int $swapId, int $userId, string $action, string $responseMessage, bool $openAllowed): array
     {
@@ -386,7 +403,7 @@ final class RotaSwaps
             //        then refused as "changed hands". V is what proves it.
             $began = $db->begin_transaction();
             if ($began === false) {
-                return ['outcome' => self::FAILED, 'reason' => '', 'slotID' => 0, 'askerID' => null];
+                return self::didNothing(self::FAILED, '', 0);
             }
             $read = $db->prepare(
                 'SELECT `w`.`swapID`, `w`.`slotID`, `w`.`status`, `w`.`targetUserID`, `w`.`requestedByID`, '
@@ -398,7 +415,7 @@ final class RotaSwaps
             );
             if ($read === false) {
                 $db->rollback();
-                return ['outcome' => self::FAILED, 'reason' => '', 'slotID' => 0, 'askerID' => null];
+                return self::didNothing(self::FAILED, '', 0);
             }
             $read->bind_param('ii', $swapId, $siteId);
             $read->execute();
@@ -409,9 +426,21 @@ final class RotaSwaps
             $reason = self::whyNotAllowed($facts, $userId, $action, self::today($siteId), $openAllowed);
             if ($reason !== '') {
                 $db->rollback();
-                return ['outcome' => self::REFUSED, 'reason' => $reason, 'slotID' => (int) ($row['slotID'] ?? 0), 'askerID' => null];
+                return self::didNothing(self::REFUSED, $reason, (int) ($row['slotID'] ?? 0));
             }
             $slotId = (int) $row['slotID'];
+
+            // 🧾 WHO ANSWERED, read inside this transaction, so every message
+            //    about the answer is built from facts this answer established
+            //    — never from the duty's row read again after the commit
+            //    (#657 round 4: those "where is it now" sentences failed three
+            //    rounds running, and a read after the commit could throw and
+            //    show an error page for an answer that WAS stored).
+            $nameRead = $db->prepare('SELECT `fullName` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+            $nameRead->bind_param('i', $userId);
+            $nameRead->execute();
+            $answererName = trim((string) ($nameRead->get_result()->fetch_assoc()['fullName'] ?? ''));
+            $nameRead->close();
 
             if ($action === self::ACCEPT) {
                 $move = $db->prepare('UPDATE `tblRotaSlot` SET `assignedToID` = ?, `reminderSentAt` = NULL WHERE `slotID` = ?');
@@ -448,7 +477,19 @@ final class RotaSwaps
 
             $db->commit();
 
-            return ['outcome' => self::DONE, 'reason' => '', 'slotID' => $slotId, 'askerID' => $facts['requestedByID']];
+            return [
+                'outcome'      => self::DONE,
+                'reason'       => '',
+                'slotID'       => $slotId,
+                'action'       => $action,
+                'askerID'      => $facts['requestedByID'],
+                'answererID'   => $userId,
+                'answererName' => $answererName,
+                // On an accept the duty was moved to the answerer, in this
+                // transaction: for a request aimed at one person that is that
+                // person; for an open request, whoever took it.
+                'movedToID'    => $action === self::ACCEPT ? $userId : null,
+            ];
         } catch (\Throwable $e) {
             if ($began === true) {
                 try {
@@ -460,8 +501,29 @@ final class RotaSwaps
             // The fault's own words are not logged: they can quote a value.
             Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', 'A rota swap answer could not be stored', '');
 
-            return ['outcome' => self::FAILED, 'reason' => '', 'slotID' => 0, 'askerID' => null];
+            return self::didNothing(self::FAILED, '', 0);
         }
+    }
+
+    /** What `respond()` answers when it did NOTHING (refused or failed). */
+    private static function didNothing(string $outcome, string $reason, int $slotId): array
+    {
+        return ['outcome' => $outcome, 'reason' => $reason, 'slotID' => $slotId, 'action' => '', 'askerID' => null, 'answererID' => null, 'answererName' => '', 'movedToID' => null];
+    }
+
+    /**
+     * The message the person who answered reads. Fixed sentences about what
+     * THIS answer did — never where the duty is "now", which an administrator
+     * can change at any moment and which the page's own list already shows.
+     */
+    public static function answerWords(string $action): string
+    {
+        return match ($action) {
+            self::ACCEPT   => 'Swap accepted. The duty was moved to you.',
+            self::DECLINE  => 'You declined the request. This did not move the duty.',
+            self::WITHDRAW => 'Your request was withdrawn. This did not move the duty.',
+            default        => 'Done.',
+        };
     }
 
     /**
@@ -564,10 +626,14 @@ final class RotaSwaps
      *     with NO job running there is no count cap, and what was kept after
      *     the 20 seconds is NOT sent until a job runs. That is why no page
      *     promises anybody an e-mail.
-     *   - stop a host ending a slow request: on a large organisation this
-     *     loop can take the whole 20 seconds, and a host that kills the
-     *     request first leaves the request saved while the member sees an
-     *     error (recorded with #989).
+     *   - stop a host ending a slow request. On a large organisation this
+     *     loop runs until Mailer's 20-second budget is spent, and a message
+     *     begun just inside it can take up to 27 seconds more (Mailer's own
+     *     note on `REQUEST_MESSAGES`) — so about 47 seconds, plus one
+     *     membership look-up per member before each message. A host that
+     *     kills the request first leaves the request saved while the member
+     *     sees an error, and pressing Send again saves a duplicate and
+     *     e-mails everybody again (recorded with #989).
      *
      * @param array<string,mixed> $req What `describe()` gave.
      */
@@ -638,113 +704,85 @@ final class RotaSwaps
     }
 
     /**
-     * Where a duty is NOW, in words for `$readerId`. The ONE place a sentence
-     * about where a swapped duty is gets built: every page message and e-mail
-     * that says it asks here, so none can disagree with the duty's row.
+     * Where a duty is NOW, in words for the member who ASKED to swap it — for
+     * ONE place only: the "Swap requests you made" list on the Duty Roster,
+     * which reads the duty's row fresh while it draws the page.
      *
-     * WHY IT ASKS WHO HOLDS IT. The pages and e-mails used to say "the duty is
-     * still yours" (to an asker after a decline or a withdrawal) and "the duty
-     * stays with the person who asked" (to somebody who declined), without
-     * looking. A decline or a withdrawal moves nothing, but the duty can have
-     * moved anyway — an administrator reassigned it while the request was
-     * waiting — and then those sentences sent a member to a duty that was no
-     * longer theirs, on a page whose own list said otherwise.
+     * WHY ONLY THERE (#657 round 4). Rounds 1 to 3 each found a sentence
+     * about where a duty is that had gone untrue: "the duty is still yours"
+     * after a decline, "the duty stays with the person who asked" to a
+     * decliner, "still yours" after a withdrawal — each written before
+     * anybody looked, or read again after the commit, while an administrator
+     * can move the duty at any moment. The design that replaced them: a
+     * message about an ANSWER says what THAT ANSWER DID (`answerWords()`, and
+     * the e-mails in `tellAnswered()`), from facts `respond()` established
+     * inside its own locked transaction; and only a page that reads the row
+     * while drawing it says where the duty IS. Four branches, each pinned by
+     * the self-test's list checks (E3, W1, W4, W5).
      *
      * @param int|null $holderId   Who holds the duty now (null: nobody).
      * @param string   $holderName Their name ('' when it cannot be read).
-     * @param int|null $askerId    Who asked for the swap (null once erased).
-     * @param int      $readerId   Who will read the sentence.
+     * @param int      $askerId    The member who asked — the reader.
      */
-    public static function whereDutyIsNow(?int $holderId, string $holderName, ?int $askerId, int $readerId): string
+    public static function whereDutyIsNow(?int $holderId, string $holderName, int $askerId): string
     {
-        $isAsker = $askerId !== null && $askerId === $readerId;
-        if ($holderId !== null && $holderId === $readerId) {
-            return $isAsker === true ? 'The duty is still yours.' : 'The duty is yours.';
+        if ($holderId !== null && $holderId === $askerId) {
+            return 'The duty is still yours.';
         }
         if ($holderId === null) {
-            return $isAsker === true
-                ? 'The duty is no longer yours: it is not assigned to anybody at the moment.'
-                : 'The duty is not assigned to anybody at the moment.';
+            return 'The duty is no longer yours: it is not assigned to anybody at the moment.';
         }
-        if ($isAsker === false && $askerId !== null && $holderId === $askerId) {
-            return 'The duty stays with the person who asked.';
-        }
-        $who = $holderName !== '' ? $holderName : 'another member';
 
-        return $isAsker === true
-            ? 'The duty is no longer yours: it is now with ' . $who . '.'
-            : 'The duty is now with ' . $who . '.';
-    }
-
-    /**
-     * Who holds one duty now, and their name — for a message built after an
-     * answer, so it describes the row as it IS, not as the answer left it.
-     *
-     * @return array{id:?int, name:string}
-     */
-    public static function holderOf(\mysqli $db, int $siteId, int $slotId): array
-    {
-        $stmt = $db->prepare(
-            'SELECT `s`.`assignedToID`, `u`.`fullName` FROM `tblRotaSlot` `s` '
-            . 'LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `s`.`assignedToID` '
-            . 'WHERE `s`.`slotID` = ? AND `s`.`siteID` = ? LIMIT 1'
-        );
-        if ($stmt === false) {
-            return ['id' => null, 'name' => ''];
-        }
-        $stmt->bind_param('ii', $slotId, $siteId);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        return [
-            'id'   => ($row === null || $row['assignedToID'] === null) ? null : (int) $row['assignedToID'],
-            'name' => trim((string) ($row['fullName'] ?? '')),
-        ];
+        return 'The duty is no longer yours: it is now with ' . ($holderName !== '' ? $holderName : 'another member') . '.';
     }
 
     /**
      * Tell the ASKER that their request was accepted or declined. Same
-     * answers as `tellAsked()`. A withdrawal tells nobody.
+     * answers as `tellAsked()`. A withdrawal e-mails nobody.
+     *
+     * `$did` is what `respond()` answered for THIS answer. The e-mail's
+     * sentence is built from it — who answered, and on an accept that the
+     * duty was moved to them, both established inside respond()'s locked
+     * transaction — and says nothing about where the duty is "now" (see
+     * `whereDutyIsNow()` for why). The rest (the duty's role and date, the
+     * two messages, the asker's address) describes the REQUEST, which the
+     * answer cannot change, so it is read here.
+     *
+     * @param array<string,mixed> $did What `respond()` answered (outcome DONE).
      */
-    public static function tellAnswered(\mysqli $db, int $siteId, int $swapId): string
+    public static function tellAnswered(\mysqli $db, int $siteId, int $swapId, array $did): string
     {
         try {
+            $action = (string) ($did['action'] ?? '');
+            if (($did['outcome'] ?? '') !== self::DONE || ($action !== self::ACCEPT && $action !== self::DECLINE)) {
+                return 'not-answered';
+            }
             $req = self::describe($db, $siteId, $swapId);
             if ($req === null) {
                 return 'no-request';
             }
-            if ($req['status'] !== 'accepted' && $req['status'] !== 'declined') {
-                return 'not-answered';
-            }
-            if ($req['requestedByID'] === null) {
+            $askerId = $did['askerID'] ?? null;
+            if ($askerId === null) {
                 return 'not-told:' . self::TELL_NO_ACCOUNT;
             }
-            $who    = self::person($db, $req['requestedByID']);
-            $whyNot = self::whyNotTold($db, $siteId, $req['requestedByID'], $who);
+            $who    = self::person($db, (int) $askerId);
+            $whyNot = self::whyNotTold($db, $siteId, (int) $askerId, $who);
             if ($whyNot !== '') {
                 return 'not-told:' . $whyNot;
             }
 
-            $accepted = $req['status'] === 'accepted';
-            // For an accepted request the person who took the duty is the
-            // duty's holder as written by `respond()` in the same request; an
-            // open request records nobody else, so this is the one place it
-            // can be read.
-            $answerer = $accepted === true ? $req['holderName'] : $req['targetName'];
-            $answerer = $answerer !== '' ? $answerer : 'The member you asked';
+            $accepted = $action === self::ACCEPT;
+            $answerer = (string) ($did['answererName'] ?? '');
+            $answerer = $answerer !== '' ? $answerer : ($accepted === true ? 'A member' : 'The member you asked');
             $duty     = self::dutyWords($req);
             $subject  = ($accepted === true ? 'Your rota swap was accepted: ' : 'Your rota swap was declined: ')
                       . $req['roleName'] . ' on ' . self::dateWords($req['slotDate']);
             $lines    = [
                 'Hello ' . self::firstName((string) ($who['fullName'] ?? '')) . ',',
                 '',
-                // The second sentence is the duty's row as it is NOW, never
-                // a prediction from the answer (`whereDutyIsNow()`).
-                ($accepted === true
-                    ? $answerer . ' accepted your request to swap ' . $duty . '. '
-                    : $answerer . ' declined your request to swap ' . $duty . '. ')
-                . self::whereDutyIsNow($req['assignedToID'], $req['holderName'], $req['requestedByID'], $req['requestedByID']),
+                $accepted === true
+                    ? $answerer . ' accepted your request to swap ' . $duty . ', and the duty was moved to them.'
+                    : $answerer . ' declined your request to swap ' . $duty . '. This did not move the duty.',
             ];
             if ($req['responseMessage'] !== '') {
                 $lines[] = '';

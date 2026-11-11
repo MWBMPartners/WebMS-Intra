@@ -219,15 +219,15 @@ $respondUrl = Site::url('rota/swap-respond');
                 <?php
                 // 🗣️ What happened, in words, and where the duty is NOW. The
                 //    second half is `RotaSwaps::whereDutyIsNow()`, built from
-                //    the duty's CURRENT holder — the same sentence the e-mail
-                //    uses. It used to say "the duty is still yours" after every
-                //    decline, which was untrue once an administrator had moved
-                //    the duty while the request waited.
+                //    the duty's row as THIS page read it a moment ago — the one
+                //    place a sentence says where a duty is (#657 round 4). It
+                //    used to say "the duty is still yours" after every decline,
+                //    which was untrue once an administrator had moved the duty
+                //    while the request waited.
                 $status   = (string) $w['status'];
                 $nowWords = RotaSwaps::whereDutyIsNow(
                     $w['assignedToID'] === null ? null : (int) $w['assignedToID'],
                     trim((string) ($w['holderName'] ?? '')),
-                    $userId,
                     $userId
                 );
                 if ($status === 'pending') {

@@ -64,9 +64,10 @@
  *   V  THE TRANSACTION: a scratch trigger makes the SECOND write fail; the
  *      first (the duty's move) must be undone. T cannot see this fault — it
  *      proves the lock exists, not that the read and writes are one unit
- *   P  THE PLANTS: each fault put into the COPY of the code (19 of them —
- *      count from the list in section P), each of which must turn the check
- *      that guards it RED, and all green again after
+ *   P  THE PLANTS: each fault put into the COPY of the code (count them
+ *      from the list in section P — no number is written here, because one
+ *      already went stale here), each of which must turn the check that
+ *      guards it RED, and all green again after
  *
  * WHY T, U AND V ARE NOT ALL HTTP TESTS. PHP's built-in server runs one
  * request at a time here, so two answers never overlap and a race test over
@@ -714,7 +715,7 @@ $scnAcceptOnce = static function () use ($newSlot, $ask, $answer, $holder, $swap
     $toldAfter = $mails('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slot['words']);
 
     return [
-        'firstWords'    => str_contains($first['flash'], 'Swap accepted'),
+        'firstWords'    => $first['flash'] === 'Swap accepted. The duty was moved to you.',
         'moved'         => $moved,
         'stampCleared'  => $stamp === null,
         'bSees'         => str_contains($bPage, '/rota/swap?slot=' . $slot['id'] . '"'),
@@ -1059,7 +1060,7 @@ $scnWhereNow = static function () use ($newSlot, $ask, $answer, $roster, $rowOf,
         'true'   => str_contains($row, 'data-swap-status="declined"') && str_contains($row, 'it is now with ' . $people['third']['name']) && stripos($row, 'still yours') === false,
         // The message the DECLINER reads: it used to say "The duty stays with
         // the person who asked." whoever held it (round 3).
-        'declinerTrue' => $declined['flash'] === 'Swap declined. The duty is now with ' . $people['third']['name'] . '.',
+        'declinerTrue' => $declined['flash'] === 'You declined the request. This did not move the duty.',
         'slot'   => $slot,
         'swapId' => $req['swapId'],
         'detail' => substr(preg_replace('/\s+/', ' ', strip_tags($row)) ?? '', 0, 300) . ' | the decliner read: ' . $declined['flash'],
@@ -1077,7 +1078,7 @@ $scnWithdrawMoved = static function () use ($newSlot, $ask, $answer, $A, $B, $C,
     $res = $answer('asker', $req['swapId'], 'withdraw');
 
     return [
-        'true'   => $res['flash'] === 'Your swap request was withdrawn. The duty is no longer yours: it is now with ' . $people['third']['name'] . '.',
+        'true'   => $res['flash'] === 'Your request was withdrawn. This did not move the duty.',
         'detail' => $res['flash'],
     ];
 };
@@ -1101,9 +1102,12 @@ $scnWhereNowRare = static function () use ($newSlot, $ask, $answer, $roster, $ro
     $rowU    = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req2['swapId'] . '"');
 
     return [
-        'nobody'  => $nobody['flash'] === 'Swap declined. The duty is not assigned to anybody at the moment.'
+        // The asker's LIST reads the duty fresh while drawing, so it is the
+        // one place that says where the duty is; what the decliner reads is
+        // the fixed sentence about their own answer.
+        'nobody'  => $nobody['flash'] === 'You declined the request. This did not move the duty.'
             && str_contains($rowN, 'The duty is no longer yours: it is not assigned to anybody at the moment.'),
-        'unnamed' => $unnamed['flash'] === 'Swap declined. The duty is now with another member.'
+        'unnamed' => $unnamed['flash'] === 'You declined the request. This did not move the duty.'
             && str_contains($rowU, 'The duty is no longer yours: it is now with another member.'),
         'detail'  => $nobody['flash'] . ' | ' . $unnamed['flash'] . ' | ' . substr(preg_replace('/\s+/', ' ', strip_tags($rowN . ' ' . $rowU)) ?? '', 0, 300),
     ];
@@ -1209,15 +1213,33 @@ $scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $ne
     $msg  = $kept('asked', 'Rota swap request: ' . $roleName . ' on ' . $slot['words']);
     $w    = $scnWhereNow();
     $decl = $kept('asker', 'Your rota swap was declined: ' . $roleName . ' on ' . $w['slot']['words']);
+    // An accept of a request aimed at B, and of an OPEN request taken by C:
+    // the name in the e-mail must be whoever respond() recorded taking it.
+    $slotT = $newSlot($A);
+    $reqT  = $ask('asker', $slotT, $B, 'Accept e-mail');
+    $answer('asked', $reqT['swapId'], 'accept');
+    $accT  = $kept('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotT['words']);
+    $slotO = $newSlot($A);
+    $reqO  = $ask('asker', $slotO, 0, 'Open accept e-mail');
+    $answer('third', $reqO['swapId'], 'accept');
+    $accO  = $kept('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotO['words']);
     $routeDown(false);
+    $dutyOf = static fn (array $slot): string => $roleName . ' on ' . $slot['words'] . ', 10:00–12:00';
 
     return [
         'kept'    => $msg !== null,
         'asText'  => $msg !== null && str_contains($msg['text'], 'Can you <b>x</b> cover?')
             && str_contains($msg['html'], 'Can you &lt;b&gt;x&lt;/b&gt; cover?') && str_contains($msg['html'], '<b>x</b>') === false,
         'useBy'   => $msg !== null && (string) $msg['expiresAt'] === $expectedUseBy($slot['date']),
-        'whereNow' => $decl !== null && str_contains($decl['text'], 'it is now with ' . $people['third']['name']) && stripos($decl['text'], 'still yours') === false,
-        'detail'  => json_encode(['expiresAt' => $msg['expiresAt'] ?? null, 'expected' => $expectedUseBy($slot['date']), 'text' => substr($msg['text'] ?? '', 0, 400), 'decline' => substr($decl['text'] ?? '', 0, 400)]),
+        // Whole sentences, each between its own line breaks, so a wrong
+        // fixed sentence cannot hide behind a matching fragment (round 4:
+        // the accept sentences were pinned by nothing, and planting them
+        // back to wrong ones stayed green).
+        'declined' => $decl !== null && str_contains($decl['text'], "\n" . $people['asked']['name'] . ' declined your request to swap ' . $dutyOf($w['slot']) . ". This did not move the duty.\n")
+            && stripos($decl['text'], 'still yours') === false,
+        'accepted' => $accT !== null && str_contains($accT['text'], "\n" . $people['asked']['name'] . ' accepted your request to swap ' . $dutyOf($slotT) . ", and the duty was moved to them.\n"),
+        'openTaker' => $accO !== null && str_contains($accO['text'], "\n" . $people['third']['name'] . ' accepted your request to swap ' . $dutyOf($slotO) . ", and the duty was moved to them.\n"),
+        'detail'  => json_encode(['expiresAt' => $msg['expiresAt'] ?? null, 'expected' => $expectedUseBy($slot['date']), 'text' => substr($msg['text'] ?? '', 0, 300), 'decline' => substr($decl['text'] ?? '', 0, 300), 'accept' => substr($accT['text'] ?? '', 0, 300), 'open' => substr($accO['text'] ?? '', 0, 300)], JSON_UNESCAPED_UNICODE),
     ];
 };
 
@@ -1293,7 +1315,7 @@ check('C4 the asker cannot accept their own request', $c['askerAccept'], $c['det
 section('D  accepting moves the duty, and only once');
 // =============================================================================
 $d = $scnAcceptOnce();
-check('D1 the person who accepts is told it is theirs', $d['firstWords'], $d['detail']);
+check('D1 the person who accepts reads exactly what their answer did: "Swap accepted. The duty was moved to you."', $d['firstWords'], $d['detail']);
 check('D2 the duty moves to them and the request is marked accepted', $d['moved'], $d['detail']);
 check('D3 the "reminder already sent" stamp is cleared, so the new holder gets their own reminder', $d['stampCleared'], $d['detail']);
 check('D4 the new holder sees it among their own duties', $d['bSees'], $d['detail']);
@@ -1307,7 +1329,7 @@ check('D9 …and nobody is e-mailed twice', $d['notToldTwice'], $d['detail']);
 section('E  declining leaves the duty where it was');
 // =============================================================================
 $res = $answer('asked', $swapA, 'decline', 'Sorry, away too');
-check('E1 the person who declines reads where the duty is now — here, still with the person who asked', $res['flash'] === 'Swap declined. The duty stays with the person who asked.', $res['flash']);
+check('E1 the person who declines reads exactly what their answer did: "You declined the request. This did not move the duty."', $res['flash'] === 'You declined the request. This did not move the duty.', $res['flash']);
 check('E2 the duty is still the asker\'s, and the request is marked declined with the reply kept', $holder($slotA['id']) === $A && ($swap($swapA)['status'] ?? '') === 'declined' && ($swap($swapA)['responseMessage'] ?? '') === 'Sorry, away too');
 $aPage = $roster('asker')['body'];
 check('E3 the asker sees it was declined and that the duty is still theirs', preg_match('#data-swap-mine="' . $swapA . '" data-swap-status="declined"#', $aPage) === 1 && str_contains($aPage, 'The duty is still yours.') && str_contains($aPage, '/rota/swap?slot=' . $slotA['id'] . '"'));
@@ -1362,7 +1384,7 @@ $reqH  = $ask('asker', $slotH, $B, 'Withdraw test');
 $byB   = $answer('asked', $reqH['swapId'], 'withdraw');
 check('H1 the person asked cannot withdraw somebody else\'s request', ($swap($reqH['swapId'])['status'] ?? '') === 'pending', $byB['flash']);
 $byA = $answer('asker', $reqH['swapId'], 'withdraw');
-check('H2 the asker can withdraw it; the duty is still theirs', ($swap($reqH['swapId'])['status'] ?? '') === 'cancelled' && $holder($slotH['id']) === $A && str_contains($byA['flash'], 'withdrawn'), $byA['flash']);
+check('H2 the asker can withdraw it; the duty is still theirs', ($swap($reqH['swapId'])['status'] ?? '') === 'cancelled' && $holder($slotH['id']) === $A && $byA['flash'] === 'Your request was withdrawn. This did not move the duty.', $byA['flash']);
 $late = $answer('asked', $reqH['swapId'], 'accept');
 check('H3 a withdrawn request cannot then be accepted', $holder($slotH['id']) === $A && str_contains($late['flash'], 'already been answered'), $late['flash']);
 check('H4 it no longer waits on the person asked\'s page', str_contains($roster('asked')['body'], 'data-swap-for-me="' . $reqH['swapId'] . '"') === false);
@@ -1390,7 +1412,7 @@ check('I5 an open request cannot be declined: it stays open', ($swap($reqI['swap
 $own = $answer('asker', $reqI['swapId'], 'accept');
 check('I6 the asker cannot take their own open request', $holder($slotI['id']) === $A && ($swap($reqI['swapId'])['status'] ?? '') === 'pending', $own['flash']);
 $take = $answer('third', $reqI['swapId'], 'accept');
-check('I7 another member takes it: the duty is theirs', $holder($slotI['id']) === $C && ($swap($reqI['swapId'])['status'] ?? '') === 'accepted', $take['flash']);
+check('I7 another member takes it: the duty is theirs, and they read exactly what their answer did', $holder($slotI['id']) === $C && ($swap($reqI['swapId'])['status'] ?? '') === 'accepted' && $take['flash'] === 'Swap accepted. The duty was moved to you.', $take['flash']);
 check('I8 the asker is e-mailed that it was accepted', $mails('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotI['words']) === 1);
 $again = $answer('asked', $reqI['swapId'], 'accept');
 check('I9 a second member pressing Take afterwards moves nothing', $holder($slotI['id']) === $C, $again['flash']);
@@ -1451,11 +1473,11 @@ section('W  where the duty is now, after a decline');
 // =============================================================================
 $w = $scnWhereNow();
 check('W1 a decline after an administrator moved the duty does NOT tell the asker "still yours": it names who has it', $w['true'], $w['detail']);
-check('W2 …nor tell the person who declined that "the duty stays with the person who asked"', $w['declinerTrue'], $w['detail']);
+check('W2 …and the person who declined reads only what their answer did ("This did not move the duty."), never "the duty stays with the person who asked"', $w['declinerTrue'], $w['detail']);
 $ww = $scnWithdrawMoved();
-check('W3 an asker who withdraws after the duty was moved is not told "the duty is still yours"', $ww['true'], $ww['detail']);
+check('W3 an asker who withdraws after the duty was moved reads only what their answer did, never "the duty is still yours"', $ww['true'], $ww['detail']);
 $wr = $scnWhereNowRare();
-check('W4 a duty taken off everybody is described as not assigned to anybody — to the decliner and on the asker\'s list', $wr['nobody'], $wr['detail']);
+check('W4 a duty taken off everybody is described as not assigned to anybody on the asker\'s list (the decliner reads the fixed sentence)', $wr['nobody'], $wr['detail']);
 check('W5 a holder whose name cannot be read is described as "another member", never a blank', $wr['unnamed'], $wr['detail']);
 
 // =============================================================================
@@ -1465,7 +1487,9 @@ $m = $scnMailContent();
 check('M1 (the premise) with the mail server down, the e-mail is KEPT in the mail queue, where it can be read', $m['kept'], $m['detail']);
 check('M2 the asker\'s own words go as TEXT: shown as typed in the text part, escaped in the HTML part, never as markup', $m['asText'], $m['detail']);
 check('M3 the e-mail carries its use-by moment: the start of the day after the duty, on the organisation\'s clock', $m['useBy'], $m['detail']);
-check('M4 the decline e-mail after the duty was moved says who has it now, not "still yours"', $m['whereNow'], $m['detail']);
+check('M4 the decline e-mail says what the answer did, word for word — "<name> declined your request to swap <duty>. This did not move the duty." — even with the duty moved', $m['declined'], $m['detail']);
+check('M5 the accept e-mail says, word for word, "<name> accepted your request to swap <duty>, and the duty was moved to them."', $m['accepted'], $m['detail']);
+check('M6 for an OPEN request it names whoever TOOK it, as respond() recorded it', $m['openTaker'], $m['detail']);
 
 // =============================================================================
 section('T  the lock: two answers at once');
@@ -1563,9 +1587,9 @@ $plants  = [
         ['$acceptWhy  = $whyNot($w, RotaSwaps::ACCEPT);', "\$acceptWhy  = '';"],
         static fn (): bool => $scnPageAsks()['noAccept'],
     ],
-    'P17 "where the duty is now" no longer asks who holds it' => ['_core/RotaSwaps.php',
-        ['if ($holderId !== null && $holderId === $readerId) {', 'if (true) {'],
-        static fn (): bool => $scnWhereNow()['true'] && $scnMailContent()['whereNow'],
+    'P17 the asker\'s list no longer asks who holds the duty' => ['_core/RotaSwaps.php',
+        ['if ($holderId !== null && $holderId === $askerId) {', 'if (true) {'],
+        static fn (): bool => $scnWhereNow()['true'],
     ],
     'P18 the "open requests switched off" refusal removed' => ['_core/RotaSwaps.php',
         ['if ($target === null && $openAllowed === false) {', 'if (false) {'],
@@ -1575,16 +1599,36 @@ $plants  = [
         ["if (\$who === null || self::whyNotTold(\$db, \$siteId, \$id, \$who) !== '') {", 'if ($who === null) {'],
         static fn (): bool => ($r = $scnOpenMail())['switchOff'] && $r['suspended'] && $r['noAddress'],
     ],
-    'P21 the answer page goes back to a fixed sentence about the duty' => ['_apps/rota/swap-respond.php',
-        ["\$where = RotaSwaps::whereDutyIsNow(\$now['id'], \$now['name'], \$result['askerID'], \$userId);", "\$where = 'The duty is still yours.';"],
-        static fn (): bool => $scnWithdrawMoved()['true'] && $scnWhereNow()['declinerTrue'],
+    'P21 the accept message back to its old, wrong sentence' => ['_core/RotaSwaps.php',
+        ["self::ACCEPT   => 'Swap accepted. The duty was moved to you.',", "self::ACCEPT   => 'Swap accepted. The duty is now yours and is on your list below.',"],
+        static fn (): bool => $scnAcceptOnce()['firstWords'],
+    ],
+    'P24 the decline message back to "the duty stays with the person who asked"' => ['_core/RotaSwaps.php',
+        ["self::DECLINE  => 'You declined the request. This did not move the duty.',", "self::DECLINE  => 'Swap declined. The duty stays with the person who asked.',"],
+        static fn (): bool => $scnWhereNow()['declinerTrue'],
+    ],
+    'P25 the withdraw message back to "the duty is still yours"' => ['_core/RotaSwaps.php',
+        ["self::WITHDRAW => 'Your request was withdrawn. This did not move the duty.',", "self::WITHDRAW => 'Your swap request was withdrawn. The duty is still yours.',"],
+        static fn (): bool => $scnWithdrawMoved()['true'],
+    ],
+    'P26 the accept e-mail back to its old, wrong sentence' => ['_core/RotaSwaps.php',
+        ["', and the duty was moved to them.'", "'. The duty is now theirs, and is no longer on your list.'"],
+        static fn (): bool => $scnMailContent()['accepted'],
+    ],
+    'P27 the accept e-mail names the person ASKED, not who took it' => ['_core/RotaSwaps.php',
+        ["\$answerer = (string) (\$did['answererName'] ?? '');", "\$answerer = \$req['targetName'];"],
+        static fn (): bool => $scnMailContent()['openTaker'],
+    ],
+    'P28 the decline e-mail back to "the duty is still yours"' => ['_core/RotaSwaps.php',
+        ["'. This did not move the duty.',\n", "'. The duty is still yours.',\n"],
+        static fn (): bool => $scnMailContent()['declined'],
     ],
     'P22 "not assigned to anybody" no longer recognised' => ['_core/RotaSwaps.php',
         ['if ($holderId === null) {', 'if (false) {'],
         static fn (): bool => $scnWhereNowRare()['nobody'],
     ],
     'P23 a holder with no name written as a blank' => ['_core/RotaSwaps.php',
-        ["\$who = \$holderName !== '' ? \$holderName : 'another member';", '$who = $holderName;'],
+        ["(\$holderName !== '' ? \$holderName : 'another member')", '$holderName'],
         static fn (): bool => $scnWhereNowRare()['unnamed'],
     ],
 ];

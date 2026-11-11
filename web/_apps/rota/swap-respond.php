@@ -18,8 +18,8 @@
  * After a stored accept or decline, an e-mail to the asker is ATTEMPTED
  * (`RotaSwaps::tellAnswered()`, subject to their own choices), AFTER the
  * commit and never able to undo it: a broken mail route must not leave the
- * duty half-moved. The message shown here says where the duty is NOW, from
- * `RotaSwaps::whereDutyIsNow()`, and promises nobody an e-mail.
+ * duty half-moved. The message shown here says what this answer DID
+ * (`RotaSwaps::answerWords()`), and promises nobody an e-mail.
  *
  * @package   Portal\Rota
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -81,23 +81,18 @@ if ($result['outcome'] === RotaSwaps::DONE) {
     Logger::activity($logged[$action][0], 'Rota swap request #' . $swapId . ' ' . $logged[$action][1] . ' (duty #' . $result['slotID'] . ')');
 
     if ($action !== RotaSwaps::WITHDRAW) {
-        // An e-mail to the asker is ATTEMPTED after the commit; its outcome
-        // is not shown, because whether one arrives cannot be known here.
-        RotaSwaps::tellAnswered($db, $siteId, $swapId);
+        // An e-mail to the asker is ATTEMPTED after the commit, built from
+        // what respond() established inside its transaction; its outcome is
+        // not shown, because whether one arrives cannot be known here.
+        RotaSwaps::tellAnswered($db, $siteId, $swapId, $result);
     }
-    // 🗣️ Where the duty is NOW, read from its row after the answer, never
-    //    predicted from the answer (#657 round 3). These used to say "The
-    //    duty is still yours." after a withdrawal and "The duty stays with
-    //    the person who asked." after a decline — both false once an
-    //    administrator had moved the duty, on a page whose own list then
-    //    said otherwise.
-    $now   = RotaSwaps::holderOf($db, $siteId, $result['slotID']);
-    $where = RotaSwaps::whereDutyIsNow($now['id'], $now['name'], $result['askerID'], $userId);
-    $_SESSION['rota_flash'] = match ($action) {
-        RotaSwaps::WITHDRAW => 'Your swap request was withdrawn. ' . $where,
-        RotaSwaps::ACCEPT   => 'Swap accepted. ' . $where,
-        default             => 'Swap declined. ' . $where,
-    };
+    // 🗣️ What THIS answer did — a fixed sentence per answer, never where the
+    //    duty is "now" (#657 round 4). Rounds 2-3 read the duty's row again
+    //    after the commit and described it; those sentences kept going untrue
+    //    at the edges, and the read could throw and show an error page for an
+    //    answer that had been stored. Where the duty is now is shown by the
+    //    Duty Roster's own lists, which read it while drawing the page.
+    $_SESSION['rota_flash'] = RotaSwaps::answerWords($action);
     $_SESSION['rota_flash_type'] = 'success';
     header('Location: ' . $back);
     exit();
