@@ -13,9 +13,9 @@ Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions t
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, b8d67707 | Check round 4: behaviour converged (1,265,400 cells, nothing outside #946); six fixes in guard, tests and wording (restore the carried-moment branch, the limit as a class, two untrue sentences, two canonical parts unpinned, a PHP warning). Round 5 building. #946 widened |
-| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 81e23793 | Check round 3: below 60° and the date line right (independent NOAA comparison); REGRESSION in Arctic CET towns where sunset falls before local noon (Vardø, Tromsø, Kirkenes). Round 4 SIMPLIFIES: pair each sunset with its own solar transit. Raised #942, #943, #945 |
-| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 775cf7fb | Round 2 built ('for ever' stated as a ceiling in eight places; could-not-read driven in-process; subtitle and log_sweep docblock exact). Check round 2 running. Raised #947 |
+| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, af861384 | Behaviour settled (0 wrong beyond #946 over 330,727 + 4.6M cells). Round 6 narrow check: one untrue sentence ('ago ago' Mon-Sat passes the guard). Comment fix + one K cell in progress, then I review and integrate |
+| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 49dc1411 | Check round 4: sunset right (independent USNO model, 69 places x 10 years, 0 wrong days); one test gap (the page's no-sunset note unpinned). Round 5 building. Raised #942, #943, #945 |
+| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, f96459b7 | Check round 3: one untrue refusal (the 0-days message offers 'Never delete' on the organisation's form where it is not offered). Round 4 building. Raised #947 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
