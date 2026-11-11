@@ -109,6 +109,16 @@
  *      ignored; the Settings page refuses adding the key for one organisation;
  *      and the portal-address card warns only when passkeys follow it. Ten
  *      plants, each caught.
+ *      Since #907 two more behaviours are DRIVEN rather than read: while the
+ *      passkey setting cannot be READ (one read made to fail by a stand-in
+ *      view, everything else working) both pages refuse with a sentence saying
+ *      so, and never fall back to the portal's own name; and in "each
+ *      organisation its own address" mode both pages name the ORGANISATION'S
+ *      own host, where any other mode names the set address. Four plants,
+ *      each caught. That part renames `tblSettings` away for a moment and puts
+ *      it back in a `finally`, at the start of every run and first thing in
+ *      the clean-up, and lends the default organisation an address for a
+ *      moment, put back the same way.
  *
  * SAFETY
  * ------
@@ -123,8 +133,13 @@
  *   of its own), and a third for one check (`auth.totpIssuer`, the name an
  *   authenticator app shows), and puts each back exactly. For part I it adds one trigger,
  *   `selftest_two_step_refuse`, which refuses backup codes for two of its
- *   own accounts only, and drops it. So do not run it at the same moment as
- *   another test on the same database.
+ *   own accounts only, and drops it. For K56-K59 (#907) it renames
+ *   `tblSettings` to `tblSettings_p907_away` for a few requests, with a view
+ *   standing in, and puts it back (also at the start of a run, and first in
+ *   the clean-up, in case a run was stopped then). For K60-K64 it gives the
+ *   default organisation the address `p907-own.example.org` and puts back
+ *   what was there. So do not run it at the same moment as another test on
+ *   the same database.
  * - The scratch folder is a NEW child of `SELFTEST_WEB_DIR` (or the system's
  *   temporary folder). It refuses if that folder contains the repository or
  *   is inside it. The child is deleted at the end only if it still holds
@@ -196,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 154; // five added by #598 (part L)
+const EXPECTED_CHECKS = 163; // five added by #598 (part L); nine by #907 (K56-K64)
 
 function refuse(string $why): never
 {
@@ -349,9 +364,44 @@ function login(string $who): string
     return 'tss-' . $who;
 }
 
+/**
+ * #907: the name `tblSettings` is given while ONE read of it is made to fail.
+ * A stand-in VIEW of the real name sits in front of it meanwhile (see
+ * whileRpReadFails()). The house technique is site-modes-selftest.php's
+ * reqWhileFailing(): rename the table away, put a view in its place that is
+ * the same in every column except one question, which raises a database error.
+ */
+const SETTINGS_AWAY = 'tblSettings_p907_away';
+/** #907: the default organisation's own address in "own address each" mode, for K60-K64 only. */
+const OWN_HOST_907 = 'p907-own.example.org';
+
+/**
+ * #907: put `tblSettings` back if a run stopped while it was renamed away.
+ * It touches only a table carrying this test's own name, and only when no
+ * real table holds `tblSettings` (the stand-in VIEW is dropped first), so it
+ * cannot touch anything else. MUST run before anything writes a setting: the
+ * stand-in's settingID column raises an error for the passkey row, and the
+ * clean-up's "put each setting back" finds rows BY settingID.
+ */
+function putSettingsBack(): void
+{
+    $here = array_column(q('SELECT TABLE_NAME AS t, TABLE_TYPE AS kind FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?, ?)', 'ss', ['tblSettings', SETTINGS_AWAY]), 'kind', 't');
+    if (isset($here[SETTINGS_AWAY]) === false) {
+        return;
+    }
+    if (($here['tblSettings'] ?? '') === 'VIEW') {
+        q('DROP VIEW `tblSettings`');
+        unset($here['tblSettings']);
+    }
+    if (isset($here['tblSettings']) === false) {
+        q('RENAME TABLE `' . SETTINGS_AWAY . '` TO `tblSettings`');
+    }
+}
+
 function removeWorld(): void
 {
     global $db;
+    putSettingsBack();
     $db->query('DROP TRIGGER IF EXISTS ' . TRIGGER);
     q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%' OR userAgent = ?", 's', [AGENT]);
     q("DELETE FROM tblErrors WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%'");
@@ -378,6 +428,10 @@ function removeWorld(): void
     // #903: K51 and K53/K54 may leave an organisation's own passkey-address row
     // if interrupted. A real installation never holds one (no page can make it).
     q("DELETE FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NOT NULL");
+    // #907: the default organisation's own address, if a run stopped while K60-K64
+    // had lent it one. Only this test's own made-up name is cleared; the run
+    // itself puts back exactly what was there (see `hostPattern1` in cleanup()).
+    q('UPDATE `tblSites` SET `hostPattern` = NULL WHERE `siteID` = 1 AND `hostPattern` = ?', 's', [OWN_HOST_907]);
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 922000 AND 922999');
@@ -431,6 +485,11 @@ function cleanup(): void
         stopServer($state['extra'][$n]);
     }
     try {
+        // #907: the real settings table back FIRST, before anything below finds a setting by its number.
+        putSettingsBack();
+        if (array_key_exists('hostPattern1', $state) === true) {
+            q('UPDATE `tblSites` SET `hostPattern` = ? WHERE `siteID` = 1', 's', [$state['hostPattern1']]);
+        }
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -2662,6 +2721,167 @@ setting('site.url', $seededUrl);
 ok('K55 the help under the portal-address box says what passkeys really follow in ALL TWENTY-FOUR combinations of a passkey name set, several organisations switched on or off, the three ways of telling them apart (session, path, each by its own address), and the box set — and only the sentence the rule picks for each',
     $k55 === $k55Want, 'seen ' . json_encode($k55) . '; wanted ' . json_encode($k55Want));
 
+// --- #907 (1). A READ OF THE PASSKEY SETTING THAT FAILS IS REFUSED, never
+//     treated as "not set". `PasskeyAddress::stored()` says why: falling back
+//     to the portal's own name would move the rpId under every member whose
+//     passkey is tied to a wider name an administrator set, for as long as the
+//     database hiccuped — and those passkeys would simply stop being offered.
+//     Until #907 nothing drove this: planting "a failed read counts as not
+//     set" left every check green (149 of 149 then), because no fixture could
+//     make that ONE read fail while the page still ran.
+//
+//     HOW THE READ IS MADE TO FAIL: `tblSettings` is renamed away and a VIEW of
+//     the same name stands in, the same in every column except `settingID`,
+//     which raises a database error (JSON_EXTRACT of text that is not JSON)
+//     for the installation-wide passkey row ONLY. PasskeyAddress orders by
+//     `settingID`, so its question fails; start-up's settings read and
+//     PortalAddress's `site.url` read never evaluate that column for that row,
+//     so the page still runs and the portal's address is still known — which
+//     is exactly the state in which the fallback would SUCCEED and the refusal
+//     is therefore a real choice. K56 asserts that premise first, against the
+//     database itself, because without it K57-K59 would prove nothing. The
+//     table is put back in a `finally`, at the start of every run, and first
+//     thing in the clean-up (putSettingsBack()).
+/**
+ * Run `$send` while the passkey setting's read fails, everything else working.
+ *
+ * @return array{answer: mixed, premise: array{rpRead: string, startUp: int, siteUrl: bool}}
+ */
+$whileRpReadFails = static function (callable $send): array {
+    $columns = array_column(q('SELECT COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION', 's', ['tblSettings']), 'c');
+    if (in_array('settingID', $columns, true) === false) {
+        refuse('tblSettings has no settingID column any more, so K56-K59 cannot make the passkey setting\'s read fail: read #907');
+    }
+    try {
+        q('RENAME TABLE `tblSettings` TO `' . SETTINGS_AWAY . '`');
+        $list = array_map(
+            static fn (string $c): string => $c === 'settingID'
+                ? "IF(`settingKey` = 'auth.webauthn.rpID' AND `siteID` IS NULL, JSON_EXTRACT(`settingKey`, '$'), `settingID`) AS `settingID`"
+                : '`' . $c . '`',
+            $columns
+        );
+        q('CREATE VIEW `tblSettings` AS SELECT ' . implode(', ', $list) . ' FROM `' . SETTINGS_AWAY . '`');
+        // The premise, asked of the database: PasskeyAddress's OWN question
+        // (copied from stored(), and K56 fails if that ever stops matching)
+        // fails, while start-up's and PortalAddress's still answer.
+        try {
+            q('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL ORDER BY `settingID` DESC LIMIT 1', 's', ['auth.webauthn.rpID']);
+            $rpRead = 'answered';
+        } catch (Throwable $e) {
+            $rpRead = 'failed: ' . $e->getMessage();
+        }
+        $startUp = count(q('SELECT settingKey, settingValue, isSensitive, siteID FROM tblSettings WHERE siteID IS NULL OR siteID = ? ORDER BY siteID IS NULL DESC', 'i', [1]));
+        $siteUrl = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL ORDER BY settingID DESC LIMIT 1', 's', ['site.url']) !== null;
+        $answer  = $send();
+    } finally {
+        putSettingsBack();
+    }
+
+    return ['answer' => $answer, 'premise' => ['rpRead' => $rpRead, 'startUp' => $startUp, 'siteUrl' => $siteUrl]];
+};
+// The add-a-passkey page needs a member signed in and the page's form token;
+// both are fetched BEFORE the read is made to fail, so only the passkey
+// request itself meets the failing read. The token is fetched afresh for each
+// run: the page spends it (Auth::verifyCsrf() replaces it on acceptance) BEFORE
+// it asks for the passkey address, so a second run with the first token would
+// be refused for the token and prove nothing about the address.
+[$k57Jar]  = passwordStep('sam', ip(180));
+$k57Token  = static fn (): string => token(req($k57Jar, 'GET', '/account', null, ip(180))['body']);
+$bothPages = static function (string $formToken) use ($k57Jar): array {
+    return [
+        'signIn' => (array) (json_decode(req(newJar(), 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), ip(181))['body'], true) ?? []),
+        'add'    => (array) (json_decode(req($k57Jar, 'POST', '/account/webauthn', (string) json_encode(['action' => 'register_options', 'csrf_token' => $formToken]), ip(180))['body'], true) ?? []),
+    ];
+};
+$formToken = $k57Token();
+$k56       = $whileRpReadFails(static fn (): array => $bothPages($formToken));
+ok('K56 premise: with the stand-in in place, the passkey setting\'s own question FAILS while start-up\'s settings read and the site.url read still answer (so the pages still run, and only the one read is broken)',
+    str_starts_with($k56['premise']['rpRead'], 'failed: ') === true && $k56['premise']['startUp'] > 0 && $k56['premise']['siteUrl'] === true
+        && str_contains((string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'PasskeyAddress.php'), "'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL ORDER BY `settingID` DESC LIMIT 1'") === true,
+    (string) json_encode($k56['premise']) . ' (and PasskeyAddress must still ask exactly the question copied here)');
+$k57Words = 'the portal could not read its own settings';
+$k57Refused = static fn (array $seen): bool => ($seen['success'] ?? null) === false && array_key_exists('options', $seen) === false
+    && str_contains((string) ($seen['error'] ?? ''), $k57Words) === true;
+ok('K57 while the passkey setting cannot be READ, the sign-in options are REFUSED with the sentence saying so — not the portal\'s own name (127.0.0.1) as if nothing were set',
+    $k57Refused($k56['answer']['signIn']) === true, 'answer ' . json_encode($k56['answer']['signIn']));
+ok('K58 ...and so are the options for ADDING a passkey, with the replacement form token on the refusal (#770)',
+    $k57Refused($k56['answer']['add']) === true && preg_match('/^[0-9a-f]{64}$/', (string) ($k56['answer']['add']['csrfToken'] ?? '')) === 1,
+    'answer ' . mb_substr((string) json_encode($k56['answer']['add']), 0, 300));
+// The plant: a failed read counted as "not set", the fault #907 names.
+$formToken = $k57Token();
+$was       = $plantFile($rpCore, "return self::\$stored = ['state' => 'unreadable', 'value' => ''];", "return self::\$stored = ['state' => 'read', 'value' => ''];");
+$q11       = $whileRpReadFails(static fn (): array => $bothPages($formToken));
+$unplantFile($rpCore, $was);
+ok('K59 PLANT, a failed read treated as "not set": the sign-in options SUCCEED naming 127.0.0.1 and the add-a-passkey options name it too, so K57 and K58 can fail',
+    str_starts_with($q11['premise']['rpRead'], 'failed: ') === true
+        && ($q11['answer']['signIn']['success'] ?? null) === true && ($q11['answer']['signIn']['options']['rpId'] ?? null) === '127.0.0.1'
+        && ($q11['answer']['add']['success'] ?? null) === true && ($q11['answer']['add']['options']['rp']['id'] ?? null) === '127.0.0.1',
+    'premise ' . json_encode($q11['premise']) . '; sign-in ' . mb_substr((string) json_encode($q11['answer']['signIn']), 0, 200) . '; add ' . mb_substr((string) json_encode($q11['answer']['add']), 0, 200));
+
+// --- #907 (2). In "each organisation its own address" mode, passkeys follow
+//     the ORGANISATION'S OWN NAME. The card under the portal-address box tells
+//     administrators so, and K55 pins only those WORDS: planting "the origin
+//     from the set address, or from the request, not PortalAddress::base()"
+//     turned no behaviour check red until now. So the real pages are asked,
+//     with the portal's address set (https://portal.example.org) and the
+//     default organisation given an address of its own: in that mode the
+//     options must name the organisation's own host and an answer from a page
+//     at it must be accepted; with organisations told apart any OTHER way
+//     (where every organisation shares the portal's address) the set address.
+//     A request to 127.0.0.1 is a request to the default organisation in that
+//     mode, because a name that is nobody's own opens it (Site::preDetect()).
+$state['hostPattern1'] = one('SELECT `hostPattern` FROM `tblSites` WHERE `siteID` = 1')['hostPattern'] ?? null;
+q('UPDATE `tblSites` SET `hostPattern` = ? WHERE `siteID` = 1', 's', [OWN_HOST_907]);
+setting('auth.webauthn.rpID', '');
+setting('site.url', 'https://portal.example.org');
+setting('multisite.enabled', 'true');
+/** The rp ids both pages name, and two signed answers: one from the organisation's own page, one from the set address's. */
+$k60Probe = static function () use ($pkFresh): array {
+    [$jar] = passwordStep('sam', ip(182));
+    $page  = req($jar, 'GET', '/account', null, ip(182));
+    $add   = (array) (json_decode(req($jar, 'POST', '/account/webauthn', (string) json_encode(['action' => 'register_options', 'csrf_token' => token($page['body'])]), ip(182))['body'], true) ?? []);
+
+    return [
+        'own'  => $pkFresh(ip(183), OWN_HOST_907, 'https://' . OWN_HOST_907),
+        'set'  => $pkFresh(ip(183), 'portal.example.org', 'https://portal.example.org'),
+        'add'  => (string) ($add['options']['rp']['id'] ?? '(none: ' . mb_substr((string) json_encode($add), 0, 160) . ')'),
+    ];
+};
+$k60Says = static fn (array $p): string => 'sign-in rpId ' . var_export($p['own']['rpId'], true) . ', add rp.id ' . var_export($p['add'], true)
+    . '; from the organisation\'s own page: ' . $p['own']['verify']['body'] . '; from the set address: ' . $p['set']['verify']['body'];
+setting('multisite.detectionMode', 'subdomain');
+$k60 = $k60Probe();
+ok('K60 in "each organisation its own address" mode, with the portal\'s address set: both passkey pages name the ORGANISATION\'S own host (' . OWN_HOST_907 . '), an answer from a page there is accepted, and one from the set address is refused',
+    $k60['own']['rpId'] === OWN_HOST_907 && $k60['add'] === OWN_HOST_907 && $pkOk($k60['own']) === true && $pkOk($k60['set']) === false,
+    $k60Says($k60));
+setting('multisite.detectionMode', 'session');
+$k61 = $k60Probe();
+ok('K61 ...and with organisations told apart by sign-in session instead (every organisation shares the portal\'s address), the SET address: portal.example.org on both pages, accepted from there and refused from the organisation\'s own name',
+    $k61['own']['rpId'] === 'portal.example.org' && $k61['add'] === 'portal.example.org' && $pkOk($k61['set']) === true && $pkOk($k61['own']) === false,
+    $k60Says($k61));
+setting('multisite.detectionMode', 'subdomain');
+// The plant that matters most is the FIRST: "the set address, else the
+// request" is what base() gives in every mode EXCEPT own-address, so it leaves
+// every other passkey check green (K35-K55 included) and only K60 can see it.
+// The two halves on their own are planted after it; each also breaks a check
+// above (K35 and K39), so they are the easy ones.
+$k62Plants = [
+    'K62' => ['the set address, ELSE the request (what base() gives in every other mode)', "\$origin = (PortalAddress::saved() !== '' ? PortalAddress::saved() : PortalAddress::fromRequest());", 'portal.example.org'],
+    'K63' => ['the SET address alone', "\$origin = PortalAddress::saved();", 'portal.example.org'],
+    'K64' => ['the REQUEST alone', "\$origin = PortalAddress::fromRequest();", '127.0.0.1'],
+];
+foreach ($k62Plants as $label => [$what, $planted, $named]) {
+    $was = $plantFile($rpCore, "\$origin = PortalAddress::base();", $planted);
+    $qp  = $k60Probe();
+    $unplantFile($rpCore, $was);
+    ok($label . ' PLANT, the origin taken from ' . $what . ' rather than PortalAddress::base(): in own-address mode the pages name ' . $named . ' and the organisation\'s own page is refused, so K60 can fail',
+        $qp['own']['rpId'] === $named && $qp['add'] === $named && $pkOk($qp['own']) === false, $k60Says($qp));
+}
+q('UPDATE `tblSites` SET `hostPattern` = ? WHERE `siteID` = 1', 's', [$state['hostPattern1']]);
+setting('multisite.enabled', (string) seeded('multisite.enabled'));
+setting('multisite.detectionMode', (string) seeded('multisite.detectionMode'));
+setting('site.url', $seededUrl);
+
 // --- K9. A KIOSK browser: the Asset Tracker hand-over put a member in the
 //     session (`kiosk_user_id`), which is NOT a sign-in. Then somebody really
 //     signs in on it. The kiosk member and the person signing in are
@@ -2838,7 +3058,10 @@ $left = (int) one(
     . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . INVITEE_EMAIL . "') "
     . "+ (SELECT COUNT(*) FROM tblInvitation WHERE email IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
     . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
-    . "+ (SELECT COUNT(*) FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999) AS n"
+    . "+ (SELECT COUNT(*) FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999) "
+    // #907: the settings table renamed away, or its stand-in view, left behind; and the default organisation's lent address.
+    . "+ (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND (TABLE_NAME = '" . SETTINGS_AWAY . "' OR (TABLE_NAME = 'tblSettings' AND TABLE_TYPE = 'VIEW'))) "
+    . "+ (SELECT COUNT(*) FROM `tblSites` WHERE `siteID` = 1 AND NOT (`hostPattern` <=> " . ($state['hostPattern1'] === null ? 'NULL' : "'" . $db->real_escape_string((string) $state['hostPattern1']) . "'") . ")) AS n"
 )['n'];
 $settingsBack = true;
 foreach ($before as $settingKey => $row) {

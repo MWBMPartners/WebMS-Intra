@@ -25,8 +25,10 @@
  *      the authenticator signs SHA-256 of exactly that name and reports the
  *      page's own origin (what WebAuthn::verify*() checks); a port, capitals,
  *      a closing dot, a scheme and a path are each refused; an empty display
- *      name is accepted; and a page reached by a NUMBER gets no passkeys at
- *      all, whatever rpId is sent, or none.
+ *      name is accepted; a page reached by a NUMBER gets no passkeys at
+ *      all, whatever rpId is sent, or none; and (#907) on a page at a name
+ *      with a letter outside a-z (bücher.localhost) that name as typed is
+ *      refused, and only its "xn--" form is accepted.
  *   B  the portal's rule agrees with the browser: for each value typed into
  *      the setting, `PasskeyAddress::check()` (the real file, run by PHP)
  *      either keeps it — and the browser then ACCEPTS what it keeps — or
@@ -34,8 +36,9 @@
  *      loses nothing a browser would have taken, and tidying (capitals, a
  *      closing dot) turns a value the browser refuses into one it accepts.
  *   X  plants: a copy of PasskeyAddress.php that KEEPS capitals, one with its
- *      "not a number" refusal removed, and one that refuses a good name, are
- *      each judged by section B, which must go red for each. And one control (a comment
+ *      "not a number" refusal removed, one that refuses a good name, and
+ *      (#907) one that lets letters outside a-z through, are each judged by
+ *      section B, which must go red for each. And one control (a comment
  *      added) must stay green.
  *
  * WHAT IT CANNOT DO, said plainly
@@ -254,6 +257,11 @@ async function main() {
 
         const named = `http://localhost:${port}/`;
         const numbered = `http://127.0.0.1:${port}/`;
+        /* #907: a page at a name with a letter outside a-z. "bücher.localhost" is
+           sent by the browser as its ASCII ("xn--") form, and a name under
+           localhost is a secure page with no certificate and needs no address
+           book entry, which is why it stands in for any such name here. */
+        const idn = `http://xn--bcher-kva.localhost:${port}/`;
 
         /* ── A. What the browser does ──────────────────────────────────── */
         console.log('A. What a real browser does with each rpId');
@@ -289,6 +297,22 @@ async function main() {
         const byNumberNone = await make(undefined);
         check(`A${n} on a page reached by a NUMBER (127.0.0.1) no passkey can be made at all: refused with the number as the rpId, and with none`,
             refused(byNumber) && refused(byNumberNone), `${show(byNumber)} / ${show(byNumberNone)}`);
+        n += 1;
+        /* #907: what the code before #903 did with a stored name holding a letter
+           outside a-z. It sent the setting AS TYPED as the rpId (git show
+           7a666338^:web/_apps/auth/login/webauthn.php), so this asks the browser
+           about exactly that, on a page at that very name: the name as typed is
+           REFUSED, making and using alike, and only its "xn--" form is accepted,
+           signed as SHA-256 of the xn-- form. So no passkey can have been made
+           under such a setting, and PasskeyAddress ignoring it now strands none. */
+        await at(idn);
+        const idnTyped = await make('bücher.localhost');
+        const idnAscii = await make('xn--bcher-kva.localhost');
+        const idnTypedUse = idnAscii.ok === true ? await use('bücher.localhost', idnAscii.id) : { skipped: 'no passkey made under the xn-- form' };
+        check(`A${n} on a page at bücher.localhost, the name TYPED with its ü (what the old code sent) is REFUSED for making and for using a passkey; its "xn--" form is accepted and signed as exactly that form`,
+            refused(idnTyped) && refused(idnTypedUse) && idnAscii.ok === true && idnAscii.rpIdHash === sha('xn--bcher-kva.localhost')
+                && idnAscii.origin === `http://xn--bcher-kva.localhost:${port}`,
+            `${show(idnTyped)} / ${show(idnTypedUse)} / ${show(idnAscii)}`);
 
         /* ── B. The portal's rule agrees with the browser ──────────────── */
         console.log('B. PasskeyAddress::check() keeps only what the browser accepts, and refuses only what it refuses');
@@ -297,6 +321,8 @@ async function main() {
             ['localhost', named], ['LOCALHOST', named], ['localhost.', named], ['  localhost ', named],
             [`localhost:${port}`, named], ['http://localhost', named], ['localhost/sign-in', named],
             ['me@localhost', named], ['', named], ['127.0.0.1', numbered],
+            // #907: a letter outside a-z is refused by the rule, and must be by the browser too; its xn-- form kept, and accepted.
+            ['bücher.localhost', idn], ['xn--bcher-kva.localhost', idn],
         ];
         const judge = async (ruleFile) => {
             const verdicts = portalVerdicts(ruleFile, typed.map(([value]) => value));
@@ -354,6 +380,13 @@ async function main() {
             await plant('ip-allowed', [["if (preg_match('/^[0-9.]+$/', $id) === 1) {", 'if (false) {']], true));
         check('X3 PLANT, the other direction — a refusal that also catches a good name: "localhost" is refused although the browser accepts it, so B1 can fail',
             await plant('refuses-all', [["if (str_contains($text, '://') === true) {", 'if (true) {']], true));
+        /* #907: the other half of the "letters outside a-z" claim. A rule that
+           let such a letter through would KEEP "bücher.localhost" as typed, and
+           the browser refuses it (A12), so B1 must go red. Bytes 0x80-0xFF are
+           let into each part of the name, which is what any UTF-8 letter is. */
+        check('X5 PLANT, letters outside a-z let through: "bücher.localhost" is KEPT as typed and the browser refuses it, so B1 can fail',
+            await plant('idn-kept', [["private const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';",
+                "private const HOST_LABEL = '[a-z0-9\\x80-\\xff](?:[a-z0-9\\x80-\\xff-]{0,61}[a-z0-9\\x80-\\xff])?';"]], true));
         check('X4 CONTROL, a comment added: B1 stays green, so a red B1 above means the rule changed, not the harness',
             await plant('comment', [["$id = rtrim(strtolower($text), '.');", "// p903 control\n        $id = rtrim(strtolower($text), '.');"]], false));
     } finally {

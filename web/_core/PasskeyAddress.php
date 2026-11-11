@@ -36,6 +36,13 @@
  * the fallback, had it ever run, kept the PORT from the Host header, which
  * the same browser also refuses.
  *
+ * WHICH BROWSER "MEASURED" MEANS IN THIS FILE (#907): every "measured" in
+ * this file was measured in ONE browser, Microsoft Edge 157, by that same
+ * script. Edge is built on Chromium, as Chrome is, but neither Chrome nor
+ * Chromium was run separately, and Firefox and Safari — which implement the
+ * same standard with their own code — were NOT measured at all. Where this
+ * file says "the browser refuses", read "Edge 157 refuses".
+ *
  * THE RULE
  * --------
  * rpId:
@@ -63,7 +70,7 @@
  * set, when PortalAddress::visitorCanChooseHost() is true.) Yes, and this is
  * the reasoning, not an assumption:
  *   - a real browser sends the Host of the page it is on, and REFUSES an rpId
- *     that is not that page's name or a domain above it (measured: a page at
+ *     that is not that page's name or a domain above it (measured in Edge 157: a page at
  *     http://localhost refused "localhost:<port>", "LOCALHOST", "localhost."
  *     and "http://localhost" alike). A wrong name FAILS; it reveals nothing;
  *   - while the setting is empty, the rpId and the expected origin come from
@@ -85,7 +92,7 @@
  *   refuses. With `site.url` NOT set, each address the portal is reached at
  *   is its own rpId, so a passkey made at one is not offered at the other.
  *   Setting `site.url` and having members use that address is the cure.
- * - A portal reached by a NUMBER (an IP address). Measured: the browser
+ * - A portal reached by a NUMBER (an IP address). Measured in Edge 157: the browser
  *   refuses passkeys outright on such a page ("This is an invalid domain"),
  *   whatever rpId is sent. check() refuses a number as the SETTING for that
  *   reason; rule 2 passes the request's own name through untouched, because
@@ -118,9 +125,21 @@
  *     passkeys stop working at the other address (see "TWO addresses").
  *   - With the setting holding something UNUSABLE (a scheme, a port, a path,
  *     capitals, a closing dot), the old pages sent it as it was and the
- *     browser refused every one of those shapes (measured), so no passkey
- *     can have been made under it either. It is now ignored (or tidied, for
- *     capitals and a closing dot) and passkeys start working.
+ *     browser refused every one of those shapes (measured in Edge 157), so
+ *     no passkey can have been made under it either. It is now ignored (or
+ *     tidied, for capitals and a closing dot) and passkeys start working.
+ *   - With the setting holding a name with a letter outside a-z, such as
+ *     "bücher.example" typed with its ü (#907): the old pages sent it AS
+ *     TYPED (`git show 7a666338^:web/_apps/auth/login/webauthn.php` reads
+ *     `$rpID = App::settings('auth.webauthn.rpID') ?? …`, with no change to
+ *     the value), and checked answers against SHA-256 of that same text.
+ *     Measured in Edge 157 on a page at that very name (bücher.localhost,
+ *     which the browser shows and sends as xn--bcher-kva.localhost): the
+ *     name as typed is REFUSED, for making a passkey and for using one, and
+ *     only the "xn--" form is accepted. So no passkey can have been made under
+ *     such a setting either; it is now ignored, the portal's own name is used,
+ *     and nothing is stranded. Typed in its "xn--" form it is kept, and works.
+ *     (Case A12 of tools/passkey-address-browser-selftest.mjs.)
  *   - FROM NOW ON, with the setting empty, the rpId follows the portal's
  *     address, so CHANGING `site.url` to a different name — or, in "own
  *     address each" mode, an organisation's own address — strands every
@@ -177,7 +196,8 @@ final class PasskeyAddress
      * Check a value typed for the rpId, and tidy it.
      *
      * ACCEPTED: a bare host name, "portal.example.org". Capitals and one
-     * closing dot are tidied away, because the browser refuses both (measured)
+     * closing dot are tidied away, because the browser refuses both (measured
+     * in Edge 157, a Chromium browser; Firefox and Safari not measured)
      * — so a stored value carrying either can never have had a passkey made
      * under it, and tidying it cannot strand one.
      *
@@ -316,7 +336,7 @@ final class PasskeyAddress
      * 🏷️ The name a browser shows beside a passkey ("rp.name"): the
      * `auth.webauthn.rpName` setting when it holds something, else the
      * portal's name. An EMPTY setting is "not set" — the same `??` fault as
-     * the rpId had (#903). Measured: the browser ACCEPTS an empty name, so
+     * the rpId had (#903). Measured in Edge 157: it ACCEPTS an empty name, so
      * this one was only ever cosmetic; it is decided here so the two
      * settings cannot be read two ways.
      */

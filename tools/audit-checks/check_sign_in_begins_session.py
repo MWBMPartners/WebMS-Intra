@@ -338,7 +338,8 @@ def analyse(root: str) -> list[str]:
 # 🧪 Self-test: against a COPY of the real files, never the repository. Each
 #    case is (name, file, swaps, words). `swaps` is a list of (from, to) that
 #    must each match exactly once; a file not among COPIED is written new from
-#    the single swap's `to`.
+#    the single swap's `to`. `words` is one text, or a tuple of texts that must
+#    all appear in ONE finding (#907: a file name and what is written).
 # =============================================================================
 COPIED = [
     "web/_core/Auth.php",
@@ -368,7 +369,11 @@ PLANTS = [
         # added lines above it and moved it to 141, which turned this case red
         # on correct code. The 2fa write's finding names `2fa_user_id`, so
         # this text still picks out the sign-in write alone.
-        [("            Auth::beginSessionFor($webauthnUserId);\n", "")], "`$_SESSION['user_id']` is written"),
+        # #907: and the finding must name THIS FILE as well as the words. The
+        # words alone would be satisfied by the same finding about any other
+        # page's sign-in write, so a plant here could be "caught" by a fault
+        # reported somewhere else. A tuple: every part must be in ONE finding.
+        [("            Auth::beginSessionFor($webauthnUserId);\n", "")], ("webauthn.php:", "`$_SESSION['user_id']` is written")),
     ("the call moved AFTER the write", VERIFY,
         [(VERIFY_PAIR, "    $_SESSION['user_id']    = $pendingUserId;\n    Auth::beginSessionFor($pendingUserId);")], "verify.php:"),
     ("the call left only in a comment", ACCEPT, [(CALL, "// " + CALL)], "accept.php:"),
@@ -559,8 +564,12 @@ def self_test() -> int:
                 continue
             got = analyse(tmp)
             restore(rel)
-            report(any(words in p for p in got), "PLANT " + name + " is reported",
-                   "expected a finding containing '" + words + "'; got: " + (" | ".join(got) or "(nothing)"))
+            # `words` is one text, or (#907) a tuple of texts that must ALL be
+            # in the SAME finding: one finding naming the file and another the
+            # words would not be the fault this plant made.
+            parts = words if isinstance(words, tuple) else (words,)
+            report(any(all(part in p for part in parts) for p in got), "PLANT " + name + " is reported",
+                   "expected one finding containing '" + "' and '".join(parts) + "'; got: " + (" | ".join(got) or "(nothing)"))
 
         for label, cases in (("GREEN", GREEN), ("BLIND SPOT", BLIND)):
             for name, rel, swaps in cases:
