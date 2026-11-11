@@ -46,7 +46,10 @@
  *   R  the page offers only buttons the handler would accept; with open
  *      requests switched off an open request cannot be taken but can be
  *      withdrawn
- *   W  after a decline, the asker is told where the duty is NOW
+ *   W  every sentence about where a duty is says where it is NOW, after an
+ *      administrator has moved it: the asker's list and e-mail after a
+ *      decline, what the decliner reads, what a withdrawing asker reads, and
+ *      the duty taken off everybody or held by somebody with no name
  *   M  what the e-mails really carry: the mail route is pointed at a closed
  *      port, so each message is KEPT in the mail queue and opened here — the
  *      asker's words go as text, the use-by moment is set, the decline
@@ -244,6 +247,20 @@ function setting(string $key, string $value, int $secret = 0): void
 // server, and the test people and rota, which the next run removes first.
 $removePeople = null;
 register_shutdown_function(static function () use (&$state, &$removePeople): void {
+    // 🔐 A second Ctrl-C must not cut the clean-up short: from here on the
+    //    signals are ignored, and the two secrets in the copy of web/ (the
+    //    database password and the key) are deleted FIRST, before anything
+    //    slow, so they are gone even if the rest of the clean-up stalls.
+    if (function_exists('pcntl_signal') === true) {
+        foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
+            pcntl_signal($signal, SIG_IGN);
+        }
+    }
+    if ($state['child'] !== null) {
+        foreach (['auth_creds.php', 'enc.key'] as $secret) {
+            @unlink($state['child'] . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $secret);
+        }
+    }
     if ($state['hold'] instanceof mysqli) {
         try {
             $state['hold']->rollback();
@@ -564,6 +581,9 @@ $makePerson('gone', 'Fay Suspended');
 q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [$people['gone']['id']]);
 $makePerson('noaddr', 'Gus Noaddress', null, false);
 $makePerson('otherorg', 'Hal Otherorg', $siteB);
+// A member whose name cannot be read (section W's "another member" branch).
+$makePerson('noname', 'Ivy Noname');
+q('UPDATE `tblUsers` SET `fullName` = NULL WHERE `userID` = ?', 'i', [$people['noname']['id']]);
 
 $roleName = 'Selftest swap duty ' . $run;
 q('INSERT INTO `tblRotaRoleType` (`siteID`, `name`) VALUES (?, ?)', 'is', [$siteId, $roleName]);
@@ -1032,14 +1052,60 @@ $scnWhereNow = static function () use ($newSlot, $ask, $answer, $roster, $rowOf,
     $slot = $newSlot($A);
     $req  = $ask('asker', $slot, $B, 'Where now');
     q('UPDATE `tblRotaSlot` SET `assignedToID` = ? WHERE `slotID` = ?', 'ii', [$C, $slot['id']]);
-    $answer('asked', $req['swapId'], 'decline');
+    $declined = $answer('asked', $req['swapId'], 'decline');
     $row = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req['swapId'] . '"');
 
     return [
         'true'   => str_contains($row, 'data-swap-status="declined"') && str_contains($row, 'it is now with ' . $people['third']['name']) && stripos($row, 'still yours') === false,
+        // The message the DECLINER reads: it used to say "The duty stays with
+        // the person who asked." whoever held it (round 3).
+        'declinerTrue' => $declined['flash'] === 'Swap declined. The duty is now with ' . $people['third']['name'] . '.',
         'slot'   => $slot,
         'swapId' => $req['swapId'],
-        'detail' => substr(preg_replace('/\s+/', ' ', strip_tags($row)) ?? '', 0, 300),
+        'detail' => substr(preg_replace('/\s+/', ' ', strip_tags($row)) ?? '', 0, 300) . ' | the decliner read: ' . $declined['flash'],
+    ];
+};
+
+/**
+ * W (withdraw): an asker who withdraws after an administrator moved the duty
+ * must NOT be told "The duty is still yours." — the flash it used to show.
+ */
+$scnWithdrawMoved = static function () use ($newSlot, $ask, $answer, $A, $B, $C, $people): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'Withdraw after move');
+    q('UPDATE `tblRotaSlot` SET `assignedToID` = ? WHERE `slotID` = ?', 'ii', [$C, $slot['id']]);
+    $res = $answer('asker', $req['swapId'], 'withdraw');
+
+    return [
+        'true'   => $res['flash'] === 'Your swap request was withdrawn. The duty is no longer yours: it is now with ' . $people['third']['name'] . '.',
+        'detail' => $res['flash'],
+    ];
+};
+
+/**
+ * W (the two rarer branches of whereDutyIsNow()): the duty taken off
+ * everybody, and a holder whose name cannot be read. Both through the real
+ * pages: what the decliner reads, and what the asker's list says.
+ */
+$scnWhereNowRare = static function () use ($newSlot, $ask, $answer, $roster, $rowOf, $A, $B, $people): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'Taken off everybody');
+    q('UPDATE `tblRotaSlot` SET `assignedToID` = NULL WHERE `slotID` = ?', 'i', [$slot['id']]);
+    $nobody = $answer('asked', $req['swapId'], 'decline');
+    $rowN   = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req['swapId'] . '"');
+
+    $slot2 = $newSlot($A);
+    $req2  = $ask('asker', $slot2, $B, 'Holder with no name');
+    q('UPDATE `tblRotaSlot` SET `assignedToID` = ? WHERE `slotID` = ?', 'ii', [$people['noname']['id'], $slot2['id']]);
+    $unnamed = $answer('asked', $req2['swapId'], 'decline');
+    $rowU    = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req2['swapId'] . '"');
+
+    return [
+        'nobody'  => $nobody['flash'] === 'Swap declined. The duty is not assigned to anybody at the moment.'
+            && str_contains($rowN, 'The duty is no longer yours: it is not assigned to anybody at the moment.'),
+        'unnamed' => $unnamed['flash'] === 'Swap declined. The duty is now with another member.'
+            && str_contains($rowU, 'The duty is no longer yours: it is now with another member.'),
+        'detail'  => $nobody['flash'] . ' | ' . $unnamed['flash'] . ' | ' . substr(preg_replace('/\s+/', ' ', strip_tags($rowN . ' ' . $rowU)) ?? '', 0, 300),
     ];
 };
 
@@ -1241,7 +1307,7 @@ check('D9 …and nobody is e-mailed twice', $d['notToldTwice'], $d['detail']);
 section('E  declining leaves the duty where it was');
 // =============================================================================
 $res = $answer('asked', $swapA, 'decline', 'Sorry, away too');
-check('E1 the person who declines is told the duty stays with the asker', str_contains($res['flash'], 'Swap declined'), $res['flash']);
+check('E1 the person who declines reads where the duty is now — here, still with the person who asked', $res['flash'] === 'Swap declined. The duty stays with the person who asked.', $res['flash']);
 check('E2 the duty is still the asker\'s, and the request is marked declined with the reply kept', $holder($slotA['id']) === $A && ($swap($swapA)['status'] ?? '') === 'declined' && ($swap($swapA)['responseMessage'] ?? '') === 'Sorry, away too');
 $aPage = $roster('asker')['body'];
 check('E3 the asker sees it was declined and that the duty is still theirs', preg_match('#data-swap-mine="' . $swapA . '" data-swap-status="declined"#', $aPage) === 1 && str_contains($aPage, 'The duty is still yours.') && str_contains($aPage, '/rota/swap?slot=' . $slotA['id'] . '"'));
@@ -1309,7 +1375,7 @@ $reqI  = $ask('asker', $slotI, 0, 'Anyone?');
 $rowI = $swap($reqI['swapId']);
 check('I1 an open request is saved with nobody named', $reqI['swapId'] > 0 && array_key_exists('targetUserID', $rowI) === true && $rowI['targetUserID'] === null, json_encode($rowI));
 $iSaid = $roster('asker')['flash'];
-check('I2 the asker is told the request was e-mailed to every member with rota swap e-mails switched on (D-141)', str_contains($iSaid, 'Every member who has rota swap e-mails switched on'), $iSaid);
+check('I2 the asker is told the request is offered to the other members, and is NOT promised that anybody is e-mailed (A6\'s rule)', str_contains($iSaid, 'offered to the other members') && stripos($iSaid, 'e-mail') === false, $iSaid);
 $om = $scnOpenMail();
 check('I2a (D-141) members of the organisation with the switch on are each e-mailed — one message each', $om['made'] && $om['members'], $om['detail']);
 check('I2b …a member who switched the e-mails off is not', $om['switchOff'], $om['detail']);
@@ -1385,6 +1451,12 @@ section('W  where the duty is now, after a decline');
 // =============================================================================
 $w = $scnWhereNow();
 check('W1 a decline after an administrator moved the duty does NOT tell the asker "still yours": it names who has it', $w['true'], $w['detail']);
+check('W2 …nor tell the person who declined that "the duty stays with the person who asked"', $w['declinerTrue'], $w['detail']);
+$ww = $scnWithdrawMoved();
+check('W3 an asker who withdraws after the duty was moved is not told "the duty is still yours"', $ww['true'], $ww['detail']);
+$wr = $scnWhereNowRare();
+check('W4 a duty taken off everybody is described as not assigned to anybody — to the decliner and on the asker\'s list', $wr['nobody'], $wr['detail']);
+check('W5 a holder whose name cannot be read is described as "another member", never a blank', $wr['unnamed'], $wr['detail']);
 
 // =============================================================================
 section('M  what the e-mails really say and carry');
@@ -1492,7 +1564,7 @@ $plants  = [
         static fn (): bool => $scnPageAsks()['noAccept'],
     ],
     'P17 "where the duty is now" no longer asks who holds it' => ['_core/RotaSwaps.php',
-        ['if ($holderId !== null && $askerId !== null && $holderId === $askerId) {', 'if (true) {'],
+        ['if ($holderId !== null && $holderId === $readerId) {', 'if (true) {'],
         static fn (): bool => $scnWhereNow()['true'] && $scnMailContent()['whereNow'],
     ],
     'P18 the "open requests switched off" refusal removed' => ['_core/RotaSwaps.php',
@@ -1502,6 +1574,18 @@ $plants  = [
     'P19 the open-request e-mail no longer asks who may be told (D-141)' => ['_core/RotaSwaps.php',
         ["if (\$who === null || self::whyNotTold(\$db, \$siteId, \$id, \$who) !== '') {", 'if ($who === null) {'],
         static fn (): bool => ($r = $scnOpenMail())['switchOff'] && $r['suspended'] && $r['noAddress'],
+    ],
+    'P21 the answer page goes back to a fixed sentence about the duty' => ['_apps/rota/swap-respond.php',
+        ["\$where = RotaSwaps::whereDutyIsNow(\$now['id'], \$now['name'], \$result['askerID'], \$userId);", "\$where = 'The duty is still yours.';"],
+        static fn (): bool => $scnWithdrawMoved()['true'] && $scnWhereNow()['declinerTrue'],
+    ],
+    'P22 "not assigned to anybody" no longer recognised' => ['_core/RotaSwaps.php',
+        ['if ($holderId === null) {', 'if (false) {'],
+        static fn (): bool => $scnWhereNowRare()['nobody'],
+    ],
+    'P23 a holder with no name written as a blank' => ['_core/RotaSwaps.php',
+        ["\$who = \$holderName !== '' ? \$holderName : 'another member';", '$who = $holderName;'],
+        static fn (): bool => $scnWhereNowRare()['unnamed'],
     ],
 ];
 foreach ($plants as $name => [$file, $edits, $guard]) {

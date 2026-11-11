@@ -7,7 +7,7 @@
  * The member a duty is assigned to asks one named member — or, where the
  * organisation allows it (`rota.allow_open_swap`), anybody — to take it. The
  * request waits on the Duty Roster page (`/rota`) of the person asked, who
- * accepts or declines it there; nothing changes until they accept.
+ * accepts or declines it there; the request moves nothing until they accept.
  *
  * WHAT CHANGED (#657). This page used to save the request and tell the member
  * "the other member will be notified" when nobody was, and there was no page
@@ -20,16 +20,20 @@
  *     number, so a hand-made post could aim a request — and now an e-mail —
  *     at somebody in another organisation;
  *   - refuses a duty whose date has already passed;
- *   - tells the person asked by e-mail, through their notification
- *     preferences (`RotaSwaps::tellAsked()`) — or, for an OPEN request, every
- *     active member with the switch on (the owner, 11 November 2026 — D-141).
- *     The e-mails go after the request is saved, outside any transaction;
+ *   - attempts an e-mail to the person asked, subject to their notification
+ *     preferences (`RotaSwaps::tellAsked()`) — or, for an OPEN request, to
+ *     every active member with the switch on (the owner, 11 November 2026 —
+ *     D-141). The e-mails go after the request is saved, outside any
+ *     transaction;
  *   - answers a successful post with a REDIRECT, so pressing Refresh cannot
  *     send the same request (and the same e-mail) twice.
  *
- * The confirmation never promises an e-mail: whether one is sent depends on
- * the other person's own choices, and whether it arrives is not something the
- * portal can know. It says where the request is waiting, which is true.
+ * The confirmation never promises an e-mail — for a named person OR an open
+ * request: whether one is sent depends on each person's own choices and on
+ * the mail route, and whether it arrives is not something the portal can
+ * know. It says where the request is waiting, which is true, and that the
+ * request itself does not move the duty — never "the duty stays yours", which
+ * an administrator can make untrue at any moment.
  *
  * @package   Portal\Rota
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -122,8 +126,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Told AFTER the request is saved: a mail fault never loses it.
                 RotaSwaps::tellAsked($db, $siteId, $swapId);
                 $_SESSION['rota_flash'] = $targetUserID > 0
-                    ? 'Swap request sent. It is waiting on their Duty Roster page for them to accept or decline. The duty stays yours until they accept.'
-                    : 'Open swap request posted. Every member who has rota swap e-mails switched on is sent an e-mail about it, and any member can take it from their Duty Roster page. The duty stays yours until somebody takes it.';
+                    ? 'Swap request sent. It is waiting on their Duty Roster page for them to accept or decline. Your request does not move the duty unless they accept.'
+                    : 'Open swap request posted. It is offered to the other members on their Duty Roster page, where any of them can take it. Your request does not move the duty unless somebody takes it.';
                 $_SESSION['rota_flash_type'] = 'success';
                 header('Location: ' . Site::url('rota'));
                 exit();
@@ -167,7 +171,7 @@ $csrf = Auth::csrfToken();
 <div class="card">
     <div class="card-body">
         <p>Duty: <strong><?php echo htmlspecialchars((string) $slot['roleName'], ENT_QUOTES, 'UTF-8'); ?></strong> on <?php echo htmlspecialchars(RotaSwaps::dateWords((string) $slot['slotDate']), ENT_QUOTES, 'UTF-8'); ?></p>
-        <p class="small text-muted">The person you ask sees the request on their Duty Roster page and can accept or decline it there. The duty stays yours until somebody accepts.</p>
+        <p class="small text-muted">The person you ask sees the request on their Duty Roster page and can accept or decline it there. Your request does not move the duty unless somebody accepts.</p>
         <form method="post" action="<?php echo htmlspecialchars(Site::url('rota/swap') . '?slot=' . $slotId, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="mb-2">

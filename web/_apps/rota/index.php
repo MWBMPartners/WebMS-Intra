@@ -141,7 +141,12 @@ $respondUrl = Site::url('rota/swap-respond');
 <div class="card mb-4" id="swap-requests-for-me">
     <div class="card-body">
         <h2 class="h5"><i class="fa-solid fa-arrows-rotate me-1"></i>Swap requests for you</h2>
-        <p class="small text-muted">Nothing changes unless you accept. If you accept, the duty becomes yours and the person who asked is told.</p>
+        <?php
+        // 🗣️ No promise that anybody is e-mailed: whether the asker is sent
+        //    one depends on their own choices and the mail route, which this
+        //    page cannot know (the rule in RotaSwaps' docblock, #657 round 3).
+        ?>
+        <p class="small text-muted">A request does not move the duty unless you accept it. If you accept, the duty becomes yours.</p>
         <div class="portal-data-list">
             <?php foreach ($swaps['forMe'] as $w): ?>
                 <div class="row py-2 align-items-center border-bottom" data-swap-for-me="<?php echo (int) $w['swapID']; ?>">
@@ -222,6 +227,7 @@ $respondUrl = Site::url('rota/swap-respond');
                 $nowWords = RotaSwaps::whereDutyIsNow(
                     $w['assignedToID'] === null ? null : (int) $w['assignedToID'],
                     trim((string) ($w['holderName'] ?? '')),
+                    $userId,
                     $userId
                 );
                 if ($status === 'pending') {

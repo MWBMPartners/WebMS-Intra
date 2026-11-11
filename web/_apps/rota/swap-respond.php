@@ -15,9 +15,11 @@
  * for everybody else. Linking a page to it would have made all three live, so
  * it now hands the whole decision to `RotaSwaps::respond()`.
  *
- * After a stored answer the OTHER person is told by e-mail
- * (`RotaSwaps::tellAnswered()`), AFTER the commit and never able to undo it:
- * a broken mail route must not leave the duty half-moved.
+ * After a stored accept or decline, an e-mail to the asker is ATTEMPTED
+ * (`RotaSwaps::tellAnswered()`, subject to their own choices), AFTER the
+ * commit and never able to undo it: a broken mail route must not leave the
+ * duty half-moved. The message shown here says where the duty is NOW, from
+ * `RotaSwaps::whereDutyIsNow()`, and promises nobody an e-mail.
  *
  * @package   Portal\Rota
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -78,16 +80,24 @@ if ($result['outcome'] === RotaSwaps::DONE) {
     ];
     Logger::activity($logged[$action][0], 'Rota swap request #' . $swapId . ' ' . $logged[$action][1] . ' (duty #' . $result['slotID'] . ')');
 
-    if ($action === RotaSwaps::WITHDRAW) {
-        $_SESSION['rota_flash'] = 'Your swap request was withdrawn. The duty is still yours.';
-    } else {
-        // Told AFTER the commit; the outcome is not shown, because whether
-        // an e-mail arrives is not something the portal can know.
+    if ($action !== RotaSwaps::WITHDRAW) {
+        // An e-mail to the asker is ATTEMPTED after the commit; its outcome
+        // is not shown, because whether one arrives cannot be known here.
         RotaSwaps::tellAnswered($db, $siteId, $swapId);
-        $_SESSION['rota_flash'] = $action === RotaSwaps::ACCEPT
-            ? 'Swap accepted. The duty is now yours and is on your list below.'
-            : 'Swap declined. The duty stays with the person who asked.';
     }
+    // 🗣️ Where the duty is NOW, read from its row after the answer, never
+    //    predicted from the answer (#657 round 3). These used to say "The
+    //    duty is still yours." after a withdrawal and "The duty stays with
+    //    the person who asked." after a decline — both false once an
+    //    administrator had moved the duty, on a page whose own list then
+    //    said otherwise.
+    $now   = RotaSwaps::holderOf($db, $siteId, $result['slotID']);
+    $where = RotaSwaps::whereDutyIsNow($now['id'], $now['name'], $result['askerID'], $userId);
+    $_SESSION['rota_flash'] = match ($action) {
+        RotaSwaps::WITHDRAW => 'Your swap request was withdrawn. ' . $where,
+        RotaSwaps::ACCEPT   => 'Swap accepted. ' . $where,
+        default             => 'Swap declined. ' . $where,
+    };
     $_SESSION['rota_flash_type'] = 'success';
     header('Location: ' . $back);
     exit();

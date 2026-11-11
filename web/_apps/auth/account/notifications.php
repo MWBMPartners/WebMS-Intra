@@ -277,9 +277,9 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             //    each e-mail would go, through WebPush::notifyPrefAllows() (a
             //    choice never made counts as ON). It covers every e-mail the
             //    rota sends about swaps: being asked by name, an OPEN request
-            //    from anybody in the organisation (D-141: every member with
-            //    this switch on is told), and an answer to a swap you asked
-            //    for. A withdrawal tells nobody.
+            //    from anybody in the organisation (D-141: an e-mail is
+            //    attempted to every member with this switch on), and an answer
+            //    to a swap you asked for. A withdrawal e-mails nobody.
             ?>
             <?php echo $switchRow('rotaSwaps', 'Rota swap requests', 'An e-mail when somebody asks you to take one of their duties, when somebody posts an open request for anyone to cover a duty, and when somebody accepts or declines a swap you asked for.'); ?>
         </div>
