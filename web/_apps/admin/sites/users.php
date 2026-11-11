@@ -18,6 +18,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -67,6 +68,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $action = $_POST['action'] ?? '';
+
+    // 🗑️ #977: an account erased on request is not changed here either —
+    //    not added to an organisation, not made an administrator of one,
+    //    and not removed from one. Every action on this page names ONE
+    //    account, so the question is asked once, before the actions. The
+    //    "add" list on this page only ever offers switched-on accounts, so
+    //    an erased one can arrive only in a hand-made request; adding it
+    //    would put an erased person back into an organisation's member
+    //    list. Removing is refused as well, deliberately: the erasure
+    //    already deleted every membership the account had, so there is
+    //    nothing it needs, and one rule with no exceptions is the one that
+    //    cannot be got half right (AccountGuard's docblock).
+    $postedUserId = (int) ($_POST['userID'] ?? 0);
+    if (in_array($action, ['add', 'remove', 'toggle_admin', 'toggle_root_admin'], true) === true
+        && AccountGuard::checkNotErased($postedUserId, 'change organisation #' . $siteId . ' membership of account #' . $postedUserId) !== AccountGuard::ALLOW) {
+        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/sites/users') . '?site=' . $siteId, true, 302);
+        exit();
+    }
 
     if ($action === 'add') {
         // ➕ Add user to site

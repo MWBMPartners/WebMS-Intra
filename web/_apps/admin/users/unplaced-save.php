@@ -68,6 +68,20 @@ if ($userId <= 0 || $siteId <= 0) {
     exit();
 }
 
+// 🗑️ #977: an account erased on request belongs to no organisation BECAUSE
+//    the erasure deleted every membership it had, so it is exactly the kind
+//    of account this page would otherwise offer to place. Placing it would
+//    put an erased person back into an organisation's member list. The list
+//    page leaves erased accounts out; this refuses a hand-made request too.
+//    Asked before anything else about the account, so the person is told
+//    the real reason.
+if (AccountGuard::checkNotErased($userId, 'place account #' . $userId . ' into an organisation') !== AccountGuard::ALLOW) {
+    $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/users/unplaced'), true, 302);
+    exit();
+}
+
 // 🏛️ The organisation must exist and be switched on. A switched-off
 //    organisation is not a real destination — the same rule the rest of
 //    the portal applies when deciding whether an organisation is a place

@@ -441,5 +441,89 @@ assertTrue(
     AccountGuard::EMAIL_CLASH_LIMIT === 5 && AccountGuard::EMAIL_CLASH_WINDOW === 3600
 );
 
+// -----------------------------------------------------------------------------
+// 🗑️ #977 — row 3a: an account ERASED on request may be looked at and nothing
+//    else, by anybody, a GLOBAL administrator included. Before #977 row 2
+//    let a global administrator change it, and re-saving it took the name
+//    kept for tax out of the Gift Aid claim file. The behaviour over HTTP is
+//    section M of tools/erasure-pages-selftest.php; this pins the RULE, with
+//    no database, including the order it is asked in.
+// -----------------------------------------------------------------------------
+echo "\n=== Row 3a (#977) — an erased account: viewing only, for everybody ===\n";
+$erasedHere      = $ordinary + ['isErased' => 1];
+$erasedNoRowHere = $noRowHere + ['isErased' => 1];
+$changeReaches   = [AccountGuard::REACH_ACCOUNT, AccountGuard::REACH_THIS_ORG, AccountGuard::REACH_REHIRE, AccountGuard::REACH_PORTAL];
+foreach ([false, true] as $single) {
+    foreach ($changeReaches as $reach) {
+        assertDecision(
+            'GLOBAL actor, erased account, reach=' . $reach . ($single === true ? ', single-organisation' : ', multi-organisation') . ' -> ERASED',
+            AccountGuard::decide(true, $erasedHere, $reach, $single),
+            AccountGuard::ERASED,
+            'erased'
+        );
+    }
+    assertDecision(
+        'GLOBAL actor, erased account, REACH_VIEW' . ($single === true ? ', single-organisation' : ', multi-organisation') . ' -> ALLOW (looking is not changing)',
+        AccountGuard::decide(true, $erasedHere, AccountGuard::REACH_VIEW, $single),
+        AccountGuard::ALLOW,
+        ''
+    );
+}
+foreach ([AccountGuard::REACH_ACCOUNT, AccountGuard::REACH_THIS_ORG, AccountGuard::REACH_PORTAL] as $reach) {
+    assertDecision(
+        'ordinary actor, erased account that is a member here, reach=' . $reach . ' -> ERASED, not the global-only words',
+        AccountGuard::decide(false, $erasedHere, $reach, false),
+        AccountGuard::ERASED,
+        'erased'
+    );
+}
+assertDecision(
+    'ordinary actor, erased member here, REACH_VIEW -> ALLOW',
+    AccountGuard::decide(false, $erasedHere, AccountGuard::REACH_VIEW, false),
+    AccountGuard::ALLOW,
+    ''
+);
+// THE ORDER (row 3 before row 3a): an administrator of another organisation
+// must be told what any account outside their organisation tells them, and
+// never learn from the verdict that an account was erased.
+foreach ($changeReaches as $reach) {
+    assertDecision(
+        'ordinary actor, multi-organisation, erased account NOT a member here, reach=' . $reach . ' -> NOT_FOUND/not_member, never ERASED',
+        AccountGuard::decide(false, $erasedNoRowHere, $reach, false),
+        AccountGuard::NOT_FOUND,
+        'not_member'
+    );
+}
+assertDecision(
+    'ordinary actor, SINGLE-organisation, erased account with no membership row -> ERASED (there is no other organisation to hide it from)',
+    AccountGuard::decide(false, $erasedNoRowHere, AccountGuard::REACH_ACCOUNT, true),
+    AccountGuard::ERASED,
+    'erased'
+);
+// The flag is read with the same two-value test as every other flag here
+// (#497): the database hands the expression back as the whole number 1.
+foreach ([1, '1'] as $onValue) {
+    assertDecision(
+        'isErased=' . var_export($onValue, true) . ' counts as ON (global actor, REACH_ACCOUNT)',
+        AccountGuard::decide(true, $ordinary + ['isErased' => $onValue], AccountGuard::REACH_ACCOUNT, false),
+        AccountGuard::ERASED,
+        'erased'
+    );
+}
+foreach ([0, '0', null, true, '01', '1x'] as $offValue) {
+    assertDecision(
+        'isErased=' . var_export($offValue, true) . ' counts as OFF (global actor, REACH_ACCOUNT -> ALLOW)',
+        AccountGuard::decide(true, $ordinary + ['isErased' => $offValue], AccountGuard::REACH_ACCOUNT, false),
+        AccountGuard::ALLOW,
+        ''
+    );
+}
+assertTrue(
+    'the ERASED message is exact, and says nothing was changed and why',
+    AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT)
+        === 'Nothing was changed. This account was erased on request, so it cannot be changed or switched back on. '
+        . 'What the erasure kept, such as giving records kept for tax, depends on it staying exactly as the erasure left it.'
+);
+
 echo "\n" . ($failures === 0 ? "ALL PASS ({$failures} failures)\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

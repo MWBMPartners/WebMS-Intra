@@ -40,6 +40,16 @@
  * refuses, in words, before anything is written. Same shape, same remedy: a
  * success message must never sit over a write that did not happen.
  *
+ * -----------------------------------------------------------------------------
+ * #977 FIX (11 November 2026): "update" changed an account that had been
+ * ERASED on request. A global administrator could tick Active or change its
+ * address, and the account then stopped reading as erased, which took the
+ * name kept for tax out of the Gift Aid claim file and switched off the
+ * refusal that stops a new statement being written over the kept one. Step
+ * 2b now refuses, in words, before anything is compared or written; see
+ * AccountGuard's docblock, "AN ERASED ACCOUNT CANNOT BE CHANGED BY ANYBODY".
+ * The list page no longer offers an Edit button for such an account either.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -294,6 +304,27 @@ if ($action === 'update') {
     //    AccountGuard's own docblock for why.
     if (AccountGuard::check($userID, AccountGuard::REACH_VIEW, 'edit account #' . $userID) !== AccountGuard::ALLOW) {
         $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::NOT_FOUND, AccountGuard::REACH_VIEW);
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/users'));
+        exit();
+    }
+
+    // 🗑️ Step 2b (#977): an account ERASED on request is never changed,
+    //    by anybody — a global administrator included. Saving one used to
+    //    work: ticking Active or changing its address made it stop reading
+    //    as erased (GdprEraser::emptiedAccountSql()), so the name kept for
+    //    tax dropped out of the Gift Aid claim file and nothing any longer
+    //    stopped a new "[Deleted User]" statement being written over the
+    //    kept one. Asked HERE, before anything else is compared, for two
+    //    reasons: the person is told the real reason even when the form
+    //    came back unchanged, and a global administrator ticking ONLY
+    //    "global administrator" reaches no AccountGuard::check() below at
+    //    all (they are allowed that without asking), so steps 7 and 8 alone
+    //    would have let that one through. Steps 7 and 8 refuse an erased
+    //    account too (row 3a of AccountGuard::decide()); this is the first
+    //    of the two locks, not the only one.
+    if (AccountGuard::checkNotErased($userID, 'edit account #' . $userID) !== AccountGuard::ALLOW) {
+        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/users'));
         exit();

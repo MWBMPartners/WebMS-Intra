@@ -60,7 +60,14 @@ if ($u === null) {
 //    administrator see this account" (already answered above) but "may
 //    they actually offboard it". A global administrator's own account,
 //    for instance, can be seen here but not offboarded by anyone else.
-$canOffboard = (AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT) === AccountGuard::ALLOW);
+$offboardVerdict = AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT);
+$canOffboard     = ($offboardVerdict === AccountGuard::ALLOW);
+// 🗑️ #977: an account erased on request cannot be offboarded either, by
+//    anybody. The refusal below used to be the "only a global administrator"
+//    sentence whatever the reason, which would tell a GLOBAL administrator
+//    looking at an erased account to ask a global administrator. It now
+//    names the real reason for that one case.
+$offboardWhyNot  = ($offboardVerdict === AccountGuard::ERASED) ? AccountGuard::ERASED : AccountGuard::GLOBAL_ONLY;
 
 $pageTitle   = 'Offboard ' . $u['fullName'];
 $pageSection = 'offboarding';
@@ -159,7 +166,7 @@ $csrf = Auth::csrfToken();
      offboarded by them — e.g. it belongs to a global administrator, or
      to another organisation too. No form is drawn at all. -->
 <div class="alert alert-info">
-    <?php echo htmlspecialchars(AccountGuard::message(AccountGuard::GLOBAL_ONLY, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>
+    <?php echo htmlspecialchars(AccountGuard::message($offboardWhyNot, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>
     <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">Back to offboarding</a>
 </div>
 <?php endif; ?>

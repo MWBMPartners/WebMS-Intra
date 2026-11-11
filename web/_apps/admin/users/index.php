@@ -39,6 +39,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -225,9 +226,14 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 //    anything; it only decides whether to draw one line of text.
 $unplacedCount = 0;
 if ($actorGlobal === true) {
+    // #977: an account erased on request is not counted. The erasure
+    //    deleted its memberships, so it would otherwise be counted here and
+    //    offered for placing; admin/users/unplaced.php leaves it out the
+    //    same way, with the same one definition.
     $unplacedResult = $mysqli->query(
         'SELECT COUNT(*) AS cnt FROM tblUsers u '
-        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID)'
+        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID) '
+        . 'AND NOT ' . GdprEraser::emptiedAccountSql('u')
     );
     if ($unplacedResult !== false) {
         $unplacedCount = (int) ($unplacedResult->fetch_assoc()['cnt'] ?? 0);
@@ -449,6 +455,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                          is a global administrator's own view), but only a global
                          administrator may change it — see AccountGuard::message(). -->
                     <span class="badge text-bg-light border" title="Only a global administrator can change this account">Changed by a global administrator</span>
+                <?php elseif ($rowVerdict === AccountGuard::ERASED): ?>
+                    <?php // 🗑️ #977: erased on request. No Edit button and no form, because
+                          // nobody may change it (AccountGuard::decide(), row 3a); the badge
+                          // says why, so its absence is not mistaken for a fault. The edit
+                          // form is a dialog filled from the Edit button, so leaving the
+                          // button out is what leaves the form out. A PHP comment, not an
+                          // HTML one, so the note is not sent to the browser. ?>
+                    <span class="badge text-bg-light border" title="<?php echo htmlspecialchars(AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>">Erased on request, cannot be changed</span>
                 <?php endif; ?>
                 <?php // A NOT_FOUND verdict here means the account changed between the
                       // list query and this render (e.g. it was offboarded a moment

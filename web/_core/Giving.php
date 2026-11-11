@@ -156,11 +156,14 @@ class Giving
      *   - with no kept row, an account still reading "[Deleted User]" gives
      *     an empty name, never the made-up one. This keys on the made-up NAME
      *     ALONE, on purpose, and never on `isActive` (#941 check round 4): a
-     *     global administrator can save an erased account with Active ticked
-     *     (admin/users/save.php), which leaves it reading "[Deleted User]"
-     *     while it is switched on - and that also stops the kept row joining
-     *     above, because the join asks emptiedAccountSql(), which requires
-     *     the account to be switched off. A rule that let a switched-on
+     *     global administrator COULD save an erased account with Active
+     *     ticked (admin/users/save.php), which leaves it reading "[Deleted
+     *     User]" while it is switched on - and that also stops the kept row
+     *     joining above, because the join asks emptiedAccountSql(), which
+     *     requires the account to be switched off. Since #977 no page can
+     *     do that any more (AccountGuard refuses every change to an erased
+     *     account), but an account re-saved BEFORE #977 is still in that
+     *     state on an installation that did it, so this rule stays. A rule that let a switched-on
      *     account through would put "[Deleted User]" back in the file
      *     (measured: `WHEN u.isActive = 1 THEN u.fullName` did exactly that).
      *     The name is the one fact that says "made up";

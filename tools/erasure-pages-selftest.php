@@ -95,6 +95,16 @@
  *      days, the organisation's own or the installation's, or kept for ever by
  *      either's choice - every state drawn over HTTP and compared with literal
  *      words written in the test.
+ *   M. (#977, 11 November 2026.) An account erased on request cannot be
+ *      changed or switched back on through any page, by anybody: the Users
+ *      page's save (Active ticked, a new address, a new name, the global
+ *      administrator box), placing an account that belongs to no
+ *      organisation, an organisation's own member list, and offboarding.
+ *      Each is pressed by a GLOBAL administrator, refused with the reason,
+ *      and leaves the account row byte for byte as it was, with the Gift Aid
+ *      claim file still naming the giver from the kept record and the
+ *      statements list still leaving them out; each page still works for a
+ *      live account; every refusal is recorded.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -187,7 +197,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 117; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 133; // 117 until #977 added section M (sixteen: the
+                            // premise, four saves of an erased account, the
+                            // wording an ordinary administrator gets, the
+                            // list page, placing, an organisation's page,
+                            // offboarding, a live control for each page, the
+                            // refusal records, and the state at the end).
+                            // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -419,6 +435,14 @@ const REQ_EVE = 917962; // Eve's request, carried out in section K
 const QUIN    = 917046; // a member of BOTH organisations, a declared gift at each (round 10)
 const RUE     = 917047; // a member of BOTH: a gift that loses the name at A only, an envelope that loses it at B only (round 12)
 const REQ_PIP_B = 917911; // Pip's request, filed in B
+// #977, section M: an erased account nobody may change, and three live
+// accounts that each stand for "the same page still works for a live one".
+// One ground each, so a control cannot pass for the wrong reason (#616).
+const ZED     = 917048; // a giver at A, with a Gift Aid declaration; erased at the start of section M
+const REQ_ZED = 917963; // Zed's request, carried out in section M
+const LIV     = 917049; // a live member of A: the control for the edit page and for adding to an organisation
+const UNP     = 917050; // a live account in NO organisation: the control for placing an account
+const OFF     = 917051; // a live member of A: the control for offboarding
 
 /** Every request this run's organisations hold for one account. */
 function requestsOf(int $user): array
@@ -484,6 +508,8 @@ function removeWorld(): void
     // run was interrupted while it was in place.
     $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_kept`');
     $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_line`');
+    // Section M (#977) offboards one live account through the real page.
+    q('DELETE FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblEmailLog WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 917000 AND 917999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -3307,6 +3333,245 @@ ok('the rendered-pin file holds exactly the pins this test compares, each once, 
     pinFileProblems() === [], implode(' | ', pinFileProblems()));
 
 // =============================================================================
+head('M. An erased account cannot be changed or switched back on (#977)');
+// =============================================================================
+// An erasure leaves the account row behind as "[Deleted User]", a made-up
+// `deleted-<request>@example.invalid` address, switched off. The giving
+// records an erasure keeps for tax hang off exactly that state: the Gift Aid
+// claim file takes the kept name only while the account still reads as
+// erased, and the statements list (with the refusal to write a new statement
+// over the kept one) asks the same thing. Before #977 a global administrator
+// could open the account on the Users page, tick Active or change the
+// address, press Save, and both went - measured over HTTP with this section,
+// run against the code from before the fix.
+//
+// So every page that can change an account is tried on an erased one, as a
+// global administrator (the person nothing else stops), and each must refuse
+// with the reason and leave the account row EXACTLY as it was; the claim file
+// and the statements list are read again after every attempt. Each page is
+// also pressed for a LIVE account, which must still work: a refusal that
+// fired for everybody would pass every erased-account check here.
+//
+// WHAT THIS SECTION DOES NOT DRIVE, and why (each is recorded on #977):
+// the users API's update (it 404s any account with no membership in the open
+// organisation, and the erasure deletes every membership; AccountGuard's
+// row 3a refuses it as well, and tools/account-guard-selftest.php pins that
+// row); the roles, group and department pages (each writes a row that the
+// database ties to a membership, which an erased account no longer has, so
+// they fail without the guard too and a plant could not go red); the DBS
+// page (it re-reads `isActive = 1` itself); and undoing an offboarding (the
+// erasure deletes the offboarding record it needs).
+const ERASED_WORDS = 'Nothing was changed. This account was erased on request, so it cannot be changed or switched back on.';
+$todayM  = gmdate('Y-m-d');
+$zedMail = 'deleted-' . REQ_ZED . '@example.invalid';
+foreach (['giving.enabled' => 'true', 'offboarding.enabled' => 'true', 'giving.retention.hold' => 'false',
+    'giving.retention.confirmed' => 'true', 'giving.retention.years' => '6', 'giving.retention.scope' => 'all'] as $key => $value) {
+    siteSetting(ORG_A, $key, $value);
+}
+foreach ([ZED => ['Zed Zakes', true], LIV => ['Liv Live', true], OFF => ['Olly Offboard', true], UNP => ['Una Unplaced', false]] as $id => [$name, $member]) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, $name, 'u' . $id . '.erasure@selftest.invalid']);
+    if ($member === true) {
+        q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+    }
+}
+q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `address`, `postcode`, `validFrom`) VALUES (?, ?, '9 Made-up Road', 'ZZ9 9ZZ', '2020-01-01')", 'ii', [ORG_A, ZED]);
+$gift(ORG_A, ZED, $recent, 9773); // £97.73: an amount nobody else in this world gives, so it can be found on a page
+
+/** Zed's line of the Gift Aid claim file, found by the declaration's postcode (the name is what is being tested). */
+$claimLineM = static function () use ($jar, $todayM): string {
+    $csv = req($jar['root'], 'GET', '/giving/hmrc-export?from=2020-01-01&to=' . $todayM)['body'];
+    foreach ((array) preg_split('/\R/', $csv) as $line) {
+        if (str_contains((string) $line, 'ZZ9 9ZZ') === true) {
+            return (string) $line;
+        }
+    }
+
+    return '(no line)';
+};
+/** Does the statements list show Zed's gift? An erased donor is left out of it by the same test that refuses a new statement. */
+$previewShowsZed = static fn (): bool => str_contains(text(req($jar['root'], 'GET', '/giving/statements?from=2020-01-01&to=' . $todayM)['body']), '97.73');
+$zedRowM = static fn (): ?array => one('SELECT * FROM `tblUsers` WHERE `userID` = ?', 'i', [ZED]);
+$flashOn = static function (string $html): string {
+    $doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $out = [];
+    foreach ($doc->querySelectorAll('div.alert-dismissible') as $box) {
+        $out[] = trim((string) preg_replace('/\s+/', ' ', (string) $box->textContent));
+    }
+
+    return implode(' | ', $out);
+};
+
+// The premise, both halves: the two probes SEE a live giver (so "not shown"
+// later means something), and the erasure really left Zed in the state this
+// section is about.
+$liveClaim   = $claimLineM();
+$livePreview = $previewShowsZed();
+$seed(REQ_ZED, ORG_A, ZED, 'pending_review', null);
+$zedRun   = act($jar['adm'], REQ_ZED, 'execute');
+$zedAfter = $zedRowM();
+$keptZed  = one('SELECT `fullName` FROM `tblGivingKeptDonors` WHERE `siteID` = ? AND `donorID` = ? AND `clearedAt` IS NULL', 'ii', [ORG_A, ZED]);
+$claimAfterErasure   = $claimLineM();
+$previewAfterErasure = $previewShowsZed();
+ok('M0 THE PREMISE: before the erasure Zed\'s gift is in the statements list and the claim file names him; after it the request is completed, his account reads "[Deleted User]", ' . $zedMail . ', switched off, his name is KEPT for tax, the claim file still names him from the kept record, and the statements list leaves him out (#977)',
+    $livePreview === true && str_contains($liveClaim, 'Zed') === true && str_contains($liveClaim, 'Zakes') === true
+    && request(REQ_ZED)['status'] === 'completed'
+    && $zedAfter !== null && $zedAfter['fullName'] === '[Deleted User]' && $zedAfter['emailAddress'] === $zedMail && (int) $zedAfter['isActive'] === 0
+    && ($keptZed['fullName'] ?? null) === 'Zed Zakes'
+    && str_contains($claimAfterErasure, 'Zed') === true && str_contains($claimAfterErasure, 'Zakes') === true
+    && $previewAfterErasure === false,
+    $zedRun . ' | ' . json_encode([$livePreview, $liveClaim, request(REQ_ZED)['status'] ?? null, $zedAfter, $keptZed, $claimAfterErasure, $previewAfterErasure]));
+
+// The edit page's save, four ways, as a global administrator. Each attempt is
+// judged against the row as it stood just before it; if the row DID change
+// (the code from before #977) it is put back, so that each attempt is
+// measured on its own and the next one starts from an erased account.
+$saveM = static function (string $who, int $uid, array $fields) use ($jar, $flashOn): string {
+    $tok = token(req($jar[$who], 'GET', '/admin/users')['body']);
+    req($jar[$who], 'POST', '/admin/users/save', ['csrf_token' => $tok, 'action' => 'update', 'userID' => $uid, 'password' => ''] + $fields);
+
+    return $flashOn(req($jar[$who], 'GET', '/admin/users')['body']);
+};
+$putZedBack = static function (array $row): void {
+    q('UPDATE `tblUsers` SET `fullName` = ?, `emailAddress` = ?, `phoneNumber` = ?, `isActive` = ?, `isAdmin` = ?, `isRootAdmin` = ? WHERE `userID` = ?',
+        'sssiiii', [$row['fullName'], $row['emailAddress'], $row['phoneNumber'], (int) $row['isActive'], (int) $row['isAdmin'], (int) $row['isRootAdmin'], ZED]);
+};
+$asErased = ['fullName' => '[Deleted User]', 'emailAddress' => $zedMail, 'phoneNumber' => (string) ($zedAfter['phoneNumber'] ?? '')];
+$attemptsM = [
+    'M1 Active ticked, nothing else changed'                => $asErased + ['isActive' => '1'],
+    'M2 a changed e-mail address'                          => ['emailAddress' => 'zed.back@selftest.invalid'] + $asErased,
+    'M3 a changed name'                                    => ['fullName' => 'Zed Zakes'] + $asErased,
+    'M4 only the "global administrator" box ticked'        => $asErased + ['isRootAdmin' => '1'],
+];
+foreach ($attemptsM as $label => $fields) {
+    $before  = $zedRowM();
+    $said    = $saveM('root', ZED, $fields);
+    $after   = $zedRowM();
+    $claim   = $claimLineM();
+    $preview = $previewShowsZed();
+    if ($after !== $before) {
+        $putZedBack((array) $before);
+    }
+    ok($label . ': a global administrator saving the ERASED account on the Users page is refused with the reason, the account row is byte for byte as it was, the claim file still names Zed from the kept record, and the statements list still leaves him out (#977)',
+        str_contains($said, ERASED_WORDS) === true && $after === $before
+        && $claim === $claimAfterErasure && $preview === false,
+        json_encode(['said' => $said, 'rowChanged' => $after !== $before, 'after' => [$after['fullName'] ?? null, $after['emailAddress'] ?? null, $after['isActive'] ?? null, $after['isRootAdmin'] ?? null],
+            'claim' => $claim, 'statementsListShowsZed' => $preview]));
+}
+
+// An administrator who is NOT global is told what an account outside their
+// organisation always tells them, never that it was erased: the membership
+// row is asked before the erased row (AccountGuard::decide(), row 3 then 3a).
+$beforeAdm = $zedRowM();
+$saidAdm   = $saveM('adm', ZED, $asErased + ['isActive' => '1']);
+ok('M5 an ordinary administrator of A saving the erased account is told only "That account could not be found." - the words for any account outside their organisation - and nothing about an erasure; the row is unchanged (#977)',
+    str_contains($saidAdm, 'That account could not be found.') === true && stripos($saidAdm, 'erased') === false && $zedRowM() === $beforeAdm,
+    $saidAdm);
+
+// The same page still saves a LIVE account.
+$saidLiv = $saveM('root', LIV, ['fullName' => 'Liv Renamed', 'emailAddress' => 'u' . LIV . '.erasure@selftest.invalid', 'phoneNumber' => '', 'isActive' => '1']);
+ok('M6 CONTROL: the same save, by the same global administrator, still changes a LIVE account (#977)',
+    one('SELECT `fullName` FROM `tblUsers` WHERE `userID` = ?', 'i', [LIV])['fullName'] === 'Liv Renamed' && str_contains($saidLiv, 'updated successfully') === true,
+    $saidLiv);
+
+// The list page draws no Edit button (which is what fills the edit form) for
+// the erased account, and says why; it still draws one for a live account.
+$listZed = req($jar['root'], 'GET', '/admin/users?q=' . rawurlencode($zedMail))['body'];
+$listLiv = req($jar['root'], 'GET', '/admin/users?q=' . rawurlencode('u' . LIV . '.erasure@selftest.invalid'))['body'];
+ok('M7 the Users list offers NO Edit button for the erased account and says "Erased on request, cannot be changed"; a live account still has its Edit button (#977)',
+    str_contains($listZed, $zedMail) === true && str_contains($listZed, 'data-uid="' . ZED . '"') === false
+    && str_contains($listZed, 'Erased on request, cannot be changed') === true
+    && str_contains($listLiv, 'data-uid="' . LIV . '"') === true && str_contains($listLiv, 'Erased on request') === false,
+    json_encode([str_contains($listZed, $zedMail), str_contains($listZed, 'data-uid="' . ZED . '"'), str_contains($listZed, 'Erased on request'), str_contains($listLiv, 'data-uid="' . LIV . '"')]));
+
+// Placing an account that belongs to no organisation. The erasure deleted
+// every membership Zed had, so he matched that page's own test exactly.
+$unplacedPage = req($jar['root'], 'GET', '/admin/users/unplaced')['body'];
+$placeM = static function (int $uid) use ($jar, $flashOn): string {
+    $tok = token(req($jar['root'], 'GET', '/admin/users/unplaced')['body']);
+    req($jar['root'], 'POST', '/admin/users/unplaced/save', ['csrf_token' => $tok, 'userID' => $uid, 'siteID' => ORG_A]);
+
+    return $flashOn(req($jar['root'], 'GET', '/admin/users/unplaced')['body']);
+};
+$beforePlace = $zedRowM();
+$saidPlace   = $placeM(ZED);
+$zedMembers  = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ?', 'i', [ZED])['n'];
+if ($zedMembers > 0) {
+    q('DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [ZED]); // so the later checks start from an erased account again
+}
+ok('M8 the "belongs to no organisation" page does not list the erased account (it lists a live one in the same state), and placing it by a hand-made request is refused with the reason: no membership is written and the account row is unchanged (#977)',
+    str_contains($unplacedPage, 'Una Unplaced') === true && str_contains($unplacedPage, $zedMail) === false
+    && str_contains($unplacedPage, 'value="' . ZED . '"') === false
+    && str_contains($saidPlace, ERASED_WORDS) === true && $zedMembers === 0 && $zedRowM() === $beforePlace,
+    json_encode([str_contains($unplacedPage, 'Una Unplaced'), str_contains($unplacedPage, $zedMail), $saidPlace, $zedMembers]));
+$saidUnp = $placeM(UNP);
+ok('M9 CONTROL: the same page still places a LIVE account that belongs to no organisation (#977)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [UNP, ORG_A])['n'] === 1,
+    $saidUnp);
+
+// An organisation's own list of members (global administrators only).
+$siteUsersM = static function (string $action, int $uid) use ($jar, $flashOn): string {
+    $path = '/admin/sites/users?site=' . ORG_B;
+    $tok  = token(req($jar['root'], 'GET', $path)['body']);
+    req($jar['root'], 'POST', $path, ['csrf_token' => $tok, 'action' => $action, 'userID' => $uid]);
+
+    return $flashOn(req($jar['root'], 'GET', $path)['body']);
+};
+$beforeSite = $zedRowM();
+$saidSite   = $siteUsersM('add', ZED);
+$zedAtB     = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ?', 'i', [ZED])['n'];
+if ($zedAtB > 0) {
+    q('DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [ZED]);
+}
+ok('M10 adding the erased account to an organisation on the organisation\'s Users page is refused with the reason: no membership is written and the account row is unchanged (#977)',
+    str_contains($saidSite, ERASED_WORDS) === true && $zedAtB === 0 && $zedRowM() === $beforeSite,
+    json_encode([$saidSite, $zedAtB]));
+$saidLivAdd = $siteUsersM('add', LIV);
+$livAtB     = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [LIV, ORG_B])['n'];
+$saidLivRm  = $siteUsersM('remove', LIV);
+$livAtBNow  = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [LIV, ORG_B])['n'];
+ok('M11 CONTROL: the same page still adds a LIVE account to the organisation, and removes it again (#977)',
+    $livAtB === 1 && $livAtBNow === 0 && str_contains($saidLivAdd, 'User added to site.') === true && str_contains($saidLivRm, 'User removed from site.') === true,
+    json_encode([$livAtB, $livAtBNow, $saidLivAdd, $saidLivRm]));
+
+// Offboarding: the page offers no form for the erased account and says why,
+// and a hand-made post is refused. offboarding/index.php prints no message at
+// all (it never has), so what the post SAYS is not read here; what it WROTE is.
+$offPage    = req($jar['root'], 'GET', '/offboarding/user?id=' . ZED)['body'];
+$offboardM  = static function (int $uid) use ($jar): void {
+    $tok = token(req($jar['root'], 'GET', '/admin/users')['body']);
+    req($jar['root'], 'POST', '/offboarding/do', ['csrf_token' => $tok, 'userID' => $uid, 'reason' => 'Selftest #977', 'dataDisposition' => 'retain', 'effectiveDate' => gmdate('Y-m-d')]);
+};
+$beforeOff = $zedRowM();
+$offboardM(ZED);
+$zedOffRows = (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [ZED])['n'];
+ok('M12 the offboarding page for the erased account shows the reason and no form, and a hand-made offboarding post for it writes no offboarding record and leaves the account row unchanged (#977)',
+    str_contains(text($offPage), ERASED_WORDS) === true && str_contains($offPage, 'name="dataDisposition"') === false
+    && $zedOffRows === 0 && $zedRowM() === $beforeOff,
+    json_encode([mb_substr(text($offPage), 0, 300), str_contains($offPage, 'name="dataDisposition"'), $zedOffRows]));
+$offboardM(OFF);
+ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written and the account is switched off (#977)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [OFF])['n'] === 1
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0);
+
+// Every refusal is on the record, in both places #518 records one. Seven:
+// four saves, one placing, one organisation page, one offboarding. The
+// activity-log line, which the open organisation's administrators read, says
+// only that the account cannot be changed and never the word "erased"; the
+// reason is in the security record, which only a global administrator sees.
+$refusalLines = (int) one("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'AccountChangeRefused' "
+    . "AND `activityDescription` LIKE ? AND `activityDescription` LIKE '%. That account cannot be changed.' AND `activityDescription` NOT LIKE '%erased%'",
+    'is', [ROOT, '%#' . ZED . '%'])['n'];
+$securityRows = (int) one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'ACCOUNT_CHANGE_REFUSED' AND `userID` = ? "
+    . "AND `errorDetail` LIKE '%Verdict: erased%' AND `errorDetail` LIKE ?", 'is', [ROOT, '%Target account number: ' . ZED . '%'])['n'];
+ok('M14 every refusal is recorded: seven activity-log lines saying only that the account cannot be changed, and seven security records giving the reason, that it was erased (#977)',
+    $refusalLines === 7 && $securityRows === 7,
+    json_encode([$refusalLines, $securityRows]));
+
+ok('M15 AFTER EVERYTHING: the erased account\'s row is byte for byte what the erasure left, the claim file\'s line for it is the same, and the statements list still leaves it out (#977)',
+    $zedRowM() === $zedAfter && $claimLineM() === $claimAfterErasure && $previewShowsZed() === false,
+    json_encode([$zedRowM(), $claimLineM(), $previewShowsZed()]));
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -3323,6 +3588,7 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblCountSessions WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID = ' . CHILD . ') '
+    . '+ (SELECT COUNT(*) FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999) '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
     //    are switched off while the world is removed, so nothing is taken away
     //    by a parent going: each has to be deleted by name or it is left

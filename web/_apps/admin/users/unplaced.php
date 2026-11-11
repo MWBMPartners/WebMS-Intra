@@ -37,6 +37,13 @@
  * and the `NOT EXISTS` test below only ever matches an account with no
  * row at all, active or not.
  *
+ * An account ERASED on request (#977) is not listed or counted either. It
+ * belongs to no organisation because the erasure deleted every membership
+ * it had, so it matched this page's test exactly, and the page offered to
+ * put an erased person back into an organisation. "Erased" is
+ * GdprEraser::emptiedAccountSql(), the one definition; the save handler
+ * refuses such an account too.
+ *
  * WHAT THIS PAGE CANNOT DO
  * -------------------------------------------------------------------------
  * It cannot guess which organisation an account should go into — that
@@ -59,6 +66,7 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Site;
 
 // 🛡️ Global administrator only. Using AccountGuard:: here (rather than a
@@ -86,9 +94,11 @@ $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Us
 //    check-in rate limit settled on for a different reason (#519).
 // -----------------------------------------------------------------------------
 $totalUnplaced = 0;
+// #977: an erased account is left out of both — see the file's docblock.
 $countResult = $mysqli->query(
     'SELECT COUNT(*) AS cnt FROM tblUsers u '
-    . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID)'
+    . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID) '
+    . 'AND NOT ' . GdprEraser::emptiedAccountSql('u')
 );
 if ($countResult !== false) {
     $totalUnplaced = (int) ($countResult->fetch_assoc()['cnt'] ?? 0);
@@ -98,6 +108,7 @@ $accounts = [];
 $listResult = $mysqli->query(
     'SELECT u.userID, u.fullName, u.emailAddress, u.isActive, u.createdAt FROM tblUsers u '
     . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID) '
+    . 'AND NOT ' . GdprEraser::emptiedAccountSql('u') . ' '
     . 'ORDER BY u.fullName ASC LIMIT 500'
 );
 if ($listResult !== false) {

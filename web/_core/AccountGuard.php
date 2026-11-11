@@ -133,6 +133,46 @@
  * a separate piece of work (#511, #516), not to this one.
  *
  * -------------------------------------------------------------------------
+ * AN ERASED ACCOUNT CANNOT BE CHANGED BY ANYBODY (#977, 11 November 2026)
+ * -------------------------------------------------------------------------
+ * An erasure leaves the account row behind, emptied: the made-up name
+ * "[Deleted User]", a made-up `deleted-<request>@example.invalid` address,
+ * and switched off. `GdprEraser::emptiedAccountSql()` is the ONE definition
+ * of that, and the giving records an erasure keeps for tax hang off it: the
+ * Gift Aid claim file takes the kept name only while it matches, and
+ * `Giving::isErasedDonor()` (which stops a new statement being written over
+ * the kept one) asks it too.
+ *
+ * Until #977 nothing here knew about it. A global administrator could open
+ * the account, tick Active or change its e-mail address, and press Save; the
+ * account then stopped matching, the kept name dropped out of the claim
+ * file, and the statement refusal was switched off. Measured over HTTP
+ * before the fix (see tools/erasure-pages-selftest.php, section M).
+ *
+ * So decide() now refuses EVERY reach except merely viewing (`REACH_VIEW`)
+ * for an erased account, with its own verdict, `ERASED`, and for a global
+ * administrator as well — the one rule here that a global administrator is
+ * subject to. NOTHING about an erased account may be changed through the
+ * pages, not even taking it out of an organisation: the erasure has already
+ * done everything that needed doing to it (it deleted every membership,
+ * role, sign-in and link), and a rule with no exceptions is one nobody can
+ * get half right. The erasure engine itself (`GdprEraser`) does not come
+ * through this class, so a second run of an unfinished request still works.
+ *
+ * The order inside decide() matters: for an administrator who is not
+ * global, the "does it belong here" row is asked FIRST, so an account in
+ * another organisation still reads exactly like a missing one and nobody
+ * learns from this verdict that an account somewhere was erased.
+ *
+ * Two pages change an account WITHOUT calling check(), because they are for
+ * global administrators only (`admin/sites/users.php`, which adds a person
+ * to an organisation, and `admin/users/unplaced-save.php`, which places an
+ * account that belongs to no organisation), and the user edit page has one
+ * change that reaches no check() (a global administrator ticking only
+ * "global administrator"). All three ask checkNotErased(), which is the
+ * same rule and records the refusal the same way.
+ *
+ * -------------------------------------------------------------------------
  * WHAT THIS CLASS CANNOT DO (see also DEV_NOTES.md and the #518 commit)
  * -------------------------------------------------------------------------
  *  - The check and the write it guards are two separate steps. A
@@ -244,6 +284,13 @@ final class AccountGuard
     public const GLOBAL_ONLY = 'global_only';
 
     /**
+     * #977: the account was erased on request, so nobody may change it —
+     * a global administrator included. See the class docblock, "AN ERASED
+     * ACCOUNT CANNOT BE CHANGED BY ANYBODY".
+     */
+    public const ERASED = 'erased';
+
+    /**
      * Plain-English reason word for each reason code, used ONLY inside the
      * security record's detail text (never shown to the person acting —
      * see message() for what they actually see).
@@ -256,6 +303,7 @@ final class AccountGuard
         'portal_admin'   => 'the account has administrator rights across the whole portal',
         'other_org'      => 'the account also belongs, or used to belong, to another organisation',
         'not_admin_here' => 'the person acting is not an administrator of the organisation that was open',
+        'erased'         => 'the account was erased on request, and an erased account is never changed (#977)',
     ];
 
     /** @var bool|null Cached per-request answer to isSingleOrganisation(). Null means "not yet worked out". */
@@ -349,14 +397,19 @@ final class AccountGuard
 
     /**
      * The decision table (see the #518 settled plan, section 1.3). Rows are
-     * checked in order and the FIRST match wins. This method reaches into
+     * checked in the order they appear and the FIRST match wins. Since #977
+     * that order is 1, 3, 3a, 2, 4, 5 ... 10: row 3 moved up and row 3a (an
+     * erased account) is new, and the numbers were kept so that references
+     * to "row 3" elsewhere still mean the membership row. This method reaches into
      * nothing outside its own arguments — no database, no session, no other
      * class — so it can be, and is, exercised directly by
      * tools/account-guard-selftest.php with no database at all.
      *
      * @param bool       $actorIsGlobal      Whether the person/key acting is a global administrator.
      * @param array|null $facts              The target account's row from facts(), or null when it does not exist.
-     *                                       Expected keys: isAdmin, isRootAdmin, thisOrgActive, otherOrgRows.
+     *                                       Expected keys: isAdmin, isRootAdmin, thisOrgActive, otherOrgRows,
+     *                                       and (#977) isErased. A missing isErased reads as "not erased",
+     *                                       which is what the self-test's hand-made rows rely on.
      * @param string     $reach              One of the REACH_* constants.
      * @param bool       $singleOrganisation Whether this installation is running single-organisation.
      *
@@ -373,18 +426,35 @@ final class AccountGuard
             return ['verdict' => self::NOT_FOUND, 'reason' => 'missing'];
         }
 
-        // Row 2 — a global administrator may change anything.
-        if ($actorIsGlobal === true) {
-            return ['verdict' => self::ALLOW, 'reason' => ''];
+        // Row 3 — for somebody who is NOT a global administrator, on a
+        // multi-organisation installation, an account that is not (in the
+        // sense that matters for this reach — see belongsHere()) a member
+        // of the organisation that is open must look exactly like a
+        // missing account. This is what stops the "does this account exist
+        // somewhere else" probe.
+        //
+        // #977: the rows keep their old numbers, so that the references to
+        // them elsewhere stay true, but this one is now ASKED BEFORE row 2.
+        // That changes nothing for anybody it applies to (it never applied
+        // to a global administrator, which is what row 2 is about); it is
+        // asked first so that it comes before row 3a below: an administrator
+        // of another organisation must not learn that an account was erased.
+        if ($actorIsGlobal === false && $singleOrganisation === false && self::belongsHere($facts, $reach) === false) {
+            return ['verdict' => self::NOT_FOUND, 'reason' => 'not_member'];
         }
 
-        // Row 3 — on a multi-organisation installation, an account that is
-        // not (in the sense that matters for this reach — see
-        // belongsHere()) a member of the organisation that is open must
-        // look exactly like a missing account. This is what stops the
-        // "does this account exist somewhere else" probe.
-        if ($singleOrganisation === false && self::belongsHere($facts, $reach) === false) {
-            return ['verdict' => self::NOT_FOUND, 'reason' => 'not_member'];
+        // Row 3a — #977: an ERASED account may be looked at and NOTHING
+        // else, by anybody, a global administrator included. See the class
+        // docblock, "AN ERASED ACCOUNT CANNOT BE CHANGED BY ANYBODY". The
+        // fact comes from facts(), which asks GdprEraser::emptiedAccountSql(),
+        // the one definition of an erased account.
+        if ($reach !== self::REACH_VIEW && self::flagIsOn($facts['isErased'] ?? null) === true) {
+            return ['verdict' => self::ERASED, 'reason' => 'erased'];
+        }
+
+        // Row 2 — a global administrator may change anything else.
+        if ($actorIsGlobal === true) {
+            return ['verdict' => self::ALLOW, 'reason' => ''];
         }
 
         // Row 4 — merely viewing/showing an account is always allowed once
@@ -551,9 +621,17 @@ final class AccountGuard
         // tblUserSites, the second because COUNT(*) always returns
         // exactly one row.
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        //
+        // #977: `isErased` is GdprEraser::emptiedAccountSql(), the ONE
+        // definition of an erased account, read in this same statement. It
+        // is not a second query on purpose: a failure here throws, so the
+        // page refuses, and "could not tell whether it was erased" can never
+        // be read as "not erased". The expression is fixed text from code
+        // and comes back as 1 or 0.
         $sql = 'SELECT u.userID, u.isAdmin, u.isRootAdmin, '
             . '(SELECT us.isActive FROM tblUserSites us WHERE us.userID = u.userID AND us.siteID = ? LIMIT 1) AS thisOrgActive, '
-            . '(SELECT COUNT(*) FROM tblUserSites o WHERE o.userID = u.userID AND o.siteID <> ?) AS otherOrgRows '
+            . '(SELECT COUNT(*) FROM tblUserSites o WHERE o.userID = u.userID AND o.siteID <> ?) AS otherOrgRows, '
+            . GdprEraser::emptiedAccountSql('u') . ' AS isErased '
             . 'FROM tblUsers u WHERE u.userID IN (' . $placeholders . ')';
 
         $db   = App::db();
@@ -629,7 +707,7 @@ final class AccountGuard
      * @param int    $userId
      * @param string $reach
      *
-     * @return string One of the ALLOW / NOT_FOUND / GLOBAL_ONLY constants.
+     * @return string One of the ALLOW / NOT_FOUND / GLOBAL_ONLY / ERASED (#977) constants.
      */
     public static function verdict(int $userId, string $reach): string
     {
@@ -647,7 +725,7 @@ final class AccountGuard
      * @param string $reach  One of the REACH_* constants.
      * @param string $action Plain-English text describing the attempt, containing ONLY what the person themselves supplied (e.g. "edit account #104"). Never the target's name or email.
      *
-     * @return string One of the ALLOW / NOT_FOUND / GLOBAL_ONLY constants.
+     * @return string One of the ALLOW / NOT_FOUND / GLOBAL_ONLY / ERASED (#977) constants.
      */
     public static function check(int $userId, string $reach, string $action): string
     {
@@ -656,6 +734,43 @@ final class AccountGuard
             self::logRefusal($action, $result['verdict'], $result['reason'], $userId > 0 ? $userId : null);
         }
         return $result['verdict'];
+    }
+
+    /**
+     * #977: may this account be changed at all, or was it erased on
+     * request? For the places that change an account WITHOUT calling
+     * check() — `admin/sites/users.php` and `admin/users/unplaced-save.php`,
+     * both for global administrators only, so there is no "does it belong
+     * here" question for them to ask — and for `admin/users/save.php`,
+     * where a global administrator changing ONLY the "global administrator"
+     * tick reaches no check() at all (a global administrator is allowed
+     * that without asking). It is the same rule as row 3a of decide(), read
+     * from the same facts(), and a refusal is recorded the same way check()
+     * records one.
+     *
+     * A failure to read THROWS (facts() does): the page then stops with an
+     * error and changes nothing, which is the safe direction. A missing
+     * account answers ALLOW here, because "missing" is not this method's
+     * question; each page already has its own answer for that.
+     *
+     * @param int    $userId The account about to be changed.
+     * @param string $action Plain-English text of the attempt (see check()).
+     *
+     * @return string ALLOW or ERASED.
+     */
+    public static function checkNotErased(int $userId, string $action): string
+    {
+        if ($userId <= 0) {
+            return self::ALLOW;
+        }
+        $facts = self::facts([$userId], Site::id());
+        if (self::flagIsOn($facts[$userId]['isErased'] ?? null) === true) {
+            self::logRefusal($action, self::ERASED, 'erased', $userId);
+
+            return self::ERASED;
+        }
+
+        return self::ALLOW;
     }
 
     // =========================================================================
@@ -674,7 +789,7 @@ final class AccountGuard
      * throws either.
      *
      * @param string   $action        Plain-English text of the attempt (see check()).
-     * @param string   $verdict       NOT_FOUND or GLOBAL_ONLY (never called for ALLOW).
+     * @param string   $verdict       NOT_FOUND, GLOBAL_ONLY or ERASED (never called for ALLOW).
      * @param string   $reason        One of the REASON_WORDS keys.
      * @param int|null $targetUserId  The account number that was asked for, or null when none was given at all.
      *
@@ -688,9 +803,22 @@ final class AccountGuard
         //    administrators, so it must never say WHY beyond "not found"
         //    or "only a global administrator", and never name the
         //    target's own details.
-        $text = ($verdict === self::NOT_FOUND)
-            ? ('Refused: ' . $action . '. Not found in this organisation.')
-            : ('Refused: ' . $action . '. Only a global administrator can do this.');
+        // #977: an erased account has its own line. Written out whole for
+        // each verdict rather than assembled, so none can read wrongly for
+        // another. It does NOT say "erased", on purpose: this line is read
+        // by the open organisation's own administrators, the account
+        // refused is usually a GLOBAL administrator's attempt on an account
+        // that belongs to no organisation any more (the erasure deleted its
+        // memberships), and this record's rule since #518 is to say no more
+        // than that a change was refused. The reason is in the security
+        // record below, which only a global administrator sees.
+        if ($verdict === self::NOT_FOUND) {
+            $text = 'Refused: ' . $action . '. Not found in this organisation.';
+        } elseif ($verdict === self::ERASED) {
+            $text = 'Refused: ' . $action . '. That account cannot be changed.';
+        } else {
+            $text = 'Refused: ' . $action . '. Only a global administrator can do this.';
+        }
         Logger::activity('AccountChangeRefused', $text, $actorId);
 
         // 2. Security record — organisation left NULL on purpose, so
@@ -735,7 +863,7 @@ final class AccountGuard
      * reach, because it is meant to be indistinguishable from an account
      * number that was simply wrong.
      *
-     * @param string $verdict NOT_FOUND or GLOBAL_ONLY.
+     * @param string $verdict NOT_FOUND, GLOBAL_ONLY or ERASED.
      * @param string $reach   One of the REACH_* constants.
      *
      * @return string
@@ -744,6 +872,14 @@ final class AccountGuard
     {
         if ($verdict === self::NOT_FOUND) {
             return 'That account could not be found.';
+        }
+
+        // #977. What happened, that nothing was changed, and why it matters,
+        // so an administrator does not go looking for a way round it.
+        if ($verdict === self::ERASED) {
+            return 'Nothing was changed. This account was erased on request, so it cannot be changed or switched '
+                . 'back on. What the erasure kept, such as giving records kept for tax, depends on it staying '
+                . 'exactly as the erasure left it.';
         }
 
         if ($verdict === self::GLOBAL_ONLY) {

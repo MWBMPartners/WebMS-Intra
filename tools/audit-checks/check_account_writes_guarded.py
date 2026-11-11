@@ -125,7 +125,12 @@ MARKER = "AccountGuard::"
 # once did needs re-making, not silently carrying forward.
 ALLOWED: dict[str, str] = {
     "_apps/admin/maintenance/demo-data.php": "global administrators only (App::isRootAdmin())",
-    "_apps/admin/sites/users.php": "global administrators only (App::isUmbrellaAdmin())",
+    # "_apps/admin/sites/users.php" was here ("global administrators only")
+    # until #977 (11 November 2026), when it began asking
+    # AccountGuard::checkNotErased() so that an account erased on request is
+    # never put back into an organisation. Mentioning the class is what this
+    # check looks for, so the entry went stale the moment that landed and was
+    # removed, as this list's both-ways rule requires.
     # Added 3 November 2026 (#724). The create branch now grants the
     # data_controller role to the new organisation's first administrator, in
     # the same transaction as the tblSites INSERT — otherwise an organisation
