@@ -70,8 +70,11 @@ if ($action === 'addJob') {
     $stmt = $mysqli->prepare('INSERT INTO tblEventJobAssignments (jobID, externalName) VALUES (?, ?)');
     $stmt->bind_param('is', $jobId, $extNm);
     $stmt->execute();
+    $assignedRowId = (int) $stmt->insert_id;
     $stmt->close();
-    Logger::activity('EventJobAssigned', 'Job #' . $jobId . ' → ' . $extNm);
+    // #933: the assignment's NUMBER, never the name typed for the helper (as
+    //    for a crew member in event-crews-save.php).
+    Logger::activity('EventJobAssigned', 'Job #' . $jobId . ' → assignment #' . $assignedRowId);
 } elseif ($action === 'unassign') {
     $assignmentId = (int) ($_POST['assignmentID'] ?? 0);
     if ($assignmentId <= 0) { header('Location: ' . $redirect, true, 302); exit(); }

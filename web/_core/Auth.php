@@ -2235,8 +2235,12 @@ class Auth
                 // back in via MS365 would crash createUser() on the
                 // emailAddress UNIQUE constraint instead of seeing a
                 // clean error.
-                if (self::findInactiveUserByEmail($email, $mysqli) !== null) {
-                    Logger::activity('LoginBlocked', 'MS365 sign-in attempt for a deactivated account: ' . $email);
+                $switchedOffId = self::findInactiveUserByEmail($email, $mysqli);
+                if ($switchedOffId !== null) {
+                    // #933: the account's NUMBER, and the account in its own
+                    //    column, never the e-mail address in the words — an
+                    //    erasure empties the column and cannot reach words.
+                    Logger::activity('LoginBlocked', 'MS365 sign-in attempt for deactivated account #' . $switchedOffId, $switchedOffId);
                     self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
                 }
 
@@ -2533,8 +2537,10 @@ class Auth
             } else {
                 // 🚫 Deactivated-account guard (#B7b) — same rationale as
                 // callbackMS365() above.
-                if (self::findInactiveUserByEmail($email, $mysqli) !== null) {
-                    Logger::activity('LoginBlocked', 'Google sign-in attempt for a deactivated account: ' . $email);
+                $switchedOffId = self::findInactiveUserByEmail($email, $mysqli);
+                if ($switchedOffId !== null) {
+                    // #933: as in callbackMS365() above.
+                    Logger::activity('LoginBlocked', 'Google sign-in attempt for deactivated account #' . $switchedOffId, $switchedOffId);
                     self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
                 }
 
@@ -2913,7 +2919,8 @@ class Auth
         //    This is the answer that counts, because the lock is held.)
         if (RateLimiter::isBlocked($ip) === true) {
             self::$localSignInWait = max(1, RateLimiter::lockoutRemaining($ip));
-            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $identifier);
+            // #933: the name's MARK, never the name (RateLimiter::nameMark()).
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . RateLimiter::nameMark($identifier));
             return false;
         }
 
@@ -2988,7 +2995,7 @@ class Auth
         //    exactly the same way, so this gives nothing away.
         if (RateLimiter::isNameBlocked($countedAs) === true) {
             self::$localSignInWait = max(1, RateLimiter::nameLockoutRemaining($countedAs));
-            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $countedAs);
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . RateLimiter::nameMark($countedAs));
             return false;
         }
 
@@ -2997,15 +3004,19 @@ class Auth
             // ⏱️ Spend the time a real check would take: see NO_ACCOUNT_HASH.
             //    The answer is deliberately not used.
             password_verify($password, self::NO_ACCOUNT_HASH);
-            // 📝 Log the failed attempt (used by RateLimiter)
-            Logger::activity('LoginFailed', RateLimiter::FAILED_NO_ACCOUNT . $countedAs);
+            // 📝 Log the failed attempt (used by RateLimiter). The name's MARK,
+            //    never the name (#933): the limit for one name counts these
+            //    records by their exact words, and a mark counts exactly as the
+            //    name did without keeping an e-mail address readable for as
+            //    long as the log is kept.
+            Logger::activity('LoginFailed', RateLimiter::FAILED_NO_ACCOUNT . RateLimiter::nameMark($countedAs));
             return false;
         }
 
         // 🔑 Verify password using PHP's built-in password_verify
         // See: https://www.php.net/manual/en/function.password-verify.php
         if (password_verify($password, $row['passwordHash']) === false) {
-            Logger::activity('LoginFailed', RateLimiter::FAILED_WRONG_PASSWORD . $countedAs);
+            Logger::activity('LoginFailed', RateLimiter::FAILED_WRONG_PASSWORD . RateLimiter::nameMark($countedAs));
             return false;
         }
 
@@ -4017,7 +4028,14 @@ class Auth
         $stmt->close();
 
         if ($result === true) {
-            Logger::activity('AccountLink', 'Linked ' . $provider . ' account (' . $providerEmail . ')');
+            // #933: the provider and the account's NUMBER, never the
+            //    provider's e-mail address. This runs inside a sign-in
+            //    callback, BEFORE anybody is signed in, so without the third
+            //    argument the record named nobody in its own column and held
+            //    the address in its words — the one place an erasure cannot
+            //    reach. The address is on the account's own link row
+            //    (tblLinkedAccounts), which an erasure does reach.
+            Logger::activity('AccountLink', 'Linked a ' . $provider . ' sign-in to account #' . $userId, $userId);
         }
 
         return $result;
@@ -4036,7 +4054,7 @@ class Auth
     public static function unlinkAccount(int $userId, int $linkID, \mysqli $db): array
     {
         // 🛡️ Verify the link belongs to this user
-        $stmt = $db->prepare('SELECT provider, providerEmail FROM tblLinkedAccounts WHERE linkID = ? AND userID = ?');
+        $stmt = $db->prepare('SELECT `provider` FROM `tblLinkedAccounts` WHERE `linkID` = ? AND `userID` = ?');
         if ($stmt === false) {
             return ['success' => false, 'error' => 'Database error.'];
         }
@@ -4063,7 +4081,9 @@ class Auth
         $del->execute();
         $del->close();
 
-        Logger::activity('AccountUnlink', 'Unlinked ' . $link['provider'] . ' account (' . ($link['providerEmail'] ?? '') . ')');
+        // #933: as in linkAccount() — the provider and the account's number,
+        //    never the provider's e-mail address.
+        Logger::activity('AccountUnlink', 'Unlinked a ' . $link['provider'] . ' sign-in (link #' . $linkID . ') from account #' . $userId, $userId);
 
         return ['success' => true, 'error' => ''];
     }

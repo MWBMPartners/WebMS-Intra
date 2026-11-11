@@ -71,7 +71,10 @@ $stmt->execute();
 $newId = (int) $stmt->insert_id;
 $stmt->close();
 
-Logger::activity('SalvationCardReceived', 'Card #' . $newId . ' (' . $fullName . ', ' . $decision . ')');
+// #933: the card's NUMBER and the decision word only, never the name written
+//    on the card. Whoever filled it in may have no account here, so no erasure
+//    could ever find the name in the log's words; it is on the card itself.
+Logger::activity('SalvationCardReceived', 'Card #' . $newId . ' (' . $decision . ')');
 if (class_exists('\\Portal\\Core\\WebhookDispatcher') === true) {
     \Portal\Core\WebhookDispatcher::emit('salvation.card.received', ['cardID' => $newId, 'decision' => $decision]);
 }

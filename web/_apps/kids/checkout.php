@@ -68,7 +68,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($ok === false) {
                 $message = '"' . htmlspecialchars($pickupName, ENT_QUOTES, 'UTF-8') . '" is NOT on the authorised pickup list for ' . htmlspecialchars((string) $row['fullName'], ENT_QUOTES, 'UTF-8') . '. Refer to a leader.';
                 $messageClass = 'danger';
-                Logger::activity('KidCheckoutBlocked', 'Child #' . $row['childID'] . ' tried by "' . $pickupName . '"');
+                // #933: never the name typed for the adult collecting. That
+                //    person usually has no account here, so no erasure could
+                //    ever find their name in the log's words.
+                Logger::activity('KidCheckoutBlocked', 'Child #' . $row['childID'] . ' (check-in #' . (int) $row['checkinID'] . '): a name not on the authorised pickup list was refused');
             } else {
                 // 🧾 Who checked the child OUT is written by name as well as
                 //    by number (#703, D-111, migration 272): an erasure keeps
@@ -84,7 +87,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->bind_param('iisi', $staffId, $staffId, $pickupName, $checkinId);
                 $stmt->execute();
                 $stmt->close();
-                Logger::activity('KidCheckedOut', 'Child #' . $row['childID'] . ' to "' . $pickupName . '"');
+                // #933: numbers only; the collecting adult's name is on the
+                //    check-in row (`pickupName`), not in the log's words.
+                Logger::activity('KidCheckedOut', 'Child #' . $row['childID'] . ' checked out (check-in #' . $checkinId . ')');
                 $message = htmlspecialchars((string) $row['fullName'], ENT_QUOTES, 'UTF-8') . ' checked out to ' . htmlspecialchars($pickupName, ENT_QUOTES, 'UTF-8') . '.';
                 $messageClass = 'success';
             }

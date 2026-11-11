@@ -263,7 +263,11 @@ if ($action === 'create') {
 
         App::commit();
 
-        Logger::activity('UserCreated', 'Created user: ' . $fullName . ' (' . $emailAddress . ')', $_SESSION['user_id'] ?? null);
+        // #933: the new account's NUMBER, never its name or e-mail address.
+        //    This record belongs to the ADMINISTRATOR (userID is who acted), so
+        //    erasing the new member could never reach it: the name and address
+        //    would have stayed in its words for as long as the log is kept.
+        Logger::activity('UserCreated', 'Created user #' . (int) $newUserId, $_SESSION['user_id'] ?? null);
 
         $_SESSION['flash_msg']  = 'User "' . $fullName . '" created successfully.';
         $_SESSION['flash_type'] = 'success';
@@ -786,7 +790,8 @@ if ($action === 'update') {
 
     Logger::activity(
         'UserUpdated',
-        'Updated user #' . $userID . ': ' . $fullName . $recordNote,
+        // #933: the account's NUMBER only, never its name (see UserCreated).
+        'Updated user #' . $userID . $recordNote,
         $_SESSION['user_id'] ?? null
     );
 

@@ -201,7 +201,10 @@ $newId = FormEngine::saveResponse($formId, $formSiteId, 'public', null, $ip, $an
 // server-state oracle for a public visitor (prayer-requests precedent).
 // -----------------------------------------------------------------------------
 if ($newId > 0) {
-    Logger::activity('FormResponsePublic', 'Form #' . $formId . ' response #' . $newId . ' from IP ' . $ip);
+    // #933: never the visitor's network address in the words. Logger already
+    //    keeps it in the record's own column (visitorIP), and the response row has
+    //    its own copy; words are the one part of a record nothing can empty.
+    Logger::activity('FormResponsePublic', 'Form #' . $formId . ' response #' . $newId . ' from a visitor');
 } else {
     Logger::errorPlatform('MySQL', 'Error', 'FORM_PUBLIC_RESPONSE_FAIL', 'saveResponse() returned 0', 'formID=' . $formId);
 }

@@ -211,7 +211,11 @@ if ($action === 'auth_verify') {
                 $_SESSION['2fa_user_id'] = $webauthnUserId;
                 unset($_SESSION['user_id'], $_SESSION['2fa_passed']);
                 $_SESSION['login_redirect'] = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
-                Logger::activity('LoginWebAuthnPending2fa', 'Passkey login pending 2FA challenge: ' . ($row['friendlyName'] ?? 'Passkey'));
+                // #933: the passkey's NUMBER, never its name, and the account
+                //    in its own column: nobody is signed in yet at this step,
+                //    so without it the record named nobody an erasure could
+                //    find. The passkey has just been verified as this account's.
+                Logger::activity('LoginWebAuthnPending2fa', 'Passkey login pending 2FA challenge: passkey #' . (int) $row['credID'], $webauthnUserId);
                 echo json_encode(['success' => true, 'redirect' => Site::url('auth/2fa/verify')]);
                 exit();
             }
@@ -227,7 +231,8 @@ if ($action === 'auth_verify') {
             // an identity it has not finished earning.
             $redirect = Auth::safeRedirectUrl($input['redirect'] ?? Site::url(''));
 
-            Logger::activity('LoginWebAuthn', 'User logged in via passkey: ' . ($row['friendlyName'] ?? 'Passkey'));
+            // #933: the passkey's NUMBER, never its name.
+            Logger::activity('LoginWebAuthn', 'User logged in via passkey #' . (int) $row['credID']);
 
             echo json_encode(['success' => true, 'redirect' => $redirect]);
             exit();

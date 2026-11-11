@@ -362,7 +362,11 @@ try {
         throw $inLock;
     }
 
-    Logger::activity('PasswordResetRequested', 'Password reset token created for: ' . $email);
+    // #933: the account's NUMBER, in the words and in its own column, never
+    //    the e-mail address. Nobody is signed in here, so without the third
+    //    argument these records named nobody in their column and held the
+    //    address in their words, which no erasure can reach.
+    Logger::activity('PasswordResetRequested', 'Password reset token created for account #' . $userId, $userId);
 } catch (\Throwable $ex) {
     // 📝 The database refused. The person already has the usual answer; the
     //    administrator gets the error.
@@ -411,7 +415,7 @@ if ($resetLink === '') {
         'A password reset e-mail was not sent, because the portal does not know its own web address. Set it at Admin, Settings, Organisation.',
         ''
     );
-    Logger::activity('PasswordResetMailFailed', 'Reset email not sent (the portal\'s web address is not known) for: ' . $email);
+    Logger::activity('PasswordResetMailFailed', 'Reset email not sent (the portal\'s web address is not known) for account #' . $userId, $userId);
 } elseif (Mailer::canSend() === true) {
     $siteName = App::settings('site.name') ?? 'Portal';
     $userName = htmlspecialchars($user['fullName'] ?? 'User', ENT_QUOTES, 'UTF-8');
@@ -488,11 +492,11 @@ if ($resetLink === '') {
         //    the mail queue there is a third ending: it is waiting.
         $became = Mailer::lastOutcome();
         if ($became === Mailer::OUTCOME_SENT) {
-            Logger::activity('PasswordResetEmailed', 'Reset email sent to: ' . $email);
+            Logger::activity('PasswordResetEmailed', 'Reset email sent for account #' . $userId, $userId);
         } elseif ($became === Mailer::OUTCOME_QUEUED || $became === Mailer::OUTCOME_HELD) {
-            Logger::activity('PasswordResetMailWaiting', 'Reset email is waiting in the mail queue (' . $became . ') for: ' . $email);
+            Logger::activity('PasswordResetMailWaiting', 'Reset email is waiting in the mail queue (' . $became . ') for account #' . $userId, $userId);
         } else {
-            Logger::activity('PasswordResetMailFailed', 'Reset email was not sent and is not waiting (' . $became . ') for: ' . $email);
+            Logger::activity('PasswordResetMailFailed', 'Reset email was not sent and is not waiting (' . $became . ') for account #' . $userId, $userId);
         }
     } catch (\Throwable $ex) {
         // 📝 Log the error but don't expose it to the user
@@ -503,7 +507,7 @@ if ($resetLink === '') {
     //    must reset the password by hand. The person asking is told the same as
     //    always. The health page counts these records, so the administrator
     //    learns that people are asking and getting nothing.
-    Logger::activity('PasswordResetNoMailer', 'Reset requested but mailer not configured for: ' . $email);
+    Logger::activity('PasswordResetNoMailer', 'Reset requested but mailer not configured for account #' . $userId, $userId);
 }
 
 // The browser was answered in section 3; there is nothing left to send.

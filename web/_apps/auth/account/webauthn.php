@@ -147,9 +147,11 @@ if ($action === 'register_verify') {
             $result['transports']
         );
         $stmt->execute();
+        $newCredId = (int) $stmt->insert_id;
         $stmt->close();
 
-        Logger::activity('WebAuthnRegister', 'Registered passkey: ' . $friendlyName);
+        // #933: the passkey's NUMBER, never its name. A person names a passkey in their own words ("Lance's iPhone"), and the log's words are the one part of a record an erasure cannot empty; the name is on the passkey's own row.
+        Logger::activity('WebAuthnRegister', 'Registered passkey #' . $newCredId);
 
         echo json_encode(['success' => true, 'csrfToken' => Auth::csrfToken()]);
         exit();

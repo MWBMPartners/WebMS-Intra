@@ -162,7 +162,10 @@ if (strlen($p256dhDecoded) !== 65 || strlen($authDecoded) !== 16) {
 //    re-validates at SEND time; a subscriber controls this string entirely,
 //    so both gates share the exact same rule set — see WebPush::validateEndpoint()).
 if (WebPush::validateEndpoint($endpoint) === false) {
-    Logger::activity('PushSubscribeRejected', 'Endpoint failed validation: ' . substr($endpoint, 0, 60));
+    // #933: the push service's HOST only, never the address itself. The rest
+    //    of a push address is a token naming one person's device, and the
+    //    log's words are the one part of a record an erasure cannot empty.
+    Logger::activity('PushSubscribeRejected', 'Endpoint failed validation (host: ' . mb_substr((string) (parse_url($endpoint, PHP_URL_HOST) ?: 'no host'), 0, 80) . ')');
     http_response_code(400);
     echo json_encode(['error' => 'Endpoint is not a recognised push service']);
     exit();
@@ -206,7 +209,8 @@ $ok = $stmt->execute();
 $stmt->close();
 
 if ($ok === false) {
-    Logger::activity('PushSubscribeFailed', 'Insert failed for endpoint ' . substr($endpoint, 0, 80));
+    // #933: the host only (see PushSubscribeRejected above).
+    Logger::activity('PushSubscribeFailed', 'Insert failed for an endpoint at ' . mb_substr((string) (parse_url($endpoint, PHP_URL_HOST) ?: 'no host'), 0, 80));
     http_response_code(500);
     echo json_encode(['error' => 'Insert failed']);
     exit();

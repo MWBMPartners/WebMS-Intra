@@ -88,8 +88,13 @@ if ($action === 'addCrew') {
     );
     $stmt->bind_param('iss', $crewId, $extName, $role);
     $stmt->execute();
+    $memberRowId = (int) $stmt->insert_id;
     $stmt->close();
-    Logger::activity('EventCrewMemberAdded', 'Crew #' . $crewId . ' + "' . $extName . '" as ' . $role);
+    // #933: the member's row NUMBER, never the name typed for them. That name
+    //    belongs to somebody who has no account here, so no erasure could ever
+    //    find it in the log's words; it lives on the crew row, which can be
+    //    edited or deleted.
+    Logger::activity('EventCrewMemberAdded', 'Crew #' . $crewId . ' + membership #' . $memberRowId . ' as ' . $role);
 } elseif ($action === 'removeMember') {
     $memberId = (int) ($_POST['membershipID'] ?? 0);
     if ($memberId <= 0) { header('Location: ' . $redirect, true, 302); exit(); }

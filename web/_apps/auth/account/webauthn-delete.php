@@ -67,7 +67,8 @@ if ($del !== false) {
     $del->execute();
     $del->close();
 
-    Logger::activity('WebAuthnDelete', 'Removed passkey: ' . ($cred['friendlyName'] ?? 'Passkey'));
+    // #933: the passkey's NUMBER, never its name. A person names a passkey in their own words ("Lance's iPhone"), and the log's words are the one part of a record an erasure cannot empty; the name is on the passkey's own row.
+    Logger::activity('WebAuthnDelete', 'Removed passkey #' . $credID);
 }
 
 header('Location: ' . Site::url('account') . '?wa_deleted=1');

@@ -221,7 +221,10 @@ try {
 try {
     Logger::activity(
         'ExpenseWithdraw',
-        'Claim #' . $claimID . ' withdrawn by claimant (' . htmlspecialchars($claim['claimTitle'], ENT_QUOTES, 'UTF-8') . ')',
+        // #933: the claim's NUMBER only. Its title is the claimant's own
+        //    words ("mileage visiting ...") and stays on the claim, which the
+        //    expenses rules keep; the log's words are never emptied.
+        'Claim #' . $claimID . ' withdrawn by claimant',
         $userId
     );
 } catch (\Throwable $ex) {

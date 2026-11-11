@@ -188,7 +188,10 @@ $stmt->close();
 if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_FAIL', $mysqli->error, '');
 } else {
-    Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted from IP ' . $ip);
+    // #933: never the visitor's network address in the words. Logger already
+    //    keeps it in the record's own column (visitorIP), and the response row has
+    //    its own copy; words are the one part of a record nothing can empty.
+    Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
 
     // 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless
     // prayer-requests.autoAssign = 'true'; swallows its own failures.

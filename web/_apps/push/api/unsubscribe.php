@@ -91,7 +91,9 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-Logger::activity('PushUnsubscribed', 'Endpoint=' . substr($endpoint, 0, 80));
+// #933: the push service's HOST only, never the device's own address (a
+//    token naming one person's device); see subscribe.php.
+Logger::activity('PushUnsubscribed', 'Endpoint at ' . mb_substr((string) (parse_url($endpoint, PHP_URL_HOST) ?: 'no host'), 0, 80));
 // 🔄 Auth::verifyCsrf() rotated the session token above on successful
 //    verification — hand the NEW token back so the client's next POST
 //    (e.g. an immediate "re-enable" click) doesn't submit the now-stale one.

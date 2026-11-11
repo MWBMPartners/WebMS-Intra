@@ -314,7 +314,10 @@ try {
     // 4. 📓 Log activity
     Logger::activity(
         'ExpensePay',
-        'Reimbursed claim #' . $claimID . ' (refs: ' . implode(', ', $refs) . ')',
+        // #933: how MANY payment references, not their text. A reference is
+        //    typed by a treasurer and often carries the payee's name; it is on
+        //    the claim's payment rows, which the expenses rules keep.
+        'Reimbursed claim #' . $claimID . ' (' . count($refs) . ' payment reference(s))',
         $userId
     );
 

@@ -131,7 +131,11 @@ if ($rsvpUrl !== '' && class_exists(Mailer::class) === true && method_exists(Mai
     }
 }
 
-Logger::activity('EventInviteSent', 'Event #' . $eventId . ' → ' . $email . ($sent === true ? ' [accepted by the mail service]' : ($waiting === true ? ' [waiting in the mail queue]' : ($rsvpUrl === '' ? ' [not sent: the portal\'s web address is not known]' : ' [mailer failed]'))));
+// #933: never the invited person's e-mail address. They may have no account
+//    here, so an erasure could never reach the log's words; the address lives
+//    on the invitation row (tblEventRSVPInvites), which the event's own page
+//    lists and which can be removed.
+Logger::activity('EventInviteSent', 'Event #' . $eventId . ': an invitation' . ($sent === true ? ' [accepted by the mail service]' : ($waiting === true ? ' [waiting in the mail queue]' : ($rsvpUrl === '' ? ' [not sent: the portal\'s web address is not known]' : ' [mailer failed]'))));
 
 if ($rsvpUrl === '') {
     $_SESSION['flash_msg'] = 'The invitation was saved, but no e-mail was sent: the portal does not know its own web address, '

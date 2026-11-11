@@ -205,8 +205,11 @@ if ($action === 'create') {
     $newId = $stmt->insert_id;
     $stmt->close();
 
-    $displayName = $assignName ?? 'User #' . $assignUserID;
-    $logDetail = 'Assigned ' . $displayName . ' to ' . $roleName . ' (ID:' . $newId . ')';
+    // #933: WHO by account NUMBER, never by name. A holder who is not a member
+    //    is named by hand, and that name could never be reached by an erasure
+    //    once it is in the log's words; it lives on the assignment row.
+    $holderWords = $assignUserID !== null && (int) $assignUserID > 0 ? 'account #' . (int) $assignUserID : 'a holder named by hand';
+    $logDetail = 'Assigned ' . $holderWords . ' to ' . $roleName . ' (ID:' . $newId . ')';
     if ($transitionedCount > 0) {
         $logDetail .= ' — transitioned ' . $transitionedCount . ' outgoing holder(s)';
     }
@@ -254,8 +257,9 @@ if ($action === 'update') {
     $stmt->execute();
     $stmt->close();
 
-    $displayName = $assignName ?? 'User #' . $assignUserID;
-    Logger::activity('LeadershipUpdated', 'Updated assignment #' . $assignmentID . ' (' . $displayName . ' as ' . $roleName . ')', $userId);
+    // #933: by account NUMBER, never by name (see LeadershipAssigned above).
+    $holderWords = $assignUserID !== null && (int) $assignUserID > 0 ? 'account #' . (int) $assignUserID : 'a holder named by hand';
+    Logger::activity('LeadershipUpdated', 'Updated assignment #' . $assignmentID . ' (' . $holderWords . ' as ' . $roleName . ')', $userId);
 
     $_SESSION['flash_msg']  = 'Assignment updated successfully.';
     $_SESSION['flash_type'] = 'success';

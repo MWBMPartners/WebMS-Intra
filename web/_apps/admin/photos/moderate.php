@@ -115,7 +115,11 @@ if ($action === 'approve') {
             }
         }
     }
-    Logger::activity('PhotoRejected', 'Rejected photo #' . $photoId . ' (' . $reason . ')', $adminId);
+    // #933: the reason is typed about somebody's photo. It is stored on the
+    //    photo's own row (the UPDATE above) and offered to the uploader by
+    //    e-mail; it is not copied into the log's words, which no erasure can
+    //    empty. (Not "it was sent": the e-mail is best effort.)
+    Logger::activity('PhotoRejected', 'Rejected photo #' . $photoId . ($reason !== '' ? ' (a reason is on the photo\'s record)' : ''), $adminId);
     $_SESSION['flash_msg']  = 'Photo rejected and uploader notified.';
     $_SESSION['flash_type'] = 'info';
 }

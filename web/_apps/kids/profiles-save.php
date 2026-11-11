@@ -97,7 +97,9 @@ if ($action === 'edit') {
     $stmt->close();
 
     if ($affected > 0) {
-        Logger::activity('KidProfileEdited', 'Child #' . $childId . ' "' . $fullName . '" by parent #' . $userId);
+        // #933: the child's NUMBER, never their name: the log's words are the
+        //    one part of a record an erasure cannot empty.
+        Logger::activity('KidProfileEdited', 'Child #' . $childId . ' by parent #' . $userId);
         $_SESSION['flash_msg']  = $fullName . ' updated.';
         $_SESSION['flash_type'] = 'success';
     } else {
@@ -119,7 +121,8 @@ $stmt->execute();
 $newId = (int) $stmt->insert_id;
 $stmt->close();
 
-Logger::activity('KidProfileAdded', 'Child #' . $newId . ' "' . $fullName . '" by user #' . $userId);
+// #933: the child's NUMBER, never their name (see KidProfileEdited above).
+Logger::activity('KidProfileAdded', 'Child #' . $newId . ' by user #' . $userId);
 $_SESSION['flash_msg']  = $fullName . ' added.';
 $_SESSION['flash_type'] = 'success';
 header('Location: ' . Site::url('kids/profiles'), true, 302); exit();

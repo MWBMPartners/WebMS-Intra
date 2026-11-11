@@ -83,6 +83,7 @@ $attr        = Giving::attributeGift($siteId, $donorId, $date, $campaignSel);
 $campaignBind = $attr['campaignID'];
 $pledgeBind   = $attr['pledgeID'];
 
+$entryId = 0;
 $stmt = $db->prepare(
     'INSERT INTO tblGivingEntry '
     . '(siteID, donorID, donorName, categoryID, amountPence, currency, donatedAt, method, reference, notes, recordedByID, campaignID, pledgeID) '
@@ -95,10 +96,23 @@ if ($stmt !== false) {
         $date, $method, $reference, $notes, $userId, $campaignBind, $pledgeBind
     );
     $stmt->execute();
+    $entryId = (int) $stmt->insert_id;
     $stmt->close();
 }
 
-Logger::activity('GivingEntryRecorded', 'Recorded ' . Giving::formatAmount($amount, $currency) . ' from ' . ($donorName !== '' ? $donorName : 'anonymous'), $userId);
+// #933: the entry's NUMBER and whose it is by account NUMBER, never the
+//    donor's name. A name typed for somebody with no account here could never
+//    be reached by an erasure once it is in the log's words; the gift's own
+//    row carries it, and the giving-records rule decides how long.
+//    (Worked out first, so the record's words are built from numbers and
+//    fixed words alone: tools/audit-checks/check_activity_descriptions_personal.py
+//    reads which names a description is built from.)
+$giverWords = $donorId !== null ? 'from account #' . $donorId : ($freeTextName !== null ? 'from a giver named by hand' : 'anonymously');
+Logger::activity(
+    'GivingEntryRecorded',
+    'Recorded ' . Giving::formatAmount($amount, $currency) . ' as entry #' . $entryId . ' ' . $giverWords,
+    $userId
+);
 
 $_SESSION['flash_msg']  = 'Entry recorded.';
 $_SESSION['flash_type'] = 'success';

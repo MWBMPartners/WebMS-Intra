@@ -215,6 +215,8 @@ $newData = [
 ];
 
 Logger::audit('tblUsers', $newUserId, 'create', null, ApiResponse::filterSensitive($newData));
-Logger::activity('ApiUserCreate', 'API: created user #' . $newUserId . ' (' . $emailAddress . ')');
+// #933: the number only, never the e-mail address: this record belongs to
+//    whoever called the API, so erasing the new member could never reach it.
+Logger::activity('ApiUserCreate', 'API: created user #' . $newUserId);
 
 ApiResponse::success(ApiResponse::filterSensitive($newData), 201);

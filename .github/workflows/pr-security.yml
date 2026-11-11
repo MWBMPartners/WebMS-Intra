@@ -1362,6 +1362,17 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_no_raw_address_stored.py
 
+      # An activity record's WORDS outlive every erasure: an erasure empties the
+      # record's account number and address but keeps its description, and an
+      # installation may keep the log for ever (D-117). 53 writers put a
+      # person's name, e-mail address, network address or own words there;
+      # this stops a new one (#933). A presence check: it reads names, not
+      # values, and its header lists what it cannot see.
+      - name: 'No activity record is worded from a person''s details (hard gate, #933)'
+        id: activity_descriptions_personal
+        if: always()
+        run: python3 tools/audit-checks/check_activity_descriptions_personal.py
+
       # Nothing under web/ may ask another website to draw a QR picture (#623).
       # The rule existed for PHP and had no guard for JavaScript, which is how
       # the noticeboard bundle's api.qrserver.com fallback went unnoticed. It is

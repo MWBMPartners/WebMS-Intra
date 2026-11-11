@@ -203,7 +203,11 @@ $stmt->execute();
 $newId = (int) $stmt->insert_id;
 $stmt->close();
 
-Logger::activity('EventRegistrationReceived', 'Event #' . $eventIdInt . ' registration #' . $newId . ' (' . $fullName . ')');
+// #933: the registration's NUMBER, never the registrant's name. The person
+//    registered is often a child, or somebody with no account, and the log's
+//    words are the one place an erasure cannot reach; the name is on the
+//    registration row, which the registrations clear-out and an erasure do.
+Logger::activity('EventRegistrationReceived', 'Event #' . $eventIdInt . ' registration #' . $newId);
 
 // 📧 Email confirmation to registrant (#348).
 if ($parentEmailArg !== null && class_exists(Mailer::class) === true && method_exists(Mailer::class, 'send') === true) {

@@ -1102,7 +1102,11 @@ function sendTestEmail(string $recipient): array
     //    with the mail route is on record). That is not a test that passed,
     //    and this used to report it as "Email sent".
     if ($ok === true && \Portal\Core\Mailer::lastIsWaiting() === true) {
-        Logger::activity('IntegrationTest', 'Test email was not sent: it is waiting in the mail queue, for ' . $recipient);
+        // #933: the address a test went to is NOT written into the log's words.
+        //    It is somebody's e-mail address — often a member's own — and words
+        //    are the one part of a record an erasure cannot empty. The page that
+        //    pressed the button shows it to the administrator at the time.
+        Logger::activity('IntegrationTest', 'Test email was not sent: it is waiting in the mail queue');
         return [
             'success' => false,
             'message' => 'The test e-mail was NOT sent: the portal kept it in the mail queue to send later. The detail below says why, and the health page says whether waiting mail is being sent.',
@@ -1111,7 +1115,8 @@ function sendTestEmail(string $recipient): array
     }
 
     if ($ok === true) {
-        Logger::activity('IntegrationTest', 'Test email sent successfully to ' . $recipient);
+        // #933: no address in the words (see above).
+        Logger::activity('IntegrationTest', 'Test email sent successfully');
         return [
             'success' => true,
             'message' => 'Email sent to ' . $recipient . '.',
@@ -1119,7 +1124,8 @@ function sendTestEmail(string $recipient): array
         ];
     }
 
-    Logger::activity('IntegrationTest', 'Test email failed for ' . $recipient);
+    // #933: no address in the words (see above).
+    Logger::activity('IntegrationTest', 'Test email failed');
     return [
         'success' => false,
         'message' => $exceptionMsg !== '' ? 'Mailer threw an exception — see detail below.' : 'Mailer returned false — see detail below.',
@@ -1178,7 +1184,10 @@ function sendGoogleTestEmail(string $recipient): array
         $result = MailerGoogle::send([$recipient], $subject, $htmlBody);
 
         if ($result === true) {
-            Logger::activity('IntegrationTest', 'Google test email sent successfully to ' . $recipient . ' from ' . $delegateUser);
+            // #933: neither address in the words — the recipient and the
+            //    mailbox the portal sends as are both somebody's e-mail
+            //    address. The answer below shows them at the time.
+            Logger::activity('IntegrationTest', 'Google test email sent successfully');
             return [
                 'success' => true,
                 'message' => 'Email sent to ' . $recipient . ' from delegate user ' . $delegateUser . '.',

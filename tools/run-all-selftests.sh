@@ -258,6 +258,7 @@ htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
+activity-description|tools/activity-description-selftest.php|selftest_actdesc|web:activity-description SELFTEST_WEB_PORT=9933
 admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-password SELFTEST_WEB_PORT=9086
 self-service-password|tools/self-service-password-selftest.php|selftest_sspwd|web:self-service-password SELFTEST_WEB_PORT=9088
 event-repeat-pages|tools/event-repeat-pages-selftest.php|selftest_evrep|web:event-repeat SELFTEST_WEB_PORT=9077

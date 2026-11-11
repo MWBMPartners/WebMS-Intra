@@ -203,7 +203,10 @@ class Debug
             try {
                 // The address goes into the activity log, so a scheduled
                 // job's token is cut out of it first (Logger::withoutJobToken()).
-                Logger::activity('DebugBlocked', 'Debug mode attempt in prod from ' . $ip . ' at ' . Logger::withoutJobToken($path));
+                // #933: the visitor's NETWORK address is not written into the
+                // words: Logger already keeps it in the record's own column,
+                // which an erasure empties, and words are never emptied.
+                Logger::activity('DebugBlocked', 'Debug mode attempt in prod at ' . Logger::withoutJobToken($path));
             } catch (\Throwable) {
                 // 🤷 Logging failure must never break the request.
             }

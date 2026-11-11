@@ -89,7 +89,8 @@ if ($cStmt !== false) {
     $cStmt->close();
 }
 
-Logger::activity('TaskCompleted', 'Completed task: ' . $task['title'], $userId);
+// #933: a task's title is free text and often names a person ("ring Mrs X"), so the record carries the task's NUMBER, never its title.
+Logger::activity('TaskCompleted', 'Completed task #' . $taskId, $userId);
 
 // 🔄 Spawn next occurrence for recurring tasks
 if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
@@ -161,7 +162,8 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
             $nStmt->execute();
             $nStmt->close();
         }
-        Logger::activity('TaskRecurrenceSpawned', 'Spawned next occurrence of: ' . $task['title'] . ' due ' . $nextDue, $userId);
+        // #933: numbers, never the title (see TaskCompleted above).
+        Logger::activity('TaskRecurrenceSpawned', 'Spawned the next occurrence of task #' . $taskId . ' due ' . $nextDue, $userId);
     }
 }
 
