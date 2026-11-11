@@ -5800,6 +5800,20 @@ class GdprEraser
         );
         $address  = $declared !== null ? (string) $declared['address'] : ($emptiedAlready === true ? null : ($account['displayAddress'] ?? null));
         $postcode = $declared !== null && $declared['postcode'] !== null ? (string) $declared['postcode'] : null;
+        // 🕳️ AN EMPTY VALUE IS NO VALUE, AND IS STORED AS NULL (#941 check
+        //    round 2). The account's `displayAddress` is written as '' whenever
+        //    a member saves their directory entry with the address box blank,
+        //    so '' reached this row as an "address" that holds nothing. NULL is
+        //    what "nothing kept" means everywhere else on this row (the
+        //    clearing writes NULL), so a blank is stored as NULL, and anything
+        //    that reads the row then needs only one test. Whitespace counts as
+        //    blank too. The audit line below reads the row back rather than
+        //    trusting these variables, so it treats '' and NULL alike as well,
+        //    for a row an older version wrote.
+        $blankIsNone = static fn (?string $v): ?string => ($v === null || trim($v) === '') ? null : $v;
+        $name        = $blankIsNone($name);
+        $address     = $blankIsNone($address);
+        $postcode    = $blankIsNone($postcode);
 
         if ($reopenKeptDonorId !== null) {
             // #941 (1c, case a): the row an earlier run kept and then cleared,
@@ -5891,19 +5905,19 @@ class GdprEraser
         if ($what === []) {
             // Only reachable for a record already kept beside an emptied
             // account (1b): everything else with nothing to keep left at 4.
-            $line .= 'Nothing there now keeps this donor\'s name. The name and address kept by the earlier run are left '
-                . 'in place all the same: only the retention job removes them, '
+            $line .= 'Nothing there now keeps this donor\'s name. What the earlier run kept is left '
+                . 'in place all the same: only the retention job removes it, '
                 . ($state['state'] === 'unreadable'
                     ? 'and THE KEEP-UNTIL DATE COULD NOT BE WORKED OUT from this organisation\'s settings, so nothing will be '
                         . 'cleared until that is put right.'
                     : 'after ' . GivingRetention::dateInWords($state['keepUntil']) . '.');
         } elseif ($state['state'] === 'unreadable') {
             $line .= ucfirst($list) . ' ' . ($total === 1 ? 'keeps' : 'keep')
-                . ' this donor\'s name and address. THE KEEP-UNTIL DATE COULD NOT BE WORKED OUT from this '
+                . ' the donor\'s details on this record. THE KEEP-UNTIL DATE COULD NOT BE WORKED OUT from this '
                 . 'organisation\'s settings, so nothing will be cleared until that is put right.';
         } else {
             $line .= ($earlierRun === true ? ucfirst($list) : $list) . ' ' . ($total === 1 ? 'keeps' : 'keep')
-                . ' this donor\'s name and address until ' . GivingRetention::dateInWords($state['keepUntil'])
+                . ' the donor\'s details on this record until ' . GivingRetention::dateInWords($state['keepUntil'])
                 . '. After that date the retention job removes them.';
         }
         $line .= ' ' . $otherWords . ' Why these: ' . $scopeWords . '.';
@@ -5929,30 +5943,34 @@ class GdprEraser
         if ($rule['hold'] !== false) {
             $line .= ' A hold is switched on (an audit or enquiry is open), so nothing will be cleared until it is switched off.';
         }
-        // 🗣️ WHERE THE NAME AND THE ADDRESS REALLY COME FROM (#941 check round 1).
-        //    Both sentences below said the name AND ADDRESS were "read from the
-        //    account". Only the name is: the address is the newest tax
-        //    declaration's at this organisation when one holds one (step 6),
-        //    and the account's only otherwise - so on the usual case, a donor
-        //    with a declaration, the line was untrue. Said from the same facts
-        //    step 6 used, so the line and the row cannot disagree.
-        $addressFrom = $declared !== null
-            ? 'the home address from the newest tax declaration there'
-            : ($address !== null ? 'the home address from the account' : 'no home address, because none is held');
+        // 🗣️ WHAT WAS KEPT, READ BACK FROM THE ROW AS STORED (#941 check rounds
+        //    1 and 2). These sentences used to say where the name and address
+        //    CAME FROM, and that went wrong two rounds running: first "both read
+        //    from the account" when the address was the declaration's; then
+        //    "the home address from the account" over an account address of ''
+        //    (stored as an empty address), and "none is held" when one WAS held
+        //    - at another organisation. Each was a branch reasoning about the
+        //    inputs. So the line no longer says where anything came from: it
+        //    says what the row now HOLDS, read back after the write, '' and
+        //    NULL alike counting as nothing. It cannot disagree with the row,
+        //    and it never names the donor or prints the address.
         if ($reopenKeptDonorId !== null) {
             $line .= ' An earlier run had kept a name and address here and later emptied them, while the account still named '
                 . 'the person; that run then stopped before the account was emptied. Its clearing was about the records held '
-                . 'then, so this run worked them out again from the start, as a first run does, and kept the name again, '
-                . 'read from the account, with ' . $addressFrom . ', for what has to be kept now.';
+                . 'then, so this run worked them out again from the start, as a first run does, for what has to be kept now.';
         } elseif ($earlierRun === true) {
             $line .= $emptiedAlready === true
-                ? ' The account had already been emptied, so the name and address kept by the earlier run were left as they are: what was kept was not overwritten.'
-                : ' The earlier run stopped before the account was emptied, so the name was read again from the account, with '
-                    . $addressFrom . '.';
+                ? ' The account had already been emptied, so what the earlier run kept was left as it is: nothing was overwritten.'
+                : ' The earlier run stopped before the account was emptied, so what is kept was worked out again from the '
+                    . 'account and the records as they are now.';
         } elseif ($emptiedAlready === true) {
-            $line .= ' This account had ALREADY been emptied before this run, so no name could be recorded: the record kept holds '
-                . ($address !== null ? 'the address from the tax declaration and no name.' : 'no name and no address.');
+            $line .= ' This account had ALREADY been emptied before this run, so no name could be recorded.';
         }
+        $stored  = $one('SELECT `fullName`, `address` FROM `tblGivingKeptDonors` WHERE `keptDonorID` = ?', 'i', [$keptDonorId]);
+        $hasName = trim((string) ($stored['fullName'] ?? '')) !== '';
+        $hasHome = trim((string) ($stored['address'] ?? '')) !== '';
+        $line   .= ' Kept on this record: ' . ($hasName === true ? 'the name' : 'no name') . ' and '
+            . ($hasHome === true ? 'a home address' : 'no home address') . '.';
 
         self::logAudit($db, $requestId, 'retain', 'GivingRecords', $where, $line);
 

@@ -226,7 +226,11 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 298; // 297 until #941's check round 1 added one: the clearing
+const EXPECTED_CHECKS = 301; // 298 until #941's check round 2 added three: the kept-record
+                             // line read back from the row says "no home address" for an
+                             // account address of '', for none at all, and for an address
+                             // held only at another organisation - and each row holds NULL.
+                             // 297 until #941's check round 1 added one: the clearing
                              // of a row kept again by a SECOND request goes on THAT
                              // request's trail (section 23 had run every run under one
                              // request, so keeping the earlier request's number passed).
@@ -383,6 +387,13 @@ const P_CE     = 920702; // section 23: an emptied account beside a cleared row,
 const REQ_CL   = 940701;
 const REQ_CE   = 940702;
 const REQ_CL2  = 940703; // section 23: her SECOND request, filed after the first was cancelled
+// #941 check round 2: what the kept-record line says when NO home address is kept.
+const P_NA_EMPTY = 920711; // section 23: her account's address is '' (a directory saved with the box blank)
+const P_NA_NULL  = 920712; // section 23: her account has no address at all
+const P_NA_OTHER = 920713; // section 23: no address on the account; a declaration address only at ANOTHER organisation
+const REQ_NA_EMPTY = 940711;
+const REQ_NA_NULL  = 940712;
+const REQ_NA_OTHER = 940713;
 const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
 const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
@@ -3367,8 +3378,14 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed'
     && count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'already dealt with by an earlier run')
-        && str_contains((string) $l['details'], 'was not overwritten'))) === $givingCountB2 - 1,
-    count($auditB2) . ' lines, expected ' . ($instructionCount + 6 + $givingCountB2));
+        // 🔁 #941 check round 2: the line says "nothing was overwritten" now.
+        && str_contains((string) $l['details'], 'nothing was overwritten'))) === $givingCountB2 - 1,
+    // The expected count printed here said "+ 6" after #707 made the check
+    // "+ 7", so a failure here printed a wrong expectation. It prints the
+    // number the check really asks for, and the "not overwritten" count.
+    count($auditB2) . ' lines, expected ' . ($instructionCount + 7 + $givingCountB2) . '; "already dealt with ... nothing was overwritten" lines: '
+    . count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
+        && str_contains((string) $l['details'], 'nothing was overwritten'))) . ', expected ' . ($givingCountB2 - 1));
 $lateNow = ge_row($lateLog);
 ge_ok('the second run still found the person\'s address: the message logged between the runs is scrubbed',
     $lateNow !== null && $lateNow['toRecipients'] === '[erased]', json_encode($lateNow));
@@ -4154,7 +4171,7 @@ $untilG1 = (new DateTimeImmutable($ago(100), new DateTimeZone('UTC')))
 // one given 45 days ago, after her declaration ended. (It read "1 other gift".)
 ge_ok('THE REPORT says what is kept and until when, in words: 2 gifts, 1 tax declaration and 1 giving statement; 2 other gifts that no longer name the donor; and how the date was worked out',
     count($lineG1) === 1 && $lineG1[0]['action'] === 'retain'
-    && str_contains($textG1, '2 gifts, 1 tax declaration and 1 giving statement keep this donor\'s name and address until ' . GivingRetention::dateInWords($untilG1))
+    && str_contains($textG1, '2 gifts, 1 tax declaration and 1 giving statement keep the donor\'s details on this record until ' . GivingRetention::dateInWords($untilG1))
     && str_contains($textG1, '2 other gifts keep the amount, date and method and no longer name the donor')
     && str_contains($textG1, 'only on gifts that have a tax declaration, receipt or statement')
     && str_contains($textG1, 'last such gift ' . GivingRetention::dateInWords($ago(100)))
@@ -4564,7 +4581,7 @@ ge_ok('ALREADY PAST ITS DATE AT ERASURE (a last gift about five and a half years
     && $keptO !== null && $keptO['fullName'] === null && $keptO['address'] === null && $keptO['clearedAt'] !== null && $keptO['lastGiftDate'] === $ago(2000)
     && $oNow['gift']['donorID'] === null && (int) $oNow['gift']['amountPence'] === 450 && $oNow['gift']['donatedAt'] === $ago(2000)
     && $oNow['declaration']['address'] === null && $oWas['declaration']['address'] === '4 Overdue Oval' && is_file($issuedO['file']) === false
-    && count($linesO) === 2 && $linesO[0]['action'] === 'retain' && str_contains((string) $linesO[0]['details'], 'keep this donor\'s name and address until')
+    && count($linesO) === 2 && $linesO[0]['action'] === 'retain' && str_contains((string) $linesO[0]['details'], 'keep the donor\'s details on this record until')
     && $linesO[1]['action'] === 'anonymise' && str_contains((string) $linesO[1]['details'], 'and has passed')
     && preg_match('/Ola|Overdue Oval/', (string) $linesO[0]['details'] . (string) $linesO[1]['details']) !== 1
     && GdprEraser::verifyAuditChain(REQ_O) === true,
@@ -4879,16 +4896,18 @@ ge_ok('THE SECOND RUN WORKS THE KEPT RECORD OUT AGAIN (rule 3): it completes; th
     && $stateR['keepUntil'] === $rightR && $stateR['keepUntil'] !== $plusYears($yearEndDay, 6) && $stateR['countedFromGift'] === $ago(1),
     $secondR instanceof Throwable ? $secondR->getMessage() : json_encode([$keptR2['lastGiftDate'], $keptR2['keptGiftCount'], $stateR]));
 $lineR = array_values(array_filter(ge_audit(REQ_R), static fn (array $l): bool => $l['tableName'] === 'GivingRecords' && $l['recordKey'] === 'organisation #' . SITE_F1));
-ge_ok('...the name and address were READ AGAIN from the account as they are now (she had changed both), the back-dated gift that is not kept lost its donor, both kept gifts still carry her, and the line says the earlier run stopped before the account was emptied, and names nobody',
+ge_ok('...the name was READ AGAIN from the account and the address from her declaration, as they are now (she had changed both), the back-dated gift that is not kept lost its donor, both kept gifts still carry her, and the line says the earlier run stopped before the account was emptied, and names nobody',
     $keptR2['fullName'] === 'Rita Rerun-Wed' && $keptR2['address'] === '9 New Road' && $keptR2['postcode'] === 'NR9 9NR'
     && $donorOf($r['giftBackdate']) === null && $donorOf($r['giftNew']) === P_R && $donorOf($r['giftOne']) === P_R
     && count($lineR) === 2 && $lineR[0]['action'] === 'retain' && $lineR[1]['action'] === 'retain'
     && str_contains((string) $lineR[1]['details'], 'were worked out again by this one')
-    // 🔁 CHANGED BY #941's check round 1: the line said the name AND ADDRESS
-    //    were read again from the account. Her address here comes from her
-    //    tax declaration ('9 New Road' was written there, not on the account),
-    //    so the line now says where each really came from.
-    && str_contains((string) $lineR[1]['details'], 'The earlier run stopped before the account was emptied, so the name was read again from the account, with the home address from the newest tax declaration there.')
+    // 🔁 CHANGED BY #941's check rounds 1 and 2: the line said the name AND
+    //    ADDRESS were read again from the account, when her address comes from
+    //    her declaration ('9 New Road' was written there). The line no longer
+    //    says where anything came from; it says what the row HOLDS, read back
+    //    after the write.
+    && str_contains((string) $lineR[1]['details'], 'The earlier run stopped before the account was emptied, so what is kept was worked out again from the account and the records as they are now.')
+    && str_contains((string) $lineR[1]['details'], 'Kept on this record: the name and a home address.')
     && str_contains((string) $lineR[1]['details'], '1 other gift keeps the amount, date and method and no longer names the donor')
     && preg_match('/Rita|Rerun|New Road|Rita Road/', (string) $lineR[1]['details']) !== 1,
     json_encode([$keptR2, $lineR[1] ?? null]));
@@ -5114,7 +5133,7 @@ ge_ok('AN ENVELOPE IN A COUNT THAT IS NOT YET CLOSED KEEPS ITS GIVER when the gi
 ge_ok('...the kept record counts from the envelope\'s service date when that is later than his last gift, and the trail says so: the organisation\'s line names the envelope, the other organisation\'s line says nothing is kept there, and one envelope line gives "3 rows" and the one kept',
     $keptW !== null && $keptW['lastGiftDate'] === $ago(2) && (int) $keptW['keptGiftCount'] === 1 && $keptAt(SITE_F4, P_W) === null
     && count($siteW) === 2 && $siteW[0]['recordKey'] === 'organisation #' . SITE_F3 && $siteW[0]['action'] === 'retain'
-    && str_contains((string) $siteW[0]['details'], '1 gift, 1 tax declaration, 1 giving statement and 1 envelope in a count that is not yet closed keep this donor\'s name and address until')
+    && str_contains((string) $siteW[0]['details'], '1 gift, 1 tax declaration, 1 giving statement and 1 envelope in a count that is not yet closed keep the donor\'s details on this record until')
     && $siteW[1]['recordKey'] === 'organisation #' . SITE_F4 && $siteW[1]['action'] === 'anonymise'
     && count($envW) === 1 && $envW[0]['action'] === 'anonymise' && $envW[0]['recordKey'] === '3 rows'
     && str_contains((string) $envW[0]['details'], '1 envelope(s) in a count that is not yet closed keep the giver')
@@ -5314,7 +5333,9 @@ ge_ok('...and the trail says so: the later run\'s line says the rule used is the
     count($lineWw) === 2 && $lineWw[1]['action'] === 'retain'
     && str_contains((string) $lineWw[1]['details'], 'this organisation keeps the donor\'s name on every gift')
     && str_contains((string) $lineWw[1]['details'], 'That is the rule that was in force when the name was kept')
-    && str_contains((string) $lineWw[1]['details'], 'what was kept was not overwritten')
+    // 🔁 #941 check round 2: the line says what the earlier run kept was
+    //    left as it is, and the row's contents are read back, not described.
+    && str_contains((string) $lineWw[1]['details'], 'what the earlier run kept was left as it is: nothing was overwritten')
     && str_contains((string) $lineWw[1]['details'], 'A hold is switched on') && preg_match('/Will|Wide/', (string) $lineWw[1]['details']) !== 1
     && GdprEraser::verifyAuditChain(REQ_WW) === true,
     json_encode($lineWw[1] ?? null));
@@ -5330,7 +5351,9 @@ ge_ok('A LATER RUN NEVER EMPTIES A KEPT NAME ITSELF, even when nothing has to be
     && $keptNn['lastGiftDate'] === $ago(40) && (int) $keptNn['keptGiftCount'] === 0
     && $donorOf($nn['gift']) === null && count($lineNn) === 2 && $lineNn[1]['action'] === 'retain'
     && str_contains((string) $lineNn[1]['details'], 'Nothing there now keeps this donor\'s name')
-    && str_contains((string) $lineNn[1]['details'], 'only the retention job removes them')
+    // 🔁 #941 check round 2: "what the earlier run kept ... only the retention
+    //    job removes it" (it no longer claims a name AND an address).
+    && str_contains((string) $lineNn[1]['details'], 'only the retention job removes it')
     && preg_match('/Nell|Nook/', (string) $lineNn[1]['details']) !== 1
     && run_giving_identity_sweep()['cleared'] === 0 && $keptAt(SITE_F3, P_NN)['fullName'] === 'Nell Nothing',
     json_encode([$secondNn instanceof Throwable ? $secondNn->getMessage() : $secondNn, $keptNn, $lineNn[1] ?? null]));
@@ -6777,13 +6800,13 @@ $lineCl = ge_one(
     'is',
     [REQ_CL2, 'organisation #' . SITE_C1]
 );
-// The line says where the name and the address really came from: the name
-// from the account, the address from her new declaration (#941 check round 1:
-// it first said both were "read from the account").
-ge_ok('...and the line on the NEW request\'s trail SAYS what happened - kept again after an earlier run had cleared it, worked out from the start, the name from the account and the address from the declaration - and never "Nothing was changed", and never her name or address',
+// The line says what the row HOLDS, read back after the write - not where it
+// came from (#941 check rounds 1 and 2; the "came from" sentence was wrong
+// twice). Her row holds her name and her declaration's address.
+ge_ok('...and the line on the NEW request\'s trail SAYS what happened - kept again after an earlier run had cleared it, worked out from the start, and that the row holds the name and a home address - and never "Nothing was changed", and never her name or address',
     $lineCl !== null && $lineCl['action'] === 'retain' && str_contains((string) $lineCl['details'], 'later emptied them, while the account still named')
     && str_contains((string) $lineCl['details'], 'worked them out again from the start')
-    && str_contains((string) $lineCl['details'], 'kept the name again, read from the account, with the home address from the newest tax declaration there')
+    && str_contains((string) $lineCl['details'], 'Kept on this record: the name and a home address.')
     && str_contains((string) $lineCl['details'], 'Nothing was changed') === false
     && preg_match('/Clara|Clara Close|CC3/', (string) $lineCl['details']) !== 1,
     json_encode($lineCl));
@@ -6838,5 +6861,44 @@ ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name writ
     && str_contains((string) $lineCe['details'], 'recorded against the emptied account since then'),
     json_encode(['run' => is_array($runCe) === true ? ['failed' => $runCe['failed']] : (string) $runCe, 'status' => $statusCl(REQ_CE),
         'row' => $keptCe, 'gift' => $donorCl($ce), 'line' => $lineCe]));
+
+// ---- What the line says when NO home address is kept (#941 check round 2) ----
+// The kept-record line used to say where the address CAME FROM, and was wrong
+// in two of these three: "the home address from the account" over an account
+// address of '' (written whenever a member saves their directory entry with
+// the box blank), and "none is held" when one IS held - at another
+// organisation. It now reads the row back. Each donor gives at the second
+// organisation, which keeps every gift, so a row is written there.
+$noAddress = static function (int $person, int $requestId, string $email, ?string $accountAddress, bool $declarationElsewhere) use ($ago, $catC2, $keptCl, $mysqli): array {
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+    ge_user($person, 'No Address ' . $person, $email);
+    ge_q('UPDATE `tblUsers` SET `displayAddress` = ? WHERE `userID` = ?', 'si', [$accountAddress, $person]);
+    if ($declarationElsewhere === true) {
+        ge_declaration(SITE_C1, $person, $ago(100), '9 Other Org Road', 'OO9 9OO');
+    }
+    ge_gift(SITE_C2, $person, $ago(30), 1200, $catC2);
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+    ge_request($requestId, $person, $email, 'No Address ' . $person, 'processing');
+    $run  = ge_execute($requestId, $person);
+    $row  = $keptCl(SITE_C2, $person);
+    $line = ge_one("SELECT `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `tableName` = 'GivingRecords' AND `recordKey` = ?", 'is',
+        [$requestId, 'organisation #' . SITE_C2]);
+
+    return ['run' => is_array($run) === true ? (int) $run['failed'] : 'stopped', 'address' => $row === null ? 'no row' : $row['address'],
+        'postcode' => $row === null ? 'no row' : $row['postcode'], 'line' => (string) ($line['details'] ?? ''),
+        'elsewhere' => $declarationElsewhere === true ? ($keptCl(SITE_C1, $person)['address'] ?? 'no row') : null];
+};
+$saysNone = static fn (array $r): bool => $r['run'] === 0 && $r['address'] === null && $r['postcode'] === null
+    && str_contains($r['line'], 'Kept on this record: the name and no home address.')
+    && str_contains($r['line'], 'a home address') === false && str_contains($r['line'], 'from the account') === false;
+$naEmpty = $noAddress(P_NA_EMPTY, REQ_NA_EMPTY, 'na.empty@selftest.invalid', '', false);
+ge_ok('AN ACCOUNT ADDRESS OF \'\' IS NO ADDRESS: the kept row holds NULL, not an empty "address", and the line says no home address was kept',
+    $saysNone($naEmpty) === true, json_encode($naEmpty));
+$naNull = $noAddress(P_NA_NULL, REQ_NA_NULL, 'na.null@selftest.invalid', null, false);
+ge_ok('AN ACCOUNT WITH NO ADDRESS: the kept row holds NULL and the line says no home address was kept',
+    $saysNone($naNull) === true, json_encode($naNull));
+$naOther = $noAddress(P_NA_OTHER, REQ_NA_OTHER, 'na.other@selftest.invalid', null, true);
+ge_ok('AN ADDRESS HELD ONLY AT ANOTHER ORGANISATION is not borrowed: this organisation\'s row holds NULL and its line says no home address was kept, while the other organisation keeps its own declaration\'s address',
+    $saysNone($naOther) === true && $naOther['elsewhere'] === '9 Other Org Road', json_encode($naOther));
 
 ge_finish();

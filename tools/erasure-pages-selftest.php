@@ -515,6 +515,28 @@ function portAnswers(int $port): bool
     return false;
 }
 
+/**
+ * 🔩 Put `tblExpenseClaims.userID` back to what `full_schema.sql` declares,
+ *    `INT NOT NULL`, if it is not that now (#927 check round 2).
+ *
+ * The label check makes that column emptiable for ONE request. A run killed
+ * in that moment left it emptiable, and every later run on that database then
+ * tested a schema nobody ships. So this is asked in three places: in the check
+ * itself (`finally`), in cleanup() (a normal end, exit(), a fatal error, and a
+ * SIGINT or SIGTERM, which the handler below turns into an exit), and at the
+ * START of every run, which is the only thing that can repair a run killed
+ * with SIGKILL - nothing runs in a process killed that way. Only ever on a
+ * selftest_ database, which the top of this file insists on.
+ */
+function putClaimColumnBack(): void
+{
+    $now = one("SELECT `IS_NULLABLE` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+        . "AND `TABLE_NAME` = 'tblExpenseClaims' AND `COLUMN_NAME` = 'userID'");
+    if (($now['IS_NULLABLE'] ?? 'NO') === 'YES') {
+        q('ALTER TABLE `tblExpenseClaims` MODIFY `userID` INT NOT NULL');
+    }
+}
+
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
 function cleanup(): void
 {
@@ -537,6 +559,7 @@ function cleanup(): void
         $state['proc'] = null;
     }
     try {
+        putClaimColumnBack();
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -800,6 +823,21 @@ if (portAnswers($port) === true) {
 }
 $state['started'] = true;
 register_shutdown_function('cleanup');
+// A SIGINT (Ctrl-C) or SIGTERM ends PHP WITHOUT running shutdown functions
+// unless it is caught, so it is caught and turned into an exit, which does
+// run cleanup(). (#927 check round 2: a run killed while the claim's column
+// was emptiable left it so.) SIGKILL cannot be caught; the repair below, at
+// the start of the next run, is what covers that.
+if (function_exists('pcntl_async_signals') === true) {
+    pcntl_async_signals(true);
+    foreach ([SIGINT, SIGTERM] as $signal) {
+        pcntl_signal($signal, static function (int $signal): void {
+            echo "\nFAIL — stopped by signal {$signal}; cleaning up before exiting.\n";
+            exit(1);
+        });
+    }
+}
+putClaimColumnBack();
 removeWorld();
 
 q("INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES (?, 'selftest-erasure-a', 'Selftest erasure A', 1), (?, 'selftest-erasure-b', 'Selftest erasure B', 1)", 'ii', [ORG_A, ORG_B]);
@@ -1143,8 +1181,13 @@ $claimLabel = static function () use (&$jar): string {
 };
 $claimWas = $claimColumn();
 q('ALTER TABLE `tblExpenseClaims` MODIFY `userID` INT NULL');
-$labelWhenNullable = $claimLabel();
-q('ALTER TABLE `tblExpenseClaims` MODIFY `userID` INT NOT NULL');
+try {
+    $labelWhenNullable = $claimLabel();
+} finally {
+    // Put back whatever happens in between; cleanup() and the start of the
+    // next run ask the same function, for a run that never reaches here.
+    putClaimColumnBack();
+}
 $labelWhenBack = $claimLabel();
 ok('THE CLAIM\'S LABEL FOLLOWS THE DATABASE, NOT A LIST OF TABLES: with its account-number column made emptiable it says only "some details about you removed"; put back exactly as it was (checked), it says the number stays again (#927 check round 1)',
     ($claimWas['IS_NULLABLE'] ?? '') === 'NO' && $claimColumn() === $claimWas
