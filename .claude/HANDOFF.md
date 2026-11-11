@@ -6,17 +6,16 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833).
-Last whole suite (with #968): green. Decisions D-129 to D-146 recorded on 11 November (D-135 is the owner's
+#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691.
+Last whole suite (with #968): green. Decisions D-129 to D-147 recorded on 11 November (D-135 is the owner's
 2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #657 — rota swap requests answered and e-mailed (D-141) | integrated locally (seven rounds + docs, test wired), unpushed | Round 7 was wording only, reviewed by me. Whole suite running, then push and close. Follow-ups #987, #989 |
-| #966 — currency not built in (D-139) | `p966-build`, 3429a5ca | Round 4 simplified to one rule `Currency::onEdit()` plus hard gate `check_currency_writes.py`; check round 4 running. Migrations 282, 283. Follow-ups #991-#997, #999 |
-| #691 — bring back hidden series dates (D-143 to D-146) | `p691-build`, 3e4f9f75 | Rounds 2-3 (D-144 second confirmation, D-146 cancelled stays cancelled, locks proved) in check. Follow-up #998 |
+| #966 — currency not built in (D-139) | `p966-build`, e4d19a4b + round 7 building | One locking helper `Currency::withParentLocked()` (round 6). Round 7: invoice file attach dropped silently, overpayment check untested. Follow-ups #991-#997, #999, #1001 |
+| #998 + #1000 — set a cancellation reason; refuse editing a hidden date | `p998-build`, building | Shares no file with #966 |
 | #964 — erase a visitor's event-suggestion details on request (D-140) | not started | After #966 (shared erasure tests) |
 | #929 — a worker's data download lists records carrying their name (D-142) | not started | After #966 (shared erasure tests) |
 
@@ -73,4 +72,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#999.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1001.
