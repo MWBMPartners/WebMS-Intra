@@ -211,6 +211,9 @@ final class Currency
      * written out here rather than read from intl at run time, because intl is
      * not an extension the installer requires (as OF_COUNTRY). A currency not
      * listed has no sign in ICU's English data, and is read by its code only.
+     * The entries made only of LETTERS ("R", "kr", "Rs", "Fr.") are ICU's data
+     * too, but are NOT read in a file (the owner, D-177): signsOf() leaves them
+     * out, and a cell written with one is refused asking for the code.
      *
      * @var array<string, list<string>>
      */
@@ -232,14 +235,44 @@ final class Currency
     ];
 
     /**
-     * 💱 The signs a currency is written with (SIGNS_OF), longest first so
-     * "CA$" is tried before "$"; [] when it has none.
+     * 💱 The signs a FILE cell may be written with for this currency: its
+     * SIGNS_OF entries that have a symbol in them ("$", "£", "A$", "R$", "GH₵"),
+     * longest first so "CA$" is tried before "$"; [] when it has none.
+     *
+     * A sign made only of LETTERS ("R", "kr", "Rs", "Fr.", "P", "Rp", "Cg." —
+     * letters with at most a trailing point) is left out on purpose (the owner,
+     * D-177, superseding D-165 for those signs): such signs clash with ordinary
+     * text ("R Smith", "P.O. 1234"), and round 7's check measured "Rs.50"
+     * stored as 0.50, a hundred times too small. A cell written with one is
+     * refused, asking for the three-letter code. They stay in SIGNS_OF because
+     * that is ICU's data, and lettersSignsOf() needs them to say so.
      *
      * @return list<string>
      */
     public static function signsOf(string $code): array
     {
-        $signs = self::SIGNS_OF[strtoupper(trim($code))] ?? [];
+        $signs = array_values(array_filter(
+            self::SIGNS_OF[strtoupper(trim($code))] ?? [],
+            static fn (string $sign): bool => self::isLettersOnly($sign) === false
+        ));
+        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return $signs;
+    }
+
+    /**
+     * The SIGNS_OF entries of this currency made only of letters (D-177): NOT
+     * read in a file; used only to tell a cell written with one that the code
+     * is wanted instead. Longest first.
+     *
+     * @return list<string>
+     */
+    private static function lettersSignsOf(string $code): array
+    {
+        $signs = array_values(array_filter(
+            self::SIGNS_OF[strtoupper(trim($code))] ?? [],
+            static fn (string $sign): bool => self::isLettersOnly($sign) === true
+        ));
         usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
         return $signs;
@@ -643,23 +676,24 @@ final class Currency
      *   - commas between groups of three ("1,234.50", "1,234,567"), the first
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
-     *   - the record's three-letter CODE in front ("GBP 12.50", "AUD 1,234.50"),
-     *     or any SIGN its currency is written with (SIGNS_OF, from ICU; a sign
-     *     or code of letters only, such as the rand's "R", only where a figure,
-     *     a space, a minus or a point follows it, so "RUB 12" is not read as
-     *     "R" + "UB 12"): "$" is
-     *     read as US dollars in a USD organisation and as Australian dollars in
-     *     an AUD one, "£" as Gibraltar pounds in a GIP one (the owner, D-165,
-     *     superseding D-155 and D-157). A minus may sit either side of it
-     *     ("-£3.00", "£-3.00"). The currency written TWICE ("GBP £12.50") is
-     *     refused, saying so. A sign the organisation's currency is never
-     *     written with is refused, saying which and that it is another
-     *     currency; and with
-     *     NO currency chosen for the organisation, any sign or code is refused,
-     *     saying so and what to do (D-139: an amount's money is never guessed,
-     *     so "£12.50" cannot be stored as money of no known kind). A sign of
-     *     letters only ("R", "kr") counts as one where a figure, a space, a
-     *     minus or a point follows it ("R12"); "Rent" is a word, not a sign.
+     *   - the record's three-letter CODE in front, where a figure, a minus or
+     *     a point follows it, after at most one space ("GBP 12.50",
+     *     "AUD1,234.50"); "ALL PAID" and "TRY again" are not codes;
+     *   - or any sign WITH A SYMBOL IN IT that its currency is written with
+     *     (signsOf(), from ICU): "$" is read as US dollars in a USD organisation
+     *     and as Australian dollars in an AUD one, "£" as Gibraltar pounds in a
+     *     GIP one (the owner, D-165, superseding D-155 and D-157). A minus may
+     *     sit either side of it ("-£3.00", "£-3.00").
+     *   A sign made only of LETTERS ("R", "kr", "Rs", "Fr.") is NOT read (the
+     *   owner, D-177): a cell written with the organisation's own such sign is
+     *   refused asking for the code ("ZAR 12.50"), and any other letters are
+     *   simply "not an amount". The currency written TWICE ("GBP £12.50",
+     *   "GBP£12", "££12.50") is refused, saying so. A symbol sign or code the
+     *   organisation's currency is not written with is refused, saying which
+     *   and that it is another currency; and with NO currency chosen for the
+     *   organisation, any symbol sign or code is refused, saying so and what to
+     *   do (D-139: an amount's money is never guessed, so "£12.50" cannot be
+     *   stored as money of no known kind).
      *
      * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
      * sign, a misplaced minus, a second decimal point, more than two decimals,
@@ -695,31 +729,23 @@ final class Currency
             $text     = substr($text, 1);
         }
         if ($fromFile === true && $code !== '') {
-            // The code, or any sign this currency is written with (D-165):
+            // The code, or a symbol sign this currency is written with (D-165):
             // "$" is the organisation's own dollars, whichever dollars they are.
-            // Anything else is refused below with the reason.
-            $prefixes = array_merge([$code], self::signsOf($code));
-            usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-            $taken = '';
-            foreach ($prefixes as $prefix) {
-                if (self::startsWithWord($text, $prefix) === true) {
-                    $taken = $prefix;
-                    $text  = ltrim(substr($text, strlen($prefix)), ' ');
-                    break;
-                }
-            }
-            if ($negative === false && str_starts_with($text, '-') === true) {
-                $negative = true;
-                $text     = substr($text, 1);
-            }
-            // The currency written TWICE ("GBP £12.50", "££12.50", "EUR €5"):
-            // round 5 called that "another currency", which was untrue.
+            // A letters-only sign is not read (D-177). Anything else is refused
+            // below with the reason.
+            $taken = self::ownMarkerAtStart($text, $code);
             if ($taken !== '') {
-                foreach ($prefixes as $prefix) {
-                    if (self::startsWithWord($text, $prefix) === true) {
-                        return 'That amount has its currency written twice (' . $taken . ' and ' . $prefix . '). '
-                            . 'Put only one in front, for example ' . $code . ' 12.50.';
-                    }
+                $text = ltrim(substr($text, strlen($taken)), ' ');
+                if ($negative === false && str_starts_with($text, '-') === true) {
+                    $negative = true;
+                    $text     = substr($text, 1);
+                }
+                // The currency written TWICE ("GBP £12.50", "GBP£12", "££12.50",
+                // "AUDA$5"): round 5 called that "another currency", untrue.
+                $again = self::ownMarkerAtStart($text, $code);
+                if ($again !== '') {
+                    return 'That amount has its currency written twice (' . $taken . ' and ' . $again . '). '
+                        . 'Put only one in front, for example ' . $code . ' 12.50.';
                 }
             }
         }
@@ -792,6 +818,16 @@ final class Currency
                     . 'in another currency. Import a file kept in ' . $code . ', or check the organisation\'s currency in '
                     . 'Admin, Settings, Organisation.';
             }
+            // The organisation's OWN letters-only sign before a figure ("R12",
+            // "Rs.50", "kr 12"): not read (D-177), and said so. Only its own:
+            // "R Smith" or "Q1 2026" in another organisation is simply not an
+            // amount, and naming a currency there would be untrue.
+            foreach (self::lettersSignsOf($code) as $sign) {
+                if (preg_match('/^' . preg_quote($sign, '/') . '\.? ?(?=[0-9.\-])/u', $text) === 1) {
+                    return 'That is not an amount: a currency sign made of letters, such as ' . $sign . ', is not read in a '
+                        . 'file. Write the three-letter code instead, for example ' . $code . ' 12.50.';
+                }
+            }
         }
         $allowed = $fromFile === true ? '0-9.,+\-' : '0-9.+\-';
         if (preg_match('/[^' . $allowed . ']/', $text) === 1) {
@@ -839,46 +875,67 @@ final class Currency
     }
 
     /**
-     * 💱 The currency sign or code a text BEGINS with ("£", "CA$", "USD", "R"),
-     * or ''. Only for saying truthfully why a file's amount was refused. Asked
-     * in this order, each longest first:
-     *   1. a sign from SIGNS_OF with a SYMBOL in it ("$", "£", "GH₵", "R$"),
-     *      wherever it is followed by anything;
-     *   2. three capital letters the portal knows as a currency ("RUB"),
-     *      followed by a figure, a space, a minus or a point;
-     *   3. a sign from SIGNS_OF made of LETTERS only ("R", "kr", "Fr."), under
-     *      the same condition as a code — so "R12" names the rand's sign while
-     *      "Rent 12" names nothing (round 7: without that condition an ordinary
-     *      word would be called a currency).
+     * 💱 The SYMBOL sign or the code of ANY currency a text begins with ("£",
+     * "CA$", "R$", "USD"), or ''. Only for saying truthfully why a file's
+     * amount was refused. Asked in this order:
+     *   1. a sign with a symbol in it, from any currency's SIGNS_OF, longest
+     *      first, whatever follows it;
+     *   2. three capital letters the portal knows as a currency, followed —
+     *      after at most one space — by a figure, a minus, a point or a symbol
+     *      sign ("RUB 12", "USD$5"), so "ALL PAID" and "TRY again" name nothing.
+     * A sign made only of letters is never named here (D-177): "R Smith",
+     * "P.O. 1234" and "Q1 2026" are not currencies.
      */
     private static function currencyWrittenAtStart(string $text): string
     {
         $symbolic = [];
-        $letters  = [];
         foreach (self::SIGNS_OF as $list) {
             foreach ($list as $sign) {
-                if (self::isLettersOnly($sign) === true) {
-                    $letters[$sign] = true;
-                } else {
+                if (self::isLettersOnly($sign) === false) {
                     $symbolic[$sign] = true;
                 }
             }
         }
-        $byLength = static fn (string $a, string $b): int => strlen($b) <=> strlen($a);
         $symbolic = array_keys($symbolic);
-        usort($symbolic, $byLength);
+        usort($symbolic, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
         foreach ($symbolic as $sign) {
             if (str_starts_with($text, $sign) === true) {
                 return $sign;
             }
         }
-        if (preg_match('/^([A-Z]{3})(?=[ 0-9.\-])/', $text, $m) === 1 && self::isKnown($m[1]) === true) {
-            return $m[1];
+        if (preg_match('/^([A-Z]{3}) ?(.*)$/sDu', $text, $m) === 1 && self::isKnown($m[1]) === true) {
+            if (preg_match('/^[0-9.\-]/', $m[2]) === 1) {
+                return $m[1];
+            }
+            foreach ($symbolic as $sign) {
+                if (str_starts_with($m[2], $sign) === true) {
+                    return $m[1];
+                }
+            }
         }
-        $letters = array_keys($letters);
-        usort($letters, $byLength);
-        foreach ($letters as $sign) {
-            if (self::startsWithWord($text, $sign) === true) {
+
+        return '';
+    }
+
+    /**
+     * 🏷️ The organisation's own marker a file cell begins with — its code where
+     * a figure, a minus, a point or one of its symbol signs follows (after at
+     * most one space), else one of its symbol signs — or ''. A letters-only
+     * sign is never a marker (D-177). Used twice by parseAmount(): to read the
+     * marker, and to find the currency written a second time.
+     */
+    private static function ownMarkerAtStart(string $text, string $code): string
+    {
+        $signs = self::signsOf($code);
+        $after = '[0-9.\-]';
+        if ($signs !== []) {
+            $after = '(?:[0-9.\-]|' . implode('|', array_map(static fn (string $s): string => preg_quote($s, '/'), $signs)) . ')';
+        }
+        if (preg_match('/^' . preg_quote($code, '/') . ' ?(?=' . $after . ')/u', $text) === 1) {
+            return $code;
+        }
+        foreach ($signs as $sign) {
+            if (str_starts_with($text, $sign) === true) {
                 return $sign;
             }
         }
@@ -886,31 +943,10 @@ final class Currency
         return '';
     }
 
-    /** Is a sign or code made of letters (and points) only — "R", "kr", "Fr.", "GBP"? */
+    /** Is a sign made only of letters, with at most a trailing point — "R", "kr", "Rs", "Fr.", "Cg."? (D-177) */
     private static function isLettersOnly(string $sign): bool
     {
-        return preg_match('/^[\p{L}.]+$/u', $sign) === 1;
-    }
-
-    /**
-     * Does `$text` begin with `$prefix` as a sign or code rather than as the
-     * start of a longer word? A prefix with a symbol in it always does; one of
-     * letters only ("R", "kr", "GBP") only when what follows is a figure, a
-     * space, a minus, a point or nothing — so the rand's "R" is not cut off
-     * "RUB 12" (round 7: that turned a rouble cell into "UB 12" and advised
-     * relabelling it as rand).
-     */
-    private static function startsWithWord(string $text, string $prefix): bool
-    {
-        if (str_starts_with($text, $prefix) === false) {
-            return false;
-        }
-        if (self::isLettersOnly($prefix) === false) {
-            return true;
-        }
-        $rest = substr($text, strlen($prefix));
-
-        return $rest === '' || preg_match('/^[ 0-9.\-]/', $rest) === 1;
+        return preg_match('/^\p{L}+\.?$/u', $sign) === 1;
     }
 
     /**
