@@ -59,6 +59,43 @@ table named in this document exists; it cannot check what is said about it.
 6. Per-request report at `/admin/erasure-requests/report?id=N` shows every action
    taken and verifies the **sealed audit chain**.
 
+### Somebody without an account who suggested an event (#964, D-140)
+
+A visitor can suggest an event without signing in, giving a name and an e-mail
+address (`tblEvents.submitterName`, `submitterEmail`), and is e-mailed if it is
+approved (D-134). They have no account, so the workflow above cannot reach
+them. The owner's decision (D-140, 11 November 2026): **erase on request only,
+never automatically.**
+
+1. The visitor asks the organisation by some other route. An administrator
+   checks, **outside the portal**, that it really is the person who uses that
+   address, then files the request on `/admin/erasure-requests` ("Somebody
+   without an account who suggested an event"), ticking a box that says so.
+   Nothing is filed without the tick. The sealed audit chain records that
+   statement and the administrator's account number; there is no box for
+   *how* they checked, because whatever was typed there would sit in
+   `tblErasureAudit` for ever. No e-mail is sent to the address.
+2. The request is filed already at `pending_review`, of kind `visitor_address`
+   (`tblErasureRequest.subjectKind`), with no account.
+3. **Execute** runs three steps, each with its own audit line:
+   the approval e-mail still waiting in `tblMailQueue` for this organisation is
+   deleted; the address is taken out of the `tblEmailLog` record of each
+   approval e-mail to it (the row stays); and `submitterName` and
+   `submitterEmail` are emptied on every event at this organisation suggested
+   **without signing in** with that address. The events themselves are kept.
+   Then the request is closed and its own copy of the address replaced.
+
+What it deliberately does **not** reach: any account, even a member's using
+the same address (a member asks from their own account); another
+organisation's suggestions or mail on the same installation (that
+organisation's administrator did not check who is asking, and files its own);
+any other mail to the same address (only the approval e-mail's subject is
+matched, `EventSuggestions::APPROVAL_SUBJECT`); and the Errors page, whose
+lines carry no subject and expire on their own clear-out. The address is
+matched exactly apart from capitals and the spaces round it: the database's own
+comparison would also treat an accented address as the same, so it only finds
+candidates.
+
 ## Giving records
 
 Each organisation sets its own rule at Admin, Giving records

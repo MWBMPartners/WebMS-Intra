@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -33,7 +34,7 @@ $siteId = Site::id();
 
 $rows = [];
 $stmt = $db->prepare(
-    'SELECT requestID, userID, subjectEmail, subjectName, status, requestedAt, dueBy, processedAt, '
+    'SELECT requestID, userID, subjectEmail, subjectName, subjectKind, status, requestedAt, dueBy, processedAt, '
     . '       TIMESTAMPDIFF(DAY, NOW(), dueBy) AS daysLeft '
     . 'FROM tblErasureRequest WHERE siteID = ? ORDER BY '
     . '       (status IN ("completed","cancelled")) ASC, dueBy ASC LIMIT 200'
@@ -66,6 +67,48 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h1 class="mb-3"><i class="fa-solid fa-shield-halved me-2"></i>Erasure requests</h1>
 <p class="text-secondary">UK GDPR Article 17 requests. Process within one month of confirmation.</p>
 
+<?php
+// 🧾 #964, D-140. Somebody who suggested an event WITHOUT signing in has no
+//    account, so they cannot ask from "Request data erasure" and an ordinary
+//    request cannot find them. They ask the organisation some other way, and
+//    an administrator files it here by their e-mail address. The tick-box is
+//    the whole of the identity check the portal can record: it cannot check
+//    who is asking itself, so it makes the administrator say they have, and
+//    the request's report records that statement and who made it. There is
+//    deliberately no box for HOW they checked (see
+//    GdprEraser::fileVisitorAddressRequest()).
+?>
+<div class="card mb-3"><div class="card-body">
+    <h2 class="h6">Somebody without an account who suggested an event</h2>
+    <p class="small text-secondary mb-2">
+        A person who suggested an event without signing in gave a name and an e-mail address, and was e-mailed if it
+        was approved. If they ask for those to be erased, file the request here by the address they gave. It reaches
+        only the name and address given with event suggestions at this organisation, and the e-mails telling that
+        address a suggestion was approved. The events themselves are kept. It does not touch any account, even a
+        member&rsquo;s using the same address. Nothing is erased until you press Execute on the request.
+    </p>
+    <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+        <input type="hidden" name="action" value="file_visitor">
+        <div class="col-md-5">
+            <label for="visitorEmail" class="form-label small">Their e-mail address</label>
+            <input type="email" id="visitorEmail" name="visitorEmail" required maxlength="255" class="form-control form-control-sm" autocomplete="off">
+        </div>
+        <div class="col-md-5">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="checkedOffPortal" name="checkedOffPortal" value="1" required>
+                <label class="form-check-label small" for="checkedOffPortal">
+                    I have checked, outside the portal, that this request really comes from the person who uses this
+                    address. The request&rsquo;s report will record that I said so.
+                </label>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-danger btn-sm" type="submit"><i class="fa-solid fa-file-circle-plus me-1"></i>File request</button>
+        </div>
+    </form>
+</div></div>
+
 <?php if (count($rows) === 0): ?>
     <div class="alert alert-info">No erasure requests on file.</div>
 <?php else: ?>
@@ -82,10 +125,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 };
                 $days = (int) ($r['daysLeft'] ?? 0);
                 $slaCls = $days < 0 ? 'text-danger' : ($days < 7 ? 'text-warning' : 'text-muted');
+                // 🧾 #964: a request for a visitor's address. It has no free
+                //    text to review and nothing that can be left for doing by
+                //    hand, so neither of those two buttons is drawn for it -
+                //    decided by the request's KIND, not by working out whether
+                //    a review is outstanding.
+                $visitorRow = (string) ($r['subjectKind'] ?? '') === GdprEraser::KIND_VISITOR_ADDRESS;
             ?>
                 <div class="row py-2 border-bottom align-items-center small">
                     <div class="col-md-4">
-                        <strong><?php echo htmlspecialchars((string) ($r['subjectName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <?php if ($visitorRow === true): ?>
+                            <strong>Event suggestions, no account</strong>
+                        <?php else: ?>
+                            <strong><?php echo htmlspecialchars((string) ($r['subjectName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <?php endif; ?>
                         <div class="text-muted"><?php echo htmlspecialchars((string) $r['subjectEmail'], ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                     <div class="col-md-2"><span class="badge bg-<?php echo $cls; ?>"><?php echo htmlspecialchars(str_replace('_', ' ', (string) $r['status']), ENT_QUOTES, 'UTF-8'); ?></span></div>
@@ -119,10 +172,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         //    role test here would be a second gate to keep in
                         //    step with the real one.
                         ?>
+                        <?php if ($visitorRow === false): ?>
                         <a class="btn btn-outline-secondary btn-sm"
                            href="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/review') . '?id=' . (int) $r['requestID'], ENT_QUOTES, 'UTF-8'); ?>">
                             <i class="fa-solid fa-user-shield me-1"></i>Review free text
                         </a>
+                        <?php endif; ?>
                         <?php if ((string) $r['status'] === 'pending_review'): ?>
                             <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -178,6 +233,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             //       The sentence now promises the record only
                             //       where it is really written.
                             ?>
+                            <?php if ($visitorRow === false): ?>
                             <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="requestID" value="<?php echo (int) $r['requestID']; ?>">
@@ -186,6 +242,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <i class="fa-solid fa-hand me-1"></i>Dealt with by hand
                                 </button>
                             </form>
+                            <?php endif; ?>
                         <?php elseif ((string) $r['status'] === 'pending_confirmation'): ?>
                             <?php
                             // ✅ Waiting for the person to click the link that

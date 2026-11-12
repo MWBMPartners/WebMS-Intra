@@ -1743,12 +1743,23 @@ return [
                     . ' goes',
         'columns'  => ['createdByID', 'updatedByID', 'moderatedByID', 'submittedByID', 'statusChangedByID', 'submitterName', 'submitterEmail', 'locationAddress', 'locationPhone', 'locationEmail'],
             'notEmptiedHere' => [
-            'submitterName' => 'Who sent an event in when they were not signed in. Nothing empties it, so a person who '
-                . 'submitted an event and later asked to be erased still has their name on it. Where the '
-                . 'event was ADDED by a pattern change the copy carries no submitter at all (#669); it is '
-                . 'the hand-submitted ones that keep it',
-            'submitterEmail' => 'The address somebody gave when sending an event in without signing in. Not emptied, '
-                . 'for the same reason as the name beside it',
+            // 🧾 #964, D-140. These two belong to somebody with NO account,
+            //    so no instruction here can reach them: an instruction matches
+            //    a person by account number. A request filed by an
+            //    administrator for the visitor's e-mail address does, through
+            //    a step of its own. "Emptied elsewhere" is the avatarPath
+            //    precedent for a column a dedicated step empties.
+            'submitterName' => 'Emptied elsewhere, on purpose: the name somebody gave when they suggested an event without '
+                . 'signing in. They have no account, so an ordinary erasure cannot find it. On their request, an '
+                . 'administrator files an erasure request for the e-mail address they gave, after checking outside '
+                . 'the portal that it is really them, and GdprEraser::executeVisitorAddress() empties this and the '
+                . 'address beside it on every such suggestion at that organisation (D-140, #964). The event itself is '
+                . 'kept. NOT emptied automatically when a suggestion is decided: the owner ruled that out (D-140). '
+                . 'Where the event was ADDED by a pattern change the copy carries no submitter at all (#669)',
+            'submitterEmail' => 'Emptied elsewhere, on purpose, with the name beside it and by the same step: the address '
+                . 'somebody gave when they suggested an event without signing in, used only to tell them it was '
+                . 'approved (D-134). The same request also takes the address out of the send log\'s record of that '
+                . 'e-mail and deletes one still waiting in the mail queue (D-140, #964)',
             'locationAddress' => 'Where the event is, as free text. The address of a PLACE, which is the organisation\'s '
                 . 'own information about its own event — but note that an event held at a member\'s home '
                 . 'makes it that member\'s home address, and nothing empties it',

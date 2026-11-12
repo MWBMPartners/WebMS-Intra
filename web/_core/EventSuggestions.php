@@ -66,6 +66,23 @@ final class EventSuggestions
     public const TOLD_NOT_SENT = 'not-sent';
 
     /**
+     * ✉️ The approval e-mail's subject, and the ONE place it is written.
+     *
+     * It is also how an erasure finds this e-mail again (#964, D-140). The
+     * send log and the mail queue keep no note of WHY a message was sent, so
+     * `GdprEraser` asks for messages to the visitor's address carrying exactly
+     * this subject: the one message the portal sends somebody who suggested an
+     * event without an account (D-134). A member's own mail to the same address
+     * has other subjects and is left alone.
+     *
+     * ⚠️ CHANGE IT AND THE ERASURE STOPS FINDING EVERY APPROVAL E-MAIL SENT
+     *    BEFORE THE CHANGE. If it ever has to change, keep the old wording as a
+     *    second subject the erasure looks for; do not just edit this line.
+     *    `tools/gdpr-coverage-selftest.php` pins it.
+     */
+    public const APPROVAL_SUBJECT = 'Your event suggestion has been approved';
+
+    /**
      * ✉️ The subject and the plain-text body of the e-mail.
      *
      * THE SUBJECT NAMES NOTHING, deliberately. The send log keeps a message's
@@ -132,7 +149,7 @@ final class EventSuggestions
                 . 'We will not send you any other e-mail about this suggestion.';
         }
 
-        return ['subject' => 'Your event suggestion has been approved', 'body' => $body];
+        return ['subject' => self::APPROVAL_SUBJECT, 'body' => $body];
     }
 
     /**

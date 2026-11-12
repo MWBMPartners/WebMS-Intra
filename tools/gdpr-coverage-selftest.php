@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 105; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 108; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -90,6 +90,10 @@ const EXPECTED_CHECKS = 105; // 81 before the #709 fix round added section 8d; r
                             // about the activity log, and the written list's own
                             // reason for it, are said WHOLE - kept for ever by
                             // choice, the organisation's own period. 105.
+                            // #964 (D-140) added section 24's three: a visitor's
+                            // suggestion details are reached by a request for their
+                            // address, that request can never reach an account, and
+                            // its kind is one column the page decides by. 108.
 
 $failures = 0;
 $passes   = 0;
@@ -3304,6 +3308,133 @@ check(
     'D-113, WHAT A MEMBER IS SHOWN: the reasons My data and Request erasure print for an erased worker\'s kept records, their account and their expense claims - and the erasure report\'s own lines - say plainly that the name and number stay and can be matched back to them (#703)',
     $shownWrong === [],
     implode(' | ', $shownWrong)
+);
+
+// -----------------------------------------------------------------------------
+// 24. A VISITOR WHO SUGGESTED AN EVENT IS REACHED BY A REQUEST FOR THEIR
+//     ADDRESS, AND THAT REQUEST REACHES NOTHING ELSE (#964, D-140).
+// -----------------------------------------------------------------------------
+// A visitor has no account, so no catalogue instruction can find their name or
+// address on an event suggestion. The owner (D-140): erase them on request, by
+// e-mail address, filed by an administrator who has checked who is asking; that
+// request also clears the approval e-mail's send-log and mail-queue rows.
+//
+// These checks read the CODE, so they say what the request is BUILT to reach;
+// section N of tools/erasure-pages-selftest.php runs it over HTTP on a real
+// database and is what proves what it DOES, with planted faults. Three
+// questions here, each one that the behaviour test would only answer
+// indirectly:
+//   1. the written list says WHERE the two columns are emptied, and the step
+//      that does it exists and is called with the approval e-mail's subject;
+//   2. the step can never reach an ACCOUNT's row - the condition that keeps a
+//      member's own suggestion out is pinned whole, in BOTH statements, and the
+//      run calls none of an account erasure's steps;
+//   3. the request's kind is one column, written the same in the install
+//      script and the migration, and the page decides by it.
+
+$visitorFaults = [];
+
+$eventsMeta = $catalogue['tblEvents'] ?? [];
+foreach (['submitterName', 'submitterEmail'] as $col) {
+    $why = (string) ($eventsMeta['notEmptiedHere'][$col] ?? '');
+    if (str_starts_with($why, 'Emptied elsewhere, on purpose') === false || str_contains($why, 'D-140') === false) {
+        $visitorFaults[] = 'tblEvents.' . $col . ' is not recorded as emptied elsewhere under D-140';
+    }
+}
+$executeVisitorBody = $methodBody($eraserMasked, 'function executeVisitorAddress(');
+$suggesterBody      = $methodBody($eraserMasked, 'function eraseSuggesterDetails(');
+$fileVisitorBody    = $methodBody($eraserMasked, 'function fileVisitorAddressRequest(');
+if ($executeVisitorBody === '' || $suggesterBody === '' || $fileVisitorBody === '') {
+    $visitorFaults[] = 'one of fileVisitorAddressRequest(), executeVisitorAddress() or eraseSuggesterDetails() is missing';
+}
+foreach ([
+    '$subject = EventSuggestions::APPROVAL_SUBJECT;',
+    'self::eraseMailQueueMessages($requestId, $address, $subject, $siteId)',
+    'self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId)',
+    'self::eraseSuggesterDetails($db, $requestId, $address, $siteId)',
+    'self::closeVisitorAddressRequest($db, $requestId, $processedByID, $steps)',
+] as $mustCall) {
+    if (str_contains($executeVisitorBody, $mustCall) === false) {
+        $visitorFaults[] = 'executeVisitorAddress() does not contain: ' . $mustCall;
+    }
+}
+$suggestionsSource = (string) @file_get_contents(__DIR__ . '/../web/_core/EventSuggestions.php');
+if (str_contains($suggestionsSource, "public const APPROVAL_SUBJECT = 'Your event suggestion has been approved';") === false
+    || str_contains($suggestionsSource, "'subject' => self::APPROVAL_SUBJECT") === false
+) {
+    // Pinned word for word: the erasure finds the approval e-mail by this
+    // subject, so a reworded subject would silently stop it finding every
+    // e-mail sent before the change. See the constant's own docblock.
+    $visitorFaults[] = 'the approval e-mail\'s subject is not the one constant, word for word as it has always been sent';
+}
+check(
+    'a visitor\'s name and address on an event suggestion are emptied by a request for their address, which also clears the approval e-mail in the mail queue and the send log, found by its subject (#964, D-140)',
+    $visitorFaults === [],
+    implode('; ', $visitorFaults)
+);
+
+$accountFaults = [];
+// The two statements, read with strings visible: masking hides SQL.
+$suggesterText = $methodBody((string) file_get_contents($eraserFile), 'function eraseSuggesterDetails(');
+foreach ([
+    'WHERE `siteID` = ? AND `submittedByID` IS NULL AND `externalFeedID` IS NULL ',
+    'WHERE `eventID` = ? AND `submittedByID` IS NULL',
+    "SET `submitterName` = NULL, `submitterEmail` = NULL, `updatedAt` = `updatedAt` ",
+    'mb_strtolower(trim((string) $row[\'submitterEmail\'])) !== $wanted',
+] as $pin) {
+    if (str_contains($suggesterText, $pin) === false) {
+        $accountFaults[] = 'eraseSuggesterDetails() no longer holds: ' . $pin;
+    }
+}
+foreach (['processEntry(', 'self::catalogue(', 'keepGivingRecords(', 'eraseProfileImages(', 'eraseAuditTrailAboutPerson(',
+          'eraseDemoDataRegisterEntries(', 'self::closeRequest(', 'eraseGivingStatementFiles('] as $accountStep) {
+    if (str_contains($executeVisitorBody, $accountStep) === true) {
+        $accountFaults[] = 'executeVisitorAddress() calls an account erasure\'s step: ' . $accountStep;
+    }
+}
+$fileVisitorText = $methodBody((string) file_get_contents($eraserFile), 'function fileVisitorAddressRequest(');
+if (str_contains($fileVisitorText, '(`siteID`, `userID`, `subjectEmail`, ') === false
+    || gc_find('/VALUES \(\?, NULL, \?, NULL, NULL, /', $fileVisitorText) !== 1
+) {
+    $accountFaults[] = 'a visitor request is no longer filed with an EMPTY account number';
+}
+check(
+    'a request for a visitor\'s address can never reach an account: it names none, empties only suggestions made WITHOUT signing in, matches the address exactly apart from capitals and the spaces round it, and runs none of an account erasure\'s steps (#964, D-140)',
+    $accountFaults === [],
+    implode('; ', $accountFaults)
+);
+
+$kindFaults = [];
+$kindColumn = "`subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT '";
+if (str_contains($schemaText, $kindColumn) === false) {
+    $kindFaults[] = 'full_schema.sql does not declare tblErasureRequest.subjectKind as expected';
+}
+$migration286 = (string) @file_get_contents(__DIR__ . '/../web/_sql/286_erasure_by_visitor_address.sql');
+if (str_contains($migration286, "ADD COLUMN `subjectKind` ENUM(''account'',''visitor_address'') NOT NULL DEFAULT ''account'' COMMENT ''") === false
+    || str_contains($migration286, "AFTER `notes`") === false
+    || str_contains($migration286, "('286_erasure_by_visitor_address.sql')") === false
+) {
+    $kindFaults[] = 'migration 286 does not add the same column, in the same place, and record itself';
+}
+// The comments must agree too: an upgraded database and a fresh one are
+// compared column for column by the migration harness.
+preg_match("/`subjectKind`      ENUM\('account','visitor_address'\) NOT NULL DEFAULT 'account' COMMENT '((?:[^']|'')*)'/", $schemaText, $schemaComment);
+preg_match("/COMMENT ''((?:[^']|'''')*)'' AFTER `notes`/", $migration286, $migrationComment);
+if (($schemaComment[1] ?? 'a') !== str_replace("''''", "''", $migrationComment[1] ?? 'b')) {
+    $kindFaults[] = 'the column\'s comment differs between full_schema.sql and migration 286';
+}
+$processCode = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/process.php'));
+if (str_contains($processCode, '$isVisitor = (string) ($row[\'subjectKind\'] ?? \'\') === GdprEraser::KIND_VISITOR_ADDRESS;') === false
+    || str_contains($processCode, 'GdprEraser::executeVisitorAddress($requestId, $adminId)') === false
+    || str_contains($processCode, 'GdprEraser::fileVisitorAddressRequest($siteId, $address, $checked, $adminId)') === false
+    || str_contains($processCode, '$checked = ($_POST[\'checkedOffPortal\'] ?? \'\') === \'1\';') === false
+) {
+    $kindFaults[] = 'the erasure page does not file a visitor request through GdprEraser with the tick-box, or does not decide a visitor run by the request\'s own kind';
+}
+check(
+    'a request\'s kind is one column, declared alike in the install script and migration 286, and the erasure page decides by it - never by an empty account number (#964)',
+    $kindFaults === [],
+    implode('; ', $kindFaults)
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

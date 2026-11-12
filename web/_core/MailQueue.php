@@ -2474,10 +2474,10 @@ final class MailQueue
      * @return list<array<string, mixed>> Each row, with `entries` and `mine`
      *         as entriesOf() gives them.
      */
-    private static function rowsFor(mysqli $db, string $email): array
+    private static function rowsFor(mysqli $db, string $email, ?string $onlySubject = null, ?int $onlySiteId = null): array
     {
         $like = '%' . addcslashes($email, '\\%_') . '%';
-        $stmt = $db->prepare('SELECT queueID, toRecipients FROM tblMailQueue WHERE toRecipients LIKE ? ORDER BY queueID');
+        $stmt = $db->prepare('SELECT queueID, toRecipients, subject, siteID FROM tblMailQueue WHERE toRecipients LIKE ? ORDER BY queueID');
         $stmt->bind_param('s', $like);
         $stmt->execute();
         $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
@@ -2485,6 +2485,20 @@ final class MailQueue
 
         $found = [];
         foreach ($rows as $row) {
+            // 🎯 #964 (D-140): an erasure filed for a VISITOR's address asks
+            //    only about the one kind of message the portal ever sends a
+            //    visitor, at the one organisation that filed it. Compared here,
+            //    exactly and with capitals counting, rather than in the LIKE
+            //    above: the database's comparison ignores capitals and, under
+            //    this schema's collation, some accents too, and "only this
+            //    message" must mean exactly this message. A member's own mail to
+            //    the same address has another subject and is never touched.
+            if ($onlySubject !== null && (string) $row['subject'] !== $onlySubject) {
+                continue;
+            }
+            if ($onlySiteId !== null && (int) ($row['siteID'] ?? 0) !== $onlySiteId) {
+                continue;
+            }
             $parts = self::entriesOf((string) $row['toRecipients'], $email);
             if ($parts['mine'] !== []) {
                 $found[] = $row + $parts;
@@ -2529,9 +2543,19 @@ final class MailQueue
      * or keep out a message sent inside an ordinary request, which is not
      * under the lock (see the file header).
      *
+     * NARROWED, FOR A VISITOR (#964, D-140). `$onlySubject` and `$onlySiteId`
+     * limit it to messages with exactly that subject, kept for exactly that
+     * organisation. GdprEraser passes both for an erasure filed by e-mail
+     * address for somebody who suggested an event without an account: the
+     * only message the portal sends such a person is the approval e-mail
+     * (D-134), so nothing else waiting for the same address is theirs to
+     * take, and a MEMBER who happens to use the same address keeps every
+     * message of their own. Both null (an account's erasure) means every
+     * message, as before.
+     *
      * @return array{deleted: int, changed: int, runWasWorking: bool}
      */
-    public static function eraseAddress(mysqli $db, string $email): array
+    public static function eraseAddress(mysqli $db, string $email, ?string $onlySubject = null, ?int $onlySiteId = null): array
     {
         $wait = self::ERASURE_WAITS_SECONDS;
         $stmt = $db->prepare("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), ?) AS got");
@@ -2540,7 +2564,7 @@ final class MailQueue
         $alone = (int) ($stmt->get_result()->fetch_assoc()['got'] ?? 0) === 1;
         $stmt->close();
         try {
-            return self::eraseAddressNow($db, $email) + ['runWasWorking' => $alone === false];
+            return self::eraseAddressNow($db, $email, $onlySubject, $onlySiteId) + ['runWasWorking' => $alone === false];
         } finally {
             if ($alone === true) {
                 try {
@@ -2553,10 +2577,10 @@ final class MailQueue
     }
 
     /** The work of eraseAddress(): every row that names the address, whatever state it is in. */
-    private static function eraseAddressNow(mysqli $db, string $email): array
+    private static function eraseAddressNow(mysqli $db, string $email, ?string $onlySubject = null, ?int $onlySiteId = null): array
     {
         $done = ['deleted' => 0, 'changed' => 0];
-        foreach (self::rowsFor($db, $email) as $row) {
+        foreach (self::rowsFor($db, $email, $onlySubject, $onlySiteId) as $row) {
             $queueId = (int) $row['queueID'];
             $others  = array_values(array_filter(
                 $row['entries'],

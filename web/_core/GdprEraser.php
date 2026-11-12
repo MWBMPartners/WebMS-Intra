@@ -3341,6 +3341,423 @@ class GdprEraser
         ];
     }
 
+    /** A request about somebody's ACCOUNT: every request filed before #964, and every one filed by a member. */
+    public const KIND_ACCOUNT = 'account';
+
+    /**
+     * A request filed by an administrator for an e-mail ADDRESS that has no
+     * account: somebody who suggested an event without signing in (#964,
+     * D-140). Stored in `tblErasureRequest.subjectKind`.
+     */
+    public const KIND_VISITOR_ADDRESS = 'visitor_address';
+
+    /**
+     * 🧾 File an erasure request for a VISITOR's e-mail address (#964, D-140).
+     *
+     * -------------------------------------------------------------------------
+     * WHO THIS IS FOR
+     * -------------------------------------------------------------------------
+     * Somebody who is not signed in can suggest an event, giving a name and an
+     * e-mail address (`calendar/submit-save.php`). They have no account, so an
+     * ordinary erasure — which finds a person through their account number —
+     * can never reach those two columns, nor the approval e-mail D-134 sends to
+     * that address. D-140 (the owner, 11 November 2026): erase them on request,
+     * never automatically; an administrator files the request by e-mail
+     * address, after checking OUTSIDE the portal that it really is that person.
+     *
+     * -------------------------------------------------------------------------
+     * HOW THE CHECK IS RECORDED, AND WHY NOT MORE
+     * -------------------------------------------------------------------------
+     * The administrator has to tick a box saying they checked; without it
+     * nothing is filed. The request's sealed audit trail then records that
+     * statement and who made it, by account number, exactly as
+     * `confirmOnBehalf()` does. It records the claim; it cannot test it.
+     *
+     * There is deliberately NO box for HOW they checked. A sentence such as
+     * "she rang from 07700 900123 and gave her date of birth" would put more
+     * personal details into `tblErasureAudit`, which is never erased and is
+     * deliberately absent from the personal-data catalogue (#510 rule 7d) —
+     * the reason `finishByHand()` takes no typed text either (#710).
+     *
+     * And NO confirming e-mail is sent to the address. The administrator has
+     * already checked; D-134 allows the address to be used for the approval
+     * e-mail alone; and sending one would write the address into the send log
+     * again moments before the erasure takes it out. (Owner question, raised
+     * with #964: built this way pending an answer.)
+     *
+     * -------------------------------------------------------------------------
+     * WHAT IT DOES
+     * -------------------------------------------------------------------------
+     * Files the request already confirmed — at `pending_review`, with no
+     * confirmation link — because the check the link stands for is the one the
+     * administrator has just stated. Nothing is erased here: an administrator
+     * still presses Execute on the list.
+     *
+     * A second request for the same address at the same organisation, while
+     * one is still waiting or running, is refused with that one's number,
+     * matched by MailQueue::listHasAddress() (capitals ignored, spaces round
+     * it ignored). The read of the open requests and the insert are in ONE
+     * transaction, the read taken `FOR UPDATE`, so two administrators pressing
+     * at once queue behind each other rather than both filing.
+     *
+     * @param int    $siteId           The organisation the administrator is in (`Site::id()`).
+     * @param string $address          The address as typed. Spaces round it are dropped.
+     * @param bool   $checkedOffPortal True only when the "I have checked" box was ticked.
+     * @param int    $adminId          Who is filing it.
+     *
+     * @return array{outcome: string, requestID: int} `outcome` is 'filed',
+     *   'not-checked', 'not-an-address' or 'already-open'; `requestID` is the
+     *   new request, or the open one, or 0.
+     *
+     * @throws \Throwable If the database refuses. Nothing is then filed.
+     */
+    public static function fileVisitorAddressRequest(int $siteId, string $address, bool $checkedOffPortal, int $adminId): array
+    {
+        if ($checkedOffPortal !== true) {
+            return ['outcome' => 'not-checked', 'requestID' => 0];
+        }
+        $address = trim($address);
+        if ($address === '' || mb_strlen($address) > 255 || filter_var($address, FILTER_VALIDATE_EMAIL) === false
+            || self::isTombstoneAddress($address) === true
+        ) {
+            return ['outcome' => 'not-an-address', 'requestID' => 0];
+        }
+
+        $db   = App::db();
+        $kind = self::KIND_VISITOR_ADDRESS;
+
+        return self::asOneStep($db, static function () use ($db, $siteId, $address, $adminId, $kind): array {
+            $stmt = $db->prepare(
+                'SELECT `requestID`, `subjectEmail` FROM `tblErasureRequest` '
+                . 'WHERE `siteID` = ? AND `subjectKind` = ? AND `status` IN (\'pending_review\', \'processing\') '
+                . 'ORDER BY `requestID` FOR UPDATE'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('the open requests could not be read: ' . $db->error);
+            }
+            $stmt->bind_param('is', $siteId, $kind);
+            $stmt->execute();
+            $open = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+            foreach ($open as $row) {
+                if (MailQueue::listHasAddress((string) $row['subjectEmail'], $address) === true) {
+                    return ['outcome' => 'already-open', 'requestID' => (int) $row['requestID']];
+                }
+            }
+
+            $stmt = $db->prepare(
+                'INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `subjectName`, `confirmToken`, '
+                . '`status`, `confirmedAt`, `dueBy`, `subjectKind`) '
+                . 'VALUES (?, NULL, ?, NULL, NULL, \'pending_review\', NOW(), DATE_ADD(NOW(), INTERVAL 1 MONTH), ?)'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('the erasure request could not be saved: ' . $db->error);
+            }
+            $stmt->bind_param('iss', $siteId, $address, $kind);
+            $stmt->execute();
+            $requestId = (int) $stmt->insert_id;
+            $stmt->close();
+
+            self::logAudit(
+                $db,
+                $requestId,
+                'filed',
+                'tblErasureRequest',
+                null,
+                'Filed by the administrator with account #' . $adminId . ' for an e-mail address that has no account: '
+                . 'somebody who suggested an event without signing in (D-140). The administrator states that they '
+                . 'checked, outside the portal, that the request comes from the person who uses this address. No '
+                . 'e-mail was sent to it. Nothing has been erased by this: the request is at pending review, and an '
+                . 'administrator still has to run it. It reaches only the name and address given with event '
+                . 'suggestions at this organisation and the approval e-mails sent to that address; no account is '
+                . 'touched, even one using the same address.'
+            );
+
+            return ['outcome' => 'filed', 'requestID' => $requestId];
+        });
+    }
+
+    /**
+     * 🗑️ Carry out a request filed for a VISITOR's e-mail address (#964, D-140).
+     *
+     * The caller must have moved the request to `processing` first, exactly as
+     * for `execute()` (process.php's claim). This refuses — changing nothing —
+     * any request that is not a visitor-address request at `processing`.
+     *
+     * -------------------------------------------------------------------------
+     * THREE STEPS, EACH WITH ITS OWN AUDIT LINE, AND NOTHING ELSE
+     * -------------------------------------------------------------------------
+     *   1. The mail queue: a waiting approval e-mail to this address, kept for
+     *      this organisation, is deleted, so it can never be sent afterwards.
+     *      FIRST, for the same reason `execute()` puts it first: it waits for a
+     *      run of the mail job to finish, so anything that run writes into the
+     *      send log is there for step 2 to clean.
+     *   2. The send log: the address is taken out of the record of each
+     *      approval e-mail to it, and that row's reason text emptied. The row
+     *      stays — it is the organisation's record that a message was sent.
+     *   3. The suggestions: `submitterName` and `submitterEmail` are emptied on
+     *      every event at this organisation suggested WITHOUT signing in with
+     *      this address. The event itself — its name, times, place, status,
+     *      who approved it — is the organisation's and is kept.
+     *
+     * -------------------------------------------------------------------------
+     * WHAT IT DELIBERATELY DOES NOT DO
+     * -------------------------------------------------------------------------
+     * - It touches NO ACCOUNT and no row found through one — even when a member
+     *   uses the same address. The person who asked has no account; a member
+     *   with the same address asks for their own erasure from their account,
+     *   and that request is checked by the e-mail link sent to them. A visitor
+     *   request reaching an account would let an administrator's say-so empty
+     *   a member's records.
+     * - It reaches only THIS ORGANISATION's suggestions and mail. Another
+     *   organisation on the same installation may be a different party whose
+     *   administrator did not check who is asking (the one-install,
+     *   many-organisations rule); that organisation files its own request.
+     * - It looks only at the approval e-mail (EventSuggestions::APPROVAL_SUBJECT),
+     *   the one message the portal sends a visitor (D-134). Any other mail to
+     *   the same address is somebody's own and is left alone.
+     * - It does not look at the Errors page: a mail server's refusal there has
+     *   no subject, so nothing says it was about the approval e-mail. Those
+     *   lines expire on that page's own clear-out.
+     * - Its address match is EXACT apart from capitals and the spaces round it
+     *   (the database's comparison would also let `josé@` match `jose@` under
+     *   this schema's collation, so the database only finds candidates and
+     *   PHP decides, as `eraseEmailLogRecipients()` does).
+     *
+     * Like `execute()`, a failed step puts the request back to pending review
+     * untouched, so running it again finds the address; every step is safe to
+     * repeat. It never needs the free-text review (#724): it empties a name and
+     * an address, not anybody's own words.
+     *
+     * @param int      $requestId     The request, at `processing`.
+     * @param int|null $processedByID The administrator who pressed Execute.
+     *
+     * @return array{changed: bool, steps: int, failed: int, handWorkOnly: array<string, string>}
+     *   As `execute()`; `handWorkOnly` is always empty.
+     *
+     * @throws \RuntimeException When the request is not one this can run, or
+     *   the run had to stop part way; the message says where it was left.
+     */
+    public static function executeVisitorAddress(int $requestId, ?int $processedByID = null): array
+    {
+        $db = App::db();
+
+        $stmt = $db->prepare(
+            'SELECT `siteID`, `subjectEmail`, `subjectKind`, `status` FROM `tblErasureRequest` WHERE `requestID` = ? LIMIT 1'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException('Erasure request #' . $requestId . ' could not be read, and nothing was changed: ' . $db->error);
+        }
+        $stmt->bind_param('i', $requestId);
+        $stmt->execute();
+        $request = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($request === null
+            || (string) $request['subjectKind'] !== self::KIND_VISITOR_ADDRESS
+            || (string) $request['status'] !== 'processing'
+        ) {
+            throw new \RuntimeException(
+                'Erasure request #' . $requestId . ' is not a request for a visitor\'s e-mail address that is being '
+                . 'carried out, so nothing was changed.'
+            );
+        }
+        $siteId  = (int) $request['siteID'];
+        $address = trim((string) $request['subjectEmail']);
+        if ($address === '' || self::isTombstoneAddress($address) === true) {
+            throw self::stopped($db, $requestId, new \RuntimeException('the request holds no address to search for'));
+        }
+
+        $subject = EventSuggestions::APPROVAL_SUBJECT;
+        $steps   = 0;
+        $failed  = 0;
+        $changed = false;
+        $status  = '';
+        try {
+            $outcomes   = [];
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $address, $subject, $siteId));
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId));
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseSuggesterDetails($db, $requestId, $address, $siteId));
+            foreach ($outcomes as $outcome) {
+                $steps++;
+                if ($outcome === self::STEP_FAILED) {
+                    $failed++;
+                } elseif ($outcome === self::STEP_CHANGED) {
+                    $changed = true;
+                }
+            }
+
+            if ($failed === 0) {
+                self::closeVisitorAddressRequest($db, $requestId, $processedByID, $steps);
+
+                return ['changed' => $changed, 'steps' => $steps, 'failed' => 0, 'handWorkOnly' => []];
+            }
+
+            $status = self::putBackToPendingReview($db, $requestId);
+            self::logAudit(
+                $db,
+                $requestId,
+                'failed',
+                'tblErasureRequest',
+                null,
+                $failed . ' of ' . $steps . ' steps failed, so the request was not closed. ' . self::statusSentence($status)
+            );
+        } catch (\Throwable $e) {
+            throw self::stopped($db, $requestId, $e);
+        }
+
+        if ($status !== 'pending_review') {
+            throw new \RuntimeException(
+                'Erasure request #' . $requestId . ': ' . $failed . ' of ' . $steps . ' steps failed. ' . self::statusSentence($status)
+            );
+        }
+
+        return ['changed' => $changed, 'steps' => $steps, 'failed' => $failed, 'handWorkOnly' => []];
+    }
+
+    /**
+     * 📅 Step 3 of a visitor-address request (#964): empty the name and the
+     *    address a visitor gave when suggesting an event.
+     *
+     * Every event at this organisation suggested WITHOUT signing in
+     * (`submittedByID IS NULL`; a signed-in suggestion stores no address at
+     * all) whose `submitterEmail` IS this address, capitals and the spaces
+     * round it aside. Deleted events and every status — waiting, approved,
+     * turned down — are included: the details are on the row whatever became
+     * of it. An event copied in from an outside calendar is never a suggestion
+     * (`externalFeedID IS NULL`).
+     *
+     * The LIKE only finds candidates, with `\`, `%` and `_` escaped; the exact
+     * comparison is made here, row by row, and each row is emptied by its own
+     * number. `FOR UPDATE` holds the rows because this runs inside the step's
+     * own transaction (asOneStep()). `updatedAt` is written back as it was:
+     * nobody changed the event, and the date it was last edited should still
+     * say when somebody did.
+     *
+     * Exactly one audit line, including when nothing matched. A failure is a
+     * FAILED step, not a crash; the fault's own words are not recorded,
+     * because a database's refusal can quote the value it was handed.
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function eraseSuggesterDetails(\mysqli $db, int $requestId, string $address, int $siteId): string
+    {
+        $like    = '%' . addcslashes($address, '\\%_') . '%';
+        $wanted  = mb_strtolower(trim($address));
+        $emptied = 0;
+        $problem = false;
+        try {
+            $find = $db->prepare(
+                'SELECT `eventID`, `submitterEmail` FROM `tblEvents` '
+                . 'WHERE `siteID` = ? AND `submittedByID` IS NULL AND `externalFeedID` IS NULL '
+                . 'AND `submitterEmail` LIKE ? FOR UPDATE'
+            );
+            $find->bind_param('is', $siteId, $like);
+            $find->execute();
+            $rows = $find->get_result()->fetch_all(MYSQLI_ASSOC);
+            $find->close();
+
+            $clear = $db->prepare(
+                'UPDATE `tblEvents` SET `submitterName` = NULL, `submitterEmail` = NULL, `updatedAt` = `updatedAt` '
+                . 'WHERE `eventID` = ? AND `submittedByID` IS NULL'
+            );
+            foreach ($rows as $row) {
+                if ($wanted === '' || mb_strtolower(trim((string) $row['submitterEmail'])) !== $wanted) {
+                    continue; // a longer address that merely contains it, or one differing by more than capitals
+                }
+                $eventId = (int) $row['eventID'];
+                $clear->bind_param('i', $eventId);
+                $clear->execute();
+                $emptied++;
+            }
+            $clear->close();
+        } catch (\Throwable $e) {
+            $problem = true;
+        }
+
+        if ($problem === true) {
+            self::logAudit($db, $requestId, 'failed', 'tblEvents', null, 'the name and address given with event suggestions could not be emptied; run the request again');
+
+            return self::STEP_FAILED;
+        }
+        if ($emptied > 0) {
+            self::logAudit(
+                $db,
+                $requestId,
+                'anonymise',
+                'tblEvents',
+                $emptied . ' events',
+                'the name and e-mail address given with an event suggestion at this organisation, made without signing '
+                . 'in, emptied on ' . $emptied . ' event(s); the events themselves and everything else on them are kept'
+            );
+
+            return self::STEP_CHANGED;
+        }
+        self::logAudit($db, $requestId, 'none', 'tblEvents', null, 'no event suggested at this organisation without signing in carries this address');
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /**
+     * 🏁 Close a visitor-address request (#964): the closing line and the
+     *    change to the request in ONE transaction, as `closeRequest()` does.
+     *
+     * Only THIS request is closed. `closeRequest()` also closes the person's
+     * other open requests and clears them, matched on the ACCOUNT number; a
+     * visitor has none, and matching other requests on the text of an address
+     * is exactly what that method refuses to do. A second open request for the
+     * same address cannot normally exist (`fileVisitorAddressRequest()` refuses
+     * one); if one did, running it finds nothing and clears its own copy.
+     *
+     * The address goes from the request — replaced, because the column may not
+     * be empty, with that row's own made-up `deleted-<number>` address — for
+     * the same reason as `closeRequest()`: a request that still shows the
+     * address of somebody who asked to be forgotten has not forgotten them.
+     *
+     * @throws \Throwable If anything fails. Nothing is then changed, and the
+     *   caller puts the request back.
+     */
+    private static function closeVisitorAddressRequest(\mysqli $db, int $requestId, ?int $processedByID, int $steps): void
+    {
+        if ($db->begin_transaction() === false) {
+            throw new \RuntimeException('a transaction could not be started: ' . $db->error);
+        }
+        try {
+            self::logAudit(
+                $db,
+                $requestId,
+                'completed',
+                'tblErasureRequest',
+                null,
+                'All ' . $steps . ' steps ran and none failed. The request is closed, and the e-mail address is '
+                . 'cleared from it.'
+            );
+            [$before, $after] = explode('{rid}', self::TOMBSTONE_EMAIL);
+            $kind = self::KIND_VISITOR_ADDRESS;
+            $stmt = $db->prepare(
+                "UPDATE `tblErasureRequest` SET `status` = 'completed', `processedAt` = NOW(), `processedByID` = ?, "
+                . '`subjectName` = NULL, `notes` = NULL, `confirmToken` = NULL, `subjectEmail` = CONCAT(?, `requestID`, ?) '
+                . "WHERE `requestID` = ? AND `status` = 'processing' AND `subjectKind` = ?"
+            );
+            $stmt->bind_param('issis', $processedByID, $before, $after, $requestId, $kind);
+            $stmt->execute();
+            $closed = (int) $stmt->affected_rows === 1;
+            $stmt->close();
+            if ($closed === false) {
+                throw new \RuntimeException('the request was no longer being carried out, so it was not closed');
+            }
+            if ($db->commit() === false) {
+                throw new \RuntimeException('closing the request could not be saved: ' . $db->error);
+            }
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $rollbackProblem) {
+                error_log('[WebMS-Intra] GdprEraser: rollback failed while closing erasure #' . $requestId . ': ' . $rollbackProblem->getMessage());
+            }
+            throw $e;
+        }
+    }
+
     /** One plain sentence saying where a request was left, from its real status. */
     private static function statusSentence(string $status): string
     {
@@ -6737,9 +7154,14 @@ class GdprEraser
      *
      * @return string One of the STEP_ constants.
      */
-    private static function eraseMailQueueMessages(int $requestId, string $email): string
+    private static function eraseMailQueueMessages(int $requestId, string $email, ?string $onlySubject = null, ?int $onlySiteId = null): string
     {
         $db = App::db();
+
+        // 🎯 #964 (D-140): for a VISITOR's address, only the approval e-mail
+        //    for an event suggestion, kept for this organisation. See
+        //    executeVisitorAddress() for why, and MailQueue::eraseAddress().
+        $visitor = $onlySubject !== null;
 
         if ($email === '') {
             self::logAudit($db, $requestId, 'none', 'tblMailQueue', null, 'no email address is known for this person, so the mail queue was not searched');
@@ -6747,7 +7169,7 @@ class GdprEraser
             return self::STEP_UNCHANGED;
         }
         try {
-            $done = MailQueue::eraseAddress($db, $email);
+            $done = MailQueue::eraseAddress($db, $email, $onlySubject, $onlySiteId);
         } catch (\Throwable $e) {
             if ($e instanceof \mysqli_sql_exception && (int) $e->getCode() === 1146) {
                 self::logAudit($db, $requestId, 'skip', 'tblMailQueue', null, 'the mail queue is not in this database yet (it has not been upgraded), so no mail is waiting');
@@ -6780,12 +7202,23 @@ class GdprEraser
                 $done['deleted'] > 0 ? 'delete' : 'anonymise',
                 'tblMailQueue',
                 $done['deleted'] . ' deleted, ' . $done['changed'] . ' changed',
-                'waiting mail for this person alone deleted, with its attached files; their address taken off waiting mail that is also for other people'
+                $visitor === true
+                    ? 'waiting "your event suggestion has been approved" e-mails to this address, kept for this organisation, deleted (or the address taken off one also for somebody else); no other waiting mail was looked at'
+                    : 'waiting mail for this person alone deleted, with its attached files; their address taken off waiting mail that is also for other people'
             );
 
             return self::STEP_CHANGED;
         }
-        self::logAudit($db, $requestId, 'none', 'tblMailQueue', null, 'no mail is waiting to be sent to this person\'s address');
+        self::logAudit(
+            $db,
+            $requestId,
+            'none',
+            'tblMailQueue',
+            null,
+            $visitor === true
+                ? 'no "your event suggestion has been approved" e-mail to this address is waiting to be sent for this organisation'
+                : 'no mail is waiting to be sent to this person\'s address'
+        );
 
         return self::STEP_UNCHANGED;
     }
@@ -6857,10 +7290,24 @@ class GdprEraser
      *
      * @return string One of the STEP_ constants.
      */
-    private static function eraseEmailLogRecipients(int $requestId, string $email): string
+    private static function eraseEmailLogRecipients(int $requestId, string $email, ?string $onlySubject = null, ?int $onlySiteId = null): string
     {
         // (The list of names is MAIL_ERROR_PLATFORMS, declared just below this method.)
         $db = App::db();
+
+        // 🎯 #964 (D-140): for a VISITOR's address, only the send-log rows of
+        //    the approval e-mail for an event suggestion. A row is this
+        //    organisation's when its `siteID` says so, OR when it names no
+        //    organisation at all - Mailer writes NULL for a message sent
+        //    outside any organisation, and that cannot be told apart from
+        //    "this one". A row naming ANOTHER organisation is left alone: that
+        //    organisation's administrator did not check who is asking.
+        //    The Errors page is NOT looked at for a visitor: a mail server's
+        //    refusal there carries no subject, so nothing says it was about
+        //    the approval e-mail rather than a member's own mail to the same
+        //    address. Those lines expire with the Errors page's own clear-out
+        //    (`errors.retentionDays`), and the audit line says so.
+        $visitor = $onlySubject !== null;
 
         if ($email === '') {
             self::logAudit($db, $requestId, 'none', 'tblEmailLog', null, 'no email address is known for this person, so the send log was not searched');
@@ -6881,7 +7328,7 @@ class GdprEraser
         $errorLines = 0;
         $problem    = null;
         try {
-            $read = $db->prepare('SELECT emailLogID, toRecipients FROM tblEmailLog WHERE toRecipients LIKE ?');
+            $read = $db->prepare('SELECT emailLogID, toRecipients, subject, siteID FROM tblEmailLog WHERE toRecipients LIKE ?');
             if ($read === false) {
                 $problem = (string) $db->error;
             } else {
@@ -6892,6 +7339,12 @@ class GdprEraser
 
                 $write = null;
                 foreach ($candidates as $row) {
+                    if ($visitor === true
+                        && ((string) $row['subject'] !== $onlySubject
+                            || ($row['siteID'] !== null && (int) $row['siteID'] !== $onlySiteId))
+                    ) {
+                        continue; // not the approval e-mail, or another organisation's row
+                    }
                     $entries = explode(',', (string) $row['toRecipients']);
                     $changed = false;
                     foreach ($entries as $i => $entry) {
@@ -6929,7 +7382,7 @@ class GdprEraser
             //    the recipient list. REJECTED: one UPDATE with the LIKE. It
             //    emptied lines about other people whose longer address
             //    happens to contain this one.
-            if ($problem === null) {
+            if ($problem === null && $visitor === false) {
                 $platforms = self::MAIL_ERROR_PLATFORMS;
                 $marks     = implode(',', array_fill(0, count($platforms), '?'));
                 $find      = $db->prepare('SELECT errorID, errorDetail FROM tblErrors WHERE errorPlatform IN (' . $marks . ') AND errorDetail LIKE ?');
@@ -6966,12 +7419,23 @@ class GdprEraser
                 'anonymise',
                 'tblEmailLog',
                 $affected . ' rows, ' . $errorLines . ' error lines',
-                'recipient address taken out of the send log and the reason text of those rows emptied; the detail of mail error lines naming the address emptied; provider/status/subject/httpCode kept'
+                $visitor === true
+                    ? 'the address taken out of the send log\'s record of each "your event suggestion has been approved" e-mail to it, and the reason text of those rows emptied; provider/status/subject/httpCode kept. No other row was changed, and the Errors page was not looked at: its lines expire on its own clear-out'
+                    : 'recipient address taken out of the send log and the reason text of those rows emptied; the detail of mail error lines naming the address emptied; provider/status/subject/httpCode kept'
             );
 
             return self::STEP_CHANGED;
         }
-        self::logAudit($db, $requestId, 'none', 'tblEmailLog', null, 'the send log holds no message to this person\'s address, and no mail error line names it');
+        self::logAudit(
+            $db,
+            $requestId,
+            'none',
+            'tblEmailLog',
+            null,
+            $visitor === true
+                ? 'the send log holds no "your event suggestion has been approved" e-mail to this address for this organisation. The Errors page was not looked at: its lines expire on its own clear-out'
+                : 'the send log holds no message to this person\'s address, and no mail error line names it'
+        );
 
         return self::STEP_UNCHANGED;
     }

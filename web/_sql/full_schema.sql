@@ -5486,6 +5486,7 @@ CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
     `claimedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, not a time on the server clock: when a run of this request was started, refreshed while the run is still going. Written and compared with UTC_TIMESTAMP() only. Empty means no run is going.',
     `reasonRetained`   TEXT         DEFAULT NULL,
     `notes`            TEXT         DEFAULT NULL,
+    `subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT 'Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address with NO account, filed by an administrator for somebody who suggested an event without signing in (#964, D-140); it reaches only the name and address on this organisation''s event suggestions and the approval e-mails sent to that address, and never an account',
     PRIMARY KEY (`requestID`),
     KEY `idx_er_status` (`status`),
     KEY `idx_er_due`    (`dueBy`),
@@ -11787,6 +11788,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('282_no_built_in_currency.sql')
 -- expense line its quotedCurrency and quotedLineTotal. A fresh install holds no
 -- rows for the migration's fills to act on; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('283_every_amount_keeps_its_currency.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 286_erasure_by_visitor_address.sql (#964, D-140) ──────────────────
+-- tblErasureRequest.subjectKind is written above, in the GDPR erasure block.
+-- Every request that already exists is an account's, which is the column's
+-- default; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('286_erasure_by_visitor_address.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

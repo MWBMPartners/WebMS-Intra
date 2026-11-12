@@ -899,6 +899,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         note somebody types a name into will not be caught by it.
     </p>
 
+    <h3 class="h6 mt-3">Somebody without an account who suggested an event</h3>
+    <p>
+        Anybody can suggest an event without signing in. They give a name and an e-mail address,
+        and are e-mailed if it is approved. They have no account, so they cannot ask for erasure
+        from the portal, and an ordinary erasure request cannot find them. Nothing clears these
+        details automatically: they stay on the event until the person asks.
+    </p>
+    <p>
+        If such a person asks you to erase them, <strong>first check, outside the portal, that it
+        really is the person who uses that address</strong> &mdash; for example by replying to that
+        address and waiting for an answer. Then open <em>Erasure requests</em>, fill in their address
+        under &ldquo;Somebody without an account who suggested an event&rdquo;, tick the box that
+        says you checked, and file it. The request&rsquo;s report records that you said so. Nothing is
+        erased until you press <strong>Execute</strong> on it.
+    </p>
+    <p>
+        It empties the name and address on every event suggested at <em>your</em> organisation with
+        that address, and clears the e-mails telling that address a suggestion was approved, from
+        the mail waiting to be sent and from the record of sent mail. The events themselves are kept.
+        It does <strong>not</strong> touch any account, even a member&rsquo;s using the same address
+        &mdash; a member asks for their own erasure from their account &mdash; nor anything at another
+        organisation on the same installation, which files its own request.
+    </p>
+
     <h3 class="h6 mt-3">What you set</h3>
     <ul>
         <li><strong>Your country.</strong> The portal uses it only to suggest a number of years. Until you choose one, it suggests a cautious 10 years.</li>

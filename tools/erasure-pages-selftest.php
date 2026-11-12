@@ -105,6 +105,17 @@
  *      claim file still naming the giver from the kept record and the
  *      statements list still leaving them out; each page still works for a
  *      live account; every refusal is recorded.
+ *   N. (#964, D-140.) Somebody WITHOUT an account who suggested an event: a
+ *      visitor suggests one through the real form and an administrator
+ *      approves it; filing a request for the address is refused without the
+ *      "I checked who is asking" tick, for something that is not an address,
+ *      for an ordinary member and without the form token; once filed, Execute
+ *      empties the name and address on that address's suggestions at this
+ *      organisation and clears the approval e-mail's send-log and mail-queue
+ *      rows - and leaves alone the same address at another organisation, a
+ *      longer address containing it, the address with an accent the database
+ *      calls equal, and a MEMBER whose account uses the same address. Five
+ *      faults planted in the running copy, each turning its check red.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -197,7 +208,12 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 133; // 117 until #977 added section M (sixteen: the
+const EXPECTED_CHECKS = 149; // 133 until #964 added section N (sixteen: the
+                            // premise through the real form and approval, the
+                            // refusals, the filing, the list page, the run and
+                            // what it did and did not reach, the report, a
+                            // cancel, five plants and the clean run after them).
+                            // 117 until #977 added section M (sixteen: the
                             // premise, four saves of an erased account, the
                             // wording an ordinary administrator gets, the
                             // list page, placing, an organisation's page,
@@ -512,6 +528,11 @@ function removeWorld(): void
     q('DELETE FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblEmailLog WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // Section N (#964): the visitor's suggestion and the rows put in by hand,
+    // one of them a send-log row recorded under NO organisation.
+    q('DELETE FROM tblEmailLog WHERE emailLogID BETWEEN 917500 AND 917599');
+    q('DELETE FROM tblMailQueue WHERE siteID IN (?, ?) OR queueID BETWEEN 917400 AND 917499', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblEvents WHERE siteID IN (?, ?) OR eventID BETWEEN 917300 AND 917399', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 917000 AND 917999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblErrors WHERE userID BETWEEN 917000 AND 917999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 917000 AND 917999', 'ii', [ORG_A, ORG_B]);
@@ -1021,7 +1042,12 @@ unset($env['PHP_CLI_SERVER_WORKERS']);
 $env['PORTAL_ENV'] = 'prod';
 $state['proc']     = proc_open(
     [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        '-d', 'display_errors=0', '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+        // No opcache (#964): section N plants faults in the scratch copy of two
+        // classes between requests, and a cached copy would be checked for a
+        // newer file only every couple of seconds - the plant could miss, or
+        // worse, the putting-back could. access-pages-selftest.php does the same.
+        '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+        '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server-output.log', 'a'], 2 => ['file', $child . $sep . 'server-output.log', 'a']],
     $pipes,
     $child,
@@ -3574,6 +3600,380 @@ ok('M15 AFTER EVERYTHING: the erased account\'s row is byte for byte what the er
     json_encode([$zedRowM(), $claimLineM(), $previewShowsZed()]));
 
 // =============================================================================
+head('N. Somebody without an account who suggested an event (#964, D-140)');
+// =============================================================================
+// A visitor who suggests an event gives a name and an e-mail address; approving
+// it e-mails that address (D-134), which leaves it in the send log. They have no
+// account, so an ordinary erasure cannot find any of it. D-140: an administrator
+// files a request BY ADDRESS after checking who is asking, and that request
+// empties the two columns and clears the approval e-mail's send-log and
+// mail-queue rows - and NOTHING ELSE.
+//
+// HOW THIS IS ARRANGED. N1 drives the real public form and the real moderation
+// handler once, so the rows the erasure must reach are the ones the portal
+// really writes. Every other row is put in by hand, each standing for ONE
+// thing the request must leave alone, and each differing from the real rows
+// in ONE way only (#709's lesson: a fixture that differs in several ways tests
+// only the first thing the code looks at):
+//   - the same address at ORGANISATION B (an event, a waiting e-mail, a sent one);
+//   - a LONGER address that merely contains it (an event, a waiting e-mail, a sent one);
+//   - the address with an ACCENT, which this schema's own comparison treats as
+//     the same address (measured: 'josé@x.org' = 'jose@x.org' is 1 under
+//     utf8mb4_general_ci, and a LIKE matches it too);
+//   - a MEMBER, May, whose account uses the SAME address, with mail of her own
+//     to it (another subject) and one event row naming her as the suggester;
+//   - the same address in other capitals and with a trailing space, which IS
+//     the visitor's and must be emptied.
+// Then the plants (N11-N15), each in the scratch copy the server runs, each
+// required to turn ONE named observation red, and each put back byte for byte.
+//
+// WHAT THIS CANNOT SHOW. That the administrator really checked who was asking:
+// the portal records their word for it and cannot test it. A mail job running
+// at the moment of the erasure (MailQueue::eraseAddress() waits for it; section
+// F8 of tools/mail-queue-selftest.php drives that wait for an account's run).
+// And a message sent by the scheduled job through Microsoft 365 or Google,
+// whose send-log row records whichever organisation the job was working in
+// rather than the message's: such a row naming ANOTHER organisation is not
+// reached (see GdprEraser::eraseEmailLogRecipients()).
+
+const MAY        = 917052; // a member of A whose ACCOUNT uses the visitor's address
+const VERA_ADDR  = 'p964.vera@selftest.invalid';
+const VERA_TYPED = 'P964.Vera@Selftest.invalid';   // as the visitor typed it on the form
+const VERA_LONG  = 'xp964.vera@selftest.invalid';  // a longer address containing hers
+const VERA_ACCENT = 'p964.véra@selftest.invalid';  // the database's own comparison calls this the same
+const EV_CASE    = 917301; // A, by the visitor's address in other capitals with a space after, waiting and DELETED
+const EV_B       = 917302; // B, by the visitor's address
+const EV_LONG    = 917303; // A, by the longer address
+const EV_ACCENT  = 917304; // A, by the accented address
+const EV_MEMBER  = 917305; // A, naming MAY as the suggester (signed in) AND the visitor's address
+const MQ_A       = 917401; // A, the approval e-mail to the visitor, waiting
+const MQ_B       = 917402; // B, the approval e-mail to the visitor, waiting
+const MQ_MAY     = 917403; // A, May's own mail to the same address, waiting
+const MQ_LONG    = 917404; // A, the approval e-mail to the longer address
+const EL_NULL    = 917501; // the approval e-mail to the visitor, logged with NO organisation
+const EL_B       = 917502; // B, the approval e-mail to the visitor
+const EL_MAY     = 917503; // A, May's own mail to the same address
+const EL_LONG    = 917504; // A, the approval e-mail to the longer address
+
+$approvalSubject = 'Your event suggestion has been approved'; // word for word, as EventSuggestions sends it
+$n964Clear = static function (): void {
+    // BY NUMBER, never by a range. The real suggestion N1 makes takes the
+    // table's next number, and on a database an earlier run has used that is
+    // ABOVE these (the counter remembers the numbers put in by hand), so a
+    // range wiped the real event and its send-log row - found on the second run.
+    q('DELETE FROM `tblEvents` WHERE `eventID` IN (?, ?, ?, ?, ?)', 'iiiii', [EV_CASE, EV_B, EV_LONG, EV_ACCENT, EV_MEMBER]);
+    q('DELETE FROM `tblMailQueue` WHERE `queueID` IN (?, ?, ?, ?)', 'iiii', [MQ_A, MQ_B, MQ_MAY, MQ_LONG]);
+    q('DELETE FROM `tblEmailLog` WHERE `emailLogID` IN (?, ?, ?, ?)', 'iiii', [EL_NULL, EL_B, EL_MAY, EL_LONG]);
+};
+/** Every row the request must leave alone, plus the two hand-made rows it must reach, put back as new. */
+$n964Fixtures = static function () use ($n964Clear, $approvalSubject): void {
+    $n964Clear();
+    $event = static function (int $id, int $site, ?int $by, string $email): void {
+        q('INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventName`, `eventSlug`, `startDateTime`, `endDateTime`, `timezone`, '
+            . '`status`, `submissionStatus`, `submittedByID`, `submitterName`, `submitterEmail`, `submittedAt`, `isDeleted`, `updatedAt`) '
+            . "VALUES (?, ?, ?, ?, '2031-07-01 10:00:00', '2031-07-01 11:00:00', 'Europe/London', 'draft', 'pending', ?, ?, ?, '2026-10-01 09:00:00', ?, '2026-10-02 09:00:00')",
+            'iissiisi', [$id, $site, 'P964 event ' . $id, 'p964-event-' . $id, $by, 'P964 Name ' . $id, $email, $id === EV_CASE ? 1 : 0]);
+    };
+    $event(EV_CASE, ORG_A, null, ' ' . strtoupper(VERA_ADDR) . ' ');
+    $event(EV_B, ORG_B, null, VERA_ADDR);
+    $event(EV_LONG, ORG_A, null, VERA_LONG);
+    $event(EV_ACCENT, ORG_A, null, VERA_ACCENT);
+    $event(EV_MEMBER, ORG_A, MAY, VERA_ADDR);
+    $queued = static function (int $id, int $site, string $to, string $subject): void {
+        q('INSERT INTO `tblMailQueue` (`queueID`, `siteID`, `status`, `nextAttemptAt`, `createdAt`, `statusAt`, `toRecipients`, `subject`, `lastError`) '
+            . "VALUES (?, ?, 'held', UTC_TIMESTAMP() + INTERVAL 1 DAY, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, ?)",
+            'iisss', [$id, $site, $to, $subject, '550 refused ' . $to]);
+    };
+    $queued(MQ_A, ORG_A, VERA_TYPED, $approvalSubject);
+    $queued(MQ_B, ORG_B, VERA_ADDR, $approvalSubject);
+    $queued(MQ_MAY, ORG_A, VERA_ADDR, 'P964 your rota for Sunday');
+    $queued(MQ_LONG, ORG_A, VERA_LONG, $approvalSubject);
+    $logged = static function (int $id, ?int $site, string $to, string $subject): void {
+        q('INSERT INTO `tblEmailLog` (`emailLogID`, `siteID`, `provider`, `toRecipients`, `subject`, `status`, `errorDetail`) '
+            . "VALUES (?, ?, 'smtp', ?, ?, 'failed', ?)", 'iisss', [$id, $site, $to, $subject, '550 refused ' . $to]);
+    };
+    $logged(EL_NULL, null, VERA_ADDR, $approvalSubject);
+    $logged(EL_B, ORG_B, VERA_ADDR, $approvalSubject);
+    $logged(EL_MAY, ORG_A, VERA_ADDR, 'P964 your rota for Sunday');
+    $logged(EL_LONG, ORG_A, VERA_LONG, $approvalSubject);
+};
+/** The rows that must NOT change, as they stand now. */
+$n964Untouched = static fn (): array => [
+    'events'  => q('SELECT * FROM `tblEvents` WHERE `eventID` IN (?, ?, ?, ?) ORDER BY `eventID`', 'iiii', [EV_B, EV_LONG, EV_ACCENT, EV_MEMBER]),
+    'queue'   => q('SELECT `queueID`, `siteID`, `toRecipients`, `subject`, `lastError` FROM `tblMailQueue` WHERE `queueID` IN (?, ?, ?) ORDER BY `queueID`', 'iii', [MQ_B, MQ_MAY, MQ_LONG]),
+    'log'     => q('SELECT * FROM `tblEmailLog` WHERE `emailLogID` IN (?, ?, ?) ORDER BY `emailLogID`', 'iii', [EL_B, EL_MAY, EL_LONG]),
+    'account' => one('SELECT * FROM `tblUsers` WHERE `userID` = ?', 'i', [MAY]),
+];
+
+// The mail route for this section: SMTP with no mail server named, so nothing
+// connects anywhere and every message is recorded in the send log as not sent
+// (MailRoutes answers "not set up"). The route a fresh install starts on,
+// Microsoft 365 with nothing filled in, records NOTHING, so the approval
+// e-mail's own send-log row - the one the erasure must reach - would not
+// exist. Both settings go back at the end with the others ($state['settings']).
+foreach (['mail.provider' => 'smtp', 'mail.smtp.host' => ''] as $key => $value) {
+    $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
+    $state['settings'][$key] = $row;
+    if ($row === null) {
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+    } else {
+        q('UPDATE tblSettings SET settingValue = ? WHERE settingID = ?', 'si', [$value, (int) $row['settingID']]);
+    }
+}
+
+// May: a member of A, signed in through the real page, whose ACCOUNT uses the
+// visitor's address. She is also the ordinary member who is refused below.
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [MAY, 'May Sameaddress', VERA_ADDR]);
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [MAY, ORG_A]);
+q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [MAY, 'selftest-erasure-may', $hash]);
+$in = $signIn('may');
+if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+    refuse("signing in as selftest-erasure-may did not work (HTTP {$in['status']} {$in['location']})");
+}
+
+// ── N1. The real form and the real approval ───────────────────────────────────
+$veraJar  = $child . $sep . 'jar-vera.txt';
+$form     = req($veraJar, 'GET', '/calendar/submit');
+$sent     = req($veraJar, 'POST', '/calendar/submit-save', [
+    'csrf_token'     => token($form['body']),
+    'eventName'      => 'P964 bring and share lunch',
+    'startDateTime'  => '2031-06-14T12:30',
+    'endDateTime'    => '2031-06-14T14:00',
+    'locationName'   => 'The church hall',
+    'description'    => 'Suggested by section N of tools/erasure-pages-selftest.php.',
+    'submitterName'  => 'P964 Vera Visitor',
+    'submitterEmail' => VERA_TYPED,
+]);
+$veraEvent = one("SELECT * FROM `tblEvents` WHERE `siteID` = ? AND `eventName` = 'P964 bring and share lunch' ORDER BY `eventID` DESC LIMIT 1", 'i', [ORG_A]);
+$veraId    = (int) ($veraEvent['eventID'] ?? 0);
+$modPage   = req($jar['adm'], 'GET', '/admin/calendar/moderation?status=pending');
+$moderated = req($jar['adm'], 'POST', '/admin/calendar/moderate', ['csrf_token' => token($modPage['body']), 'eventID' => (string) $veraId, 'action' => 'approve']);
+$veraEvent = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [$veraId]);
+// The approval e-mail's own send-log row, whatever became of the message (no
+// mail route is set up here, so it is recorded as not sent - still a row TO
+// the address, which is what the erasure has to reach).
+$realLog = q('SELECT * FROM `tblEmailLog` WHERE `siteID` = ? AND `subject` = ? AND `toRecipients` = ?', 'iss', [ORG_A, $approvalSubject, VERA_TYPED]);
+ok('N1 THE PREMISE: a visitor suggests an event through the real form and an administrator approves it through the real handler; the event holds the name and the address as typed, and the approval e-mail to that address is in the send log under its subject (#964)',
+    $veraId > 0 && ($veraEvent['submitterName'] ?? '') === 'P964 Vera Visitor' && ($veraEvent['submitterEmail'] ?? '') === VERA_TYPED
+        && $veraEvent['submittedByID'] === null && ($veraEvent['submissionStatus'] ?? '') === 'approved' && count($realLog) === 1,
+    'submit ' . $sent['status'] . ' ' . $sent['location'] . ' | moderate ' . $moderated['status'] . ' | event ' . json_encode($veraEvent === null ? null : array_intersect_key($veraEvent, array_flip(['eventID', 'submitterName', 'submitterEmail', 'submissionStatus']))) . ' | log rows ' . count($realLog));
+
+// ── N2. What is refused, and files nothing ───────────────────────────────────
+$visitorRequests = static fn (): array => q("SELECT * FROM `tblErasureRequest` WHERE `siteID` IN (?, ?) AND `subjectKind` = 'visitor_address' ORDER BY `requestID`", 'ii', [ORG_A, ORG_B]);
+$file = static function (string $who, array $fields) use (&$jar): array {
+    $list = req($jar[$who], 'GET', '/admin/erasure-requests');
+    $r    = req($jar[$who], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token($list['body']), 'action' => 'file_visitor'] + $fields);
+
+    return ['status' => $r['status'], 'message' => $r['status'] === 302 ? message(req($jar[$who], 'GET', '/admin/erasure-requests')['body']) : ''];
+};
+$noTick    = $file('adm', ['visitorEmail' => VERA_ADDR]);
+$notAddr   = $file('adm', ['visitorEmail' => 'not an address', 'checkedOffPortal' => '1']);
+$asArray   = $file('adm', ['visitorEmail' => [VERA_ADDR], 'checkedOffPortal' => '1']);
+$listAsMay = req($jar['may'], 'GET', '/admin/erasure-requests');
+$byMay     = req($jar['may'], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token(req($jar['may'], 'GET', '/account/erasure-request')['body']), 'action' => 'file_visitor', 'visitorEmail' => VERA_ADDR, 'checkedOffPortal' => '1']);
+$noToken   = req($jar['adm'], 'POST', '/admin/erasure-requests/process', ['action' => 'file_visitor', 'visitorEmail' => VERA_ADDR, 'checkedOffPortal' => '1']);
+ok('N2 nothing is filed without the tick that says the administrator checked who is asking, for something that is not one address (typed, or sent as a list), by an ordinary member - even the one whose own account uses the address - or without the form token (#964, D-140)',
+    $visitorRequests() === []
+        && str_starts_with($noTick['message'], '[warning] Nothing was filed. Tick the box') === true
+        && str_starts_with($notAddr['message'], '[warning] Nothing was filed: that does not look like an e-mail address.') === true
+        && str_starts_with($asArray['message'], '[warning] Nothing was filed: that does not look like an e-mail address.') === true
+        && $listAsMay['status'] === 403 && $byMay['status'] === 403 && $noToken['status'] === 400,
+    'no tick: ' . $noTick['message'] . ' | not an address: ' . $notAddr['message'] . ' | a list: ' . $asArray['message']
+        . ' | May list ' . $listAsMay['status'] . ', post ' . $byMay['status'] . ' | no token ' . $noToken['status'] . ' | filed ' . count($visitorRequests()));
+
+// ── N3. Filed, once ─────────────────────────────────────────────────────────
+$n964Fixtures();
+$untouchedBefore = $n964Untouched();
+$activityBefore  = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+$filed           = $file('adm', ['visitorEmail' => '  p964.VERA@selftest.invalid ', 'checkedOffPortal' => '1']);
+$again           = $file('adm', ['visitorEmail' => VERA_TYPED, 'checkedOffPortal' => '1']);
+$requests        = $visitorRequests();
+$vReq            = $requests[0] ?? [];
+$vId             = (int) ($vReq['requestID'] ?? 0);
+$filedLine       = one('SELECT `action`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? ORDER BY `auditID` LIMIT 1', 'i', [$vId]);
+ok('N3 an administrator who ticks the box files ONE request: for that address with the spaces dropped, no account, at pending review with no confirmation link, of the visitor kind; its report records who said they checked; a second filing for the same address in other capitals is told the first is already waiting (#964, D-140)',
+    count($requests) === 1 && $vReq['subjectEmail'] === 'p964.VERA@selftest.invalid' && $vReq['userID'] === null
+        && $vReq['status'] === 'pending_review' && $vReq['confirmToken'] === null && $vReq['confirmedAt'] !== null
+        && (int) $vReq['siteID'] === ORG_A
+        && str_starts_with($filed['message'], '[success] Erasure request #' . $vId . ' is filed for that address') === true
+        && str_starts_with($again['message'], '[info] Nothing new was filed: erasure request #' . $vId . ' for that address') === true
+        && ($filedLine['action'] ?? '') === 'filed'
+        && str_contains((string) ($filedLine['details'] ?? ''), 'administrator with account #' . ADM . ' ') === true
+        && str_contains((string) ($filedLine['details'] ?? ''), 'checked, outside the portal') === true,
+    json_encode($vReq) . ' | ' . $filed['message'] . ' | ' . $again['message'] . ' | ' . json_encode($filedLine));
+
+// ── N4. The list page, and the one button that must not apply ───────────────
+$listNow  = req($jar['adm'], 'GET', '/admin/erasure-requests')['body'];
+$listDoc  = \Dom\HTMLDocument::createFromString($listNow, LIBXML_NOERROR);
+$forThis  = static function (string $action) use ($listDoc, $vId): int {
+    $n = 0;
+    foreach ($listDoc->querySelectorAll('form') as $f) {
+        $idField = $f->querySelector('input[name="requestID"]');
+        $act     = $f->querySelector('input[name="action"]');
+        if ($idField !== null && $act !== null && (int) $idField->getAttribute('value') === $vId && $act->getAttribute('value') === $action) {
+            $n++;
+        }
+    }
+
+    return $n;
+};
+$reviewLinks = 0;
+foreach ($listDoc->querySelectorAll('a') as $a) {
+    if (str_contains((string) $a->getAttribute('href'), 'review?id=' . $vId) === true) {
+        $reviewLinks++;
+    }
+}
+$byHandMsg = act($jar['adm'], $vId, 'finish_by_hand');
+ok('N4 the list shows the request as event suggestions with no account, offers Execute and Cancel for it but neither "Dealt with by hand" nor "Review free text", and a hand-made "Dealt with by hand" press is refused with the reason and changes nothing (#964)',
+    str_contains(text($listNow), 'Event suggestions, no account') === true
+        && $forThis('execute') === 1 && $forThis('cancel') === 1 && $forThis('finish_by_hand') === 0 && $reviewLinks === 0
+        && str_starts_with($byHandMsg, '[warning] Erasure request #' . $vId . ' is for a visitor\'s e-mail address') === true
+        && request($vId)['status'] === 'pending_review' && auditLines($vId) === 1,
+    'execute ' . $forThis('execute') . ', cancel ' . $forThis('cancel') . ', by hand ' . $forThis('finish_by_hand') . ', review links ' . $reviewLinks . ' | ' . $byHandMsg);
+
+// ── N5-N9. Execute, and what it did ───────────────────────────────────────────
+$veraBefore = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [$veraId]);
+$caseBefore = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [EV_CASE]);
+$runMsg     = act($jar['adm'], $vId, 'execute');
+$vReqAfter  = request($vId);
+ok('N5 Execute completes the request, and the request then holds no address: its own made-up one, no account, completed by this administrator (#964)',
+    str_starts_with($runMsg, '[success] Erasure request #' . $vId . ' is completed: all 3 steps ran and none failed.') === true
+        && $vReqAfter['status'] === 'completed' && $vReqAfter['subjectEmail'] === 'deleted-' . $vId . '@example.invalid'
+        && $vReqAfter['userID'] === null && (int) $vReqAfter['processedByID'] === ADM && $vReqAfter['subjectKind'] === 'visitor_address',
+    $runMsg . ' | ' . json_encode($vReqAfter));
+
+$veraAfter = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [$veraId]);
+$caseAfter = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [EV_CASE]);
+$sameApartFromTwo = static function (?array $before, ?array $after): bool {
+    if ($before === null || $after === null) {
+        return false;
+    }
+    unset($before['submitterName'], $before['submitterEmail'], $after['submitterName'], $after['submitterEmail']);
+
+    return $before === $after;
+};
+$untouchedAfter = $n964Untouched();
+ok('N6 the name and address are emptied on BOTH of the visitor\'s suggestions at this organisation - the approved one from the form, and a waiting, deleted one in other capitals with a space after - and nothing else on either event changes, not even when it was last edited (#964)',
+    $veraAfter['submitterName'] === null && $veraAfter['submitterEmail'] === null
+        && $caseAfter['submitterName'] === null && $caseAfter['submitterEmail'] === null
+        && $sameApartFromTwo($veraBefore, $veraAfter) === true && $sameApartFromTwo($caseBefore, $caseAfter) === true,
+    json_encode([$veraAfter['submitterName'] ?? 'gone', $veraAfter['submitterEmail'] ?? 'gone', $caseAfter['submitterName'] ?? 'gone', $caseAfter['submitterEmail'] ?? 'gone']));
+ok('N7 NOTHING ELSE IS REACHED: the same address at organisation B, a longer address that contains it, the address with an accent the database calls equal, an event naming a member, the member\'s own waiting and sent mail to the same address, and the member\'s ACCOUNT are all exactly as they were (#964, D-140)',
+    $untouchedAfter === $untouchedBefore,
+    'changed: ' . json_encode(array_keys(array_filter([
+        'events'  => $untouchedBefore['events'] !== $untouchedAfter['events'],
+        'queue'   => $untouchedBefore['queue'] !== $untouchedAfter['queue'],
+        'log'     => $untouchedBefore['log'] !== $untouchedAfter['log'],
+        'account' => $untouchedBefore['account'] !== $untouchedAfter['account'],
+    ]))));
+$queueGone = one('SELECT COUNT(*) AS n FROM `tblMailQueue` WHERE `queueID` = ?', 'i', [MQ_A]);
+$logRows   = q('SELECT `emailLogID`, `toRecipients`, `errorDetail`, `subject`, `status` FROM `tblEmailLog` WHERE `emailLogID` = ? OR `emailLogID` = ? ORDER BY `emailLogID`', 'ii', [(int) ($realLog[0]['emailLogID'] ?? 0), EL_NULL]);
+$logClean  = count($logRows) === 2;
+foreach ($logRows as $lr) {
+    $logClean = $logClean && $lr['toRecipients'] === '[erased]' && $lr['errorDetail'] === '' && $lr['subject'] === $approvalSubject;
+}
+ok('N8 the approval e-mail still waiting for this organisation is deleted, and the send log keeps the rows of every approval e-mail to the address - the real one and one recorded under no organisation - with the address taken out and the reason text emptied (#964, D-140)',
+    (int) ($queueGone['n'] ?? -1) === 0 && $logClean === true,
+    'queue rows left ' . ($queueGone['n'] ?? '?') . ' | ' . json_encode($logRows));
+
+$trail     = q('SELECT `action`, `tableName`, `recordKey`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? ORDER BY `auditID`', 'i', [$vId]);
+$shape     = array_map(static fn (array $t): string => $t['action'] . ' ' . $t['tableName'] . ' ' . (string) $t['recordKey'], $trail);
+$trailText = mb_strtolower((string) json_encode($trail, JSON_UNESCAPED_UNICODE));
+$activity  = mb_strtolower((string) json_encode(q('SELECT * FROM `tblActivityLogs` WHERE `logID` > ?', 'i', [$activityBefore]), JSON_UNESCAPED_UNICODE));
+$report    = req($jar['adm'], 'GET', '/admin/erasure-requests/report?id=' . $vId);
+ok('N9 the sealed report has one line per step, in order - filed, the mail queue, the send log, the suggestions, completed - its chain verifies on the report page, and neither it nor the activity log holds the address anywhere (#964)',
+    $shape === ['filed tblErasureRequest ', 'delete tblMailQueue 1 deleted, 0 changed', 'anonymise tblEmailLog 2 rows, 0 error lines', 'anonymise tblEvents 2 events', 'completed tblErasureRequest ']
+        && str_contains($trailText, 'p964.vera') === false && str_contains($activity, 'p964.vera') === false
+        && $report['status'] === 200 && str_contains($report['body'], 'verified') === true,
+    implode(' | ', $shape) . ' | report ' . $report['status']);
+
+// ── N10. Run again for an address that holds nothing, then cancel one ───────
+$otherFiled = $file('adm', ['visitorEmail' => 'p964.nobody@selftest.invalid', 'checkedOffPortal' => '1']);
+$otherId    = (int) (one("SELECT MAX(`requestID`) AS m FROM `tblErasureRequest` WHERE `siteID` = ? AND `subjectKind` = 'visitor_address'", 'i', [ORG_A])['m'] ?? 0);
+$cancelMsg  = act($jar['adm'], $otherId, 'cancel');
+ok('N10 a request for an address that suggested nothing can still be cancelled before it is run, and is (#964)',
+    $otherId !== $vId && str_starts_with($otherFiled['message'], '[success]') === true
+        && $cancelMsg === '[info] Erasure request cancelled.' && request($otherId)['status'] === 'cancelled',
+    $otherFiled['message'] . ' | ' . $cancelMsg);
+
+// ── N11-N15. The plants ───────────────────────────────────────────────────────
+// Each changes ONE thing in the scratch copy the server runs, is proved
+// applied, and must turn ONE named observation red; then the file is put back
+// byte for byte. The observation is the same question N6-N8 ask, answered on a
+// fresh set of rows and a fresh request each time.
+$n964Observe = static function () use ($n964Fixtures, $n964Untouched, $file, &$jar): array {
+    $n964Fixtures();
+    $before = $n964Untouched();
+    $f      = $file('adm', ['visitorEmail' => VERA_ADDR, 'checkedOffPortal' => '1']);
+    $id     = (int) (one("SELECT MAX(`requestID`) AS m FROM `tblErasureRequest` WHERE `siteID` = ? AND `subjectKind` = 'visitor_address'", 'i', [ORG_A])['m'] ?? 0);
+    $msg    = act($jar['adm'], $id, 'execute');
+    $after  = $n964Untouched();
+    $wrong  = [];
+    foreach (['events', 'queue', 'log', 'account'] as $part) {
+        if ($before[$part] !== $after[$part]) {
+            $wrong[] = 'untouched ' . $part . ' changed';
+        }
+    }
+    if ((int) (one('SELECT COUNT(*) AS n FROM `tblMailQueue` WHERE `queueID` = ?', 'i', [MQ_A])['n'] ?? -1) !== 0) {
+        $wrong[] = 'the waiting approval e-mail is still there';
+    }
+    if ((string) (one('SELECT `toRecipients` FROM `tblEmailLog` WHERE `emailLogID` = ?', 'i', [EL_NULL])['toRecipients'] ?? '') !== '[erased]') {
+        $wrong[] = 'the sent approval e-mail still holds the address';
+    }
+    if (one('SELECT `submitterEmail` FROM `tblEvents` WHERE `eventID` = ?', 'i', [EV_CASE])['submitterEmail'] !== null) {
+        $wrong[] = 'the suggestion still holds the address';
+    }
+    if (request($id)['status'] !== 'completed') {
+        $wrong[] = 'the request is not completed: ' . $msg;
+    }
+
+    return $wrong;
+};
+$plantFile = static fn (string $rel): string => $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
+$plants = [
+    'N11 a match that trusts the database\'s comparison (the PHP test made always true): the accented and longer addresses\' events are emptied too' => [
+        '_core/GdprEraser.php', ["if (\$wanted === '' || mb_strtolower(trim((string) \$row['submitterEmail'])) !== \$wanted) {" => 'if (false) {'], 'untouched events changed'],
+    // BOTH statements carry the condition, so a plant that drops only one stays
+    // green - each alone keeps a member's row out. That is the design; this
+    // plant takes both away to show the condition is what does it.
+    'N12 the "made without signing in" condition dropped from both statements: an event naming a MEMBER is emptied' => [
+        '_core/GdprEraser.php', [
+            "AND `submittedByID` IS NULL AND `externalFeedID` IS NULL '" => "AND `externalFeedID` IS NULL '",
+            "'WHERE `eventID` = ? AND `submittedByID` IS NULL'"            => "'WHERE `eventID` = ?'",
+        ], 'untouched events changed'],
+    'N13 the mail-queue step left out: the waiting approval e-mail stays, and can still be sent' => [
+        '_core/GdprEraser.php', ["\$outcomes[] = self::asOneStep(\$db, static fn (): string => self::eraseMailQueueMessages(\$requestId, \$address, \$subject, \$siteId));" => ''], 'the waiting approval e-mail is still there'],
+    'N14 the send log\'s subject test dropped: the member\'s own sent mail to the same address loses it' => [
+        '_core/GdprEraser.php', ["((string) \$row['subject'] !== \$onlySubject\n" => "(false\n"], 'untouched log changed'],
+    'N15 the mail queue\'s organisation test dropped: organisation B\'s waiting approval e-mail is deleted' => [
+        '_core/MailQueue.php', ["if (\$onlySiteId !== null && (int) (\$row['siteID'] ?? 0) !== \$onlySiteId) {" => 'if (false) {'], 'untouched queue changed'],
+];
+foreach ($plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong    = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $n964Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#964)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$cleanAgain = $n964Observe();
+ok('N16 with every plant taken out again, the same fresh run is green: every observation the plants turned red holds (#964)',
+    $cleanAgain === [], implode('; ', $cleanAgain));
+$n964Clear();
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -3591,6 +3991,10 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID = ' . CHILD . ') '
     . '+ (SELECT COUNT(*) FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999) '
+    // Section N (#964).
+    . '+ (SELECT COUNT(*) FROM tblEvents WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR eventID BETWEEN 917300 AND 917399) '
+    . '+ (SELECT COUNT(*) FROM tblMailQueue WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR queueID BETWEEN 917400 AND 917499) '
+    . '+ (SELECT COUNT(*) FROM tblEmailLog WHERE emailLogID BETWEEN 917500 AND 917599) '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
     //    are switched off while the world is removed, so nothing is taken away
     //    by a parent going: each has to be deleted by name or it is left
