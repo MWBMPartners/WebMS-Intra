@@ -55,22 +55,41 @@ HOW IT READS THE CODE
     finds those notes and nothing else), and a name inside a string is not a
     call. A bare `finfo_close(` and a fully-qualified `\finfo_close(` are both
     calls; a method or property of the same name (`->`, `::`, `?->`) and a
-    declaration (`function finfo_close`) are not; a name with a namespace left
-    in it (`\Vendor\finfo_close`) is somebody else's. Names are compared
-    without regard to capitals, because PHP's function names are.
+    declaration (`function finfo_close`, and the by-reference
+    `function &finfo_close`) are not; a name with a namespace left in it
+    (`\Vendor\finfo_close`) is somebody else's. Names are compared without
+    regard to capitals, because PHP's function names are.
+
+    AN UNQUALIFIED CALL IN A FILE WHOSE NAMESPACE DECLARES THAT FUNCTION IS
+    NOT A CALL TO PHP'S. In `namespace Portal\Core; function imagedestroy($i)
+    {} imagedestroy(1);` PHP calls the namespace's own function and prints no
+    deprecation (measured on 8.5.12). The first version of this check reported
+    it, which is crying wolf on a hard gate (#483) — found by round 2 of the
+    independent check. So a file is read for the functions IT declares outside
+    any class, interface, trait or enum body (a METHOD of that name changes
+    nothing: an unqualified call still reaches the global function), and an
+    unqualified call to one of those names in a namespaced file is skipped. A
+    FULLY-QUALIFIED `\imagedestroy()` in the same file is still reported: the
+    backslash means the global one.
 
 WHAT IT CANNOT SEE (the same four shapes as check_no_curl_close.py)
     A name built at run time (`$fn = 'finfo_' . 'close'; $fn($f);`); a name in
     a string handed to `call_user_func()`; an import alias
     (`use function finfo_close as fc;` then `fc($f);`); and
     `namespace\finfo_close($f);` in a file with no namespace.
+    And one the other way round, which REPORTS correct code: a namespace that
+    declares its own `imagedestroy()` in ANOTHER file, called unqualified here,
+    is reported, because this reads one file at a time. Nothing here does that;
+    the cure if it ever happens is to write the call `namespace\imagedestroy()`.
 
 PENDING (fails both ways)
     One call is LEFT on purpose, and named here so the check is green while it
     waits: `web/_apps/venues/invoice-save.php`, which another package was
     changing at the same time (#1003's builder was told not to touch it). The
     entry FAILS this check the moment the call has gone, so it cannot outstay
-    its reason. Nothing else may be added.
+    its reason. It is keyed by file, function AND NUMBER of calls, so a second
+    `finfo_close()` added to that same file fails too rather than hiding behind
+    the first. Nothing else may be added.
 
     It also refuses to pass when it cannot run: no `php`, no answer from the
     tokeniser, or no PHP file read at all is a FAILURE, never a pass (#646).
@@ -109,13 +128,16 @@ MEASURED_85 = (
     "zip_entry_compressionmethod",
 )
 
-# (path relative to the repository, function) -> why it is left for now.
-# Fails BOTH ways: a listed call that has gone is reported, so the line is
-# deleted rather than left to excuse a future one.
+# (path relative to the repository, function) -> (how many calls, why it is
+# left for now). Fails BOTH ways: a listed call that has gone is reported, so
+# the line is deleted rather than left to excuse a future one; and a count that
+# no longer matches is reported, so a SECOND call cannot hide behind the first.
 PENDING = {
-    ("web/_apps/venues/invoice-save.php", "finfo_close"):
+    ("web/_apps/venues/invoice-save.php", "finfo_close"): (
+        1,
         "another package was changing this file while #1003 was built; "
         "remove the call (and this line) when that package has landed",
+    ),
 }
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -138,6 +160,40 @@ foreach (array_slice($argv, 2) as $root) {
         $scanned++;
         $tokens = token_get_all((string) file_get_contents($f->getPathname()));
         $n = count($tokens);
+        // Which function names THIS FILE declares outside a class-like body,
+        // and whether it is in a namespace at all (see the header: such a
+        // name, called unqualified, is the namespace's own function).
+        $declared = []; $namespaced = false; $stack = []; $classNext = false;
+        $real = static function (int $from, int $step) use ($tokens, $n) {
+            for ($j = $from; $j >= 0 && $j < $n; $j += $step) {
+                if (is_array($tokens[$j]) && in_array($tokens[$j][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }
+                return [$j, $tokens[$j]];
+            }
+            return [-1, null];
+        };
+        foreach ($tokens as $i => $t) {
+            if (is_array($t) === true) {
+                if ($t[0] === T_NAMESPACE) {
+                    [, $nx] = $real($i + 1, 1);
+                    if (is_array($nx) && in_array($nx[0], [T_STRING, T_NAME_QUALIFIED], true)) { $namespaced = true; }
+                } elseif (in_array($t[0], [T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM], true)) {
+                    // `Foo::class` is not a declaration.
+                    [, $pv] = $real($i - 1, -1);
+                    if (!(is_array($pv) && $pv[0] === T_DOUBLE_COLON)) { $classNext = true; }
+                } elseif ($t[0] === T_FUNCTION && in_array('class', $stack, true) === false) {
+                    [$k, $nx] = $real($i + 1, 1);
+                    if ($nx === '&' || (is_array($nx) && in_array($nx[0], [T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG, T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true))) {
+                        [, $nx] = $real($k + 1, 1);
+                    }
+                    if (is_array($nx) && $nx[0] === T_STRING) { $declared[strtolower($nx[1])] = true; }
+                } elseif ($t[0] === T_CURLY_OPEN || $t[0] === T_DOLLAR_OPEN_CURLY_BRACES) {
+                    $stack[] = 'other';
+                }
+                continue;
+            }
+            if ($t === '{') { $stack[] = $classNext === true ? 'class' : 'other'; $classNext = false; }
+            elseif ($t === '}') { array_pop($stack); }
+        }
         foreach ($tokens as $i => $t) {
             if (is_array($t) === false) { continue; }
             if (in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true) === false) { continue; }
@@ -159,6 +215,19 @@ foreach (array_slice($argv, 2) as $root) {
                 $prev = $tokens[$j]; break;
             }
             if (is_array($prev) && in_array($prev[0], [T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_DOUBLE_COLON, T_FUNCTION, T_NEW], true)) { continue; }
+            // A by-reference declaration, `function &finfo_close(`: the token
+            // before the name is `&` and the one before THAT is `function`.
+            if ($prev === '&' || (is_array($prev) && in_array($prev[0], [T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG, T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true))) {
+                $before = null;
+                for ($k = $j - 1; $k >= 0; $k--) {
+                    if (is_array($tokens[$k]) && in_array($tokens[$k][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }
+                    $before = $tokens[$k]; break;
+                }
+                if (is_array($before) && $before[0] === T_FUNCTION) { continue; }
+            }
+            // An unqualified call to a name this namespaced file declares is
+            // the namespace's own function, never PHP's.
+            if ($t[0] === T_STRING && $namespaced === true && isset($declared[strtolower($bare)]) === true) { continue; }
             $hits[] = ['file' => $f->getPathname(), 'line' => $t[2], 'name' => strtolower($bare)];
         }
     }
@@ -206,20 +275,32 @@ def judge(roots, repo, pending, quiet=False):
         say("FAIL: no PHP file was read, so this check proved nothing.")
         return 2
 
-    found = set()
+    found = {}
     faults = []
+    lines = {}
     for h in data["hits"]:
         here = pathlib.Path(h["file"]).resolve()
         try:
             shown = str(here.relative_to(repo.resolve()))
         except ValueError:
             shown = str(here)
-        found.add((shown, h["name"]))
-        if (shown, h["name"]) in pending:
-            continue
-        faults.append("    %s:%d  %s()" % (shown, h["line"], h["name"]))
+        key = (shown, h["name"])
+        found[key] = found.get(key, 0) + 1
+        lines.setdefault(key, []).append("    %s:%d  %s()" % (shown, h["line"], h["name"]))
+        if key not in pending:
+            faults.append(lines[key][-1])
 
-    stale = sorted(k for k in pending if k not in found)
+    # A pending entry must match EXACTLY: more calls than listed is a new
+    # fault hiding behind the old one; fewer (or none) means the line is stale.
+    stale = []
+    for key in sorted(pending):
+        want = pending[key][0]
+        got = found.get(key, 0)
+        if got > want:
+            faults.extend(lines[key])
+            faults.append("      (PENDING allows %d call(s) of %s() in %s, and there are %d)" % (want, key[1], key[0], got))
+        elif got < want:
+            stale.append(key)
 
     if len(faults) == 0 and len(stale) == 0:
         say("✓ no call to a deprecated PHP function (%d PHP files read, %d functions refused)"
@@ -238,8 +319,10 @@ def judge(roots, repo, pending, quiet=False):
         say("  is freed when it goes out of scope (#673, #1003). Otherwise use what")
         say("  the PHP manual names as the replacement.")
     for k in stale:
-        say("✗ PENDING names %s %s(), and that call has gone. Delete its line from" % k)
-        say("  PENDING in this file, so it cannot excuse a call added later.")
+        say("✗ PENDING allows %d call(s) of %s() in %s, and there are fewer now."
+            % (pending[k][0], k[1], k[0]))
+        say("  Lower the number, or delete the line when none is left, so it cannot")
+        say("  excuse a call added later.")
     return 1
 
 
@@ -264,6 +347,22 @@ def selftest() -> int:
         ("a constant of that name",       "<?php echo FINFO_CLOSE;",                                        False),
         ("finfo_open is fine",            "<?php $f = finfo_open(FILEINFO_MIME_TYPE); finfo_file($f, 'x');", False),
         ("curl_multi_close is fine",      "<?php curl_multi_close($m);",                                   False),
+        # Round 2 of #1003's check: two cry-wolf cases on CORRECT code, which on
+        # a hard gate is how a check gets switched off (#483). PHP 8.5.12 calls
+        # the namespace's own imagedestroy() here and prints no deprecation.
+        ("a namespace's own function",    "<?php namespace Portal\\Core;\nfunction imagedestroy($i) {}\nimagedestroy(1);", False),
+        # The by-reference declarations are in files with NO namespace on
+        # purpose: inside a namespace the "declares its own" rule would pass
+        # them anyway, and the case would then not test the `&` rule at all
+        # (measured: with the `&` rule switched off, a namespaced case stayed
+        # green).
+        ("a by-reference declaration",    "<?php function &finfo_close() {}", False),
+        ("a by-reference method",         "<?php class A { public function &finfo_close() { static $x = null; return $x; } }", False),
+        # ...and the narrowing must not reach further than that:
+        ("the global one, qualified, beside it", "<?php namespace A;\nfunction imagedestroy($i) {}\n\\imagedestroy($g);", True),
+        ("only a METHOD of that name here", "<?php namespace A;\nclass K { public function imagedestroy() {} }\nimagedestroy($i);", True),
+        ("declared, but no namespace",    "<?php if (false) { function imagedestroy($i) {} }\nimagedestroy($i);", True),
+        ("a method after a ::class",      "<?php namespace A;\n$c = K::class;\nclass K { function imagedestroy() {} }\nimagedestroy($i);", True),
     ]
     failures = 0
     total = 0
@@ -286,9 +385,9 @@ def selftest() -> int:
         (box / "wait.php").write_text("<?php finfo_close($f);")
         (box / "other.php").write_text("<?php $x = 1;")
         for name, pend, want, other in [
-            ("pending: a listed call passes",   {("wait.php", "finfo_close")}, 0, "<?php $x = 1;"),
+            ("pending: a listed call passes",   {("wait.php", "finfo_close"): (1, "")}, 0, "<?php $x = 1;"),
             # Only other.php is at fault here: the listed entry is still true.
-            ("pending: an unlisted one fails",  {("wait.php", "finfo_close")}, 1, "<?php finfo_close($g);"),
+            ("pending: an unlisted one fails",  {("wait.php", "finfo_close"): (1, "")}, 1, "<?php finfo_close($g);"),
         ]:
             (box / "other.php").write_text(other)
             got = judge([box], box, pend, quiet=True)
@@ -296,9 +395,17 @@ def selftest() -> int:
             ok = got == want
             failures += 0 if ok else 1
             print("%s %-32s exit expected %d got %d" % ("✓" if ok else "✗", name, want, got))
-        (box / "wait.php").write_text("<?php $x = 1;")
+        # A SECOND call in the listed file must not hide behind the first.
         (box / "other.php").write_text("<?php $x = 1;")
-        got = judge([box], box, {("wait.php", "finfo_close")}, quiet=True)
+        (box / "wait.php").write_text("<?php finfo_close($f);\nfinfo_close($g);")
+        got = judge([box], box, {("wait.php", "finfo_close"): (1, "")}, quiet=True)
+        total += 1
+        ok = got == 1
+        failures += 0 if ok else 1
+        print("%s %-32s exit expected 1 got %d (a second call fails)"
+              % ("✓" if ok else "✗", "pending: one more than listed", got))
+        (box / "wait.php").write_text("<?php $x = 1;")
+        got = judge([box], box, {("wait.php", "finfo_close"): (1, "")}, quiet=True)
         total += 1
         ok = got == 1
         failures += 0 if ok else 1

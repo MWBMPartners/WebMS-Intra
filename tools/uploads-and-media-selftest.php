@@ -162,6 +162,51 @@ check('R16 If-Range present: we send no version marker, so the whole file', $r('
 check('R17 a 25-digit start is past any file: 416, not a wrapped-round number', $r('bytes=' . str_repeat('9', 25) . '-', null, 10),
     [416, -1, -1, 0]);
 check('R18 a 25-digit end is "to the end"', $r('bytes=3-' . str_repeat('9', 25), null, 10), [206, 3, 9, 7]);
+// The two boundaries round 2 of the check found pinned by nothing: `>=`
+// against `>` on the shortening (bytes=0-<size> would then promise one byte
+// more than it sends — #880's fault 2 back), and `<` against `<=` on the
+// malformed test (a one-byte piece would then get the whole file).
+check('R19 bytes=0-9 on a 10-byte file: exactly the file, as a piece', $r('bytes=0-9', null, 10), [206, 0, 9, 10]);
+check('R20 bytes=0-10 on a 10-byte file: the end AT the size is shortened too', $r('bytes=0-10', null, 10), [206, 0, 9, 10]);
+check('R21 bytes=0-0: one byte, the first', $r('bytes=0-0', null, 10), [206, 0, 0, 1]);
+check('R22 bytes=9-9: one byte, the last', $r('bytes=9-9', null, 10), [206, 9, 9, 1]);
+check('R23 leading zeros are legal and count for nothing: twenty zeros then 5 is byte 5, 000-001 is bytes 0-1, -0000 asks for nothing', [
+    $r('bytes=' . str_repeat('0', 20) . '5-', null, 10), $r('bytes=000-001', null, 10), $r('bytes=-0000', null, 10),
+], [[206, 5, 9, 5], [206, 0, 1, 2], [416, -1, -1, 0]]);
+
+// =============================================================================
+echo "M. ByteRange::send() does not gather the file in memory behind an open buffer\n";
+// =============================================================================
+// Round 2 of the check measured a 43 MB peak for a 20 MB file when an output
+// buffer was open (a host's `output_buffering`, or a caller's `ob_start()`):
+// every chunk was kept until the request ended. `send()` now ends open buffers
+// first, as `CsvExporter::download()` does. Measured in a CHILD process, so
+// the 20 MB it sends goes to /dev/null rather than into this test's output.
+$probe = sys_get_temp_dir() . $sep . 'byterange-peak-' . bin2hex(random_bytes(4)) . '.php';
+file_put_contents($probe, '<?php
+declare(strict_types=1);
+require ' . var_export($repo . $sep . 'web' . $sep . '_core' . $sep . 'ByteRange.php', true) . ';
+$f = sys_get_temp_dir() . "/byterange-peak-" . getmypid() . ".bin";
+$h = fopen($f, "wb");
+for ($i = 0; $i < 20; $i++) { fwrite($h, random_bytes(1048576)); }
+fclose($h);
+ob_start();
+\\Portal\\Core\\ByteRange::send($f);
+$left = ob_get_level();
+while (ob_get_level() > 0) { ob_end_clean(); }
+unlink($f);
+fwrite(STDERR, json_encode(["peakMb" => round(memory_get_peak_usage(true) / 1048576, 1), "buffersLeft" => $left]));
+');
+$proc = proc_open([PHP_BINARY, '-d', 'memory_limit=256M', $probe], [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']], $pipes);
+$peak = is_resource($proc) === true ? json_decode((string) stream_get_contents($pipes[2]), true) : null;
+if (is_resource($proc) === true) {
+    fclose($pipes[2]);
+    proc_close($proc);
+}
+@unlink($probe);
+check('M1 sending a 20 MB file with ob_start() open: every buffer ended, and memory stays under 8 MB (it was 42 MB)',
+    [is_array($peak) === true ? $peak['buffersLeft'] : 'no answer', is_array($peak) === true && $peak['peakMb'] < 8],
+    [0, true]);
 
 // ── A copy of web/, so a planted fault never touches the repository ─────────
 $child = sys_get_temp_dir() . $sep . 'uploads-media-' . bin2hex(random_bytes(6));
@@ -669,6 +714,9 @@ $rangeMatrix = static function (string $label, string $path, string $whole, bool
         $want(206, 'bytes ' . ($n - 500) . '-' . ($n - 1) . '/' . $n, substr($whole, -500)));
     check("{$label}: an end past the file is shortened to the last byte", $see($ask('bytes=10-' . ($n + 5000))),
         $want(206, 'bytes 10-' . ($n - 1) . '/' . $n, substr($whole, 10)));
+    check("{$label}: bytes=0-<last byte> and bytes=0-<size>: both the whole file as one piece, Content-Length the size",
+        [$see($ask('bytes=0-' . ($n - 1))), $see($ask('bytes=0-' . $n))],
+        [$want(206, 'bytes 0-' . ($n - 1) . '/' . $n, $whole), $want(206, 'bytes 0-' . ($n - 1) . '/' . $n, $whole)]);
     $past = $ask('bytes=' . $n . '-');
     check("{$label}: a piece starting past the end: 416, Content-Range: bytes */size, no body, never kept",
         [$past['status'], $past['headers']['accept-ranges'] ?? '', $past['headers']['content-range'] ?? '', $past['body'],

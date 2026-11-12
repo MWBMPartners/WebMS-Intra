@@ -289,8 +289,13 @@ final class PublicDoor
      * it asks for itself (see the file header for the order).
      *
      * ANYTHING THAT THROWS is a refusal: the identical 404, with the fault in
-     * PHP's error log. Nothing is sent before the whole answer is ready, so a
-     * fault can never leave half an answer behind.
+     * PHP's error log. Every question is answered before anything is sent,
+     * so a fault in a question can never leave half an answer behind. A
+     * poster's MEDIA is the one answer not built whole first (#880): once
+     * every question has been answered, `ByteRange::send()` copies it from
+     * its file in chunks, so a read fault part-way through (the file shrinking
+     * under it) ends the answer SHORT — never with wrong bytes, and never
+     * before the door has decided the file may be sent.
      */
     public static function answer(\mysqli $db): never
     {

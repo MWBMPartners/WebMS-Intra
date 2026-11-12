@@ -248,6 +248,21 @@ final class ByteRange
 
         $plan = self::resolve($_SERVER['HTTP_RANGE'] ?? null, $_SERVER['HTTP_IF_RANGE'] ?? null, $size);
 
+        // 🧹 End every open output buffer first, as `CsvExporter::download()`
+        //    does. With a buffer open (a host's `output_buffering`, or a caller's
+        //    `ob_start()`), every chunk below would be gathered in memory until
+        //    the request ended — #880's independent check measured a 43 MB peak for a 20 MB file — which
+        //    undoes reading in chunks. Anything already buffered is DISCARDED,
+        //    not sent: it would sit in front of the file's first byte and
+        //    corrupt it. `@` and the stop: a buffer PHP will not remove (one
+        //    started without the removable flag) answers false, and looping on
+        //    it would never end.
+        while (ob_get_level() > 0) {
+            if (@ob_end_clean() === false) {
+                break;
+            }
+        }
+
         header('Accept-Ranges: bytes');
 
         if ($plan['status'] === self::UNSATISFIABLE) {
@@ -295,13 +310,25 @@ final class ByteRange
         return true;
     }
 
-    /** A run of digits as a number; longer than MAX_DIGITS reads as the largest one. */
+    /**
+     * A run of digits as a number; more than MAX_DIGITS significant digits
+     * reads as the largest one.
+     *
+     * Leading zeros are dropped BEFORE the length is measured. They are legal
+     * (`bytes=0005-` is byte 5) and add nothing to the value, so counting them
+     * made `bytes=00000000000000000000005-` — byte 5, written with twenty
+     * zeros — read as "past any file" and answer 416. An all-zero run is 0.
+     */
     private static function number(string $digits): int
     {
-        if (strlen($digits) > self::MAX_DIGITS) {
+        $significant = ltrim($digits, '0');
+        if ($significant === '') {
+            return 0;
+        }
+        if (strlen($significant) > self::MAX_DIGITS) {
             return PHP_INT_MAX;
         }
 
-        return (int) $digits;
+        return (int) $significant;
     }
 }
