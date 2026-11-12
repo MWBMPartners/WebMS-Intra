@@ -232,7 +232,9 @@ try {
     //        way in, and it counts a link whether or not that sign-in is set
     //        up (D-018 forbids a SECOND way in);
     //      - otherwise: "You can try giving it a password on the Users page,
-    //        which will say if it cannot." A promise is deliberately NOT
+    //        which will say if it cannot." (round 11: the sentence before it
+    //        already says there is no way in, so it is not said twice.) A
+    //        promise is deliberately NOT
     //        made. Round 8 said an administrator cannot (false: D-018 does
     //        not forbid a FIRST way in); round 9 said "You can" (false when
     //        the save refuses a sign-in name over 50 characters - an e-mail
@@ -294,8 +296,7 @@ try {
             $howTheySignIn .= ' It is still linked to a Microsoft or Google account, so it cannot be given a password '
                 . 'on the Users page.';
         } else {
-            $howTheySignIn .= ' It has no other way to sign in. You can try giving it a password on the Users page, '
-                . 'which will say if it cannot.';
+            $howTheySignIn .= ' You can try giving it a password on the Users page, which will say if it cannot.';
         }
     } else {
         $howTheySignIn = ' ' . implode(' ', $facts);

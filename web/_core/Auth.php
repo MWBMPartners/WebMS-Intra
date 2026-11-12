@@ -3389,7 +3389,9 @@ class Auth
      * other way in - no linked Microsoft or Google account and no passkey:
      * D-018 forbids a SECOND way in, not a first - and only when the sign-in
      * name it makes (the e-mail address) fits in 50 characters and is not
-     * already in use (admin/users/save.php, step 10b).
+     * already in use (admin/users/save.php, step 10b). Step 11's
+     * setPassword() then also refuses an account holding more than one
+     * sign-in row, which it should never have (storeHash()).
      *
      * @return string|null One of the PASSWORD_* words, or null when the rows
      *                     could not be read.

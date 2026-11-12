@@ -173,8 +173,11 @@ try {
     );
 
     // 3. Disable the local-account password — clear hash so it's unusable.
-    //    A future rehire requires the user to reset via the forgot-password
-    //    flow.
+    //    A rehire does not put it back. The emptied row means the person can
+    //    set a new one with "Forgot your password?" if the portal can send
+    //    e-mail; an account that never had a row cannot use that page, which
+    //    is why rehire.php states what the account has rather than promising
+    //    a route (#982).
     $run('clear_password_hash',
         "UPDATE tblLocalAccounts SET passwordHash = '' WHERE userID = ?",
         [$userId], 'i'

@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 238; // #982 round 10 added M13o (an e-mail address
+const EXPECTED_CHECKS = 239; // #982 round 11 added M13p (the Rehire button's
+                            // confirmation promises nothing). 239.
+                            // #982 round 10 added M13o (an e-mail address
                             // over 50 characters: no promise of success). 238.
                             // #982 round 9 added M13k (an organisation
                             // administrator is told they can give a password,
@@ -4064,7 +4066,7 @@ ok('M13g rehiring an account whose password offboarding EMPTIED, with nothing el
 $ollyRehire = $rehireM(OFF);
 ok('M13h rehiring (as a global administrator) an account with NO password row, no passkey, no link, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that you can TRY giving it a password on the Users page, which will say if it cannot - never a promise (round 9\'s "You can give it" was untrue when the save refuses) and never "cannot be given" (round 8) (#982 round 10)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
-    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. You can try giving it a password on the Users page, which will say if it cannot.') === true
     && str_contains($ollyRehire, 'You can give it') === false && str_contains($ollyRehire, 'cannot be given') === false
     && str_contains($ollyRehire, 'Forgot your password') === false,
     'rehire said: ' . $ollyRehire);
@@ -4112,7 +4114,7 @@ $gusSave    = $givePasswordM('adm', M13_GUS);
 $gusRows    = (int) one("SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ? AND `passwordHash` <> ''", 'i', [M13_GUS])['n'];
 ok('M13k an organisation administrator who rehires an account with no way in is told it has no other way in and that they can try giving it a password on the Users page - and the Users page really does store one when they do (#982 round 10)',
     str_contains($gusRehire, 'User rehired: their account is switched on again.') === true
-    && str_contains($gusRehire, 'It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($gusRehire, 'You can try giving it a password on the Users page, which will say if it cannot.') === true
     && $gusRows === 1,
     'offboard said: ' . $gusOff . ' | rehire said: ' . $gusRehire . ' | save said: ' . $gusSave . ' | usable password rows: ' . $gusRows);
 
@@ -4142,13 +4144,22 @@ ok('M13l an account still LINKED to Microsoft (not set up here) is said to have 
 // says to TRY, and the save really refuses - round 9's "You can give it a
 // password" was untrue for exactly this account.
 [, $ottOff] = $offboardM(M13_OTT, 'Selftest #982 round 10');
+// M13p: the offboarding list, with Ott waiting to be rehired, draws a Rehire
+// button whose confirmation promises nothing. It used to say "they'll need to
+// set a new password", untrue for an account with no password row ("Forgot
+// your password?" needs one) and for a Microsoft- or Google-only account.
+$offList = req($jar['root'], 'GET', '/offboarding')['body'];
+ok('M13p the Rehire button on the offboarding list asks "Rehire this user? Their account becomes active again. The next page says how they can sign in." and never says they will need to set a new password (#982 round 11)',
+    str_contains($offList, 'data-confirm="Rehire this user? Their account becomes active again. The next page says how they can sign in."') === true
+    && stripos($offList, 'set a new password') === false && stripos($offList, 'reset password') === false,
+    'confirmations on the page: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $offList, $offConfirm) > 0 ? $offConfirm[1] : ['(none)']));
 $ottRehire  = $rehireM(M13_OTT);
 $ottSave    = $givePasswordM('root', M13_OTT);
 $ottRows    = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_OTT])['n'];
 ok('M13o an account with no way in and an e-mail address over 50 characters is promised nothing ("You can give it" / "can be given" absent) and told to TRY on the Users page - and the save really refuses, storing no password (#982 round 10)',
     mb_strlen(M13_OTT_MAIL, 'UTF-8') > 50
     && str_contains($ottRehire, 'This account has no way to sign in yet') === true
-    && str_contains($ottRehire, 'It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ottRehire, 'You can try giving it a password on the Users page, which will say if it cannot.') === true
     && str_contains($ottRehire, 'You can give it') === false && str_contains($ottRehire, 'can be given') === false
     && $ottRows === 0 && str_contains($ottSave, 'longer than 50 characters') === true,
     'offboard said: ' . $ottOff . ' | rehire said: ' . $ottRehire . ' | save said: ' . $ottSave . ' | password rows: ' . $ottRows);

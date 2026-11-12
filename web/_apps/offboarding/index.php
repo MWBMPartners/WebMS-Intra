@@ -139,7 +139,7 @@ $csrf = Auth::csrfToken();
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="offboardingID" value="<?php echo (int) $r['offboardingID']; ?>">
                                     <button type="submit" class="btn btn-outline-success btn-sm"
-                                            data-confirm="Rehire this user? Their account becomes active again — they'll need to set a new password.">Rehire</button>
+                                            data-confirm="Rehire this user? Their account becomes active again. The next page says how they can sign in.">Rehire</button>
                                 </form>
                             <?php else: ?>
                                 <span class="small text-muted">Window passed</span>

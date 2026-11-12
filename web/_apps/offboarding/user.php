@@ -90,7 +90,7 @@ $csrf = Auth::csrfToken();
         <li>Remove role assignments</li>
         <li>Audit-log the action to <code>tblOffboarding</code> with per-step success/failure</li>
     </ul>
-    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a> — the account is reactivated but credentials are NOT restored; the user must reset password and re-enrol passkeys.</p>
+    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a> — the account is switched on again. The password, passkeys and Microsoft or Google links that offboarding removed are not put back; the page shown after a rehire says what the account still has.</p>
 </div>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/do'), ENT_QUOTES, 'UTF-8'); ?>">
@@ -153,7 +153,7 @@ $csrf = Auth::csrfToken();
                 <input type="date" name="effectiveDate" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
             </div>
             <button type="submit" class="btn btn-danger"
-                    data-confirm="Offboard <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?>? This deletes their credentials. Within the undo window the account can be reactivated but they'll need to re-enrol." data-confirm-destructive="true"
+                    data-confirm="Offboard <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?>? This removes their password, passkeys and Microsoft or Google links. Within the undo window the account can be switched on again, but those are not put back." data-confirm-destructive="true"
                     data-confirm-confirm-label="Offboard">
                 Offboard user
             </button>
