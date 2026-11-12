@@ -4,6 +4,17 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A member's full data copy includes their own DBS checks (#1012; D-154)
+
+- The full data copy (`account/data-export`) now includes the DBS checks recorded FOR a member, which an erasure
+  keeps: type, certificate reference, dates, status, when recorded (`recordedAtServerTime`, the database server's
+  clock) and notes — never who recorded them (D-154). My data's count comes from the same place, so the two agree.
+- My data and Request erasure now say when a kind of record could not be read, instead of leaving it off the list
+  (which read as "nothing held"); the full copy fails rather than answering an empty list.
+- The privacy policy's "Right of access" sentence now also mentions the records that carry a person's name because
+  they made them (#929), and says truthfully that a DBS check is not recorded against any one organisation.
+- Follow-up #1015 (a person's own care cases). Codex has not reviewed this.
+
 ### A worker's own data download lists the records that carry their name (#929; D-142, D-151)
 
 - Since #703 a pastoral visit, a pastoral care case, a DBS check

@@ -23867,3 +23867,21 @@ still read under the lock, and only an administrator with the form token can sen
   rendered pins on My data find the inventory rows by theirs.
 - No JSON Schema exists for either download (neither had one before); the
   shape of each entry is pinned by section O instead (exact values and keys).
+
+### A member's own DBS checks in their data copy (#1012; D-154)
+
+- `GdprEraser::dbsChecksAboutYou()` is the ONE place the checks ABOUT a member are read; the full data copy hands
+  over what it returns and `inventory()` counts by asking it. Do not write a second query. When the read fails the
+  copy throws (500) and My data shows the row as "could not be read"; neither says none.
+- `inventory()` skips only error 1146 (no such table). Any other failure is a row made by `unreadInventoryRow()`
+  (`rows` null, `couldNotRead` true, `note`). Before #1012 every failure was skipped, for every kind of record, which
+  read as "nothing held".
+- The column list is the decision: everything about the check, nothing about who recorded it (D-154, the rule this
+  download applies to every "who did this to you" column). `recordedAt` is the database server's clock (DEFAULT
+  CURRENT_TIMESTAMP; the one writer does not name it), so the key is `recordedAtServerTime`.
+- A DBS check has no organisation column, but `admin/safeguarding/dbs.php` shows a member's checks to every
+  organisation they belong to, so the wording is "not recorded against any one organisation", never "held by none".
+- Times as stored text; section P puts the organisation on America/Nuuk and a `strtotime()` round-trip plant (P11)
+  moves the stored time. Its own 1146 handler names its exception `$failure` because section O's plant O18b finds
+  the 1146 test in `recordsCarryingYourName()` by its exact text.
+
