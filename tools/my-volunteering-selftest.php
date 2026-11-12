@@ -37,6 +37,14 @@
  *       copied-in event E6, which must not appear either.
  *   UD  has nothing at all: an empty list, not an error.
  *   UE  has a role on 32 events: only the first 30 come back, soonest first.
+ *   UF  (#1025) has a role on an event in Pago Pago (UTC-11) that began 23
+ *       hours ago on its own clock, and one in Kiritimati (UTC+14) that began
+ *       25 hours ago: the day of grace is a day on EACH EVENT's clock, so the
+ *       first stays and the second goes. The old bound, the database's NOW()
+ *       less a day, did the reverse (checked as a premise first).
+ *   UG  (#1025) has a role on 30 events on UTC and one in Auckland at 20:00
+ *       the same date: soonest in real time, latest by reading. The 30 that
+ *       come back are Auckland and the first 29 UTC ones, in that order.
  *
  * PART 2 runs the real page file (web/_apps/account/my-volunteering.php) once
  * for each kind of member in a separate PHP process, with the page header and
@@ -105,6 +113,47 @@ $db->set_charset('utf8mb4');
 
 // The class under test. A missing file is a FAIL (via the handler above).
 require $core . DIRECTORY_SEPARATOR . 'Events.php';
+// #1025: volunteeringFor() now asks each event's own clock
+// (Events::nowOnItsOwnClock()) and orders by the real moment
+// (Events::startAsUtcMoment()). Both lean on I18n, which stands alone, and on
+// two questions to Site: the organisation's zone and "which clock is this
+// stored zone text". Site cannot be loaded without the portal's start-up, so
+// a STAND-IN answers those two, written to a scratch file shared with the
+// page runner below. It is not under test: it reads the zone the fixture
+// stored for the organisation, and opens a stored zone text the way
+// Site::zoneFor() does (the organisation's zone when PHP cannot open it).
+require $core . DIRECTORY_SEPARATOR . 'I18n.php';
+$siteStandIn = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'mv1025-site-' . bin2hex(random_bytes(4)) . '.php';
+file_put_contents($siteStandIn, <<<'PHP'
+<?php
+declare(strict_types=1);
+namespace Portal\Core;
+class Site {
+    public static ?\mysqli $db = null;
+    public static function id(): int { return (int) getenv('MV_SITE'); }
+    public static function url(string $routeKey): string { return '/' . ltrim($routeKey, '/'); }
+    public static function timezone(?int $siteId = null): string
+    {
+        $siteId = $siteId ?? self::id();
+        $stmt = self::$db->prepare('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?');
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $zone = (string) ($stmt->get_result()->fetch_assoc()['timezone'] ?? '');
+        $stmt->close();
+        return in_array($zone, \DateTimeZone::listIdentifiers(), true) === true ? $zone : 'UTC';
+    }
+    public static function zoneFor(string $stored, ?int $siteId = null): \DateTimeZone
+    {
+        try {
+            return trim($stored) === '' ? new \DateTimeZone(self::timezone($siteId)) : new \DateTimeZone(trim($stored));
+        } catch (\Throwable $e) {
+            return new \DateTimeZone(self::timezone($siteId));
+        }
+    }
+}
+PHP);
+require $siteStandIn;
+\Portal\Core\Site::$db = $db;
 
 use Portal\Core\Events;
 
@@ -297,6 +346,85 @@ $need = ['eventID', 'eventName', 'eventSlug', 'startDateTime', 'endDateTime', 'l
 check('a row carries every column the page reads', $ua !== [] && array_diff($need, array_keys($ua[0])) === []);
 
 // =============================================================================
+// 🕰️ Part 1b (#1025): the day of grace and the order are on EACH EVENT'S clock
+// =============================================================================
+// The method used to bound the list with the DATABASE SERVER's NOW() less a
+// day and order it by the stored READING. Readings are on each event's own
+// clock, so both were wrong for events on clocks far from the database's.
+// This server's NOW() is asked below and every premise is checked first, so
+// none of these checks can pass by accident on the old query.
+
+/** Insert an event at a given READING on a given clock. */
+function addEventAt(mysqli $db, int $id, int $site, string $reading, string $zone): void
+{
+    run(
+        $db,
+        'INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `isDeleted`) '
+        . "VALUES (?, ?, ?, ?, ?, ?, 'published', 0)",
+        'iissss',
+        [$id, $site, 'Selftest event ' . $id, 'selftest-' . $id, $reading, $zone]
+    );
+}
+
+const UF = 900016; // the day of grace
+const UG = 900017; // the order, and the 30-row cut
+const E_PAGO = 900301; // Pago Pago (UTC-11), began 23 hours ago on its own clock: still in its day of grace
+const E_KIRI = 900302; // Kiritimati (UTC+14), began 25 hours ago on its own clock: past its day of grace
+const E_AKL  = 900303; // Auckland, 20:00 on a date: the soonest real moment of UG's 31 events
+const E_UTC  = 900310; // 900310 .. 900339: thirty events on UTC, 09:00 onwards that same date
+
+run($db, 'UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', ['UTC', ORG]);
+foreach ([UF => 'f', UG => 'g'] as $id => $letter) {
+    run($db, 'INSERT INTO tblUsers (userID, fullName, emailAddress) VALUES (?, ?, ?)', 'iss', [$id, 'Selftest volunteer ' . $letter, 'selftest-547-' . $letter . '@invalid.test']);
+}
+
+$readingOn = static fn (string $zone, string $shift): string
+    => (new DateTimeImmutable('now', new DateTimeZone($zone)))->modify($shift)->format('Y-m-d H:i:s');
+$pagoStart = $readingOn('Pacific/Pago_Pago', '-23 hours');
+$kiriStart = $readingOn('Pacific/Kiritimati', '-25 hours');
+$dbDayAgo  = (string) run($db, 'SELECT DATE_SUB(NOW(), INTERVAL 1 DAY) AS d')[0]['d'];
+check(
+    '#1025 premise: the Pago Pago reading is BEFORE the database\'s NOW() less a day, and the Kiritimati one AFTER it -- so the old bound answers both the wrong way',
+    strcmp($pagoStart, $dbDayAgo) < 0 && strcmp($kiriStart, $dbDayAgo) > 0,
+    'Pago Pago ' . $pagoStart . ', Kiritimati ' . $kiriStart . ', database NOW() less a day ' . $dbDayAgo
+);
+addEventAt($db, E_PAGO, ORG, $pagoStart, 'Pacific/Pago_Pago');
+addEventAt($db, E_KIRI, ORG, $kiriStart, 'Pacific/Kiritimati');
+addRole($db, E_PAGO, UF, 'host');
+addRole($db, E_KIRI, UF, 'host');
+$uf = array_map('intval', array_column(Events::volunteeringFor($db, UF, ORG), 'eventID'));
+check(
+    '#1025 the day of grace is a day on the EVENT\'s clock: the Pago Pago event that began 23 hours ago is kept, the Kiritimati one that began 25 hours ago is not',
+    $uf === [E_PAGO],
+    json_encode($uf)
+);
+
+// The order. A date forty days on; Auckland 20:00 that day is earlier in real
+// time than 09:00 on UTC the same day (Auckland is twelve or thirteen hours
+// ahead), so it is the SOONEST of the 31 -- and by reading it is the LATEST,
+// so the old ORDER BY put it 31st and LIMIT 30 cut it off.
+$day      = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('+40 days')->format('Y-m-d');
+$aklStart = $day . ' 20:00:00';
+addEventAt($db, E_AKL, ORG, $aklStart, 'Pacific/Auckland');
+addRole($db, E_AKL, UG, 'host');
+for ($i = 0; $i < 30; $i++) {
+    addEventAt($db, E_UTC + $i, ORG, (new DateTimeImmutable($day . ' 09:00:00', new DateTimeZone('UTC')))->modify('+' . (10 * $i) . ' minutes')->format('Y-m-d H:i:s'), 'UTC');
+    addRole($db, E_UTC + $i, UG, 'helper');
+}
+$aklMoment = (new DateTimeImmutable($aklStart, new DateTimeZone('Pacific/Auckland')))->getTimestamp();
+check(
+    '#1025 premise: the Auckland event really starts BEFORE 09:00 UTC that day, though its reading sorts after every UTC one',
+    $aklMoment < (new DateTimeImmutable($day . ' 09:00:00', new DateTimeZone('UTC')))->getTimestamp() && strcmp($aklStart, $day . ' 13:50:00') > 0,
+    'Auckland ' . gmdate('Y-m-d H:i', $aklMoment) . ' UTC'
+);
+$ug = array_map('intval', array_column(Events::volunteeringFor($db, UG, ORG), 'eventID'));
+check(
+    '#1025 the thirty soonest by REAL moment come back in that order: Auckland first, then the first 29 UTC events (the 30th UTC one is the one cut)',
+    $ug === array_merge([E_AKL], range(E_UTC, E_UTC + 28)),
+    'first three ' . json_encode(array_slice($ug, 0, 3)) . ', count ' . count($ug) . ', last ' . json_encode(end($ug))
+);
+
+// =============================================================================
 // 📄 Part 2: the real page file, once for each kind of member
 // =============================================================================
 
@@ -315,10 +443,8 @@ namespace Portal\Core {
     // 13 October 2026: the link sweep made the page build its "Account" link with it, and this test
     // then failed with "Call to undefined method" although the page itself was right.)
     class Auth { public static function ensureSession(): void {} public static function requireLogin(): void {} }
-    class Site {
-        public static function id(): int { return (int) getenv('MV_SITE'); }
-        public static function url(string $routeKey): string { return '/' . ltrim($routeKey, '/'); }
-    }
+    // Site's stand-in is the shared scratch file (argument 9) since #1025,
+    // because Events now also asks it for the organisation's zone.
 }
 namespace {
     [, $core, $page, $host, $user, $pass, $name, $port] = $argv;
@@ -332,6 +458,8 @@ namespace {
     require $core . DIRECTORY_SEPARATOR . 'I18n.php';
     $mysqli = new mysqli($host, $user, $pass, $name, (int) $port);
     $mysqli->set_charset('utf8mb4');
+    require $argv[9];
+    \Portal\Core\Site::$db = $mysqli;
     $_SESSION = ['user_id' => (int) getenv('MV_USER')];
     require $page;
     echo "\nPAGE-REACHED-ITS-END\n";
@@ -345,11 +473,14 @@ $cases = [
     'a coordinator only (UB, plus a role)'  => [UB, ['Selftest event ' . E2, 'Coordinator'], []],
     'a role AND coordinator (UC)'           => [UC, ['Selftest event ' . E3, 'Coordinator'], []],
     'a member with nothing (UD)'            => [UD, ['not currently rostered'], ['Selftest event']],
+    // #1025: the page shows the Auckland event (soonest in real time, last by
+    // reading) and not the 30th UTC one, which the LIMIT now cuts instead.
+    'events on two clocks (UG, #1025)'      => [UG, ['Selftest event ' . E_AKL, 'Selftest event ' . E_UTC], ['Selftest event ' . (E_UTC + 29)]],
 ];
 foreach ($cases as $label => [$user, $mustShow, $mustNotShow]) {
     $out = [];
     $exit = 0;
-    $cmd = [PHP_BINARY, $runner, $core, $page, $dbHost, $dbUser, $dbPass, $dbName, (string) $dbPort, $scratch];
+    $cmd = [PHP_BINARY, $runner, $core, $page, $dbHost, $dbUser, $dbPass, $dbName, (string) $dbPort, $scratch, $siteStandIn];
     $proc = proc_open(
         $cmd,
         [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
@@ -380,6 +511,7 @@ check('page: the error log (tblErrors) gained no row', $errorsAfter === $errorsB
 @unlink($scratch . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php');
 @rmdir($scratch . DIRECTORY_SEPARATOR . 'templates');
 @rmdir($scratch);
+@unlink($siteStandIn);
 wipe($db);
 $left = (int) run($db, 'SELECT (SELECT COUNT(*) FROM tblEvents WHERE eventID >= 900000) + (SELECT COUNT(*) FROM tblUsers WHERE userID >= 900000) + (SELECT COUNT(*) FROM tblSites WHERE siteID >= 900000) AS c')[0]['c'];
 check('the made-up rows were all removed', $left === 0, $left . ' left');

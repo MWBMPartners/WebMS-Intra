@@ -332,8 +332,8 @@ if ($view === 'list') {
     $where = 'WHERE ' . implode(' AND ', $conditions);
 
     // 📋 Count — the same WHERE as the fetch below, visibility rule included
-    //    (#514 part P2), so the page count never includes rows the viewer
-    //    may not see.
+    //    (EventVisibility::where() above, #514 part P2), so the page count
+    //    never includes rows the viewer may not see.
     $stmt = $mysqli->prepare('SELECT COUNT(*) AS cnt FROM tblEvents e ' . $where);
     if ($stmt !== false) {
         $stmt->bind_param($types, ...$params);
@@ -346,6 +346,19 @@ if ($view === 'list') {
     $offset     = ($page - 1) * $perPage;
 
     $orderDir = $showPast === true ? 'DESC' : 'ASC';
+    // ⏱️ ORDER BY THE REAL MOMENT EACH EVENT STARTS (#1024). This was
+    //    `ORDER BY e.startDateTime`, and that column is a READING on each
+    //    event's OWN clock (#777): Auckland 20:00 happens about twelve hours
+    //    before New York 10:00 on the same date, yet sorted after it. Events
+    //    on different clocks therefore came out in the wrong order, and
+    //    because the list is PAGED, an event could land on the wrong page.
+    //    Events::soonestByRealStart() fixes a "next N" list but cannot page,
+    //    so the moment is worked out ROW BY ROW inside SQL instead
+    //    (Events::startAsUtcMoment()), which keeps LIMIT and OFFSET exact
+    //    across every page. Ties go to the reading and then the event's
+    //    number, in the same direction, so the order is total and a row can
+    //    never appear on two pages or on none.
+    $realStart = \Portal\Core\Events::startAsUtcMoment($mysqli, 'e', $siteId);
     // 👁️ #514 part P2: canSeeFull and externalFeedID are selected beside
     //    every row, and the row goes through EventVisibility::redact()
     //    before any view sees it, so a limited event reaches the views with
@@ -371,11 +384,13 @@ if ($view === 'list') {
         $fullDetail['sql']
     )
          . $where . ' '
-         . 'ORDER BY e.startDateTime ' . $orderDir . ' '
+         . 'ORDER BY ' . $realStart['sql'] . ' ' . $orderDir . ', `e`.`startDateTime` ' . $orderDir . ', `e`.`eventID` ' . $orderDir . ' '
          . 'LIMIT ? OFFSET ?';
 
-    $fetchTypes  = $fullDetail['types'] . $types . 'ii';
-    $fetchParams = array_merge($fullDetail['params'], $params, [$perPage, $offset]);
+    // The ORDER BY's values come after the WHERE's and before LIMIT/OFFSET,
+    // because bind_param() matches values to `?` marks by position only.
+    $fetchTypes  = $fullDetail['types'] . $types . $realStart['types'] . 'ii';
+    $fetchParams = array_merge($fullDetail['params'], $params, $realStart['params'], [$perPage, $offset]);
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {

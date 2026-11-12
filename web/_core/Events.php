@@ -340,7 +340,8 @@ class Events
 
     /**
      * The upcoming events one person is involved with, for the "My volunteering"
-     * page (/account/my-volunteering). Up to 30, soonest first.
+     * page (/account/my-volunteering). Up to 30, soonest first by the REAL
+     * moment each starts, whatever clock each is on (#1025).
      *
      * A person is "involved" in an event two ways: they are listed on its team
      * (tblEventPeople), or they coordinate it (tblEventCoordinators, not revoked).
@@ -375,40 +376,59 @@ class Events
      */
     public static function volunteeringFor(mysqli $db, int $userId, int $siteId): array
     {
-        // 🕰️ #804, LEFT ON PURPOSE: "since a day ago" below is on the
-        //    DATABASE SERVER's clock, not the event's. It is a deliberate day
-        //    of grace (somebody looks up what they helped with yesterday), and
-        //    the bound is the DATABASE's session clock, not UTC, and clocks span 26 hours
-        //    (UTC-12 to UTC+14). So it never drops an event still to come only while the
-        //    database clock is at most 12 hours ahead of UTC — true for a server on UTC or
-        //    Europe, but a server on UTC+13 (Tonga, Samoa) would drop an `Etc/GMT+12` event
-        //    in its last hour (#804's check measured it). The harm is small and rare; this
-        //    used to claim it could never happen, which was untrue. Otherwise
-        //    only how much of yesterday shows varies. Nothing here says
-        //    "upcoming" or "past" per row -- a page that needs that asks
-        //    nowOnItsOwnClock().
+        // 🕰️ "Since a day ago" is a deliberate day of grace (somebody looks
+        //    up what they helped with yesterday), and since #1025 it is a day
+        //    on EACH EVENT'S OWN CLOCK: Events::nowOnItsOwnClock(), less one
+        //    day. It used to be `DATE_SUB(NOW(), INTERVAL 1 DAY)` -- the
+        //    DATABASE SERVER's clock in its own session zone -- so an event on
+        //    a clock far behind the database's (Pago Pago, UTC-11) dropped off
+        //    up to eleven hours inside its day of grace, and one far ahead
+        //    (Kiritimati, UTC+14) stayed up to fourteen hours past it. The
+        //    loose bound (two days back on UTC) is only for the
+        //    `startDateTime` index: no clock reads more than a day and a half
+        //    from UTC, so it never cuts a row the exact bound keeps.
+        //
+        // ⏱️ ORDER: by the REAL moment each event starts
+        //    (Events::startAsUtcMoment(), #1025), then the reading and the
+        //    event's number. It was `ORDER BY e.startDateTime`, a reading on
+        //    each event's own clock, so events on different clocks came out
+        //    in the wrong order -- and with `LIMIT 30` the sooner of two could
+        //    be the one cut off. Worked out row by row inside SQL, so the
+        //    LIMIT keeps exactly the thirty soonest.
+        $nowOnClock = self::nowOnItsOwnClock($db, 'e', $siteId);
+        $moment     = self::startAsUtcMoment($db, 'e', $siteId);
         $stmt = $db->prepare(
-            'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
-            . '       e.locationName, e.status, e.description, '
-            . '       GROUP_CONCAT(DISTINCT ep.role ORDER BY ep.role SEPARATOR ", ") AS myRoles, '
-            . '       MAX(CASE WHEN ec.coordinatorID IS NOT NULL THEN 1 ELSE 0 END) AS amCoordinator '
-            . 'FROM tblEvents e '
-            . 'LEFT JOIN tblEventPeople ep '
-            . '       ON ep.eventID = e.eventID AND ep.userID = ? '
-            . 'LEFT JOIN tblEventCoordinators ec '
-            . '       ON ec.eventID = e.eventID AND ec.userID = ? AND ec.revokedAt IS NULL '
+            'SELECT `e`.`eventID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`startDateTime`, `e`.`endDateTime`, '
+            . '       `e`.`locationName`, `e`.`status`, `e`.`description`, '
+            . '       GROUP_CONCAT(DISTINCT `ep`.`role` ORDER BY `ep`.`role` SEPARATOR ", ") AS `myRoles`, '
+            . '       MAX(CASE WHEN `ec`.`coordinatorID` IS NOT NULL THEN 1 ELSE 0 END) AS `amCoordinator` '
+            . 'FROM `tblEvents` `e` '
+            . 'LEFT JOIN `tblEventPeople` `ep` '
+            . '       ON `ep`.`eventID` = `e`.`eventID` AND `ep`.`userID` = ? '
+            . 'LEFT JOIN `tblEventCoordinators` `ec` '
+            . '       ON `ec`.`eventID` = `e`.`eventID` AND `ec`.`userID` = ? AND `ec`.`revokedAt` IS NULL '
             // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
-            . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL '
-            . '  AND e.startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '
-            . '  AND (ep.eventPersonID IS NOT NULL OR ec.coordinatorID IS NOT NULL) '
-            . 'GROUP BY e.eventID '
-            . 'ORDER BY e.startDateTime ASC LIMIT 30'
+            . 'WHERE `e`.`siteID` = ? AND `e`.`isDeleted` = 0 AND `e`.`externalFeedID` IS NULL '
+            . '  AND `e`.`startDateTime` >= ? '
+            . '  AND `e`.`startDateTime` >= DATE_SUB(' . $nowOnClock['sql'] . ', INTERVAL 1 DAY) '
+            . '  AND (`ep`.`eventPersonID` IS NOT NULL OR `ec`.`coordinatorID` IS NOT NULL) '
+            . 'GROUP BY `e`.`eventID` '
+            . 'ORDER BY ' . $moment['sql'] . ' ASC, `e`.`startDateTime` ASC, `e`.`eventID` ASC LIMIT 30'
         );
         if ($stmt === false) {
             return [];
         }
 
-        $stmt->bind_param('iii', $userId, $userId, $siteId);
+        $loose = self::looseUtcBound('-2 days');
+        $stmt->bind_param(
+            'iiis' . $nowOnClock['types'] . $moment['types'],
+            $userId,
+            $userId,
+            $siteId,
+            $loose,
+            ...$nowOnClock['params'],
+            ...$moment['params']
+        );
         $stmt->execute();
         $result = $stmt->get_result();
         $rows = [];
@@ -1111,6 +1131,225 @@ class Events
         }
 
         return $max;
+    }
+
+    /**
+     * ⏱️ Each event's START as a real moment, in UTC, as an SQL expression
+     *    worked out ROW BY ROW inside the database -- the ONE place a query
+     *    that PAGES or LIMITS a list of events across clocks gets its order
+     *    (#1024, #1025).
+     *
+     * WHY IT IS NEEDED. `startDateTime` is a READING on its event's own
+     * clock (`tblEvents.timezone`, #777), so `ORDER BY startDateTime`
+     * compares readings from DIFFERENT clocks: Auckland 20:00 happens about
+     * twelve hours before New York 10:00 on the same date, yet sorts after
+     * it. `soonestByRealStart()` puts that right for a "next N" list, but it
+     * cannot page with OFFSET (it needs the whole head of the list), and the
+     * calendar's list view pages. A real moment in SQL would normally be
+     * `CONVERT_TZ()` with the zone's name, which needs the database's
+     * time-zone tables; shared hosting rarely loads them, and then every
+     * value is NULL. So, as `nowOnItsOwnClock()` does for "now", PHP does the
+     * zone arithmetic and binds the answers.
+     *
+     * HOW. A zone's offset from UTC is the same for long stretches of
+     * readings and changes only around a clock change. So, for each zone in
+     * use, PHP works out the stretches of readings over the span of readings
+     * actually stored (`MIN`/`MAX` of `startDateTime`, with two days of
+     * margin each side) and the offset in each, and the expression is
+     *
+     *     DATE_SUB(start, INTERVAL (CASE WHEN start < ? THEN o1
+     *                                    WHEN start < ? THEN o2 ... ELSE oN END) SECOND)
+     *
+     * inside a `CASE` on the zone, compared BYTE FOR BYTE as in
+     * `nowOnItsOwnClock()` (see its 🔤 note). The offset of a stretch is
+     * ASKED of `I18n::wallClockInstant()` -- the instant the public door
+     * prints and `realStartOf()` uses -- never re-derived, and it is CHECKED
+     * at both ends of every stretch (a stretch whose ends disagree is split
+     * in half until they agree), as `readingsAtOrAfter()` does. So a reading
+     * in the hour a clock skips is the instant after the gap (RFC 5545's
+     * rule) and one in the hour a clock repeats is PHP's own pick: the same
+     * moment `sortByRealStart()` would give it.
+     *
+     * The first stretch also covers every reading below the span, and the
+     * last every reading above it, at the offset the zone has at that end.
+     * A row can only be outside the span if it was written between the read
+     * of the span and the statement, and the cost then is at most that one
+     * row's place in the order, never a missing row. The `ELSE` of the zone
+     * `CASE` (a zone written in that same instant) reads the organisation's
+     * clock; a zone text PHP cannot open reads it too (`Site::zoneFor()`),
+     * as every page that shows the event does.
+     *
+     * The result is a DATETIME in UTC. Order by it, then by `startDateTime`,
+     * then by the event's number, which is `sortByRealStart()`'s tie rule.
+     * Like `nowOnItsOwnClock()`, it differs row by row, so it cannot use the
+     * `startDateTime` index: the database sorts the rows the WHERE kept.
+     *
+     * A failed read of the zones or the span THROWS under this portal's
+     * strict reporting (see the ⚠️ note on `nowOnItsOwnClock()`).
+     *
+     * @param mysqli   $db     The connection the expression will be used on.
+     * @param string   $alias  The table alias for `tblEvents` in that statement.
+     * @param int|null $siteId One organisation's zones, span and fallback
+     *                         clock, or null for every organisation's.
+     *
+     * @return array{sql: string, types: string, params: list<string>} Bind
+     *         `params` (all text) where `sql` appears.
+     */
+    public static function startAsUtcMoment(mysqli $db, string $alias, ?int $siteId = null): array
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,30}$/', $alias) !== 1) {
+            throw new \InvalidArgumentException('Events::startAsUtcMoment(): the alias must be a plain SQL name.');
+        }
+        $column = '`' . $alias . '`.`startDateTime`';
+        [$low, $high] = self::readingSpan($db, $siteId);
+
+        $own   = self::utcMomentOnOneClock(new \DateTimeZone(Site::timezone($siteId)), $column, $low, $high);
+        $zones = self::zonesInUse($db, $siteId);
+        if ($zones === []) {
+            // No events: a CASE with no WHEN is not SQL (#804's trap).
+            return ['sql' => $own['sql'], 'types' => str_repeat('s', count($own['params'])), 'params' => $own['params']];
+        }
+
+        $sql    = 'CAST(CASE CAST(`' . $alias . '`.`timezone` AS BINARY)';
+        $params = [];
+        foreach ($zones as $zone) {
+            $one      = self::utcMomentOnOneClock(Site::zoneFor($zone, $siteId), $column, $low, $high);
+            $sql     .= ' WHEN ? THEN ' . $one['sql'];
+            $params[] = $zone;
+            $params   = array_merge($params, $one['params']);
+        }
+        $sql   .= ' ELSE ' . $own['sql'] . ' END AS DATETIME)';
+        $params = array_merge($params, $own['params']);
+
+        return ['sql' => $sql, 'types' => str_repeat('s', count($params)), 'params' => $params];
+    }
+
+    /**
+     * The lowest and highest stored start READING (as "seconds, as if the
+     * reading were UTC") of one organisation's events, or of every
+     * organisation's; the current moment for both when there are none.
+     *
+     * @return array{0:int, 1:int}
+     */
+    private static function readingSpan(mysqli $db, ?int $siteId): array
+    {
+        $stmt = $siteId === null
+            ? $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents`')
+            : $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `siteID` = ?');
+        $row = null;
+        // A backstop only: under strict reporting a failed prepare THROWS.
+        if ($stmt !== false) {
+            if ($siteId !== null) {
+                $stmt->bind_param('i', $siteId);
+            }
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        }
+        // wallClockReading() is built in UTC, which has no transitions, so
+        // its timestamp is the reading "as if it were UTC" -- not a moment.
+        $asSeconds = static function (mixed $reading): ?int {
+            $parsed = I18n::wallClockReading(is_string($reading) === true ? $reading : null);
+
+            return $parsed === null ? null : $parsed->getTimestamp();
+        };
+        $low  = $asSeconds($row['low'] ?? null);
+        $high = $asSeconds($row['high'] ?? null);
+        if ($low === null || $high === null) {
+            return [time(), time()];
+        }
+
+        return [$low, $high];
+    }
+
+    /**
+     * The `DATE_SUB(...)` half of `startAsUtcMoment()` for ONE clock: the
+     * stretches of readings in `[low - 2 days, high + 2 days]` with the
+     * offset in each, as an SQL expression over `$column`.
+     *
+     * @return array{sql: string, params: list<string>}
+     */
+    private static function utcMomentOnOneClock(\DateTimeZone $zone, string $column, int $low, int $high): array
+    {
+        $offsetOf = static function (int $r) use ($zone): int {
+            $instant = I18n::wallClockInstant(gmdate('Y-m-d H:i:s', $r), $zone);
+            if ($instant === null) {
+                throw new \RuntimeException('Events::startAsUtcMoment(): a stored reading could not be placed on its clock.');
+            }
+
+            return $r - $instant->getTimestamp();
+        };
+
+        $from  = $low - 2 * 86400;
+        $until = $high + 2 * 86400;
+
+        // Where the offset may change: a clock change at the instant `ts`
+        // from offset b to offset a is the readings `ts + b` and `ts + a`.
+        // The changes are looked for two days wider than the readings,
+        // because a reading and its instant are never more than about 26
+        // hours apart.
+        $points = [$from, $until];
+        $states = $zone->getTransitions($from - 2 * 86400, $until + 2 * 86400);
+        if (is_array($states) === true) {
+            $before = null;
+            foreach ($states as $i => $state) {
+                if ($i > 0 && $before !== null) {
+                    $points[] = (int) $state['ts'] + $before;
+                    $points[] = (int) $state['ts'] + (int) $state['offset'];
+                }
+                $before = (int) $state['offset'];
+            }
+        }
+        $points = array_values(array_unique(array_filter($points, static fn (int $p): bool => $p >= $from && $p <= $until)));
+        sort($points);
+
+        // Stretches ending at a reading (exclusive), each with one offset,
+        // CHECKED at both ends; neighbours with the same offset are joined.
+        $stretches = [];
+        $piece = static function (int $a, int $b) use (&$piece, &$stretches, $offsetOf): void {
+            if ($b <= $a) {
+                return;
+            }
+            $offset = $offsetOf($a);
+            if ($b - $a > 1 && $offsetOf($b - 1) !== $offset) {
+                $middle = intdiv($a + $b, 2);
+                $piece($a, $middle);
+                $piece($middle, $b);
+                return;
+            }
+            $last = count($stretches) - 1;
+            if ($last >= 0 && $stretches[$last][1] === $offset) {
+                $stretches[$last][0] = $b;
+                return;
+            }
+            $stretches[] = [$b, $offset];
+        };
+        for ($i = 0; $i + 1 < count($points); $i++) {
+            $piece($points[$i], $points[$i + 1]);
+        }
+        if ($stretches === []) {
+            $stretches[] = [$until, $offsetOf($from)];
+        }
+
+        // The offsets are integers PHP worked out, so they are written into
+        // the SQL as numbers; the readings where a stretch ends are bound.
+        if (count($stretches) === 1) {
+            return ['sql' => 'DATE_SUB(' . $column . ', INTERVAL ' . (int) $stretches[0][1] . ' SECOND)', 'params' => []];
+        }
+        $sql    = 'DATE_SUB(' . $column . ', INTERVAL (CASE';
+        $params = [];
+        $lastAt = count($stretches) - 1;
+        foreach ($stretches as $at => [$end, $offset]) {
+            if ($at === $lastAt) {
+                $sql .= ' ELSE ' . (int) $offset;
+                break;
+            }
+            $sql     .= ' WHEN ' . $column . ' < CAST(? AS DATETIME) THEN ' . (int) $offset;
+            $params[] = gmdate('Y-m-d H:i:s', $end);
+        }
+        $sql .= ' END) SECOND)';
+
+        return ['sql' => $sql, 'params' => $params];
     }
 
     /**

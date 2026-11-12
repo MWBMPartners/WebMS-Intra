@@ -21,6 +21,12 @@
  *                       anniversaries to designated roles
  *                       (`milestones.digest_recipients`, migration 076).
  *
+ * WHOSE CLOCK (#1028): every "today" and every hour here is the
+ * ORGANISATION's own (`Site::timezone($siteId)`, and `RotaSwaps::today()`
+ * for the rota), worked out inside the per-organisation loop. Never the
+ * database server's CURDATE()/NOW(), and never PHP's default zone, which is
+ * whichever organisation the request happened to resolve to.
+ *
  * TOKEN GATE: `?key=` vs `user_reminders.cron_token`, constant-time
  * `hash_equals()`, empty stored token ⇒ ALWAYS 403 — migration 171 seeds
  * `user_reminders.cron_token` empty + isSensitive=1, so this endpoint is
@@ -99,6 +105,7 @@ use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\Mailer;
 use Portal\Core\PortalAddress;
+use Portal\Core\RotaSwaps;
 use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -299,7 +306,14 @@ $grandTotals = [
     'milestone-digest' => ['due' => 0, 'sent' => 0, 'skipped' => 0],
 ];
 
-$hour = (int) date('H');
+// 🕰️ No "hour" or "today" is read here, before the loop (#1028). This
+//    job runs across EVERY organisation, each on its own clock, so each
+//    one's hour and date are worked out inside the loop from
+//    Site::timezone($siteId). It used to read `date('H')` once, here, in
+//    PHP's default zone -- which start-up sets to the zone of whichever
+//    organisation the REQUEST resolved to, and Site::forceContext() does not
+//    change -- so every other organisation's 06:00-08:59 window was judged
+//    on somebody else's clock.
 
 foreach ($siteIds as $siteId) {
     // 🌐 Force this site's context — see file header's MULTI-SITE note.
@@ -323,6 +337,13 @@ foreach ($siteIds as $siteId) {
         'rota-slot'        => ['due' => 0, 'sent' => 0, 'skipped' => 0],
         'milestone-digest' => ['due' => 0, 'sent' => 0, 'skipped' => 0],
     ];
+
+    // 🕰️ THIS organisation's own clock, read once for the whole of its turn
+    //    (#1028): its hour decides the digest's window and its date decides
+    //    "today's" birthdays. Site::timezone() is the one answer to an
+    //    organisation's zone (#604).
+    $siteNow = new \DateTimeImmutable('now', new \DateTimeZone(Site::timezone($siteId)));
+    $hour    = (int) $siteNow->format('G');
 
     // -------------------------------------------------------------------
     // ⏰ Family: task-reminder.
@@ -411,6 +432,21 @@ foreach ($siteIds as $siteId) {
     if (in_array($rotaEnabled, ['1', 'true'], true) === true && $rotaRemindersOn !== '0') {
         $leadDays = (int) (App::settingForSite('rota.reminder_days_before', $siteId) ?? '3');
 
+        // 📅 Which duties are due, on THIS ORGANISATION's calendar (#1028).
+        //    A duty's `slotDate` is a date on the organisation's own
+        //    calendar, so "today" must be too: RotaSwaps::today($siteId), the
+        //    rule the rota swap pages use (#987). This was
+        //    `BETWEEN CURDATE() AND DATE_ADD(CURDATE(), ...)` -- the DATABASE
+        //    SERVER's date in its own session zone -- so an organisation far
+        //    ahead of or behind the database was reminded a day early or a
+        //    day late around its midnight (#783's shape). The last day is
+        //    counted on a calendar built in UTC, which has no clock changes,
+        //    so adding days is plain date arithmetic.
+        $rotaFirstDay = RotaSwaps::today($siteId);
+        $rotaLastDay  = (new \DateTimeImmutable($rotaFirstDay . ' 00:00:00', new \DateTimeZone('UTC')))
+            ->modify(($leadDays >= 0 ? '+' : '') . $leadDays . ' days')
+            ->format('Y-m-d');
+
         $stmt = $db->prepare(
             'SELECT s.slotID, s.slotDate, s.startTime, s.endTime, s.notes, s.assignedToID, '
             . 'r.name AS roleName, u.emailAddress, u.notifyPrefs '
@@ -418,11 +454,11 @@ foreach ($siteIds as $siteId) {
             . 'INNER JOIN tblRotaRoleType r ON r.roleTypeID = s.roleTypeID '
             . 'INNER JOIN tblUsers u ON u.userID = s.assignedToID AND u.isActive = 1 '
             . 'WHERE s.siteID = ? AND s.assignedToID IS NOT NULL AND s.reminderSentAt IS NULL '
-            . 'AND s.slotDate BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) '
+            . 'AND `s`.`slotDate` BETWEEN ? AND ? '
             . 'ORDER BY s.assignedToID, s.slotDate, s.startTime'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('ii', $siteId, $leadDays);
+            $stmt->bind_param('iss', $siteId, $rotaFirstDay, $rotaLastDay);
             $stmt->execute();
             $result = $stmt->get_result();
 
@@ -477,8 +513,10 @@ foreach ($siteIds as $siteId) {
                     //    reminder that arrives after the first is still the
                     //    only one the person gets for the rest.)
                     $lastDuty = (string) max(array_column($group['slots'], 'slotDate'));
+                    //    The day after is counted on a UTC calendar (no clock
+                    //    changes), never by strtotime() in PHP's default zone.
                     $useBy    = MailQueue::useBy(
-                        date('Y-m-d', (int) strtotime($lastDuty . ' +1 day')),
+                        (new \DateTimeImmutable($lastDuty . ' 00:00:00', new \DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d'),
                         Site::timezone($siteId)
                     );
                     if (Mailer::send($group['email'], $subject, $body, [], ['expiresAt' => $useBy]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
@@ -522,7 +560,14 @@ foreach ($siteIds as $siteId) {
             && $digestEnabled !== '0'
             && $recipientsCsv !== ''
         ) {
-            $today = date('Y-m-d');
+            // 🎂 "Today" and its month-and-day on THIS ORGANISATION's
+            //    calendar (#1028). It was `date('Y-m-d')` (PHP's default
+            //    zone: whichever organisation the request resolved to) for
+            //    the once-a-day mark, and the database's CURDATE() for whose
+            //    birthday it is -- two different clocks, neither this
+            //    organisation's.
+            $today    = $siteNow->format('Y-m-d');
+            $monthDay = $siteNow->format('m-d');
 
             if (userReminderAlreadySent($db, 'milestone-digest', $siteId, $today) === true) {
                 $siteTotals['milestone-digest']['skipped']++;
@@ -532,12 +577,12 @@ foreach ($siteIds as $siteId) {
                     . 'FROM tblUserMilestone m '
                     . 'INNER JOIN tblUsers u ON u.userID = m.userID AND u.isActive = 1 '
                     . 'INNER JOIN tblUserSites us ON us.userID = u.userID AND us.siteID = ? AND us.isActive = 1 '
-                    . "WHERE m.monthDay = DATE_FORMAT(CURDATE(), '%m-%d') AND m.privacy <> 'private' "
+                    . "WHERE `m`.`monthDay` = ? AND m.privacy <> 'private' "
                     . 'ORDER BY u.fullName'
                 );
                 $milestones = [];
                 if ($stmt !== false) {
-                    $stmt->bind_param('i', $siteId);
+                    $stmt->bind_param('is', $siteId, $monthDay);
                     $stmt->execute();
                     $result = $stmt->get_result();
                     while ($m = $result->fetch_assoc()) {
@@ -558,23 +603,27 @@ foreach ($siteIds as $siteId) {
                         $line = htmlspecialchars((string) $m['fullName'], ENT_QUOTES, 'UTF-8')
                               . ' — ' . htmlspecialchars($kindLabel, ENT_QUOTES, 'UTF-8');
                         if ($m['originYear'] !== null) {
-                            $years = (int) date('Y') - (int) $m['originYear'];
+                            $years = (int) $siteNow->format('Y') - (int) $m['originYear'];
                             $line .= ' — ' . htmlspecialchars(ordinalSuffix($years), ENT_QUOTES, 'UTF-8');
                         }
                         $lines[] = '<li>' . $line . '</li>';
                     }
 
-                    $subject = "🎂 Today's milestones — " . date('j M');
+                    $subject = "🎂 Today's milestones — " . $siteNow->format('j M');
                     $body = '<p>Today\'s milestones:</p>'
                           . '<ul>' . implode('', $lines) . '</ul>'
                           . PortalAddress::linkHtml('milestones', 'View Milestones', $siteId);
 
                     $recipients = resolveMilestoneDigestRecipients($db, $siteId, $recipientsCsv);
                     // ⏳ Use-by (#592): the end of the day this digest calls
-                    //    "today", on the same clock that chose that day
-                    //    ($today above is PHP's). "Today's milestones"
-                    //    delivered tomorrow would be wrong.
-                    $useBy = MailQueue::useBy(date('Y-m-d', (int) strtotime($today . ' +1 day')), date_default_timezone_get());
+                    //    "today", on the same clock that chose that day --
+                    //    the organisation's (#1028; it was PHP's default
+                    //    zone). "Today's milestones" delivered tomorrow
+                    //    would be wrong.
+                    $useBy = MailQueue::useBy(
+                        (new \DateTimeImmutable($today . ' 00:00:00', new \DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d'),
+                        Site::timezone($siteId)
+                    );
                     $sent  = 0;
                     foreach (array_unique($recipients) as $email) {
                         if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
