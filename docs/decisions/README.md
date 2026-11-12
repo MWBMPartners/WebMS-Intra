@@ -232,7 +232,8 @@ appended with its real date and a note that it was added later.
 | [D-174](174-an-errors-words-have-e-mail-addresses-removed-when-written.md) | 2026-11-12 | An error's own words have any e-mail address removed before they are stored | in force |
 | [D-175](175-the-support-address-is-still-recorded-in-the-activity-log.md) | 2026-11-12 | The organisation's support e-mail address is still recorded in the activity log when it is changed | in force |
 | [D-176](176-an-anonymous-prayer-request-is-erased-by-a-visitor-address-request.md) | 2026-11-12 | An anonymous prayer request is erased by the same visitor-address request as an event suggestion, and its network address is kept until then | in force |
+| [D-177](177-letter-only-currency-signs-are-not-read-in-a-file.md) | 2026-11-12 | A currency sign made only of letters is not read in an imported file; the three-letter code is | in force |
 
-*176 decisions. This index is checked against the folder by
+*177 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

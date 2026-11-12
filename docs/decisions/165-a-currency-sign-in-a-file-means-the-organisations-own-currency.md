@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-12  
 **Status:** in force  
+**Superseded in part by:** D-177 (signs made only of letters are not read)
 **Supersedes:** D-155, D-157
 
 **Question:** Several currencies share signs ("$" for US, Australian, Canadian, New Zealand and other dollars; "£" for sterling and the Gibraltar, Falklands, Egyptian and other pounds; "₱" for the Philippine and Cuban pesos; "¥" for yen and yuan). How should a sign in an imported file (bank statement, asset spreadsheet) be read?
