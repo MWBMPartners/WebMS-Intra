@@ -597,6 +597,10 @@ if ($foundBoth === false) {
     //    the closure, and the whole test stopped with "class not found" at the
     //    first ordinary cell -- so it is loaded here, before anything runs.
     require_once PORTAL_CORE . $sep . 'EventRecurrence.php';
+    // 📅 And the WRAPPER asks `\Portal\Core\EventDateRange` whether a stored
+    //    reading falls in the range an event may have (#1045, D-181), for the
+    //    same reason: loaded before the closure runs.
+    require_once PORTAL_CORE . $sep . 'EventDateRange.php';
     // The reader is defined FIRST: the wrapper binds it with `use (&...)`.
     eval($grabRaw[0]);
     eval($grabStore[0]);
@@ -995,6 +999,24 @@ if ($foundBoth === false) {
     }
     check('K05 each refusal says WHICH refusal it is, not "not parseable"',
         $reasonsWrong === [] ? 'all correct' : implode(' | ', $reasonsWrong), 'all correct');
+
+    // ── K08. THE RANGE AN EVENT MAY HAVE (#1045, D-181) ──
+    //    1 January 1900 to the end of the later of 2200 and this year plus
+    //    fifty. The far year is WORKED OUT here, never written down, so these
+    //    stay right when this year plus fifty passes 2200. Kept out of K01 and
+    //    K02 on purpose: those lists' lengths are pinned (K04, K04b) and a
+    //    computed year cannot sit in a fixed list. The HTTP half — the row
+    //    really refused at preview and not imported — is section F of
+    //    `tools/event-date-range-selftest.php`.
+    $kLast  = max(2200, (int) gmdate('Y') + 50);
+    $kWhy   = null;
+    $k1899  = $fmtStore('1899-12-31 10:00', $kWhy);
+    check('K08 31 December 1899 is refused, with the range as its reason',
+        [$k1899, str_contains((string) $kWhy, 'between 1 January 1900 and 31 December ' . $kLast)], [null, true]);
+    check('K08b 1 January 1900 at midnight is stored', $fmtStore('1900-01-01 00:00'), '1900-01-01 00:00:00');
+    check('K08c the last second of the last allowed year is stored', $fmtStore($kLast . '-12-31 23:59:59'), $kLast . '-12-31 23:59:59');
+    check('K08d the first moment of the year after is refused', $fmtStore(($kLast + 1) . '-01-01 00:00'), null);
+    check('K08e year 9999 is refused', $fmtStore('9999-12-31 10:00'), null);
 
     // ── K07. THE HOUR THAT DOES NOT EXIST, through the loose fallback (#785) ──
     //

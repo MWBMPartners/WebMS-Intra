@@ -1330,6 +1330,25 @@ final class FeedImporter
                 $skipped++;
                 continue;
             }
+            // 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181), asked of
+            //    the ONE place that decides it for every writer: from 1
+            //    January 1900 to the end of the later of 2200 and this year
+            //    plus fifty. A date outside it is SKIPPED, not stored and not
+            //    guessed at, and counted in the same `skipped` figure as an
+            //    unstorable one — which the run history on the calendar's own
+            //    page shows to an administrator ("skipped N").
+            //
+            //    Be exact about what this can reach today. The reader keeps
+            //    only dates whose START falls in this class's window (a month
+            //    back, a year ahead), so a start outside the range cannot get
+            //    here until the far end of the range is within a year — it is
+            //    a backstop. The END can: a calendar file may give an event an
+            //    end years away, and the reader brings one past 9999 back to
+            //    the last second of 9999, which the old test stored.
+            if (EventDateRange::whyRefused([$start, $end]) !== null) {
+                $skipped++;
+                continue;
+            }
 
             // An end that sorts BEFORE its start is NOT repaired and NOT
             // refused. On the night the clocks go back, 01:30 followed by

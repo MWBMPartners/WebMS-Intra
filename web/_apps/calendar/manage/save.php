@@ -22,6 +22,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\EventCancelReason;
+use Portal\Core\EventDateRange;
 use Portal\Core\EventRecurrence;
 use Portal\Core\Events;
 use Portal\Core\Geocoder;
@@ -286,6 +287,21 @@ if (
     && $endWhen < $startWhen
 ) {
     $_SESSION['flash_msg']  = 'The event cannot end before it starts. Please check the dates.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
+
+// 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181): from 1 January 1900
+//    to the end of the later of 2200 and this year plus fifty. Asked of the
+//    same normalised text as the check above, by the ONE place that decides
+//    (`EventDateRange`), for a new event and an edit alike. A browser's
+//    date-and-time box will send a five-digit year if one is typed, and that
+//    is outside the range too, so it is refused here rather than reaching the
+//    database as a bare error.
+$rangeProblem = EventDateRange::whyRefused([$startWhen, $endWhen !== '' ? $endWhen : null]);
+if ($rangeProblem !== null) {
+    $_SESSION['flash_msg']  = $rangeProblem . ' Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('calendar/manage'));
     exit();
@@ -874,6 +890,24 @@ if ($action === 'create') {
             'maxOccurrences' => preg_match('/^\d+$/', $countRaw) === 1 && (int) $countRaw > 0 ? (int) $countRaw : null,
         ];
 
+        // 📅 A REPEAT STOPS AT THE LAST DAY AN EVENT MAY BE STORED ON (#1045,
+        //    D-181). The first date has already been checked above; the rest
+        //    are made here, and a series begun near the far end of the range
+        //    could otherwise run past it. Capping the pattern's own "until"
+        //    here — the GENERATOR's limit, not a stored one: the rule row
+        //    below never writes `endDate` and records a COUNT of the dates
+        //    made — keeps the dates and that count in agreement. Dropping
+        //    dates afterwards instead would make the series disagree with
+        //    its pattern, and the rule would be withdrawn below. Only applied
+        //    where it can matter, so an ordinary series is generated exactly
+        //    as before.
+        $lastRepeatDay = EventDateRange::lastYear() . '-12-31';
+        if ((int) substr($startReading, 0, 4) + EventRecurrence::HARD_MAX_YEARS >= EventDateRange::lastYear()
+            && ($rule['endDate'] === null || $rule['endDate'] > $lastRepeatDay)
+        ) {
+            $rule['endDate'] = $lastRepeatDay;
+        }
+
         // 🧢 HOW BIG A SERIES MAY BE is this installation's choice, and this
         //    organisation's within it — `calendar.repeat.maxOccurrences` and
         //    `calendar.repeat.maxYears`, set at /admin/settings/repeats.
@@ -1317,6 +1351,15 @@ if ($action === 'create') {
                     foreach ($extra as $index => $occurrence) {
                         $occStart = (string) $occurrence['start'];
                         $occEnd   = $occurrence['end'];
+                        // 📅 Asked of every date made, not only the first
+                        //    (#1045, D-181). The cap above keeps every START
+                        //    inside the range; this catches the one date whose
+                        //    END would spill over the last day. Not made, so
+                        //    the count below withdraws the rule as for any
+                        //    date that could not be saved.
+                        if (EventDateRange::whyRefused([$occStart, $occEnd === null ? null : (string) $occEnd]) !== null) {
+                            continue;
+                        }
                         // 🔤 EACH DATE GETS ITS OWN ADDRESS, NAME AND ITS OWN
                         //    DATE, ASKED OF THE DATABASE (#883). It was the
                         //    FIRST date's address plus `-2`, `-3` … — so the

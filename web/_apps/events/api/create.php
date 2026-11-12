@@ -61,6 +61,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\EventDateRange;
 use Portal\Core\Events;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
@@ -169,6 +170,14 @@ if ($endDateTime !== null) {
     if ($endSql === null || $endSql < $startSql) {
         ApiResponse::error('endDateTime must be a valid timestamp and ≥ startDateTime', 400);
     }
+}
+// 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181). Asked of the
+//    STORED readings, after any offset has been put onto the event's clock,
+//    so the API and every other writer judge the same text. The one place is
+//    `EventDateRange`; never a second year test here.
+$rangeProblem = EventDateRange::whyRefused([$startSql, $endSql]);
+if ($rangeProblem !== null) {
+    ApiResponse::error($rangeProblem . ' Nothing was created.', 400);
 }
 
 // 📥 Optional fields

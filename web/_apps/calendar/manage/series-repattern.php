@@ -60,6 +60,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventDateRange;
 use Portal\Core\EventRecurrence;
 use Portal\Core\Events;
 use Portal\Core\InstallationSettings;
@@ -384,6 +385,10 @@ if ($isPost === true) {
             $anchorEnd = trim($formEnd) === '' ? null : $toReading($formEnd);
             if ($anchorEnd !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $anchorEnd) !== 1) {
                 $problem = 'The time the first date of the new pattern ends could not be read.';
+            } elseif (EventDateRange::whyRefused([$anchor, $anchorEnd]) !== null) {
+                // 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181),
+                //    asked by the ONE place that decides it.
+                $problem = EventDateRange::refusalWords();
             } else {
                 // 🧢 The ceilings are the installation's choice and this
                 //    organisation's within it, and the INSTALLATION'S value
@@ -405,6 +410,16 @@ if ($isPost === true) {
                     'maxOccurrences' => preg_match('/^\d+$/', $formCount) === 1 && (int) $formCount > 0 ? (int) $formCount : null,
                 ];
 
+                // 📅 THE PATTERN STOPS AT THE LAST DAY AN EVENT MAY BE STORED
+                //    ON (#1045, D-181), exactly as the create handler caps it,
+                //    and only where that can matter.
+                $lastRepeatDay = EventDateRange::lastYear() . '-12-31';
+                if ((int) substr($anchor, 0, 4) + EventRecurrence::HARD_MAX_YEARS >= EventDateRange::lastYear()
+                    && ($askedRule['endDate'] === null || $askedRule['endDate'] > $lastRepeatDay)
+                ) {
+                    $askedRule['endDate'] = $lastRepeatDay;
+                }
+
                 $worked = EventRecurrence::datesFor(
                     $askedRule,
                     $anchor,
@@ -414,7 +429,21 @@ if ($isPost === true) {
                 );
 
                 $newDates = $worked['dates'];
-                if ($newDates === []) {
+                // 📅 And every date the pattern makes is asked too: the cap
+                //    keeps each START inside, but a last date's END could
+                //    still spill past the final day. Refused whole rather
+                //    than trimmed, because the preview must show what the
+                //    change really does.
+                foreach ($newDates as $newDate) {
+                    if (EventDateRange::whyRefused([(string) $newDate['start'], $newDate['end'] === null ? null : (string) $newDate['end']]) !== null) {
+                        $problem  = EventDateRange::refusalWords();
+                        $newDates = [];
+                        break;
+                    }
+                }
+                if ($problem !== '') {
+                    // Refused just above; nothing to preview.
+                } elseif ($newDates === []) {
                     $problem = $worked['why'] !== ''
                         ? (string) $worked['why']
                         : 'That pattern produced no dates, so there was nothing to change.';

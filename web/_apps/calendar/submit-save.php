@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\EventDateRange;
 use Portal\Core\Events;
 use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
@@ -214,6 +215,16 @@ if ($endRaw !== '') {
         header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
         exit();
     }
+}
+
+// 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181): from 1 January 1900
+//    to the end of the later of 2200 and this year plus fifty. A year-1 or
+//    year-9999 date on this public form is almost certainly a typing slip.
+//    `EventDateRange` is the ONE place; the form prints its own words for
+//    `?err=range`, so the sentence names the range the handler applied.
+if (EventDateRange::whyRefused([$startUtc, $endUtc]) !== null) {
+    header('Location: ' . Site::url('calendar/submit') . '?err=range', true, 302);
+    exit();
 }
 
 if ($isLoggedIn === false && ($submitterName === '' || $submitterEmail === '')) {

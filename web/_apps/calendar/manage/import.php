@@ -140,8 +140,21 @@ $fmtStore = static function (string $text, ?string &$why = null) use (&$fmtClock
         $why = 'is a date the database cannot store at all (the year must be four digits)';
         return null;
     }
-    if ($out < '1000-01-01 00:00:00') {
-        $why = 'has a year before 1000, which this portal does not accept — check for a typing mistake';
+    // 📅 (2) IS NOW THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181), asked
+    //    of the ONE place that decides it rather than a floor typed here. It
+    //    used to be "a year before 1000"; the owner has since set the range
+    //    for every writer of an event's start — 1 January 1900 to the end of
+    //    the later of 2200 and this year plus fifty — so a year-0500 cell and
+    //    a year-2900 cell are refused by the same test, with words naming the
+    //    range. Still in the WRAPPER, so every path to a stored reading meets
+    //    it, and the shape test above still runs first because it is the one
+    //    that prevents the database's own refusal.
+    //    Written fully qualified, as the reader's own call to
+    //    `\Portal\Core\EventRecurrence` is, because `clock-change-selftest.php`
+    //    lifts this closure out of the file and runs it without this file's
+    //    `use` lines.
+    if (\Portal\Core\EventDateRange::contains($out) === false) {
+        $why = 'is outside the dates an event may have. ' . \Portal\Core\EventDateRange::refusalWords();
         return null;
     }
     $why = '';
