@@ -250,10 +250,12 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    run of spaces. A sign made only of letters ("R", "Rs", "kr") is not
     //    read (D-177). A refusal names a reason only where it is certain — two
     //    currency markers, decimals, commas, points, a misplaced minus, too
-    //    large, nothing entered, or a marker while no currency is chosen;
-    //    anything else, including another currency's sign or code, is "That
-    //    amount could not be read." with what IS read (Currency::fileAdvice()).
-    //    It never guesses another currency. Negatives are allowed so a debit can
+    //    large, nothing entered, or a marker while no currency is chosen. A
+    //    sign or code the import's currency does NOT use is told exactly that,
+    //    and to convert the figure rather than put our code in front of it
+    //    (round 10, Currency::otherCurrencyWords()); which other currency it
+    //    is, is never guessed. Anything else is "That amount could not be
+    //    read." with what IS read (Currency::fileAdvice()). Negatives are allowed so a debit can
     //    be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
