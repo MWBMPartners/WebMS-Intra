@@ -3016,23 +3016,27 @@ $qInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qS
 $qWarning = $qWarningOf($qInspect);
 brs_check(
     str_contains($qWarning, 'Putting this snapshot back whole signs out 4 accounts on their next page.') === true
-    && str_contains($qWarning, '2 accounts had a password reset, changed or set after this snapshot was taken; they sign in again with the password they had when it was taken.') === true
-    && str_contains($qWarning, '2 accounts are not in this snapshot or switched off in it, and will not be able to sign in at all afterwards.') === true
+    && str_contains($qWarning, '2 accounts have a sign-in number that differs from the snapshot\'s') === true
+    && str_contains($qWarning, 'only a password each had when the snapshot was taken will work.') === true
+    && str_contains($qWarning, '1 account is switched off in this snapshot; it cannot sign in until an administrator switches it back on.') === true
+    && str_contains($qWarning, '1 account is not in this snapshot, and cannot be used to sign in afterwards.') === true
     && str_contains($qWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
+    && str_contains($qWarning, 'Its result stays at the top of this page for seven days.') === true
     && strpos($qInspect, 'id="snapshot-sign-ins-warning"') < strpos($qInspect, 'name="action" value="restore_full"'),
-    'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out four accounts in two groups - two whose password changed (they sign in with the old one) and two not in the snapshot or switched off in it (they cannot sign in at all) - and that Rae\'s is among them',
+    'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out four accounts in three groups - two whose sign-in number differs (only the old password works), one switched off in the snapshot (cannot sign in until switched back on) and one not in it - and that Rae\'s is among them',
     $qWarning
 );
 brs_check(
-    preg_match('/data-confirm="[^"]*Anybody whose password was reset, changed or set after the snapshot was taken is signed out[^"]*cannot sign in afterwards\."[^>]*data-confirm-confirm-label="Restore all"/', $qInspect) === 1,
-    'Q4 and the Restore button\'s own confirmation box says both'
+    preg_match('/data-confirm="[^"]*Every account whose sign-in number differs from the snapshot\'s[^"]*an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on\."[^>]*data-confirm-confirm-label="Restore all"/', $qInspect) === 1,
+    'Q4 and the Restore button\'s own confirmation box says all three'
 );
 $qAnswer = bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qInspect), 'action' => 'restore_full', 'name' => $qSnapshot]);
 $qSaid   = bps_message($qAnswer['body']);
 brs_check(
     str_starts_with($qSaid, '[warning] Snapshot put back in full:') === true
     && str_contains($qSaid, 'Your own sign-in is not current in the restored database') === true
-    && str_contains($qSaid, 'with the password you had when the snapshot was taken') === true,
+    && str_contains($qSaid, 'only a password your account had when the snapshot was taken will work') === true
+    && str_contains($qSaid, 'This result stays at the top of this page for seven days.') === true,
     'Q5 DURING: the restore\'s own answer says it worked AND that Rae\'s next page will ask her to sign in again',
     $qSaid
 );
@@ -3102,8 +3106,8 @@ $qGilInspect = bps_request($qGilJar, 'GET', '/admin/maintenance/backup?inspect='
 $qGilWarning = $qWarningOf($qGilInspect);
 brs_check(
     str_contains($qGilWarning, 'signs out 1 account on their next page.') === true
-    && str_contains($qGilWarning, '1 account is not in this snapshot or switched off in it, and will not be able to sign in at all afterwards.') === true
-    && str_contains($qGilWarning, 'your account is not in this snapshot: once it is put back you will not be able to sign in with it at all') === true
+    && str_contains($qGilWarning, '1 account is not in this snapshot, and cannot be used to sign in afterwards.') === true
+    && str_contains($qGilWarning, 'your account is not in this snapshot, so once it is put back you cannot sign in with it') === true
     && str_contains($qGilWarning, 'sign in again') === false && str_contains($qGilWarning, 'asked to sign in') === false,
     'Q14 BEFORE: Gil is told that his own account is not in the snapshot and he will not be able to sign in at all - never that he will be asked to sign in again',
     $qGilWarning
@@ -3128,7 +3132,8 @@ brs_check(
 );
 $qRaeBox = $qBoxOf(bps_request($qJar, 'GET', '/admin/maintenance/backup')['body']);
 brs_check(
-    str_contains($qRaeBox, 'Snapshot ' . $qSnap2 . ' put back in full:') === true && str_contains($qRaeBox, 'names no account') === true,
+    str_contains($qRaeBox, 'Snapshot ' . $qSnap2 . ' put back in full:') === true && str_contains($qRaeBox, 'names no account') === true
+    && str_contains($qRaeBox, 'A whole restore signs out every account whose sign-in number differs') === true,
     'Q17 AFTER: Rae, another global administrator, opens the backup page and sees the result of the restore Gil ran',
     $qRaeBox
 );
@@ -3154,6 +3159,92 @@ brs_check(
 );
 bps_settle();
 brs_removeFolder($backups . '/' . $qSnap2);
+
+// Part three (#922 round 3): the administrator who restores is SWITCHED OFF in
+// the snapshot. Her account exists afterwards, so - unlike Gil's - the record
+// must NAME her (the "names nobody" path is for an account that is not there
+// at all, and widening it to her would hide her from an erasure, #626). She is
+// told before and after that she cannot sign in until switched back on, her
+// next click signs her out with no notice, and she really cannot sign in.
+Brs::$writer->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 0, 0, 1)')
+    ->execute([BPS_LATE, 'Xena Off', 'u' . BPS_LATE . '.backup@selftest.invalid']);
+Brs::$writer->prepare('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 0, 0)')->execute([BPS_LATE]);
+Brs::$writer->prepare('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)')->execute([BPS_LATE, 'selftest-backup-late', $hash]);
+$qBefore3 = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
+bps_press($qJar, ['action' => 'snapshot_now']);
+$qNew3  = array_values(array_diff(array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []), $qBefore3));
+$qSnap3 = (string) ($qNew3[0] ?? '');
+Brs::$writer->query('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ' . BPS_LATE);
+$qXenaJar = $child . '/jar-late-q.txt';
+brs_check(count($qNew3) === 1 && $qSignIn($qXenaJar, 'late') === 1, 'Q20 the premise: a third snapshot holding Xena switched off, and Xena, a global administrator switched on since, signs in', implode(', ', $qNew3));
+$qXenaInspect = bps_request($qXenaJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap3)['body'];
+$qXenaWarning = $qWarningOf($qXenaInspect);
+brs_check(
+    str_contains($qXenaWarning, '1 account is switched off in this snapshot; it cannot sign in until an administrator switches it back on.') === true
+    && str_contains($qXenaWarning, 'your account is switched off in this snapshot, so once it is put back you cannot sign in until another global administrator switches it back on') === true
+    && str_contains($qXenaWarning, 'at all') === false && str_contains($qXenaWarning, 'asked to sign in') === false,
+    'Q21 BEFORE: Xena is told her account is switched off in the snapshot and she cannot sign in until it is switched back on - never "at all", never "asked to sign in"',
+    $qXenaWarning
+);
+$qXenaSaid = bps_message(bps_request($qXenaJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qXenaInspect), 'action' => 'restore_full', 'name' => $qSnap3])['body']);
+brs_check(
+    str_starts_with($qXenaSaid, '[warning] Snapshot put back in full:') === true
+    && str_contains($qXenaSaid, 'Your own account is switched off in the restored database') === true
+    && str_contains($qXenaSaid, 'naming no account') === false,
+    'Q22 DURING: the restore\'s answer says her account is switched off in the restored database, and nothing about a record naming nobody',
+    $qXenaSaid
+);
+$qXenaLine = Brs::$writer->query("SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = 'BackupRestored' AND `logID` > "
+    . (int) $bps['logMark'] . ' ORDER BY `logID` DESC LIMIT 1')->fetch_assoc();
+brs_check(
+    (int) ($qXenaLine['userID'] ?? 0) === BPS_LATE && str_contains((string) ($qXenaLine['activityDescription'] ?? ''), 'names no account') === false,
+    'Q23 THE RECORD NAMES HER: her account exists after the restore, so the line carries her account number and does not say it names nobody',
+    json_encode($qXenaLine)
+);
+$qXenaNext  = bps_request($qXenaJar, 'GET', '/admin/maintenance/backup');
+$qXenaLogin = bps_request($qXenaJar, 'GET', '/login')['body'];
+brs_check(
+    $qXenaNext['status'] === 302 && str_contains($qXenaNext['location'], 'login') === true && str_contains($qXenaLogin, 'id="signed-out-notice"') === false
+    && $qSignIn($qXenaJar, 'late') === 0,
+    'Q24 AFTER: her next click signs her out, the sign-in page says nothing about why (a switched-off account is told nothing), and she cannot sign in',
+    'HTTP ' . $qXenaNext['status'] . ' ' . $qXenaNext['location']
+);
+$qXenaBox = $qBoxOf(bps_request($qJar, 'GET', '/admin/maintenance/backup')['body']);
+brs_check(
+    str_contains($qXenaBox, 'Snapshot ' . $qSnap3 . ' put back in full:') === true && str_contains($qXenaBox, 'by Xena Off') === true,
+    'Q25 and Rae\'s backup page shows the result "by Xena Off"',
+    $qXenaBox
+);
+bps_settle();
+brs_removeFolder($backups . '/' . $qSnap3);
+
+// A snapshot whose account list cannot be read: the warning says the general
+// sentence, the restore FAILS, and the box shows that failure WITHOUT the
+// sentence about signing people out - a failed restore changed nothing.
+$qBefore4 = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
+bps_press($qJar, ['action' => 'snapshot_now']);
+$qNew4  = array_values(array_diff(array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []), $qBefore4));
+$qSnap4 = (string) ($qNew4[0] ?? '');
+$qUsersFile = $backups . '/' . $qSnap4 . '/tblUsers.jsonl';
+$qSpoilt    = is_file($qUsersFile) === true && file_put_contents($qUsersFile, "this is not a row\n", FILE_APPEND) !== false;
+$qBadInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap4)['body'];
+$qBadWarning = $qWarningOf($qBadInspect);
+brs_check(
+    $qSpoilt === true && str_contains($qBadWarning, 'could not be worked out') === true && str_contains($qBadWarning, 'Yours may be one of them.') === true,
+    'Q26 a snapshot whose account list cannot be read: the warning says how many could not be worked out, in the general sentence',
+    $qBadWarning
+);
+$qBadSaid = bps_message(bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qBadInspect), 'action' => 'restore_full', 'name' => $qSnap4])['body']);
+$qBadPage = bps_request($qJar, 'GET', '/admin/maintenance/backup')['body'];
+$qBadBox  = preg_match('#<div class="alert alert-danger" id="last-whole-restore"[^>]*>(.*?)</div>#s', $qBadPage, $qFound) === 1 ? bps_text($qFound[1]) : '(no red box)';
+brs_check(
+    str_starts_with($qBadSaid, '[danger]') === true && str_contains($qBadBox, 'Putting snapshot ' . $qSnap4 . ' back failed') === true
+    && str_contains($qBadBox, 'nobody was signed out') === true && str_contains($qBadBox, 'signs out every account') === false,
+    'Q27 the restore fails, and the box shows the FAILED restore in red with "nobody was signed out" - never the sentence about signing accounts out',
+    $qBadSaid . ' | box: ' . $qBadBox
+);
+bps_settle();
+brs_removeFolder($backups . '/' . $qSnap4);
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

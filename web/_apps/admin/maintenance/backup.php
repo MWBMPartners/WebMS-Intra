@@ -558,24 +558,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ));
                 $flashType = $notes === '' ? 'success' : 'warning';
                 // The three ways the restorer's own sign-in can end, each its
-                // own whole sentence, because what they can do next differs:
-                // a moved number signs in again with the old password; an
-                // account switched off, or not there at all, cannot sign in.
-                // The result is kept at the top of this page for seven days
-                // (the "last whole restore" box below) in every case, read from
-                // the line just written - which for a missing account names
-                // nobody, so it is still written.
+                // own whole sentence, because what they can do next differs
+                // (#922 rounds 2-3): a moved number must sign in again and only
+                // a password the account had then will work; an account
+                // switched off cannot sign in until switched back on; an
+                // account not there cannot sign in with it. The result is kept
+                // at the top of this page for seven days (the "last whole
+                // restore" box below) in every case, read from the line just
+                // written - which for a missing account names nobody, so it is
+                // still written - but only a GLOBAL administrator can open this
+                // page, so somebody who is not one in the restored database is
+                // not told the result "stays" for them.
+                $restorerGlobal = false;
+                if ($restorerNow === Auth::SIGN_IN_NOT_CURRENT) {
+                    $globalStmt = $db->prepare('SELECT `isRootAdmin` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+                    if ($globalStmt !== false) {
+                        $restorerId = (int) ($_SESSION['user_id'] ?? 0);
+                        $globalStmt->bind_param('i', $restorerId);
+                        $globalStmt->execute();
+                        $globalRow      = $globalStmt->get_result()->fetch_assoc();
+                        $restorerGlobal = $globalRow !== null && (int) $globalRow['isRootAdmin'] === 1;
+                        $globalStmt->close();
+                    }
+                }
                 $restorerWords = [
-                    Auth::SIGN_IN_NOT_CURRENT  => ' Your own sign-in is not current in the restored database: your password was '
-                        . 'reset, changed or set after this snapshot was taken. The next page you open will ask you to sign '
-                        . 'in again, with the password you had when the snapshot was taken. This result stays at the top '
-                        . 'of this page for seven days.',
+                    Auth::SIGN_IN_NOT_CURRENT  => ' Your own sign-in is not current in the restored database: its sign-in '
+                        . 'number differs from the one you signed in under (usually because your password was reset, '
+                        . 'changed or set after this snapshot was taken). The next page you open will ask you to sign in '
+                        . 'again, and only a password your account had when the snapshot was taken will work.'
+                        . ($restorerGlobal === true
+                            ? ' This result stays at the top of this page for seven days.'
+                            : ' Your account is not a global administrator in the restored database, so you will not be '
+                              . 'able to open this page again; this result is kept here for seven days for any global '
+                              . 'administrator.'),
                     Auth::SIGN_IN_SWITCHED_OFF => ' Your own account is switched off in the restored database, so the next page '
-                        . 'you open will sign you out, and you will not be able to sign in again until another global '
-                        . 'administrator switches it back on. This result stays at the top of this page for seven days.',
+                        . 'you open will sign you out, and you cannot sign in until another global administrator switches it '
+                        . 'back on. This result is kept at the top of this page for seven days for any global administrator '
+                        . 'who signs in.',
                     Auth::SIGN_IN_NO_ACCOUNT   => ' Your own account is not in the restored database, so the next page you open '
                         . 'will sign you out and you cannot sign in with it again. This result has been recorded in the '
-                        . 'activity log naming no account, because yours is not there, and stays at the top of this page '
+                        . 'activity log naming no account, because yours is not there, and is kept at the top of this page '
                         . 'for seven days for any global administrator who signs in.',
                 ];
                 if (isset($restorerWords[$restorerNow]) === true) {
@@ -877,44 +899,66 @@ if (DbBackup::isSnapshotName($inspect) === true) {
         $signIns = $backup->signInsEndedByRestoring($inspect, (int) ($_SESSION['user_id'] ?? 0));
         // Whole sentences per case, never a clause assembled from ternaries
         // (#694's lesson): what an account can do next depends on WHY it is
-        // signed out, so the two groups are said apart (#922 round 2).
-        $accounts = static fn (int $n): string => $n === 1 ? '1 account' : $n . ' accounts';
+        // signed out, so the three groups are said apart (#922 rounds 2-3).
+        // Every sentence was checked against what the next request really does:
+        // - a moved number is NOT always a changed password (an earlier restore
+        //   can put an older number back), so the sentence says the number
+        //   differs and gives the usual cause as usual;
+        // - "signs in with the password it had" was untrue for an account that
+        //   had none then, so it says only that no OTHER password will work;
+        // - a switched-off account can sign in once switched back on, so it is
+        //   never also told it cannot sign in "at all";
+        // - the result is kept on THIS page, which only a global administrator
+        //   opens, so somebody who is not one in the snapshot is told so.
+        $accounts = static fn (int $n, string $one, string $many): string => $n === 1 ? '1 account ' . $one : $n . ' accounts ' . $many;
         if ($signIns === null) {
-            $inspectSignIns = 'Putting this snapshot back whole also puts back every account as it was when it was '
-                . 'taken. Anybody whose password has been reset, changed or set since then (you too, if yours has) is '
-                . 'signed out on their next page and signs in again with the password they had then; anybody who is '
-                . 'not in the snapshot, or is switched off in it, is signed out and cannot sign in at all. How many '
-                . 'people that is could not be worked out.';
-        } elseif ($signIns['changed'] + $signIns['cannot'] > 0) {
-            $inspectSignIns = sprintf(
-                'Putting this snapshot back whole signs out %s on their next page.',
-                $accounts($signIns['changed'] + $signIns['cannot'])
-            );
+            $inspectSignIns = 'How many accounts putting this snapshot back would sign out could not be worked out. Put back '
+                . 'whole, it signs out every account that is not in it or is switched off in it, and every account whose '
+                . 'sign-in number differs from the snapshot\'s (usually because its password was reset, changed or set '
+                . 'since); such an account must sign in again, and only a password it had when the snapshot was taken '
+                . 'will work. Yours may be one of them.';
+        } elseif ($signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'] > 0) {
+            $total          = $signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'];
+            $inspectSignIns = 'Putting this snapshot back whole signs out ' . ($total === 1 ? '1 account' : $total . ' accounts')
+                . ' on their next page.';
             if ($signIns['changed'] > 0) {
-                $inspectSignIns .= sprintf(
-                    ' %s had a password reset, changed or set after this snapshot was taken; %s in again with the '
-                    . 'password %s when it was taken.',
-                    ucfirst($accounts($signIns['changed'])),
-                    $signIns['changed'] === 1 ? 'it signs' : 'they sign',
-                    $signIns['changed'] === 1 ? 'it had' : 'they had'
-                );
+                $inspectSignIns .= ' ' . ucfirst($accounts(
+                    $signIns['changed'],
+                    'has a sign-in number that differs from the snapshot\'s (usually because its password was reset, '
+                        . 'changed or set after the snapshot was taken); it must sign in again, and only a password it had '
+                        . 'when the snapshot was taken will work.',
+                    'have a sign-in number that differs from the snapshot\'s (usually because a password was reset, '
+                        . 'changed or set after the snapshot was taken); they must sign in again, and only a password each '
+                        . 'had when the snapshot was taken will work.'
+                ));
             }
-            if ($signIns['cannot'] > 0) {
-                $inspectSignIns .= sprintf(
-                    ' %s not in this snapshot or switched off in it, and will not be able to sign in at all afterwards.',
-                    ucfirst($accounts($signIns['cannot'])) . ($signIns['cannot'] === 1 ? ' is' : ' are')
-                );
+            if ($signIns['switchedOff'] > 0) {
+                $inspectSignIns .= ' ' . ucfirst($accounts(
+                    $signIns['switchedOff'],
+                    'is switched off in this snapshot; it cannot sign in until an administrator switches it back on.',
+                    'are switched off in this snapshot; they cannot sign in until an administrator switches them back on.'
+                ));
             }
+            if ($signIns['missing'] > 0) {
+                $inspectSignIns .= ' ' . ucfirst($accounts(
+                    $signIns['missing'],
+                    'is not in this snapshot, and cannot be used to sign in afterwards.',
+                    'are not in this snapshot, and cannot be used to sign in afterwards.'
+                ));
+            }
+            $keptForYou = $signIns['youGlobalAfter'] === true
+                ? ' Its result stays at the top of this page for seven days.'
+                : ' Your account is not a global administrator in this snapshot, so you will not be able to open this '
+                  . 'page afterwards; its result is kept here for seven days for any global administrator.';
             $inspectSignIns .= match ($signIns['you']) {
                 'changed'      => ' Yours is one of them: you will be asked to sign in as soon as the restore has '
-                    . 'finished, with the password you had when the snapshot was taken, and its result stays at the top '
-                    . 'of this page for seven days.',
-                'switched_off' => ' Yours is one of them, and your account is switched off in this snapshot: once it '
-                    . 'is put back you will not be able to sign in until another global administrator switches it back '
-                    . 'on. Its result stays at the top of this page for seven days.',
-                'missing'      => ' Yours is one of them, and your account is not in this snapshot: once it is put '
-                    . 'back you will not be able to sign in with it at all. Its result stays at the top of this page for '
-                    . 'seven days for any global administrator who signs in.',
+                    . 'finished, and only a password your account had when the snapshot was taken will work.' . $keptForYou,
+                'switched_off' => ' Yours is one of them: your account is switched off in this snapshot, so once it is '
+                    . 'put back you cannot sign in until another global administrator switches it back on. Its result is '
+                    . 'kept at the top of this page for seven days for any global administrator who signs in.',
+                'missing'      => ' Yours is one of them: your account is not in this snapshot, so once it is put back '
+                    . 'you cannot sign in with it. Its result is kept at the top of this page for seven days for any '
+                    . 'global administrator who signs in.',
                 default        => '',
             };
         }
@@ -958,7 +1002,12 @@ $csrf = Auth::csrfToken();
         <strong>The last whole restore</strong>
         (<?php echo htmlspecialchars((string) $lastRestore['timestamp'], ENT_QUOTES, 'UTF-8'); ?><?php if (($lastRestore['fullName'] ?? '') !== ''): ?>, by <?php echo htmlspecialchars((string) $lastRestore['fullName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>):
         <?php echo htmlspecialchars((string) $lastRestore['activityDescription'], ENT_QUOTES, 'UTF-8'); ?>
-        <span class="d-block small mt-1">A restore signs out everybody whose password was reset, changed or set after its snapshot was taken, which is why this is kept here for seven days: it is also in the activity log.</span>
+        <?php // A FAILED restore changed nothing and signed nobody out, so it is never given the signing-out sentence (#922 round 3). ?>
+        <?php if ($lastRestore['activityType'] === 'BackupRestored'): ?>
+            <span class="d-block small mt-1">A whole restore signs out every account whose sign-in number differs from its snapshot's, and every account that is not in the snapshot or is switched off in it, which is why this is kept here for seven days. It is also in the activity log.</span>
+        <?php else: ?>
+            <span class="d-block small mt-1">Nothing was changed by it, so nobody was signed out. It is kept here for seven days, and is also in the activity log.</span>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 
@@ -1317,7 +1366,7 @@ $scheduleBadge    = $scheduleFrequency === 'off'
                 </button>
                 <span class="text-muted small ms-2">Rehearses the whole restore and changes nothing.</span>
             </form>
-            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs. Anybody whose password was reset, changed or set after the snapshot was taken is signed out, you too if yours was; anybody not in the snapshot, or switched off in it, cannot sign in afterwards." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
+            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs. Every account whose sign-in number differs from the snapshot's (usually a password changed since) is signed out, yours too if so; an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="restore_full">
                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">

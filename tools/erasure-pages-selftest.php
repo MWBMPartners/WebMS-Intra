@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 225; // #982 added M13b (an offboarding post with no
+const EXPECTED_CHECKS = 226; // #982 round 3 added M13c (a failed step is not
+                            // called a success). 226.
+                            // #982 added M13b (an offboarding post with no
                             // reason is refused in words) and #926 added B4b
                             // (Request erasure shows a member no developer
                             // note, pinned as rendered). M12 and M13 now also
@@ -3810,6 +3812,34 @@ ok('M13b a hand-made offboarding post with NO reason lands on the Users page, wh
     str_ends_with($offToBare, '/admin/users') === true && str_contains($offSaidBare, 'A reason is needed to offboard somebody. Nobody was offboarded.') === true
     && (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [UNP])['n'] === 0,
     json_encode([$offToBare, $offSaidBare]));
+
+// #982 round 3: a step that FAILS is caught, logged as ok:false and the
+// transaction still commits - and the page used to say "Their account is
+// switched off" regardless. Switching the account off is made to fail in the
+// copy the server runs (an unknown column, which is what a lock-wait timeout
+// also looks like from here), Liv - a live member of A nobody offboards
+// elsewhere - is offboarded, and the copy is put back byte for byte. The
+// premise is checked too: the account really is still switched on.
+$m13cPath     = $child . $sep . 'web' . $sep . '_apps' . $sep . 'offboarding' . $sep . 'do.php';
+$m13cOriginal = (string) file_get_contents($m13cPath);
+$m13cFrom     = "'UPDATE tblUsers SET isActive = 0 WHERE userID = ?'";
+$m13cApplied  = substr_count($m13cOriginal, $m13cFrom) === 1;
+$m13cSaid     = '(not run)';
+if ($m13cApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13cFrom, "'UPDATE tblUsers SET isActiveNoSuchColumn = 0 WHERE userID = ?'", $m13cOriginal));
+    try {
+        [, $m13cSaid] = $offboardM(LIV, 'Selftest #982 round 3');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+ok('M13c when switching the account off FAILS, the offboarding page does not say it is switched off: it says it was NOT, that they may still be able to sign in, and names the failed step - and the account really is still on (#982 round 3)',
+    $m13cApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [LIV])['isActive'] === 1
+    && str_contains($m13cSaid, 'their account was NOT switched off, so they may still be able to sign in') === true
+    && str_contains($m13cSaid, 'These steps failed: switching the account off.') === true
+    && str_contains($m13cSaid, 'Their account is switched off') === false && str_contains($m13cSaid, 'isActiveNoSuchColumn') === false,
+    ($m13cApplied === true ? 'applied' : 'NOT APPLIED') . ' | said: ' . $m13cSaid);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

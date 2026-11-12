@@ -2530,36 +2530,48 @@ class DbBackup
      * Since #598 (D-104, D-108) a browser stays signed in only while the
      * account exists, is switched on, and carries the sign-in number the
      * browser was signed in under. A whole restore puts `tblUsers` back as the
-     * snapshot held it, numbers included, so every account whose number has
-     * moved on since (a password reset, changed or set), every account not in
-     * the snapshot, and every account switched off in it, is signed out on
-     * its next page - the administrator pressing Restore included. Until #922
-     * nothing said so beforehand, and afterwards they met a sign-in page that
-     * said nothing either.
+     * snapshot held it, numbers included, so every account whose number
+     * differs from the snapshot's, every account not in the snapshot, and
+     * every account switched off in it, is signed out on its next page - the
+     * administrator pressing Restore included. Until #922 nothing said so
+     * beforehand, and afterwards they met a sign-in page that said nothing.
      *
      * Counts accounts that are switched ON now (a switched-off account has no
-     * browser to sign out) and would not be current after the restore, in TWO
-     * groups, because what they can do next differs (#922 round 2): an
-     * account whose number moved signs in again with the password it had
-     * when the snapshot was taken; an account NOT IN the snapshot, or
-     * switched OFF in it, cannot sign in at all afterwards. And it says which
-     * of those the viewer is. It reads the snapshot's `tblUsers` file through
-     * rows(), the same reader the restore itself uses, and changes nothing.
+     * browser to sign out) and would not be current after the restore, in
+     * THREE groups, because what each can do next differs (#922 rounds 2-3):
+     *   - `changed`: the number differs (usually a password reset, changed or
+     *     set since the snapshot, though an earlier restore can do it too).
+     *     It must sign in again, and only a password the account had when the
+     *     snapshot was taken works - which says nothing about whether it HAD
+     *     one, so the page never promises it can.
+     *   - `switchedOff`: switched off in the snapshot; cannot sign in until an
+     *     administrator switches it back on.
+     *   - `missing`: not in the snapshot; cannot sign in with it at all.
+     * And which of those the viewer is (`you`), and whether the viewer is a
+     * global administrator IN THE SNAPSHOT (`youGlobalAfter`), because only a
+     * global administrator can open the backup page where the result is kept.
+     * It reads the snapshot's `tblUsers` file through rows(), the same reader
+     * the restore itself uses, and changes nothing.
+     *
+     * A DATABASE STILL WAITING FOR MIGRATION 270 has no `signInVersion`, and
+     * then no browser is signed out for a moved number at all (see
+     * Auth::signInFacts()): that one error (1054) is answered by counting the
+     * other two groups only, never by giving up - so the page's "could not be
+     * worked out" sentence is said only when something really could not be
+     * read.
      *
      * WHAT IT CANNOT SAY: who is signed in at this moment (sessions are files
      * the portal does not list), so this counts ACCOUNTS whose browsers would
-     * be signed out, not browsers. And a snapshot taken before migration 270
-     * has no numbers: every account in it counts as 0, which is what the
-     * restore will write.
+     * be signed out, not browsers. A snapshot taken before migration 270 has
+     * no numbers: every account in it counts as 0, which is what the restore
+     * will write.
      *
-     * @return array{changed: int, cannot: int, you: ?string}|null Null when it
-     *         could not be worked out (the snapshot or the database could not
-     *         be read); the page then says the general sentence without a
-     *         number. `changed`: accounts whose number moved; `cannot`:
-     *         accounts not in the snapshot or switched off in it; `you`:
-     *         'changed', 'missing', 'switched_off' or null (not signed out).
-     *         All zero when the snapshot does not hold `tblUsers` at all,
-     *         because then the restore leaves it alone.
+     * @return array{changed: int, switchedOff: int, missing: int, you: ?string, youGlobalAfter: bool}|null
+     *         Null when the snapshot or the database could not be read.
+     *         `you` is 'changed', 'switched_off', 'missing' or null (not
+     *         signed out). All zero when the snapshot does not hold `tblUsers`
+     *         at all, because then the restore leaves it alone (and
+     *         `youGlobalAfter` is then true: nothing about the viewer changes).
      */
     public function signInsEndedByRestoring(string $name, int $viewerId): ?array
     {
@@ -2578,25 +2590,36 @@ class DbBackup
             }
         }
         if ($usersKey === null) {
-            return ['changed' => 0, 'cannot' => 0, 'you' => null];
+            return ['changed' => 0, 'switchedOff' => 0, 'missing' => 0, 'you' => null, 'youGlobalAfter' => true];
         }
         try {
-            // What the snapshot would put back: number and switch per account.
+            // What the snapshot would put back, per account.
             $then = [];
             foreach ($this->rows($opened['dir'], $usersKey, $opened['format']) as $row) {
                 $then[(int) ($row['userID'] ?? 0)] = [
                     'on'      => (int) ($row['isActive'] ?? 0) === 1,
                     'version' => (int) ($row['signInVersion'] ?? 0),
+                    'global'  => (int) ($row['isRootAdmin'] ?? 0) === 1,
                 ];
             }
-            // What every switched-on account carries now.
-            $result = $this->db->query('SELECT `userID`, `signInVersion` FROM `tblUsers` WHERE `isActive` = 1');
+            // What every switched-on account carries now. On a database with
+            // no `signInVersion` yet (1054, and only that), every number is
+            // treated as unchanged, because nothing compares them there.
+            $versions = true;
+            try {
+                $result = $this->db->query('SELECT `userID`, `signInVersion` FROM `tblUsers` WHERE `isActive` = 1');
+            } catch (\mysqli_sql_exception $unknownColumn) {
+                if ($unknownColumn->getCode() !== 1054) {
+                    throw $unknownColumn;
+                }
+                $versions = false;
+                $result   = $this->db->query('SELECT `userID` FROM `tblUsers` WHERE `isActive` = 1');
+            }
             if ($result === false) {
                 return null;
             }
-            $changed = 0;
-            $cannot  = 0;
-            $you     = null;
+            $counts = ['changed' => 0, 'switched_off' => 0, 'missing' => 0];
+            $you    = null;
             while ($now = $result->fetch_assoc()) {
                 $id = (int) $now['userID'];
                 // The same three outcomes Auth::signInVerdict() gives the
@@ -2606,29 +2629,30 @@ class DbBackup
                     $what = 'missing';
                 } elseif ($then[$id]['on'] === false) {
                     $what = 'switched_off';
-                } elseif ($then[$id]['version'] !== (int) $now['signInVersion']) {
+                } elseif ($versions === true && $then[$id]['version'] !== (int) $now['signInVersion']) {
                     $what = 'changed';
                 } else {
                     continue;
                 }
-                if ($what === 'changed') {
-                    $changed++;
-                } else {
-                    $cannot++;
-                }
+                $counts[$what]++;
                 if ($id === $viewerId) {
                     $you = $what;
                 }
             }
             $result->free();
         } catch (\Throwable) {
-            // A file the restore itself would refuse, or a database still
-            // waiting for migration 270 (no `signInVersion`, and so no
-            // browser is signed out for this reason at all): no number.
+            // A file the restore itself would refuse, or a database that
+            // would not answer: no number.
             return null;
         }
 
-        return ['changed' => $changed, 'cannot' => $cannot, 'you' => $you];
+        return [
+            'changed'        => $counts['changed'],
+            'switchedOff'    => $counts['switched_off'],
+            'missing'        => $counts['missing'],
+            'you'            => $you,
+            'youGlobalAfter' => ($then[$viewerId]['global'] ?? false) === true,
+        ];
     }
 
     /** The file holding one table, for the form the snapshot is in. */

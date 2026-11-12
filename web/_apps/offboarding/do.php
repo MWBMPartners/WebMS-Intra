@@ -315,10 +315,59 @@ try {
 
     $db->commit();
 
-    // Plain words (#982 round 2): this message is shown now, and it used to
-    // read "Audit row + per-step outcomes recorded".
-    $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
-    $_SESSION['flash_type'] = 'success';
+    // 🧾 What to tell the administrator is decided from what each step DID
+    //    (#982 round 3). A step that fails is caught by $run(), written into
+    //    the step log as ok:false, and the transaction still commits - so
+    //    "switched off" was said even when switching the account off had
+    //    failed (measured with a planted unknown column; a lock-wait timeout
+    //    does the same), and the person could still sign in while the page
+    //    said they could not. Only a step that really succeeded is claimed.
+    $stepWords = [
+        'deactivate_user'             => 'switching the account off',
+        'delete_webauthn'             => 'removing passkeys',
+        'clear_password_hash'         => 'removing the password',
+        'end_site_memberships'        => 'ending organisation memberships',
+        'end_leadership_assignments'  => 'ending leadership roles',
+        'end_small_group_memberships' => 'ending small-group memberships',
+        'delete_user_roles'           => 'removing roles',
+        'delete_user_groups'          => 'removing group memberships',
+        'delete_user_depts'           => 'removing department memberships',
+        'delete_linked_accounts'      => 'removing Microsoft or Google sign-in links',
+        'revoke_trusted_devices'      => 'forgetting trusted devices',
+        'delete_push_subscriptions'   => 'removing notification subscriptions',
+    ];
+    $failedSteps = [];
+    $switchedOff = false;
+    foreach ($stepsLog as $step) {
+        if (($step['ok'] ?? false) !== true) {
+            $failedSteps[] = $stepWords[(string) ($step['step'] ?? '')] ?? (string) ($step['step'] ?? 'a step');
+        } elseif (($step['step'] ?? '') === 'deactivate_user') {
+            $switchedOff = true;
+        }
+    }
+    if ($failedSteps === [] && $switchedOff === true) {
+        // Plain words (#982 round 2): this used to read "Audit row +
+        // per-step outcomes recorded".
+        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
+        $_SESSION['flash_type'] = 'success';
+    } else {
+        // The database's own words for each failure are kept in the step
+        // log and on Admin, Errors - never on the page.
+        \Portal\Core\Logger::errorPlatform(
+            'Offboarding',
+            'Error',
+            'OFFBOARD_STEP_FAILED',
+            'Offboarding account #' . $userId . ' left ' . count($failedSteps) . ' step(s) undone',
+            (string) json_encode(array_values(array_filter($stepsLog, static fn (array $step): bool => ($step['ok'] ?? false) !== true)))
+        );
+        $_SESSION['flash_msg']  = ($switchedOff === true
+                ? 'The offboarding was recorded and their account is switched off, but these steps failed: '
+                : 'The offboarding was recorded, but their account was NOT switched off, so they may still be able to '
+                  . 'sign in: switch it off on the Users page. These steps failed: ')
+            . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.'
+            . $erasureNote;
+        $_SESSION['flash_type'] = 'danger';
+    }
 } catch (\Throwable $e) {
     $db->rollback();
     \Portal\Core\Logger::errorPlatform('Offboarding', 'Critical', 'OFFBOARD_FAIL', $e->getMessage(), 'userID=' . $userId);
