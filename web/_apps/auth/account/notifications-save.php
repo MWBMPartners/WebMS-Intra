@@ -146,10 +146,11 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //    row keeps the token it already has, so unsubscribe links already sent out
 //    in earlier newsletters keep working.
 //
-//    Touched ONLY when the form that was posted DREW the choice, for THIS
-//    organisation (#875), and then ALWAYS. The page draws
-//    Newsletter::choiceShownMarker() beside the box, and
-//    Newsletter::choiceFromPost() answers null when it did not arrive.
+//    Written ONLY when the form that was posted DREW the choice, for THIS
+//    organisation, and the member MOVED the box away from how it was drawn
+//    (#875). The page draws Newsletter::choiceShownMarker() beside the box,
+//    carrying the organisation and whether the box was ticked, and
+//    Newsletter::choiceFromPost() answers null - write nothing - otherwise.
 //    - Asking whether the newsletter is on NOW decided the wrong thing both
 //      ways. A page opened while it was off has no tick box, and saved after
 //      it was switched on that read as "unticked", so a member was
@@ -158,14 +159,20 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //      box, unticked it and saved after the newsletter had been switched off
 //      was told "Preferences saved." while nothing was written, so when the
 //      newsletter came back on they were still subscribed after asking to
-//      leave. A choice the page really showed is the member's own, so it is
-//      saved whether or not the newsletter is on at that moment.
+//      leave. So a change the member made is saved whether or not the
+//      newsletter is on at that moment.
+//    - But only a CHANGE (round 4 of the check). Saving whatever an old page
+//      posted resubscribed a member who had left by a newsletter's own
+//      unsubscribe link after opening the page: the box was drawn ticked, the
+//      link stored "opted out", and the unchanged tick wrote "opted in" over
+//      it. A box left as drawn now writes nothing.
 //    - The marker also names the organisation the box was drawn for, and a
 //      marker for any other organisation changes nothing (round 2 of #875's
 //      check): this request writes the subscription of the organisation it
 //      is in NOW, which a switch in another tab can have changed.
 $newsletterOn     = (string) (App::settings()['newsletter']['enabled'] ?? '0');
 $siteId           = Site::id();
+$newsletterShown  = Newsletter::choiceShownHere($_POST, $siteId);
 $newsletterChoice = Newsletter::choiceFromPost($_POST, $siteId);
 if ($newsletterChoice !== null) {
     $optedIn      = $newsletterChoice === true ? 1 : 0;
@@ -193,7 +200,7 @@ Logger::activity('NotificationPrefsUpdated', 'User updated notification preferen
 //    show it for this organisation. One plain line says so. While the
 //    newsletter is off there is no choice on the page to speak of, and none
 //    is added.
-$_SESSION['notifications_flash']      = (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice === null)
+$_SESSION['notifications_flash']      = (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterShown === false)
     ? 'Preferences saved. Your newsletter choice was not changed, because the page you saved did not show it for this organisation. You can change it below.'
     : 'Preferences saved.';
 $_SESSION['notifications_flash_type'] = 'success';

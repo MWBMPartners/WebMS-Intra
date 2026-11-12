@@ -30,7 +30,10 @@
  *      choice is saved only from a form that DREW it, so a page opened while
  *      the newsletter was off cannot unsubscribe anybody once it is on, and
  *      a box drawn for one organisation cannot set another's choice after
- *      the member switches organisation (D14-D17, the real switch page)
+ *      the member switches organisation (D14-D17, the real switch page);
+ *      only a CHANGE to the box is written, so an old page cannot
+ *      resubscribe a member who left by a newsletter's own unsubscribe link
+ *      (D20, D21), and an opted-out member is drawn unticked (D22)
  *   E  a stored value that is valid JSON but not a set of named choices is
  *      replaced by the keys just saved, and the replacement is RECORDED — on
  *      BOTH pages
@@ -45,7 +48,7 @@
  *      shared one would let both read at once, deadlock, and lose a save
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
- *   H  THE PLANTS: sixteen faults, each put into a COPY of the code, each of
+ *   H  THE PLANTS: eighteen faults, each put into a COPY of the code, each of
  *      which must turn the check that guards it RED, and all green again after
  *
  * NOT DRIVEN: `merge()` also checks each `execute()`'s answer, so that its
@@ -956,6 +959,85 @@ check('D19 (#875, round 3) a member who saw the box and unticked it is unsubscri
     $okOnOff, $detailOnOff);
 
 /**
+ * D20-D22 (#875, round 4 of its check): an OLD page must not resubscribe a
+ * member who has since left by a newsletter's own unsubscribe link.
+ *
+ * The member is subscribed (a row, opted in, with a known unsubscribe
+ * token); the page is drawn with the newsletter ON, so the box is ticked;
+ * the newsletter is then switched OFF or left ON; the member uses the real
+ * `/unsubscribe?token=` page (it works signed out and whatever the switch
+ * says); then presses Save on the old page, box still ticked as drawn. The
+ * box was not changed, so nothing may be written: the row stays opted OUT.
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioStaleAfterLink = static function (bool $onWhenSaved) use (&$state, $db, $http, $formOn, $userId, $siteId, $fmt): array {
+    $setNewsletter = static function (string $on) use ($db): void {
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '{$on}' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+    };
+    $state['newsletterTouched'] = true;
+    $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+    $token = bin2hex(random_bytes(20));
+    $db->query("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES ({$siteId}, {$userId}, 1, '{$token}')");
+    $optedIn = static fn (): ?int => ($r = $db->query("SELECT `optedIn` FROM `tblNewsletterSubscription` WHERE `userID` = {$userId} AND `siteID` = {$siteId}")->fetch_assoc()) === null ? null : (int) $r['optedIn'];
+    try {
+        $setNewsletter('1');
+        $page   = $http('GET', '/account/notifications');
+        $form   = $formOn($page['body'], 'account/notifications/save');
+        $ticked = ($form['fields']['newsletterOptedIn'] ?? null) === '1';
+        $setNewsletter($onWhenSaved === true ? '1' : '0');
+        $link   = $http('GET', '/unsubscribe?token=' . $token);
+        $afterLink = $optedIn();
+        $answer = $http('POST', $form['action'], $form['fields']); // the old page, box left ticked
+        $final  = $optedIn();
+        $ok = $ticked === true && $link['status'] === 200 && $afterLink === 0 && $answer['status'] === 302 && $final === 0;
+        return [$ok, 'box drawn ticked: ' . ($ticked ? 'yes' : 'no') . '; unsubscribe link HTTP ' . $link['status'] . ', then optedIn ' . $fmt($afterLink)
+            . '; old page saved HTTP ' . $answer['status'] . ', then optedIn ' . $fmt($final) . ' (want 0)'];
+    } finally {
+        $setNewsletter('0');
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        $state['newsletterTouched'] = false;
+    }
+};
+[$okStaleOff, $detailStaleOff] = $scenarioStaleAfterLink(false);
+check('D20 (#875, round 4) a page drawn ticked, then the newsletter switched OFF, then the member unsubscribes by the e-mail link, then Save on the old page: they stay UNSUBSCRIBED',
+    $okStaleOff, $detailStaleOff);
+[$okStaleOn, $detailStaleOn] = $scenarioStaleAfterLink(true);
+check('D21 ...and the same with the newsletter left ON throughout (a window older than #875): they stay UNSUBSCRIBED',
+    $okStaleOn, $detailStaleOn);
+
+/**
+ * D22: a member who has opted out is DRAWN UNTICKED, with a marker saying so.
+ * Nothing else pins this, and the change rule depends on it: a page drawing
+ * every box ticked would read an unchanged box as "they unticked it".
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioDrawnUnticked = static function () use (&$state, $db, $http, $formOn, $userId, $siteId): array {
+    $state['newsletterTouched'] = true;
+    $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+    $token = bin2hex(random_bytes(20));
+    $db->query("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES ({$siteId}, {$userId}, 0, '{$token}')");
+    try {
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $body   = $http('GET', '/account/notifications')['body'];
+        $form   = $formOn($body, 'account/notifications/save');
+        $drawn  = str_contains($body, 'name="newsletterOptedIn"');
+        $ticked = array_key_exists('newsletterOptedIn', $form['fields']);
+        $marker = preg_match('/name="newsletterShown" value="([^"]*)"/', $body, $m) === 1 ? $m[1] : '(none)';
+        return [$drawn === true && $ticked === false && $marker === $siteId . ':0',
+            'box drawn: ' . ($drawn ? 'yes' : 'no') . '; ticked: ' . ($ticked ? 'yes' : 'no') . '; marker ' . $marker];
+    } finally {
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        $state['newsletterTouched'] = false;
+    }
+};
+[$okUnticked, $detailUnticked] = $scenarioDrawnUnticked();
+check('D22 a member who has opted out is drawn with the box UNTICKED, and the marker records it as drawn unticked',
+    $okUnticked, $detailUnticked);
+
+/**
  * D14-D17 (#875, round 2 of its check): a box drawn for ONE organisation must
  * never set ANOTHER organisation's newsletter choice. The save writes the
  * subscription of the organisation the request is in when it is POSTED; with
@@ -1076,7 +1158,7 @@ $scenarioOtherOrganisation = static function () use (&$state, $db, $http, $formO
 $both = ['A' => 1, 'B' => 1];
 $other = $scenarioOtherOrganisation();
 check('D14 (the premise) the organisation really is chosen per session: the page drawn in A marks the newsletter box for A, and after the real switch it marks it for B',
-    ($other['marker on A\'s page'] ?? null) === (string) $siteId && ($other['marker on B\'s page'] ?? null) === (string) $siteB, $fmt($other));
+    ($other['marker on A\'s page'] ?? null) === $siteId . ':1' && ($other['marker on B\'s page'] ?? null) === $siteB . ':1', $fmt($other));
 check('D15 a form drawn for A, posted with its own token after switching to B, is refused and changes neither subscription (the switch spent that token: measured, and true before this check existed too)',
     ($other['own token: told expired'] ?? null) === true && ($other['own token: subscriptions'] ?? null) === $both,
     $fmt([$other['own token: answer'] ?? null, $other['own token: told expired'] ?? null, $other['own token: subscriptions'] ?? null]));
@@ -1571,7 +1653,7 @@ $plants['H13 the handler no longer asking whether the newsletter box was DRAWN (
 );
 $plants['H14 the page no longer drawing the "drawn" marker beside the box turns D13 RED (unsubscribing stops working)'] = $plant(
     '_apps/auth/account/notifications.php',
-    'echo Newsletter::choiceShownMarker($siteId); ?>',
+    'echo Newsletter::choiceShownMarker($siteId, $newsletterOptedIn); ?>',
     '?>',
     static function () use ($scenarioNewsletter): array {
         $r = $scenarioNewsletter(true, true);
@@ -1581,8 +1663,8 @@ $plants['H14 the page no longer drawing the "drawn" marker beside the box turns 
 
 $plants['H15 the newsletter marker no longer naming the organisation (any marker read as "drawn") turns D16 RED: A\'s box sets B\'s choice'] = $plant(
     '_core/Newsletter.php',
-    "        if ((\$post[self::CHOICE_SHOWN_FIELD] ?? null) !== (string) \$siteId) {",
-    "        if (array_key_exists(self::CHOICE_SHOWN_FIELD, \$post) === false) {",
+    "        return in_array(\$post[self::CHOICE_SHOWN_FIELD] ?? null, [\$siteId . ':0', \$siteId . ':1'], true);",
+    "        return preg_match('/^\\\\d+:[01]\$/', (string) (\$post[self::CHOICE_SHOWN_FIELD] ?? '')) === 1;",
     static function () use ($scenarioOtherOrganisation, $signIn): array {
         $r = $scenarioOtherOrganisation();
         $signIn();
@@ -1602,12 +1684,25 @@ $plants['H16 the save asking again whether the newsletter is on NOW turns D19 RE
 );
 $plants['H17 the "not changed" sentence no longer asking whether the newsletter is on turns D18 RED: it is said about a choice the page never offered'] = $plant(
     '_apps/auth/account/notifications-save.php',
-    "\$_SESSION['notifications_flash']      = ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice === null)",
-    "\$_SESSION['notifications_flash']      = (\$newsletterChoice === null)",
+    "\$_SESSION['notifications_flash']      = ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterShown === false)",
+    "\$_SESSION['notifications_flash']      = (\$newsletterShown === false)",
     static function () use ($scenarioNewsletter): array {
         $r = $scenarioNewsletter(false, false, false);
         return [$r[0], $r[1]];
     }
+);
+
+$plants['H18 the save writing whatever an old page posted (not only a CHANGE) turns D20 RED: the link\'s unsubscribe is overwritten'] = $plant(
+    '_core/Newsletter.php',
+    "        return \$postedTick === \$drawnTicked ? null : \$postedTick;",
+    "        return \$postedTick;",
+    static fn (): array => $scenarioStaleAfterLink(false)
+);
+$plants['H19 the page drawing every box ticked turns D22 RED: an opted-out member is shown as subscribed'] = $plant(
+    '_apps/auth/account/notifications.php',
+    "<?php echo \$newsletterOptedIn === true ? 'checked' : ''; ?>>",
+    "checked>",
+    $scenarioDrawnUnticked
 );
 
 foreach ($plants as $words => $g) {
@@ -1631,6 +1726,7 @@ check('H12 with the plants removed, every scenario they broke is green again',
     && $scenarioOnlyUnsettable()[0] === true
     && $scenarioNewsletter(false, true)[0] === true && $scenarioNewsletter(true, true)[0] === true
     && $scenarioNewsletter(false, false, false)[0] === true && $scenarioNewsletter(true, true, false)[0] === true
+    && $scenarioStaleAfterLink(false)[0] === true && $scenarioStaleAfterLink(true)[0] === true && $scenarioDrawnUnticked()[0] === true
     && (static function () use ($scenarioOtherOrganisation, $signIn): bool {
         $r = $scenarioOtherOrganisation();
         $signIn();

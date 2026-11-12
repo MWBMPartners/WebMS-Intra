@@ -40,9 +40,9 @@ use mysqli;
 class Newsletter
 {
     /**
-     * 📰 The hidden field a form draws beside the newsletter choice to say
-     * "this form showed the member that choice, for THIS organisation" (#875).
-     * Its value is the organisation's number.
+     * 📰 The hidden field a form draws beside the newsletter choice (#875).
+     * Its value is "<organisation number>:<1 or 0>": the organisation the box
+     * was about, and whether the box was drawn TICKED.
      */
     public const CHOICE_SHOWN_FIELD = 'newsletterShown';
 
@@ -55,18 +55,48 @@ class Newsletter
      * NotifyPrefs::shownMarker() is printed beside each notification switch
      * (#667). It carries the number of the organisation whose newsletter the
      * box was about, because a subscription belongs to one organisation and
-     * the tick box says nothing about which.
+     * the tick box says nothing about which; and whether the box was drawn
+     * ticked, so the save can tell what the member CHANGED (see
+     * choiceFromPost()).
+     *
+     * @param int  $siteId      The organisation the box is about.
+     * @param bool $drawnTicked Whether the box is drawn ticked (subscribed).
      */
-    public static function choiceShownMarker(int $siteId): string
+    public static function choiceShownMarker(int $siteId, bool $drawnTicked): string
     {
-        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="' . $siteId . '">';
+        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="' . $siteId . ':' . ($drawnTicked === true ? '1' : '0') . '">';
     }
 
     /**
-     * 📰 What a posted form asks for the member's newsletter choice in
-     * organisation `$siteId` (#875): true (stay subscribed, or subscribe),
-     * false (unsubscribe), or NULL - "change nothing" - when the form never
-     * showed the choice FOR THAT ORGANISATION.
+     * 📰 Did the posted form show the newsletter choice for organisation
+     * `$siteId`? True only when the marker arrived naming THAT organisation
+     * (#875). The save uses this to say, truthfully, when the choice was left
+     * alone because the page never showed it.
+     *
+     * WHY THE ORGANISATION (round 2 of #875's check). The save writes the
+     * subscription of the organisation the request is in when it is POSTED,
+     * which need not be the one the page was drawn for: with the organisation
+     * chosen per session, a member can switch organisation in another tab. A
+     * box drawn for one organisation must never set another's choice. Through
+     * the real switch page the open form's token is also spent by the switch,
+     * so that post is refused before it gets here (measured, section D of
+     * tools/notify-prefs-selftest.php); this is the second line, and it does
+     * not depend on how the form token is handled.
+     *
+     * @param array<string,mixed> $post Normally `$_POST`.
+     */
+    public static function choiceShownHere(array $post, int $siteId): bool
+    {
+        return in_array($post[self::CHOICE_SHOWN_FIELD] ?? null, [$siteId . ':0', $siteId . ':1'], true);
+    }
+
+    /**
+     * 📰 What a posted form asks to WRITE for the member's newsletter choice
+     * in organisation `$siteId` (#875): true (subscribe), false (unsubscribe),
+     * or NULL - write nothing.
+     *
+     * NULL when the form did not show the choice for this organisation
+     * (choiceShownHere()), AND when the member left the box as it was drawn.
      *
      * WHY THE MARKER AND NOT THE TICK BOX. An unticked box is not sent at
      * all, so "the box did not arrive" is the same post as "the box was never
@@ -75,16 +105,18 @@ class Newsletter
      * switched ON wrote "opted out" for a member who was never shown a
      * choice. Ask whether the field ARRIVED, never what it contains (#677).
      *
-     * WHY THE ORGANISATION (round 2 of #875's check). The save writes the
-     * subscription of the organisation the request is in when it is POSTED,
-     * which need not be the one the page was drawn for: with the organisation
-     * chosen per session, a member can switch organisation in another tab. A
-     * box drawn for one organisation must never set another's choice, so a
-     * marker naming any other organisation answers null. Through the real
-     * switch page the open form's token is also spent by the switch, so that
-     * post is refused before it gets here (measured, section D of
-     * tools/notify-prefs-selftest.php); this is the second line, and it does
-     * not depend on how the form token is handled.
+     * WHY ONLY A CHANGE (round 4 of the check). The page can be stale. A
+     * member opens it while subscribed (the box drawn ticked), then leaves by
+     * the link at the bottom of a newsletter, which works signed out and
+     * stores "opted out"; then presses Save on the old tab. Writing what the
+     * old page posted put them back on the list they had just left - while
+     * the newsletter was on (a window older than #875) and, since round 3
+     * saved a shown choice whatever the switch said, while it was off too. So
+     * a choice is written only where the member moved the box away from what
+     * the page drew: an untick of a ticked box is always written, and so is a
+     * tick of an unticked one, and a box left as drawn writes nothing. What
+     * is lost is only the case where nothing was asked: a page left as drawn
+     * does not re-assert the old value over a newer one.
      *
      * EXACTLY '1' is a tick, nothing looser, as NotifyPrefs::changesFromPost()
      * decided for the switches.
@@ -94,11 +126,15 @@ class Newsletter
      */
     public static function choiceFromPost(array $post, int $siteId): ?bool
     {
-        if (($post[self::CHOICE_SHOWN_FIELD] ?? null) !== (string) $siteId) {
+        if (self::choiceShownHere($post, $siteId) === false) {
             return null;
         }
+        // The organisation was settled by choiceShownHere() just above, which is
+        // the ONE place it is judged; this reads only the "drawn ticked" half.
+        $drawnTicked = str_ends_with((string) $post[self::CHOICE_SHOWN_FIELD], ':1');
+        $postedTick  = ($post[self::CHOICE_FIELD] ?? null) === '1';
 
-        return ($post[self::CHOICE_FIELD] ?? null) === '1';
+        return $postedTick === $drawnTicked ? null : $postedTick;
     }
 
     /**
