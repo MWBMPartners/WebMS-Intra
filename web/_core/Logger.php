@@ -370,7 +370,7 @@ class Logger
         return null;
     }
 
-    public static function activity(string $type, string $description = '', ?int $userId = null, bool $namesNobody = false): void
+    public static function activity(string $type, string $description = '', ?int $userId = null): void
     {
         // Declared before the try so the fallback line below can use whatever
         // had been worked out before anything failed.
@@ -464,22 +464,8 @@ class Logger
             //      every record of somebody signed in as themselves.
             //    - It does nothing when there is no session, so a failed
             //      sign-in still names nobody.
-            if ($userId === null && $namesNobody === false && $sessionFacts !== null && $sessionFacts['userID'] !== null) {
+            if ($userId === null && $sessionFacts !== null && $sessionFacts['userID'] !== null) {
                 $userId = (int) $sessionFacts['userID'];
-            }
-            // 🚫 `$namesNobody` (#922): the ONE case where a signed-in request
-            //    must write a record naming no account, because the account
-            //    the session names is NOT IN THE DATABASE any more - a
-            //    whole-database restore of a snapshot taken before that
-            //    account existed, run by that very account. The column is
-            //    linked to tblUsers, so naming it would be REFUSED and the
-            //    record would reach only PHP's error log, which is how the
-            //    result of such a restore was lost (measured, #922 round 2).
-            //    The caller says so in the description instead. Never pass
-            //    it for an account that exists: that would hide the person
-            //    from an erasure (#626).
-            if ($namesNobody === true) {
-                $userId = null;
             }
 
             // 🌐 Include siteID for multi-site context
@@ -510,12 +496,19 @@ class Logger
     }
 
     /**
-     * 🕶️ An activity record that NAMES NOBODY, on purpose (#988).
+     * 🕶️ An activity record that NAMES NOBODY, on purpose (#988, #922).
      *
-     * For a page that PROMISES the person sending it that what they send is
-     * anonymous, and for nothing else. Today that is one handler:
+     * For two purposes and nothing else: ANONYMITY (#988), or an account that
+     * is NOT IN THE DATABASE (#922). Anonymity: a page that PROMISES the person
+     * sending it that what they send is anonymous - today one handler,
      * `prayer-requests/anonymous-save.php`, and the one record it causes
      * elsewhere (`PrayerChain::maybeAutoAssign()` for an anonymous request).
+     * An account not in the database: a whole-database restore run by an
+     * administrator whose account is not in the snapshot
+     * (`admin/maintenance/backup.php`, one call) - the session still names
+     * them, but the record's account column is linked to tblUsers, so naming
+     * them would be refused and the line would reach only PHP's error log.
+     * That line says in its own words which account ran it.
      * `tools/audit-checks/check_activity_naming_nobody.py` names every caller
      * and fails when one is added or taken away without the list changing.
      *

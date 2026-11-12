@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-An activity record that names nobody is written ONLY where a page promises
-anonymity (#988).
+An activity record that names nobody is written ONLY for anonymity (#988), or
+for an account that is not in the database (#922).
 
 Path: tools/audit-checks/check_activity_naming_nobody.py
 
@@ -20,7 +20,10 @@ deliberate way out - it leaves the account, the session's fingerprint and facts,
 the network address, the browser name and the headers all empty.
 
 That makes it a way to write a record nobody can be held to, so it is used only
-where a page PROMISES the person anonymity. This check names every file that
+where a page PROMISES the person anonymity (#988), or where the account the
+session names is not in the database at all, so a record naming it would be
+refused (#922: a whole restore run by an administrator who is not in the
+snapshot). This check names every file that
 calls it and how many times, and fails BOTH WAYS: a call in a file not on the
 list (somebody reaching for it to keep an action off the record), and a listed
 file whose count has changed (a promise quietly dropped, or a new record added
@@ -56,7 +59,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 
 METHOD = "activityNamingNobody"
 
-# File (relative to web/) -> (number of calls, why anonymity is promised there).
+# File (relative to web/) -> (number of calls, and why: anonymity promised there, or an account not in the database).
 ON_PURPOSE = {
     "_apps/prayer-requests/anonymous-save.php": (
         4,
@@ -65,6 +68,11 @@ ON_PURPOSE = {
     "_core/PrayerChain.php": (
         1,
         "the automatic assignment of a request sent through the anonymous form, which runs inside the sender's request (#988)",
+    ),
+    "_apps/admin/maintenance/backup.php": (
+        1,
+        "a whole restore run by an administrator whose account is not in the restored database: naming it would be "
+        "refused by the account link, so the line names nobody and says in its words which account ran it (#922)",
     ),
 }
 
@@ -119,7 +127,8 @@ def problems(web: str) -> list[str]:
         if rel not in ON_PURPOSE:
             wrong.append(
                 f"{rel} calls Logger::{METHOD}() {count} time(s), and is not on ON_PURPOSE. A record that names nobody "
-                "is only for a page that promises the person anonymity; if this one does, add it with the reason."
+                "is only for anonymity (#988) or an account that is not in the database (#922); if this is one of "
+                "those, add it with the reason."
             )
     for rel, (expected, _why) in sorted(ON_PURPOSE.items()):
         got = found.get(rel, 0)
@@ -252,8 +261,8 @@ def main() -> int:
             print(f"FAIL: {line}")
         return 1
     total = sum(n for n, _ in ON_PURPOSE.values())
-    print(f"OK: Logger::{METHOD}() is called {total} time(s), only in the {len(ON_PURPOSE)} file(s) that promise "
-          "anonymity, and still writes the account and the browser columns as empty. (A presence check: see this "
+    print(f"OK: Logger::{METHOD}() is called {total} time(s), only in the {len(ON_PURPOSE)} file(s) listed for "
+          "anonymity (#988) or an account not in the database (#922), and still writes the account and the browser columns as empty. (A presence check: see this "
           "file's header for what it cannot see.)")
     return 0
 

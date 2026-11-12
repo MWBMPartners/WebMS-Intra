@@ -342,19 +342,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    a restore, so it lands in the restored activity log and is not
         //    wiped by it.
         //
-        //    `$namesNobody` (#922 round 2): after a whole restore the person who
-        //    pressed it may not be IN the restored database. Their number in
-        //    the line's account column would then be refused by its link to
-        //    tblUsers and the line would reach only PHP's error log - so the
-        //    restore's result was lost. Such a line names no account and says
-        //    why in its own words.
+        //    `$namesNobody` (#922): after a whole restore the person who pressed
+        //    it may not be IN the restored database. Their number in the line's
+        //    account column would then be refused by its link to tblUsers and
+        //    the line would reach only PHP's error log - so the restore's
+        //    result was lost. Such a line goes through
+        //    Logger::activityNamingNobody() (#988's method, whose gate lists
+        //    this file for exactly one call) and says in its own words which
+        //    account ran it. That method also leaves out the network address,
+        //    the browser and the session's details: intended here, for a line
+        //    about an account that no longer exists - the number in the words
+        //    is all that is kept of who pressed the button.
         $record = static function (string $type, string $what, bool $namesNobody = false): void {
-            Logger::activity(
-                $type,
-                $what,
-                $namesNobody === false && isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null,
-                $namesNobody
-            );
+            if ($namesNobody === true) {
+                Logger::activityNamingNobody($type, $what);
+
+                return;
+            }
+            Logger::activity($type, $what, isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null);
         };
         // Added to the message when the portal could not be put back as found.
         $stillClosed = ' The portal could not be reopened automatically and is still closed to everyone '

@@ -3768,7 +3768,7 @@ $livAtB     = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userI
 $saidLivRm  = $siteUsersM('remove', LIV);
 $livAtBNow  = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [LIV, ORG_B])['n'];
 ok('M11 CONTROL: the same page still adds a LIVE account to the organisation, and removes it again (#977)',
-    $livAtB === 1 && $livAtBNow === 0 && str_contains($saidLivAdd, 'User added to site.') === true && str_contains($saidLivRm, 'User removed from site.') === true,
+    $livAtB === 1 && $livAtBNow === 0 && str_contains($saidLivAdd, 'User added to the organisation.') === true && str_contains($saidLivRm, 'User removed from the organisation.') === true,
     json_encode([$livAtB, $livAtBNow, $saidLivAdd, $saidLivRm]));
 
 // Offboarding: the page offers no form for the erased account and says why,
