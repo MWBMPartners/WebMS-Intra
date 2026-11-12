@@ -34,11 +34,38 @@
  *   Geocoder::autoEnabled()                            -> bool
  *   Geocoder::testConnection()                         -> array{success,message}
  *
+ * ONE SHAPE FOR A FORWARD ANSWER, BUILT IN ONE PLACE (#1034, 12 November 2026).
+ * A forward answer is built ONLY by `answer()`, whichever way it arrives — the
+ * Google leg, the Nominatim leg, or the cache — so a fresh answer and a cached
+ * one cannot differ in shape. `answer()` returns null for anything that is not
+ * a real position, and every caller already treats null as "no answer".
+ *
+ * What #1033 claimed, and what was measured instead. #1033 said a FRESH
+ * answer carried only `formatted` and `source`, so the first live look-up
+ * stored an empty position. That is not so, and #1033 was closed: driven
+ * against a stand-in for each provider, a fresh answer from both legs carried
+ * `lat` and `lng`, and a venue saved with automatic look-up on stored it. The
+ * shape #1033 described is `reverse()`'s, a different method.
+ * What WAS wrong (#1034), measured over HTTP with `tools/geocoder-selftest.php`
+ * on the code before this change: the provider's coordinates were turned into
+ * numbers with `(float)` and never checked. A `lat` that was empty or not a
+ * number became 0,0 — a real place, in the Gulf of Guinea — and a saved venue
+ * stored 0,0; a latitude of 95 was stored as given; `1e999` became infinity,
+ * which `/geo/lookup` could not even encode as JSON. Each was also written to
+ * the cache, which is asked first for ever after, and a bad Google answer did
+ * not fall through to Nominatim because it was not null. A cache row with no
+ * coordinates (only possible by hand) came back as 0,0 too. All now come back
+ * as "no answer". (The event, organisation and small-group savers take the
+ * same answer as the venue; they were read, not driven.)
+ *
+ * The forward cache key also carries the country a look-up is limited to
+ * (#1035); see forwardKeyText(), which says what that did to old rows.
+ *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/456
  * -----------------------------------------------------------------------------
  */
@@ -78,7 +105,12 @@ class Geocoder
             return null;
         }
 
-        $hash = self::cacheKey('forward', $address);
+        // 🌍 The country the look-up is limited to is PART OF THE KEY (#1035).
+        //    It used to be left out, so "Springfield" limited to the US and
+        //    "Springfield" limited to Great Britain shared one cached answer,
+        //    and whichever was asked second was given the first one's place —
+        //    for ever, because the cache is asked first. See forwardKeyText().
+        $hash = self::cacheKey('forward', self::forwardKeyText($address, $countryCode));
         $cached = self::cacheGet($hash);
         if ($cached !== null) {
             return $cached;
@@ -95,8 +127,9 @@ class Geocoder
             return null;
         }
 
-        $result['lat'] = round($result['lat'], 7);
-        $result['lng'] = round($result['lng'], 7);
+        // 📐 Both legs built `$result` through answer(), which has already
+        //    checked and rounded the position, so there is nothing to tidy here
+        //    and nothing unchecked reaches the cache.
         self::cachePut($hash, 'forward', $address, $result['lat'], $result['lng'], $result['formatted'], $result['source']);
         return $result;
     }
@@ -243,12 +276,9 @@ class Geocoder
             return null;
         }
 
-        return [
-            'lat'       => (float) $location['lat'],
-            'lng'       => (float) $location['lng'],
-            'formatted' => $formatted !== '' ? $formatted : null,
-            'source'    => 'google',
-        ];
+        // 📐 answer() judges the position; it used to be `(float)` here, which
+        //    turned anything that was not a number into 0,0 (#1034).
+        return self::answer($location['lat'], $location['lng'], $formatted !== '' ? $formatted : null, 'google');
     }
 
     /* ====================================================================== */
@@ -326,11 +356,61 @@ class Geocoder
             return null;
         }
 
+        // 📐 Nominatim sends its numbers as TEXT ("52.2053"), so `(float)` here
+        //    turned an empty or garbled field into 0,0 (#1034). answer() asks
+        //    whether it is a number at all before it asks whether it is in range.
+        return self::answer(
+            $first['lat'],
+            $first['lon'],
+            isset($first['display_name']) === true ? (string) $first['display_name'] : null,
+            'nominatim'
+        );
+    }
+
+    /**
+     * 📐 The ONE place a forward answer is built (#1034) — from either
+     * provider or from the cache — so the three cannot differ in shape.
+     *
+     * Returns null, meaning "no answer", unless both coordinates are numbers
+     * (an int, a float, or numeric text) and on the Earth: latitude
+     * -90 to 90, longitude -180 to 180. Exactly 0,0 IS accepted: it is a real
+     * place, and refusing it would be a rule about one point rather than about
+     * what a position is. What is refused is anything that only BECOMES 0,0 by
+     * being forced into a number — which is how the old `(float)` produced it.
+     *
+     * Why not `GeoLocation::validateCoords()`: that casts with `(float)` before
+     * it checks the range, so `'abc'` passes it as 0. It is right for what a
+     * person typed into a form, where an empty box is caught first; it is not
+     * enough for text a third party's server sent.
+     *
+     * @return array{lat: float, lng: float, formatted: ?string, source: string}|null
+     */
+    private static function answer(mixed $lat, mixed $lng, ?string $formatted, string $source): ?array
+    {
+        foreach ([$lat, $lng] as $part) {
+            // `is_numeric()` is true for an int, a float, or text that reads
+            // wholly as a number; false for '', null, 'abc', an array, a bool.
+            if (is_numeric($part) === false) {
+                return null;
+            }
+        }
+        $latF = (float) $lat;
+        $lngF = (float) $lng;
+        // '1e999' is numeric text and becomes INF, which this range test
+        // refuses (INF > 90). A separate is_finite() test was written first
+        // and deleted: planted out, the self-test stayed green, because NaN —
+        // the one value a range test lets through — cannot come from numeric
+        // text or from JSON, and a guard nothing can tell from its absence is
+        // not a guard.
+        if ($latF < -90.0 || $latF > 90.0 || $lngF < -180.0 || $lngF > 180.0) {
+            return null;
+        }
+
         return [
-            'lat'       => (float) $first['lat'],
-            'lng'       => (float) $first['lon'],
-            'formatted' => isset($first['display_name']) === true ? (string) $first['display_name'] : null,
-            'source'    => 'nominatim',
+            'lat'       => round($latF, 7),
+            'lng'       => round($lngF, 7),
+            'formatted' => $formatted,
+            'source'    => $source,
         ];
     }
 
@@ -385,6 +465,58 @@ class Geocoder
     }
 
     /**
+     * 🌍 What a FORWARD look-up's cache key is made from (#1035): the country
+     * it was limited to and the address, as a two-item JSON list —
+     * `["gb","1 high street"]`, or `["","1 high street"]` when it was not
+     * limited to any country.
+     *
+     * Nothing is tidied here. `cacheKey()` lower-cases the whole text, so
+     * `GB` and `gb` already share one row (Nominatim reads its `countrycodes`
+     * the same whatever the case). `JSON_UNESCAPED_UNICODE` keeps `É` as a
+     * letter rather than an escape, so that lower-casing folds it to `é` as it
+     * always did. A version that ALSO trimmed and lower-cased the country here
+     * was written first and taken out: planted back to the untidied form, the
+     * self-test stayed green, because `/geo/lookup` trims what it is sent and
+     * `cacheKey()` does the rest — a step nothing can tell from its absence.
+     * The country is not otherwise judged: the look-up is sent exactly as
+     * before, and what was asked is what the row is filed under.
+     *
+     * WHY A JSON LIST AND NOT `country|address`. With a plain separator a
+     * country of `x|y` and an address `a` would give the same text as a
+     * country of `x` and an address `y|a` — two different questions sent to
+     * the provider, one cached answer. A JSON list cannot be read two ways.
+     *
+     * WHAT THIS DID TO ROWS ALREADY CACHED. Every forward row written before
+     * #1035 was filed under `"<address>"` alone, and a key built here equals
+     * one of those only if somebody once typed an address that was itself
+     * such a JSON list, so every old forward row becomes a MISS: the address
+     * is asked of the provider once more and filed under its new key. That
+     * was chosen over keeping the old rows for look-ups with no country,
+     * because an old row cannot say whether it was written by a limited
+     * look-up — keeping them would keep exactly the wrong answers #1035 is
+     * about. The old rows are not deleted (nothing here removes cache rows);
+     * they stay in the table unused. Reverse rows are untouched. No
+     * installation existed when this changed (D-135), so in practice there
+     * were no such rows.
+     *
+     * The column comment on `tblGeocodeCache.queryHash` ("sha256(direction |
+     * lowercased query text)") still reads true if "query text" is taken to
+     * be this text; `queryText` itself still stores the address alone.
+     */
+    private static function forwardKeyText(string $address, ?string $countryCode): string
+    {
+        $country = $countryCode ?? '';
+        $text = json_encode(
+            [$country, $address],
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+        );
+
+        // json_encode() answers false only for text it cannot encode, which the
+        // SUBSTITUTE flag rules out; this keeps the key well defined if not.
+        return $text !== false ? $text : '["' . bin2hex($country) . '","' . bin2hex($address) . '"]';
+    }
+
+    /**
      * @return array{lat: float, lng: float, formatted: ?string, source: string}|null
      */
     private static function cacheGet(string $hash): ?array
@@ -410,12 +542,20 @@ class Geocoder
                 $upd->close();
             }
 
-            return [
-                'lat'       => $row['latitude'] !== null ? round((float) $row['latitude'], 7) : 0.0,
-                'lng'       => $row['longitude'] !== null ? round((float) $row['longitude'], 7) : 0.0,
-                'formatted' => $row['formatted'] !== null ? (string) $row['formatted'] : null,
-                'source'    => (string) $row['provider'],
-            ];
+            // 📐 Built by answer(), the same as a fresh answer (#1034). A row
+            //    with no coordinates used to come back as 0,0; it now reads as
+            //    a miss, so the provider is asked again and the row is
+            //    overwritten by cachePut()'s ON DUPLICATE KEY UPDATE. The same
+            //    is true of a row written before #1034 holding a position off
+            //    the Earth. reverse() also reads here; the rows it writes carry
+            //    the coordinates it was asked about, already checked, so it is
+            //    unaffected.
+            return self::answer(
+                $row['latitude'],
+                $row['longitude'],
+                $row['formatted'] !== null ? (string) $row['formatted'] : null,
+                (string) $row['provider']
+            );
         } catch (\Throwable $e) {
             return null;
         }
