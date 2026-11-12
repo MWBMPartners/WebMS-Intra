@@ -341,7 +341,11 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     //    as the organisation's currency is told it is not read as that currency
     //    here, and to convert rather than relabel (rounds 10-12), naming no
     //    other currency; every other start, an unrecognised sign included, is
-    //    "That amount could not be read." with what IS read. The rows are
+    //    "That amount could not be read." with what IS read. An asset cost
+    //    cannot be negative, so every refusal of a cell that may be written as
+    //    a negative (Currency::mayMeanNegative(): a minus or dash anywhere, a
+    //    figure in brackets, a DR suffix) also ends "Amounts here cannot be
+    //    negative." (rounds 18-19). The rows are
     //    made in the organisation's currency, so that is the one passed. It used to strip
     //    "£", "$", "€", every comma and every space and go through a float, so
     //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure
