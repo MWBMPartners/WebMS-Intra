@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Address look-ups store only real positions, cached per country (#1034, #1035)
+
+- Geocoding (#1034): a map position from Google or OpenStreetMap that is empty, not a number, or not
+  on the Earth is now treated as "no answer". It used to be stored as 0,0 (a real place in the Gulf of
+  Guinea) or as given on the venue, event, organisation or small group, and cached for ever. A cached
+  row with no position is now asked again rather than read as 0,0. A bad Google answer now falls
+  through to OpenStreetMap.
+- Geocoding (#1035): the cache now keeps a separate answer for each country a look-up is limited to.
+  "Springfield" limited to the US and to Great Britain used to share one cached place. Answers cached
+  before this change are asked once more.
+- Geocoding (#1034, round 3): "Test connection" on Admin, Integrations, Geocoding now really asks the providers (it skips reading the cache, and still keeps the fresh answer), and the page no longer says it converts coordinates back to an address or that Nominatim calls are always a second apart.
+
+### Queued mail through Microsoft 365 or Google, and a refused bot check on the anonymous form (#1006, #1017)
+
+- **Fixed — a waiting message sent later through Microsoft 365 or Google is recorded under its own
+  organisation (#1006).** The two routes wrote their send-log line under whichever organisation the
+  scheduled job happened to be working in, so an erasure that finds sent mail by organisation
+  (an e-mail address request) could miss it. The help page's limit about this is gone.
+- **Fixed — a refused reCAPTCHA v3 check on the anonymous prayer form names nobody (#1017).** Its
+  record no longer carries the signed-in member's account, network address, browser or session,
+  matching the form's own records (#988). Every other form's record is unchanged.
+
 ### Events and outside calendars: five faults a member or administrator would see (#885, #853, #854, #855, #811; D-180)
 
 - The events API refuses a category or event type that is not the organisation's own with 422 and a plain reason,
@@ -157,8 +179,8 @@
 - It touches no account (not even a member's using the same address) and nothing at another organisation (D-150),
   except a send-log row recorded under no organisation. The visitor is not e-mailed (D-149). Nothing is cleared
   automatically (D-140).
-- Limits, stated on the help page and in the policy: a queued copy later sent through Microsoft 365 or Google is
-  logged under the wrong organisation and is not reached (#1006); an Errors line quoting the address is deleted only
+- Limits, stated on the help page and in the policy: a queued copy later sent through Microsoft 365 or Google was
+  logged under the wrong organisation and not reached — fixed by #1006, except for rows written before it; an Errors line quoting the address is deleted only
   by the retention clear-out; an approval pressed while the request runs can still leave one row, cleared by a
   fresh request. Follow-ups #1006-#1010. Codex has not reviewed this.
 

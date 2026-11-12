@@ -260,6 +260,7 @@ htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
 currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
 assets-api-update|tools/assets-api-update-selftest.php|selftest_assetsapi|SELFTEST_WEB_PORT=9101
+geocoder|tools/geocoder-selftest.php|selftest_geocoder|SELFTEST_WEB_PORT=9871
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 activity-description|tools/activity-description-selftest.php|selftest_actdesc|web:activity-description SELFTEST_WEB_PORT=9933

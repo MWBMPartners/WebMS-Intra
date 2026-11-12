@@ -23796,8 +23796,9 @@ still read under the lock, and only an administrator with the form token can sen
   `gdpr-coverage-selftest.php` fails both ways.
 - Filing takes a required note (D-148), kept in the sealed audit trail; a filing that loses a deadlock (1213) is tried
   once more (untested, #1010).
-- Known limit: a queued approval e-mail later sent by the scheduled job through Microsoft 365 or Google is logged under
-  whichever organisation the job was working in (#1006), so such a send-log row is not reached.
+- Former limit, fixed by #1006: a queued approval e-mail later sent by the scheduled job through Microsoft 365 or Google
+  was logged under whichever organisation the job was working in, so such a send-log row was not reached. Rows written
+  before #1006 still may be.
 - Test: section N of `tools/erasure-pages-selftest.php` (it loads the real form, N3a), section 24 of
   `tools/gdpr-coverage-selftest.php`.
 
@@ -24085,3 +24086,27 @@ thought of.
   newsletter is switched on at that moment. A box left as drawn writes nothing, so an old page
   cannot resubscribe somebody who left by a newsletter's own unsubscribe link. #677's rule (ask whether
   a field ARRIVED) and #667's marker shape, for the one choice not stored in `tblUsers.notifyPrefs`.
+
+## Address look-ups: real positions, a cache per country (#1034, #1035)
+
+- `(float)` on a third party's coordinate turns garbage into 0,0, which is a real place: ask
+  `is_numeric()` first. `GeoLocation::validateCoords()` casts before it checks, so it is right for a
+  form and wrong for a provider.
+- A cache key must hold every input that changes the answer. Build it as a JSON list rather than
+  joining with a separator, which can be read two ways.
+- The geocoder test points a COPY of the class at a stand-in rather than giving the portal a setting
+  to redirect look-ups, which would be a way to send members' addresses to somebody else's server.
+
+## Queued mail logged under its own organisation; anonymous bot-check refusals (#1006, #1017)
+
+**A queued message's send-log line takes the ROW's organisation, whichever route writes it (#1006).**
+`Mailer::queueRowSite()` is the one place; Microsoft 365 and Google write their own line and are
+now handed it (`sendViaGraph()`/`MailerGoogle::send()`'s last argument, default `false` = this
+request's). The fallback from Microsoft to Google passes it on.
+**A bot-check refusal on a form that promises anonymity names nobody (#1017).**
+`Captcha::PROMISES_ANONYMITY` is the one list, `Captcha::recordV3Refusal()` the one writer;
+`check_activity_naming_nobody.py` pins the list whole.
+**Testing outside HTTPS services: `tools/https-standin.php`.** A proxy that answers for named hosts
+itself (its own authority), refuses all others, never forwards. Give the portal's server BOTH
+`openssl.cafile` and `curl.cainfo` — PHP's curl reads the first and ignores the second when it is
+set (measured, PHP 8.5.12) — and `https_proxy`; `tools/https-standin-client.php` does all three.

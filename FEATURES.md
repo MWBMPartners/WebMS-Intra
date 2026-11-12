@@ -1351,6 +1351,9 @@ another repo, ever**.
   order-reversing characters removed (#972, #1020)."
 - Mail: "A plain message is told from HTML by real HTML elements only (`Mailer::looksLikeHtml()`,
   #971), and plain-text senders say so; event broadcasts carry the organisation's footer."
+- Address look-ups: Fresh, cached and both providers' answers are built in one
+place (`Geocoder::answer()`) and must be a real position; the cache is kept per country
+(#1034, #1035). Test: `tools/geocoder-selftest.php`.
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 

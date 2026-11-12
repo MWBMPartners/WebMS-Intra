@@ -4099,10 +4099,19 @@ ok(
 );
 // P17i/P17j: the automatic address look-up switched ON. No request leaves this
 // machine: Geocoder::forward() answers from tblGeocodeCache first, so the
-// answer for this address is put there by hand (the key is the same hash the
-// class makes: sha256 of "forward|" and the address in lower case).
+// answer for this address is put there by hand. The key is ASKED of the class
+// itself (its private forwardKeyText() and cacheKey(), through reflection),
+// never rebuilt here: #1035 made the forward key the country AND the address,
+// and a copy of the old formula in this file silently stopped matching, so the
+// look-up missed the cache and P17j failed for a reason that had nothing to do
+// with #945. The page passes the posted country, "GB".
 $geoAddress = 'Selftest 945 lookup';
-$geoHash    = hash('sha256', 'forward|' . mb_strtolower($geoAddress));
+require_once __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Geocoder.php';
+$geoHash    = (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'cacheKey'))->invoke(
+    null,
+    'forward',
+    (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $geoAddress, 'GB')
+);
 q('DELETE FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash]);
 q("INSERT INTO tblGeocodeCache (queryHash, direction, queryText, latitude, longitude, formatted, provider) VALUES (?, 'forward', ?, 12.3456789, 45.6, NULL, 'selftest')", 'ss', [$geoHash, $geoAddress]);
 setting('geo.autoGeocode', 'true');

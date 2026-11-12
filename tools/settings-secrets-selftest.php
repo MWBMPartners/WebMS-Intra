@@ -1854,7 +1854,11 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webSrc, F
     }
 }
 ksort($callSites);
-$letThrough = array_keys(array_filter($callSites, static fn (string $form): bool => str_starts_with($form, 'Captcha::FOR_') === true));
+// The let-through kind is exactly the two constants Captcha::verify() compares
+// with (FOR_SIGN_IN, FOR_PASSWORD_RESET). Judging by the "Captcha::FOR_" prefix
+// stopped being right when #1017 gave the anonymous prayer form its own constant
+// (FOR_ANONYMOUS_PRAYER_REQUEST), which is NOT let through.
+$letThrough = array_keys(array_filter($callSites, static fn (string $form): bool => in_array($form, ['Captcha::FOR_SIGN_IN', 'Captcha::FOR_PASSWORD_RESET'], true) === true));
 ok(
     'All ' . count($callSites) . ' places that ask the bot check say which form they are; only sign-in and the two password-reset pages are the kind that is let through',
     count($callSites) === 13 && in_array('', $callSites, true) === false
