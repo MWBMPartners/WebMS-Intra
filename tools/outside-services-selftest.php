@@ -1329,6 +1329,29 @@ setChoice(M, 'gravatar', 'on');
 $plain = req($jarM2, 'GET', '/account/outside-services')['body'];
 req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'off', 'csrf_token' => token($plain)]);
 check('O09 ...but an "off" with no drawn value IS applied: a withdrawal of consent is never lost', choiceOf(M, 'gravatar') === 'off');
+
+// Round 2 of #815's check: judged by EFFECT, not by the word. Where the
+// organisations' default is OFF, "follow" over a stored "on" is a WITHDRAWAL, and
+// the first version held it back as "out of date" — the member's picture went on
+// being sent. And the other direction: where the default is ON, "follow" over a
+// stored "off" switches sharing back on, so it must still be held back.
+setAt(K_GRAV, null, 'off');   // allowed, off until a member switches it on
+setChoice(M, 'gravatar', 'on');
+check('O10 premise: with the default off and the member\'s own "on", Gravatar IS sent',
+    str_contains(req($jarM2, 'GET', '/account')['body'], 'gravatar.com/avatar/') === true);
+$plain = req($jarM2, 'GET', '/account/outside-services')['body'];
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'follow', 'csrf_token' => token($plain)]);
+check('O11 with no drawn value, "follow" over a stored "on" under a default of off is APPLIED: the "on" is gone and nothing is sent (a withdrawal by effect)',
+    choiceOf(M, 'gravatar') === null && str_contains(req($jarM2, 'GET', '/account')['body'], 'gravatar.com') === false,
+    var_export(choiceOf(M, 'gravatar'), true));
+setAt(K_GRAV, null, 'on');    // allowed, on until a member switches it off
+setChoice(M, 'gravatar', 'off');
+$plain = req($jarM2, 'GET', '/account/outside-services')['body'];
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'follow', 'csrf_token' => token($plain)]);
+check('O12 ...but with no drawn value, "follow" over a stored "off" under a default of ON is HELD BACK: it would switch sharing back on',
+    choiceOf(M, 'gravatar') === 'off'
+    && str_contains(req($jarM2, 'GET', '/account/outside-services')['body'], 'was not changed, because the page you saved was out of date') === true,
+    var_export(choiceOf(M, 'gravatar'), true));
 setChoice(M, 'gravatar', null);
 setAt(K_GRAV, null, 'off');
 

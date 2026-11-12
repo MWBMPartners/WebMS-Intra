@@ -2160,5 +2160,27 @@ check('N17 ...and a post of it is REFUSED: the installation\'s rows are unchange
     var_export($installRow('org.address.countryCode'), true) . '/' . var_export($installRow('org.currency'), true));
 check('N18 ...with words that say why', str_contains($httpOrg('GET', '/admin/settings/organisation')['body'], 'only a global administrator can change them') === true);
 
+// The in-app help says what this card does. Its key sentences are pinned AS RENDERED
+// (as an administrator reads them), each beside the check above that proves it of
+// the card — so the help cannot drift from the behaviour without this going red.
+$helpPage = $http('GET', '/help/admin');
+$helpText = preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) (preg_match('#<div[^>]*id="installation-country-currency"[^>]*>(.*?)</div>#s', $helpPage['body'], $hm) === 1 ? $hm[1] : '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+$helpMissing = [];
+foreach ([
+    'follows the installation’s own country and currency: set when the portal was installed, and changeable afterwards by a global administrator on that same page', // N2, N3
+    'Every organisation set to “Same as the installation” follows the change; an organisation that chose its own does not', // N3
+    'Changing a currency affects new records only. Every amount already recorded keeps the currency it was recorded in, and nothing is converted', // N4, N7
+    'saving it without touching that box leaves their change in place, and the page says so', // N8, N9
+    'The general Settings page does not change either setting', // N15
+] as $sentence) {
+    if (str_contains((string) $helpText, $sentence) === false) {
+        $helpMissing[] = $sentence;
+    }
+}
+check('N19 the in-app help (/help/admin) says what the card does, in the sentences the checks above prove: following, new records only, the older page, and the general Settings page',
+    $helpPage['status'] === 200 && $helpText !== '' && $helpMissing === [],
+    'HTTP ' . $helpPage['status'] . '; missing: ' . implode(' | ', $helpMissing));
+check('N20 ...and no longer says the installation\'s values were fixed "when it was installed"', str_contains((string) $helpText, 'chosen for the whole installation when it was installed') === false);
+
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

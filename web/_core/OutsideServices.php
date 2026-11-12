@@ -1062,12 +1062,23 @@ final class OutsideServices
      * on the page they are looking at.
      *   A value posted with NO drawn value beside it (a page drawn before this
      *   change, or a hand-made request) cannot be told apart from a stale one,
-     *   so: an "off" is still applied, because a withdrawal of consent is
-     *   never lost (round 4's rule), and an "on" or "follow" that would change
-     *   anything is left alone and the member is told to open the page again —
-     *   "follow" can switch a service back on as surely as "on" can. An "on"
-     *   above the ceiling is still REFUSED with its reason, as before: the page
-     *   draws no control there, so only a hand-made request sends one.
+     *   so it is judged by its EFFECT, never by its word (round 2 of #815's
+     *   check — the first version judged by word and lost a withdrawal):
+     *     - APPLIED when it can only make LESS shared: every "off" (a
+     *       withdrawal of consent is never lost, round 4's rule), and a
+     *       "follow" over a stored "on". Dropping an explicit "on" can never
+     *       widen sharing, now or later: where the organisations' default is
+     *       off it IS a withdrawal (measured: stored "on", default off — the
+     *       first version kept the member's photo going out and said the page
+     *       was out of date), and where the default is on nothing changes.
+     *     - HELD BACK, with "open the page again", when it could turn sharing
+     *       ON: every "on", and a "follow" over a stored "off" — which, now or
+     *       when an organisation's default later becomes "on", switches back
+     *       on what the member switched off. A "follow" over nothing stored
+     *       changes nothing and is passed over silently.
+     *     - An "on" above the ceiling is still REFUSED with its reason, as
+     *       before: the page draws no control there, so only a hand-made
+     *       request sends one.
      * `$drawn` = null means "no page was involved" (a caller with no form, such
      * as a test or a future API): every posted value is treated as a change, as
      * it always was. The member page's handler always passes an array.
@@ -1096,9 +1107,9 @@ final class OutsideServices
         //    an unmarked "on" or "follow" stays in the press so that one ABOVE the
         //    ceiling is still refused with its reason (the page draws no control
         //    there, so only a hand-made request sends one, and the refusal is the
-        //    honest answer), but one that WOULD change something is left alone
-        //    in step 3. The sentences are worked out under the lock, from what is
-        //    stored THEN.
+        //    honest answer); step 3 then APPLIES one that can only make less
+        //    shared and HOLDS BACK one that could turn sharing on. The sentences
+        //    are worked out under the lock, from what is stored THEN.
         $untouched = [];
         $unmarked  = [];
         if ($drawn !== null) {
@@ -1207,13 +1218,24 @@ final class OutsideServices
                         continue; // left exactly as it was
                     }
                 }
-                // 🪟 #815: an "on" or "follow" from a page that drew no value
-                //    beside it cannot be told from an older tab's, so it is left
-                //    alone — when it would change anything — and the member is
-                //    told to open the page again. ("follow" over nothing stored
-                //    changes nothing, so it needs no sentence.)
+                // 🪟 #815: a value from a page that drew none beside it cannot be
+                //    told from an older tab's, so it is judged by its EFFECT (see
+                //    the docblock). A "follow" over a stored "on" can only make
+                //    LESS shared — it drops an explicit grant — so it is applied
+                //    like an "off". Anything that could turn sharing ON (an "on",
+                //    or a "follow" over a stored "off") is held back and the
+                //    member told to open the page again. ("follow" over nothing
+                //    stored changes nothing, so it needs no sentence.)
+                //    WHY BY STORED CHOICE AND NOT BY TODAY'S CEILING: a "follow"
+                //    over "off" may share nothing today and start sharing the
+                //    day an organisation's default becomes "on"; asking what is
+                //    stored answers for later too.
                 if (isset($unmarked[$service]) === true) {
                     if ($value === self::FOLLOW && $old === null) {
+                        continue;
+                    }
+                    if ($value === self::FOLLOW && $old === self::ON) {
+                        $apply[$service] = $value;
                         continue;
                     }
                     $notes[] = '"' . self::SERVICES[$service]['name'] . '" was not changed, because the page you saved '
