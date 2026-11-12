@@ -100,7 +100,10 @@ if ($stmt !== false) {
 //    buttons below are drawn from the same lists `respond()` judges, and
 //    `respond()` asks again under a lock, so a stale page cannot do harm.
 $swaps = RotaSwaps::forPage($db, $siteId, $userId);
-$swapToday   = RotaSwaps::today($siteId);
+// The SAME date the two lists above were drawn from (#987), never asked a
+// second time: two reads either side of midnight could otherwise list a duty
+// as upcoming and then judge it as already past on one page.
+$swapToday   = $fromDate;
 $openAllowed = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') === '1';
 
 /**

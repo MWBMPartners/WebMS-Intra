@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 282;  // + six in part P (#945: P17b-P17g) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 285;  // + nine in part P (#945: P17b-P17j) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3919,30 +3919,36 @@ ok(
         && (float) $nearZero['place']['lng'] === 0.0, // JSON carries 0.0 as 0, so compared as a number
     json_encode($nearZero)
 );
-// P17b-P17g (#945): a coordinate that is not a NUMBER is refused, never turned
-// into 0. GeoLocation::validateCoords() used `(float)`, which makes any text a
-// number: "north" became 0, a real place on the equator, and was saved. The
-// stored position at this point is P17's (0.00004, 0), so a refusal is proved
-// by it being UNCHANGED as well as by the words shown. Each post sends one bad
-// box beside a good one, so neither a whole-pair test nor a one-box test alone
-// can pass it.
+// P17b-P17k (#945): a coordinate that is not a NUMBER is never turned into 0.
+// GeoLocation::validateCoords() used `(float)`, which makes any text a number:
+// "north" became 0, a real place on the equator, and was saved. Now a typed
+// position that cannot be used leaves the STORED one exactly as it was, while
+// everything else on the form IS saved (round 2 of the check: refusing the
+// whole save threw away the address the administrator had typed), and the
+// message says so with the reason. The stored position at this point is P17's
+// (0.00004, 0). Each post sends one bad box beside a good one, so neither a
+// whole-pair test nor a one-box test alone can pass it, and each carries a
+// different first address line, so "the rest was saved" is proved per case.
 $orgPos = static fn (): array => [
     one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.latitude'])['settingValue'] ?? null,
     one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.longitude'])['settingValue'] ?? null,
 ];
-$orgRefusalWords = 'Nothing was saved. The map position must be two numbers';
+$orgLine1 = static fn (): ?string => one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.address.line1'])['settingValue'] ?? null;
 foreach ([
-    'P17b a WORD in the latitude box' => ['latitude' => 'north', 'longitude' => '-0.1278'],
-    'P17c a WORD in the longitude box' => ['latitude' => '51.5074', 'longitude' => 'west'],
-    'P17d a decimal COMMA ("51,5" used to be saved as 51)' => ['latitude' => '51,5', 'longitude' => '-0.1278'],
-    'P17e one box filled and the other left empty' => ['latitude' => '51.5074', 'longitude' => ''],
-] as $what => $boxes) {
-    $sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save', ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB'] + $boxes);
+    'P17b a WORD in the latitude box' => [['latitude' => 'north', 'longitude' => '-0.1278'], 'the latitude and longitude must be numbers'],
+    'P17c a WORD in the longitude box' => [['latitude' => '51.5074', 'longitude' => 'west'], 'the latitude and longitude must be numbers'],
+    'P17d a decimal COMMA ("51,5" used to be saved as 51)' => [['latitude' => '51,5', 'longitude' => '-0.1278'], 'the latitude and longitude must be numbers'],
+    'P17e one box filled and the other left empty' => [['latitude' => '51.5074', 'longitude' => ''], 'only one of the two boxes was filled in'],
+] as $what => [$boxes, $reason]) {
+    $line  = 'Selftest 945 ' . substr($what, 0, 4);
+    $sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save', ['addressLine1' => $line, 'countryCode' => 'GB'] + $boxes);
     $shown = flashAfter($adminJar, '/admin/settings/organisation');
     ok(
-        $what . ' is REFUSED with the reason, and the stored map position is left as it was (0.00004, 0) -- never saved as 0, never cleared',
-        $sent['status'] === 302 && str_contains($shown, $orgRefusalWords) === true && $orgPos() === ['0.00004', '0'],
-        said($sent) . '; shown "' . $shown . '"; stored ' . json_encode($orgPos())
+        $what . ': the rest of the form IS saved, the stored map position is left exactly as it was (0.00004, 0) -- never saved as 0, never cleared -- and the message says so with the reason',
+        $sent['status'] === 302 && $orgLine1() === $line && $orgPos() === ['0.00004', '0']
+            && str_contains($shown, 'Organisation address saved. The map position was not changed: ' . $reason) === true
+            && str_contains($shown, 'Type both numbers to change it.') === true,
+        said($sent) . '; shown "' . $shown . '"; line 1 ' . json_encode($orgLine1()) . '; stored ' . json_encode($orgPos())
     );
 }
 // The over-reach direction: what IS a number still saves -- the exponent form
@@ -3962,6 +3968,55 @@ ok(
     $sent['status'] === 302 && $orgPos() === ['0', '0'],
     said($sent) . '; stored ' . json_encode($orgPos())
 );
+// P17h: BOTH boxes empty, on purpose, with no look-up set up (automatic address
+// look-up OFF -- the installation's seed -- and no what3words address typed):
+// that is "no map position", and the stored one is CLEARED, as it always was.
+// Without this, a guard that never wrote the position at all would pass
+// P17b-P17e.
+setting('geo.autoGeocode', 'false');
+$sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 945 empty', 'countryCode' => 'GB', 'latitude' => '', 'longitude' => '', 'what3words' => '']);
+$shown = flashAfter($adminJar, '/admin/settings/organisation');
+ok(
+    'P17h both boxes left EMPTY on purpose, with no look-up set up, CLEARS the stored map position, and says only "Organisation address saved."',
+    $sent['status'] === 302 && $orgPos() === ['', ''] && str_contains($shown, 'Organisation address saved.') === true
+        && str_contains($shown, 'map position was not changed') === false,
+    said($sent) . '; shown "' . $shown . '"; stored ' . json_encode($orgPos())
+);
+// P17i/P17j: the automatic address look-up switched ON. No request leaves this
+// machine: Geocoder::forward() answers from tblGeocodeCache first, so the
+// answer for this address is put there by hand (the key is the same hash the
+// class makes: sha256 of "forward|" and the address in lower case).
+$geoAddress = 'Selftest 945 lookup';
+$geoHash    = hash('sha256', 'forward|' . mb_strtolower($geoAddress));
+q('DELETE FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash]);
+q("INSERT INTO tblGeocodeCache (queryHash, direction, queryText, latitude, longitude, formatted, provider) VALUES (?, 'forward', ?, 12.3456789, 45.6, NULL, 'selftest')", 'ss', [$geoHash, $geoAddress]);
+setting('geo.autoGeocode', 'true');
+post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => $geoAddress, 'countryCode' => 'GB', 'latitude' => '0.00004', 'longitude' => '0']);
+$sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => $geoAddress, 'countryCode' => 'GB', 'latitude' => 'north', 'longitude' => '-0.1278']);
+$shown = flashAfter($adminJar, '/admin/settings/organisation');
+// The look-up is not even ASKED: every answer from the cache adds one to the
+// row's `hitCount` (1 when inserted), so it must still be 1 here. That is what
+// makes the look-up's own gate visible -- the stored position would stay put
+// without it, because the position is not written at all, but the address
+// would then be sent to an outside geocoding service for nothing.
+$geoHits = static fn (): int => (int) (one('SELECT hitCount FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash])['hitCount'] ?? -1);
+ok(
+    'P17i with the automatic look-up ON, a WORD typed in a box still leaves the stored position as it was (0.00004, 0), the look-up is not even asked, and the message says the position was not changed',
+    $sent['status'] === 302 && $orgPos() === ['0.00004', '0'] && $geoHits() === 1 && str_contains($shown, 'The map position was not changed') === true,
+    said($sent) . '; shown "' . $shown . '"; stored ' . json_encode($orgPos()) . '; look-up answers given: ' . ($geoHits() - 1)
+);
+$sent = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => $geoAddress, 'countryCode' => 'GB', 'latitude' => '', 'longitude' => '']);
+ok(
+    'P17j …and with BOTH boxes empty the look-up IS asked and fills the position in from the address, as before (12.3456789, 45.6)',
+    $sent['status'] === 302 && $orgPos() === ['12.3456789', '45.6'] && $geoHits() === 2,
+    said($sent) . '; stored ' . json_encode($orgPos()) . '; look-up answers given: ' . ($geoHits() - 1)
+);
+setting('geo.autoGeocode', 'false');
+q('DELETE FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash]);
 // Back to P17's position, which P18 and the checks after it expect.
 post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
     ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB', 'latitude' => '0.00004', 'longitude' => '0']);

@@ -470,21 +470,44 @@ if ($countryChosen !== null && preg_match('/^[A-Z]{2}$/', $countryChosen) === 1)
 }
 
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
-// 📍 A map position somebody TYPED but that cannot be used is refused, with the
-//    reason, and nothing is saved (#945). Until then a word in either box was
-//    turned into 0 -- a real place, on the equator or the prime meridian --
-//    and saved; and once validateCoords() stopped doing that, the same mistake
-//    would have quietly CLEARED this organisation's stored position instead
-//    (the null below falls through to "no position"), which loses something
-//    that was right. Refusing keeps what is stored and says what to fix. Both
-//    boxes left empty is still "no position", as before. "Typed" is asked of
-//    the text after trimming spaces, and anything that is not text (a request
-//    can send `latitude[]=1`) counts as typed, because it was sent.
+// 📍 A MAP POSITION TYPED BUT UNUSABLE LEAVES THE STORED ONE ALONE (#945).
+//    Until #945 a word in either box was turned into 0 -- a real place, on
+//    the equator or the prime meridian -- and saved. Once validateCoords()
+//    stopped doing that, the same mistake would have quietly CLEARED this
+//    organisation's stored position instead (null falls through to "no
+//    position" below), losing something that was right: measured, with only
+//    the function fixed, a typo stored ["", ""].
+//
+//    WHAT HAPPENS NOW, and why not a refusal. The first version of this
+//    refused the whole save, which threw away everything else typed on the
+//    form (address lines, country, currency) -- a new way to lose typing,
+//    where a half-filled pair used to save the rest (round 2 of the check).
+//    So everything else IS saved, the stored latitude and longitude are left
+//    EXACTLY as they were -- neither cleared, nor filled in by the what3words
+//    or automatic address look-ups below, because the person plainly meant to
+//    type a position and a looked-up one would replace it unasked -- and the
+//    message says so, with the reason.
+//
+//    Both boxes EMPTY is unchanged: no position typed, so the look-ups may
+//    fill one where they are set up, and otherwise the position is cleared.
+//
+//    "Typed" is asked of the text after trimming spaces, and anything that is
+//    not text (a request can send `latitude[]=1`) counts as typed, because it
+//    was sent.
 $coordTyped = static function (mixed $value): bool {
     return $value !== null && (is_string($value) === false || trim($value) !== '');
 };
-if ($coords === null && ($coordTyped($_POST['latitude'] ?? null) === true || $coordTyped($_POST['longitude'] ?? null) === true)) {
-    $reject('Nothing was saved. The map position must be two numbers: a latitude from -90 to 90 and a longitude from -180 to 180, written with a full stop for the decimal point (for example 51.5074 and -0.1278). Fill in both boxes, or leave both empty for no map position.');
+$latTyped = $coordTyped($_POST['latitude'] ?? null);
+$lngTyped = $coordTyped($_POST['longitude'] ?? null);
+$positionKept = '';   // '' = the boxes decide the position; otherwise the reason it was left alone
+if ($coords === null && ($latTyped === true || $lngTyped === true)) {
+    if ($latTyped === false || $lngTyped === false) {
+        $positionKept = 'only one of the two boxes was filled in';
+    } elseif (GeoLocation::coordinateNumber($_POST['latitude']) === null || GeoLocation::coordinateNumber($_POST['longitude']) === null) {
+        $positionKept = 'the latitude and longitude must be numbers, written with a full stop for the decimal point (for example 51.5074 and -0.1278)';
+    } else {
+        $positionKept = 'the latitude must be from -90 to 90 and the longitude from -180 to 180';
+    }
 }
 
 $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
@@ -500,7 +523,8 @@ $warning = null;
 if ($w3w !== null && What3Words::isConfigured() === true) {
     $verified = What3Words::convertToCoordinates($w3w);
     if ($verified !== null) {
-        if ($coords === null) {
+        // Not when a typed position could not be used (#945): see above.
+        if ($coords === null && $positionKept === '') {
             $coords = $verified;
         }
     } else {
@@ -511,7 +535,7 @@ if ($w3w !== null && What3Words::isConfigured() === true) {
     }
 }
 
-if ($coords === null && Geocoder::autoEnabled() === true) {
+if ($coords === null && $positionKept === '' && Geocoder::autoEnabled() === true) {
     $formatted = GeoLocation::formatAddress($address);
     if ($formatted !== '') {
         $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null);
@@ -567,8 +591,12 @@ $plainCoordinate = static function (float $value): string {
 
     return $text === '-0' ? '0' : $text;
 };
-$upsert($db, 'org.latitude', $coords !== null ? $plainCoordinate((float) $coords['lat']) : '', $siteId);
-$upsert($db, 'org.longitude', $coords !== null ? $plainCoordinate((float) $coords['lng']) : '', $siteId);
+// A typed position that could not be used leaves BOTH stored values exactly as
+// they were: neither row is written (#945).
+if ($positionKept === '') {
+    $upsert($db, 'org.latitude', $coords !== null ? $plainCoordinate((float) $coords['lat']) : '', $siteId);
+    $upsert($db, 'org.longitude', $coords !== null ? $plainCoordinate((float) $coords['lng']) : '', $siteId);
+}
 $upsert($db, 'org.what3words', $w3w ?? '', $siteId);
 $db->commit();
 } catch (\Throwable $saveFault) {
@@ -588,7 +616,24 @@ Logger::activity(
         . '.'
 );
 
-$_SESSION['flash_msg']  = $warning !== null ? ('Address saved. ' . $warning) : 'Organisation address saved.';
-$_SESSION['flash_type'] = $warning !== null ? 'warning' : 'success';
+// The position sentence (#945) says only what is known: the rest WAS saved,
+// and the stored position was not touched. It does not claim what the stored
+// position IS (it may be empty, or one a look-up filled in earlier), and it
+// does not say what emptying both boxes would do, because that depends on
+// whether a what3words address and the automatic address look-up are set up
+// (either may fill a position in when the boxes are empty).
+$positionWords = $positionKept === ''
+    ? ''
+    : ' The map position was not changed: ' . $positionKept . '. Type both numbers to change it.';
+if ($warning !== null) {
+    $_SESSION['flash_msg']  = 'Address saved. ' . $warning . $positionWords;
+    $_SESSION['flash_type'] = 'warning';
+} elseif ($positionWords !== '') {
+    $_SESSION['flash_msg']  = 'Organisation address saved.' . $positionWords;
+    $_SESSION['flash_type'] = 'warning';
+} else {
+    $_SESSION['flash_msg']  = 'Organisation address saved.';
+    $_SESSION['flash_type'] = 'success';
+}
 header('Location: ' . $redirect, true, 302);
 exit();
