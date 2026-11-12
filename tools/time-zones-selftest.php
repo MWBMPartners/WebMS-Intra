@@ -4737,11 +4737,22 @@ ok(
 //    a DELETED one included -- made the list view answer 500 for the whole
 //    organisation, and one in 9990 built a statement MySQL refused. They are
 //    in place for every list request below, and none matches a search here.
-const L_FAR = 961090; // 961090 deleted 9999-12-31, 961091 deleted 0001-01-01, 961092 live 9990
+const L_FAR = 961090; // 961090 deleted 9999-12-31, 961091 deleted 0001-01-01, 961092 live 9990, 961093 live year 0
 $lEvent(L_FAR, 'Selftest 1024 far end', '9999-12-31 23:30:00', 'Europe/London');
 $lEvent(L_FAR + 1, 'Selftest 1024 far start', '0001-01-01 00:30:00', 'Pacific/Auckland');
 q('UPDATE `tblEvents` SET `isDeleted` = 1 WHERE `eventID` IN (?, ?)', 'ii', [L_FAR, L_FAR + 1]);
 $lEvent(L_FAR + 2, 'Selftest 1024 far 9990', '9990-06-15 12:00:00', 'America/New_York');
+// Round 3: a live event in year 0 (MySQL stores it, PHP's reader refuses
+// it; it used to collapse the window to "now"), and 33,000 DELETED events
+// each with a made-up zone text (both pages used to answer 500: too many
+// placeholders).
+$lEvent(L_FAR + 3, 'Selftest 1024 far year 0', '0000-06-15 12:00:00', 'Europe/London');
+q('SET SESSION `cte_max_recursion_depth` = 40000');
+q(
+    'INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventSlug`, `eventName`, `startDateTime`, `timezone`, `status`, `isPublic`, `isDeleted`) '
+    . 'WITH RECURSIVE `n` (`i`) AS (SELECT 0 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 32999) '
+    . "SELECT 962000 + `i`, 1, CONCAT('selftest-1024-junk-', `i`), CONCAT('Selftest 1024 junk ', `i`), '2027-01-01 10:00:00', CONCAT('Junk/Zone', `i`), 'draft', 1, 1 FROM `n`"
+);
 
 $lSearch = rawurlencode('Selftest 1024 list');
 $lPage1  = req($adminJar, 'GET', '/calendar?view=list&q=' . $lSearch);
@@ -4780,7 +4791,7 @@ q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_AKL, L_FIL
 // between its real instant and the instant it would have on the OTHER side's
 // offset -- so an event given the wrong offset swaps places with its partner.
 // 32 events: two pages of the list.
-const L_CLOCK = 961200; // 961200 .. 961231
+const L_CLOCK = 961200; // 961200 .. 961231, and 961299 the 9999 Los Angeles event
 $lClockRows = [];
 foreach (['Europe/London', 'Pacific/Auckland'] as $zoneName) {
     $zone   = new DateTimeZone($zoneName);
@@ -4804,6 +4815,11 @@ foreach ($lClockRows as $n => [$reading, $zoneName]) {
     $lEvent(L_CLOCK + $n, $lClockName($n), $reading, $zoneName);
     $lKeyed[] = [(new DateTimeImmutable($reading, new DateTimeZone($zoneName)))->getTimestamp(), $reading, $n];
 }
+// Round 3: a PUBLISHED event at the last second of 9999 in Los Angeles. Its
+// moment used to overflow to NULL, and NULL sorts FIRST: the list showed it
+// first and My volunteering gave it one of its thirty places. It must come
+// LAST, and take no place among the thirty.
+$lEvent(L_CLOCK + 99, $lClockName(99), '9999-12-31 23:59:59', 'America/Los_Angeles');
 $lRealOrder = $lKeyed;
 usort($lRealOrder, static fn (array $a, array $b): int => [$a[0], $a[1], $a[2]] <=> [$b[0], $b[1], $b[2]]);
 $lRealOrder = array_map($lClockName, array_column($lRealOrder, 2));
@@ -4825,21 +4841,21 @@ $lClockPage1 = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode('Se
 $lClockPage2 = req($adminJar, 'GET', '/calendar?view=list&page=2&q=' . rawurlencode('Selftest 1024 clock'));
 $lClockSeen  = array_merge($lNamesOn($lClockPage1['body']), $lNamesOn($lClockPage2['body']));
 ok(
-    'L04 the list view, across two pages and eight clock changes (with far-off and deleted dates in the calendar), shows the events in REAL order (#1024)',
-    $lClockPage1['status'] === 200 && $lClockPage2['status'] === 200 && $lClockSeen === $lRealOrder,
+    'L04 the list view, across two pages and eight clock changes (with far-off, deleted and 33,000 made-up-zone dates in the calendar), shows the events in REAL order, and the 9999-12-31 23:59:59 Los Angeles one LAST (#1024; round 3: it came first)',
+    $lClockPage1['status'] === 200 && $lClockPage2['status'] === 200 && $lClockSeen === array_merge($lRealOrder, [$lClockName(99)]),
     said($lClockPage1) . ' / ' . said($lClockPage2) . '; first difference at position '
-        . json_encode(array_key_first(array_diff_assoc($lClockSeen, $lRealOrder))) . ' of ' . count($lClockSeen)
+        . json_encode(array_key_first(array_diff_assoc($lClockSeen, array_merge($lRealOrder, [$lClockName(99)])))) . ' of ' . count($lClockSeen)
 );
 
 // My volunteering, over HTTP: the administrator is on the team of every one
 // of the 32. The page shows thirty, soonest first in real time.
-foreach (array_keys($lClockRows) as $n) {
+foreach (array_merge(array_keys($lClockRows), [99]) as $n) {
     q("INSERT INTO `tblEventPeople` (`eventID`, `userID`, `role`) VALUES (?, ?, 'helper')", 'ii', [L_CLOCK + $n, ADMIN]);
 }
 $lMine     = req($adminJar, 'GET', '/account/my-volunteering');
 $lMineSeen = $lNamesOn($lMine['body']);
 ok(
-    'L05 My volunteering shows the thirty soonest of them in REAL order across the clock changes, with the same far-off dates in place (#1025)',
+    'L05 My volunteering shows the thirty soonest of them in REAL order across the clock changes, with the same far-off dates in place -- and the 9999 Los Angeles duty takes none of the thirty places (#1025; round 3: it took the first)',
     $lMine['status'] === 200 && $lMineSeen === array_slice($lRealOrder, 0, 30),
     said($lMine) . '; ' . count($lMineSeen) . ' shown, first difference at '
         . json_encode(array_key_first(array_diff_assoc($lMineSeen, array_slice($lRealOrder, 0, 30))))
@@ -4850,9 +4866,10 @@ ok(
     $lSize['threw'] === '' && (int) ($lSize['values'] ?? 0) > 0 && (int) $lSize['values'] <= 2200 && (int) $lSize['length'] <= 250000,
     $lSize['threw'] !== '' ? 'THREW ' . $lSize['threw'] : json_encode($lSize)
 );
-q('DELETE FROM `tblEventPeople` WHERE `userID` = ? AND `eventID` BETWEEN ? AND ?', 'iii', [ADMIN, L_CLOCK, L_CLOCK + 31]);
-q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_CLOCK, L_CLOCK + 31]);
-q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_FAR, L_FAR + 2]);
+q('DELETE FROM `tblEventPeople` WHERE `userID` = ? AND `eventID` BETWEEN ? AND ?', 'iii', [ADMIN, L_CLOCK, L_CLOCK + 99]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_CLOCK, L_CLOCK + 99]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_FAR, L_FAR + 3]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN 962000 AND 994999');
 
 // ---- #1028: the user reminders job, on each organisation's own date ----
 // The job runs over EVERY organisation. Its rota reminders and its morning

@@ -4733,7 +4733,9 @@ $p = $plant('_core/Events.php', 'usort($keyed, static function (array $a, array 
 check('PN7 (#898) with the order left as the READINGS\' (the code before #898), the limited list gives the later event and drops the sooner (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
 // #811: the window moved, unchanged, to Events::soonestByRealStart().
-$p = $plant('_core/Events.php', '$latest + self::maxOffsetOfZones(self::zonesInUse($db, $siteId), $siteId)', '$latest',
+// #1024 round 3: the widening is worked out into `$ahead` first (two days
+// when zonesInUse() stopped at its limit), so the plant drops that.
+$p = $plant('_core/Events.php', '$latest + $ahead', '$latest',
     static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
 check('PN8 (#898) with the second read\'s window not widened by the clocks\' offsets, the sooner event on the clock furthest ahead is never read (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);

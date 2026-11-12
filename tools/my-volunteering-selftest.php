@@ -507,6 +507,44 @@ addEventAt($db, E_FAR + 1, ORG, '0001-01-01 00:30:00', 'Pacific/Auckland');
 run($db, 'UPDATE `tblEvents` SET `isDeleted` = 1 WHERE `eventID` IN (?, ?)', 'ii', [E_FAR, E_FAR + 1]);
 addEventAt($db, E_FAR + 2, ORG, '9990-06-15 12:00:00', 'America/New_York');
 
+// Round 3: a PUBLISHED event at the last second of 9999 in Los Angeles. Its
+// offset taken off the reading went past the last date MySQL holds, gave
+// NULL, and NULL sorts FIRST -- so it took one of the thirty places and a
+// real duty was dropped. UH and UG are both on its team: for UH it must come
+// LAST; for UG (thirty-one real duties) it must not take a place at all.
+addEventAt($db, E_FAR + 3, ORG, '9999-12-31 23:59:59', 'America/Los_Angeles');
+addRole($db, E_FAR + 3, UH, 'helper');
+addRole($db, E_FAR + 3, UG, 'helper');
+
+// Round 3: a LIVE event in year 0, which MySQL stores and PHP's reader
+// refuses. As the organisation's lowest date it used to collapse the
+// window to "now" plus or minus two days, so every clock change above lost
+// its offset. The span is held inside 1900-2200 in SQL now.
+addEventAt($db, E_FAR + 4, ORG, '0000-06-15 12:00:00', 'Europe/London');
+
+// Round 3: enough summer-time zones in use (live events in 2190, no team)
+// that, between now and 2200, the clocks change more than
+// MOMENT_CHANGE_BUDGET times -- so the size check below holds only if the
+// window is really narrowed.
+foreach (['America/Chicago', 'America/Denver', 'America/Santiago', 'Australia/Sydney', 'America/Halifax', 'Europe/Paris'] as $n => $zoneName) {
+    addEventAt($db, E_FAR + 10 + $n, ORG, '2190-06-15 12:00:00', $zoneName);
+}
+
+// Round 3: 33,000 DELETED events, each with its own made-up zone text. Every
+// text used to cost the statements bound values, and this many made both
+// pages fail (more than MySQL's 65,535 placeholders). Deleted rows are left
+// out of the ordering expression's zones, and every builder stops at
+// Events::ZONE_TEXT_LIMIT texts.
+$db->query('SET SESSION `cte_max_recursion_depth` = 40000');
+run(
+    $db,
+    'INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `isDeleted`) '
+    . 'WITH RECURSIVE `n` (`i`) AS (SELECT 0 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 32999) '
+    . "SELECT 950000 + `i`, ?, CONCAT('Selftest junk ', `i`), CONCAT('selftest-junk-', `i`), '2027-01-01 10:00:00', CONCAT('Junk/Zone', `i`), 'draft', 1 FROM `n`",
+    'i',
+    [ORG]
+);
+
 $uh = null;
 $uhError = '';
 try {
@@ -515,15 +553,53 @@ try {
     $uhError = get_class($e) . ': ' . $e->getMessage();
 }
 check(
-    '#1025 round 2: with deleted events dated 9999-12-31 and 0001-01-01 and a live one in 9990 in the organisation, the list still answers -- and the events either side of each clock change come back in REAL order',
-    $uh === $clk['real'],
-    $uhError !== '' ? 'THREW ' . $uhError : 'got ' . json_encode($uh) . ' wanted ' . json_encode($clk['real'])
+    '#1025 round 2: with deleted events dated 9999-12-31 and 0001-01-01, live ones in year 0, in 9990 and at 9999-12-31 23:59:59 in Los Angeles, and 33,000 deleted made-up zones in the organisation, the list still answers -- the events either side of each clock change come back in REAL order, and the 9999 one comes LAST (round 3: it came first)',
+    $uh === array_merge($clk['real'], [E_FAR + 3]),
+    $uhError !== '' ? 'THREW ' . $uhError : 'got ' . json_encode($uh) . ' wanted ' . json_encode(array_merge($clk['real'], [E_FAR + 3]))
+);
+$ug2 = array_map('intval', array_column(Events::volunteeringFor($db, UG, ORG), 'eventID'));
+check(
+    '#1025 round 3: UG is ALSO on the team of the 9999-12-31 23:59:59 Los Angeles event, and the thirty places still go to Auckland and the first 29 UTC duties -- no real duty is dropped for it',
+    $ug2 === array_merge([E_AKL], range(E_UTC, E_UTC + 28)),
+    'first ' . json_encode(array_slice($ug2, 0, 2)) . ', count ' . count($ug2) . ', 9999 event among them: ' . json_encode(in_array(E_FAR + 3, $ug2, true))
 );
 $moment = Events::startAsUtcMoment($db, 'e', ORG);
 check(
-    '#1025 round 2: the ordering expression stays bounded with a 9990 event in use (' . count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters)',
+    '#1025 round 2: the ordering expression stays bounded with events from year 0 to 9999 and ten summer-time zones in use (' . count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters)',
     count($moment['params']) <= 2100 && strlen($moment['sql']) <= 200000,
     count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters'
+);
+
+// Round 3: the narrowing itself, driven directly. A span of 1900-2200 with
+// ten summer-time zones is far more clock changes than the budget allows;
+// the window must come back containing now, narrower than the span, and with
+// the clocks changing no more than the budget in it unless it has reached
+// its 732-day floor. And with now BEFORE a span of 2150-2200, it sits at the
+// span's START (the end nearer now), not round now.
+$tenZones = array_map(static fn (string $z): DateTimeZone => new DateTimeZone($z), [
+    'Europe/London', 'Pacific/Auckland', 'America/New_York', 'America/Los_Angeles', 'America/Chicago',
+    'America/Denver', 'America/Santiago', 'Australia/Sydney', 'America/Halifax', 'Europe/Paris',
+]);
+$countChanges = static function (int $from, int $until) use ($tenZones): int {
+    $n = 0;
+    foreach ($tenZones as $z) {
+        $n += max(0, count((array) $z->getTransitions($from - 2 * 86400, $until + 2 * 86400)) - 1);
+    }
+    return $n;
+};
+$readingNow = gmmktime((int) gmdate('H'), (int) gmdate('i'), 0, (int) gmdate('n'), (int) gmdate('j'), (int) gmdate('Y'));
+[$wFrom, $wUntil] = Events::momentWindow([gmmktime(0, 0, 0, 1, 3, 1900), gmmktime(0, 0, 0, 12, 29, 2200)], $tenZones, time());
+check(
+    '#1025 round 3: momentWindow() narrows a 1900-2200 span round now until the ten zones change their clocks at most 2,000 times (got ' . gmdate('Y-m-d', $wFrom) . ' .. ' . gmdate('Y-m-d', $wUntil) . ', ' . $countChanges($wFrom, $wUntil) . ' changes)',
+    $wFrom <= $readingNow && $wUntil >= $readingNow && ($countChanges($wFrom, $wUntil) <= 2000 || $wUntil - $wFrom <= 732 * 86400)
+        && $wUntil - $wFrom < (gmmktime(0, 0, 0, 12, 29, 2200) - gmmktime(0, 0, 0, 1, 3, 1900)),
+    gmdate('Y-m-d', $wFrom) . ' .. ' . gmdate('Y-m-d', $wUntil)
+);
+[$aFrom, $aUntil] = Events::momentWindow([gmmktime(0, 0, 0, 1, 1, 2150), gmmktime(0, 0, 0, 12, 29, 2200)], array_merge($tenZones, $tenZones, $tenZones, $tenZones), time());
+check(
+    '#1025 round 3: with now BEFORE the span (2150-2200) and too many changes, the narrowed window sits against the span\'s START, the end nearer now (got ' . gmdate('Y-m-d', $aFrom) . ' .. ' . gmdate('Y-m-d', $aUntil) . ')',
+    $aFrom === gmmktime(0, 0, 0, 1, 1, 2150) - 2 * 86400 && $aUntil < gmmktime(0, 0, 0, 12, 29, 2200),
+    gmdate('Y-m-d', $aFrom) . ' .. ' . gmdate('Y-m-d', $aUntil)
 );
 
 // =============================================================================
@@ -581,7 +657,7 @@ $cases = [
     // #1025 round 2: across clock changes, with the far-off dates in place,
     // the page shows every event and in REAL order (the fourth element asks
     // for the order of the names on the page, not just their presence).
-    'across clock changes, in real order (UH, #1025)' => [UH, array_map(static fn (int $id): string => 'Selftest event ' . $id, $clk['real']), [], true],
+    'across clock changes, in real order (UH, #1025)' => [UH, array_map(static fn (int $id): string => 'Selftest event ' . $id, array_merge($clk['real'], [E_FAR + 3])), [], true],
 ];
 foreach ($cases as $label => $case) {
     [$user, $mustShow, $mustNotShow] = $case;

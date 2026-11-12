@@ -736,14 +736,40 @@ class Events
      * A failed read THROWS under this portal's strict reporting; it never
      * comes back empty (an empty list means "no events at all").
      *
+     * 🧮 AT MOST `ZONE_TEXT_LIMIT` TEXTS (round 3 of #1024's check). Every
+     *    text costs at least one bound value in the statement built from it,
+     *    and 16,000 distinct texts on DELETED events made the calendar list
+     *    and My volunteering answer 500 (too many placeholders). So the texts
+     *    of events that are not deleted come first, then the most used, and
+     *    the list stops at the limit. A row whose text is left out reaches
+     *    the builder's `ELSE`: the organisation's own clock for a page, and
+     *    `Etc/GMT+12` (the latest) for a deletion deadline. No real
+     *    organisation is near the limit; PHP knows about six hundred zones.
+     *    `soonestByRealStart()` widens its proof window when the limit was
+     *    reached, because a text left out might have the highest offset.
+     *
+     * @param bool $liveOnly Only events that are not deleted (the statements
+     *                       that list events, which never show a deleted one).
+     *
      * @return list<string>
      */
-    public static function zonesInUse(mysqli $db, ?int $siteId): array
+    public static function zonesInUse(mysqli $db, ?int $siteId, bool $liveOnly = false): array
     {
         $zones = [];
-        $stmt  = $siteId === null
-            ? $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')
-            : $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?');
+        $where = [];
+        if ($siteId !== null) {
+            $where[] = '`siteID` = ?';
+        }
+        if ($liveOnly === true) {
+            $where[] = '`isDeleted` = 0';
+        }
+        $stmt = $db->prepare(
+            'SELECT CAST(`timezone` AS BINARY) AS `zone` '
+            . 'FROM `tblEvents`' . ($where === [] ? '' : ' WHERE ' . implode(' AND ', $where)) . ' '
+            . 'GROUP BY CAST(`timezone` AS BINARY) '
+            . 'ORDER BY SUM(`isDeleted` = 0) DESC, COUNT(*) DESC, `zone` '
+            . 'LIMIT ' . self::ZONE_TEXT_LIMIT
+        );
         // A backstop only: under this portal's strict reporting a failed
         // prepare THROWS (see the ⚠️ note on nowOnItsOwnClock()), so this is
         // never false here.
@@ -1050,7 +1076,12 @@ class Events
                 }
             }
             if ($latest !== null) {
-                $upTo = gmdate('Y-m-d H:i:s', $latest + self::maxOffsetOfZones(self::zonesInUse($db, $siteId), $siteId));
+                $zones = self::zonesInUse($db, $siteId);
+                // When zonesInUse() stopped at its limit, a text it left out
+                // might carry the highest offset, so the proof uses two days
+                // -- more than any clock has ever been ahead of UTC.
+                $ahead = count($zones) >= self::ZONE_TEXT_LIMIT ? 2 * 86400 : self::maxOffsetOfZones($zones, $siteId);
+                $upTo  = gmdate('Y-m-d H:i:s', $latest + $ahead);
                 $rows = $read($upTo, null);
             }
         }
@@ -1134,6 +1165,12 @@ class Events
     }
 
     /**
+     * The most distinct zone texts `zonesInUse()` hands back (round 3 of
+     * #1024's check); see its 🧮 note.
+     */
+    public const ZONE_TEXT_LIMIT = 500;
+
+    /**
      * The first and last reading `startAsUtcMoment()` ever works out an
      * offset for. A reading outside is given the offset at the nearer end.
      * Round 2 of #1024's check: one stored date of 9999-12-31 or 0001-01-01
@@ -1195,16 +1232,34 @@ class Events
      *
      * THE WINDOW is the span of start readings of the organisation's events
      * that are not deleted, with two days of margin, held inside 1900-2200,
-     * and narrowed round "now" if the zones in use would change their clocks
-     * more than `MOMENT_CHANGE_BUDGET` times in it. A reading outside the
-     * window -- a far-off date, or a row written between the read of the
-     * span and the statement -- is given the offset at the nearer end. That
-     * can cost such a row its exact place among rows within an hour or so of
-     * it; it never drops a row, never throws and never makes the statement
-     * unbounded. The `ELSE` of the zone `CASE` (a zone written in that same
-     * instant) reads the organisation's clock; a zone text PHP cannot open
-     * reads it too (`Site::zoneFor()`), as every page that shows the event
-     * does.
+     * and narrowed by `momentWindow()` if the zones in use would change their
+     * clocks more than `MOMENT_CHANGE_BUDGET` times in it. A reading outside
+     * the window -- a far-off date, or a row written between the read of the
+     * span and the statement -- is given the offset its zone has at the
+     * nearer END of the window. How far out that puts such a row is the
+     * difference between that offset and the one really in force at the
+     * row's own date: an hour for an ordinary summer-time zone, but for a
+     * zone whose base offset has changed it is that whole change -- round 3
+     * of #1024's check measured a 1990 Pacific/Kiritimati event a full DAY
+     * out once the window had narrowed, because Kiritimati moved its clocks
+     * by a day in 1994. So a row outside the window can be misplaced among
+     * rows up to about a day either side of it. It is never dropped, nothing
+     * throws, and the statement stays bounded.
+     *
+     * NEVER NULL. The reading is held inside 1000-01-03 .. 9999-12-29 before
+     * the offset is taken off (round 3: `DATE_SUB('9999-12-31 23:59:59',
+     * INTERVAL -28800 SECOND)` for a Los Angeles event is past the last date
+     * MySQL holds, answers NULL with warning 1441, and NULL sorts FIRST -- so
+     * the list showed that event first and My volunteering gave it one of its
+     * thirty places, dropping a real duty). Readings beyond those dates sort
+     * by the held value and then by the reading itself.
+     *
+     * ZONES. Only the texts of events that are not deleted, at most
+     * `ZONE_TEXT_LIMIT` of them (`zonesInUse()`); a row whose text is not
+     * among them -- or was written after the list was read -- reaches the
+     * zone `CASE`'s `ELSE`, the organisation's own clock, and a zone text PHP
+     * cannot open reads it too (`Site::zoneFor()`), as every page that shows
+     * the event does.
      *
      * The result is a DATETIME in UTC. Order by it, then by `startDateTime`,
      * then by the event's number, which is `sortByRealStart()`'s tie rule.
@@ -1228,7 +1283,7 @@ class Events
             throw new \InvalidArgumentException('Events::startAsUtcMoment(): the alias must be a plain SQL name.');
         }
         $column = '`' . $alias . '`.`startDateTime`';
-        $zones  = self::zonesInUse($db, $siteId);
+        $zones  = self::zonesInUse($db, $siteId, true);
         $ownZone = new \DateTimeZone(Site::timezone($siteId));
         $clocks  = [$ownZone];
         foreach ($zones as $zone) {
@@ -1258,13 +1313,22 @@ class Events
 
     /**
      * The window of readings, as "seconds, as if the reading were UTC",
-     * that `startAsUtcMoment()` works offsets out over: the span with two
-     * days of margin, held inside `MOMENT_FIRST_READING` ..
-     * `MOMENT_LAST_READING`, then halved round `$nowUtc` (as a reading)
-     * until the clocks change no more than `MOMENT_CHANGE_BUDGET` times in
-     * it, all clocks together. It is never narrowed below about a year
-     * either side of now, where no zone changes more than a few times.
-     * Public so a test can drive the narrowing with a moment of its choice.
+     * that `startAsUtcMoment()` works offsets out over. Exactly:
+     *
+     *   1. the span with two days of margin each side, held inside
+     *      `MOMENT_FIRST_READING` .. `MOMENT_LAST_READING`;
+     *   2. then, while the clocks (all of them together, counted with two
+     *      days more each side) change more than `MOMENT_CHANGE_BUDGET` times
+     *      in it AND it is wider than 732 days, it is HALVED: the new window
+     *      is half as wide, centred on `$nowUtc` where that fits inside the
+     *      old window, and otherwise pushed against the old window's end
+     *      nearer to now. So when now is outside the span the window stays
+     *      at the span's end nearer to now, not round now.
+     *
+     * It stops at the first width of 732 days or less, whatever the count:
+     * that is the floor, and the budget can be exceeded there only by very
+     * many zones. Public so a test can drive the narrowing with a moment of
+     * its choice.
      *
      * @param array{0:int, 1:int}  $span   From `readingSpan()`.
      * @param list<\DateTimeZone> $clocks Every clock the expression will carry.
@@ -1292,11 +1356,11 @@ class Events
             return $n;
         };
         $centre = $hold($nowUtc);
-        while ($changes($from, $until) > self::MOMENT_CHANGE_BUDGET && $until - $from > 2 * 366 * 86400) {
-            $half  = intdiv($until - $from, 4);
-            $mid   = max($from, min($until, $centre));
-            $from  = max($from, $mid - $half);
-            $until = min($until, $mid + $half);
+        while ($until - $from > 2 * 366 * 86400 && $changes($from, $until) > self::MOMENT_CHANGE_BUDGET) {
+            $width = intdiv($until - $from, 2);
+            $start = max($from, min($until - $width, $centre - intdiv($width, 2)));
+            $from  = $start;
+            $until = $start + $width;
         }
 
         return [$from, $until];
@@ -1307,15 +1371,25 @@ class Events
      * were UTC") of one organisation's events that are NOT deleted, or of
      * every organisation's; the current moment for both when there are none.
      * Deleted rows are left out because no statement using the expression
-     * lists them (round 2 of #1024's check).
+     * lists them (round 2 of #1024's check). Each reading is held inside
+     * 1900-2200 IN SQL before MIN and MAX are taken (round 3), so a stored
+     * value nothing can read -- a zero date from an old backup, year 0 --
+     * counts as the nearer end of those years rather than collapsing the
+     * whole window to "now".
      *
      * @return array{0:int, 1:int}
      */
     private static function readingSpan(mysqli $db, ?int $siteId): array
     {
         $stmt = $siteId === null
-            ? $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `isDeleted` = 0')
-            : $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `isDeleted` = 0 AND `siteID` = ?');
+            ? $db->prepare(
+                'SELECT MIN(' . self::heldReadingSql('`startDateTime`') . ') AS `low`, MAX(' . self::heldReadingSql('`startDateTime`') . ') AS `high` '
+                . 'FROM `tblEvents` WHERE `isDeleted` = 0'
+            )
+            : $db->prepare(
+                'SELECT MIN(' . self::heldReadingSql('`startDateTime`') . ') AS `low`, MAX(' . self::heldReadingSql('`startDateTime`') . ') AS `high` '
+                . 'FROM `tblEvents` WHERE `isDeleted` = 0 AND `siteID` = ?'
+            );
         $row = null;
         // A backstop only: under strict reporting a failed prepare THROWS.
         if ($stmt !== false) {
@@ -1342,6 +1416,16 @@ class Events
         }
 
         return [$low, $high];
+    }
+
+    /**
+     * `$column` held inside `MOMENT_FIRST_READING` .. `MOMENT_LAST_READING`,
+     * as SQL (constants of this class, never anything a person typed).
+     */
+    private static function heldReadingSql(string $column): string
+    {
+        return 'LEAST(GREATEST(' . $column . ", CAST('" . self::MOMENT_FIRST_READING . "' AS DATETIME)), CAST('"
+            . self::MOMENT_LAST_READING . "' AS DATETIME))";
     }
 
     /**
@@ -1415,10 +1499,16 @@ class Events
 
         // The offsets are integers PHP worked out, so they are written into
         // the SQL as numbers; the readings where a stretch ends are bound.
+        //
+        // NEVER NULL (round 3): the offset is taken off a reading held inside
+        // 1000-01-03 .. 9999-12-29, so no offset (none reaches 26 hours) can
+        // carry it past the dates MySQL holds. Unheld, 9999-12-31 23:59:59
+        // in Los Angeles became NULL, and NULL sorts first.
+        $held = 'LEAST(GREATEST(' . $column . ", CAST('1000-01-03 00:00:00' AS DATETIME)), CAST('9999-12-29 00:00:00' AS DATETIME))";
         if (count($stretches) === 1) {
-            return ['sql' => 'DATE_SUB(' . $column . ', INTERVAL ' . (int) $stretches[0][1] . ' SECOND)', 'params' => []];
+            return ['sql' => 'DATE_SUB(' . $held . ', INTERVAL ' . (int) $stretches[0][1] . ' SECOND)', 'params' => []];
         }
-        $sql    = 'DATE_SUB(' . $column . ', INTERVAL (CASE';
+        $sql    = 'DATE_SUB(' . $held . ', INTERVAL (CASE';
         $params = [];
         $lastAt = count($stretches) - 1;
         foreach ($stretches as $at => [$end, $offset]) {
