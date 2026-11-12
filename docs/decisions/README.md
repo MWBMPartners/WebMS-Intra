@@ -221,7 +221,11 @@ appended with its real date and a note that it was added later.
 | [D-163](163-the-privacy-retention-setting-is-kept-and-given-a-job.md) | 2026-11-12 | The unused privacy data-retention setting is kept and given a real job | in force |
 | [D-164](164-an-erasure-empties-the-hashed-address-on-asset-changes.md) | 2026-11-12 | An erasure empties the hashed network address on asset-change records the person made | in force |
 | [D-165](165-a-currency-sign-in-a-file-means-the-organisations-own-currency.md) | 2026-11-12 | A currency sign in an imported file is read as the organisation's own currency whenever that currency uses the sign | in force |
+| [D-166](166-the-privacy-retention-setting-governs-how-long-consents-are-kept.md) | 2026-11-12 | The privacy data-retention setting governs how long consent records are kept | in force |
+| [D-167](167-whether-an-organisation-issues-tax-receipts-is-a-setting.md) | 2026-11-12 | Whether an organisation issues tax receipts for gifts is its own setting | in force |
+| [D-168](168-a-hosts-home-stops-being-the-meeting-place-when-they-leave.md) | 2026-11-12 | When a host leaves a small group, their home stops being its meeting place automatically | in force |
+| [D-169](169-a-pending-suggestion-cannot-be-published-before-approval.md) | 2026-11-12 | A pending event suggestion cannot be published before it is approved | in force |
 
-*165 decisions. This index is checked against the folder by
+*169 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
