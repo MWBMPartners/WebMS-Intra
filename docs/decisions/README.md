@@ -203,7 +203,10 @@ appended with its real date and a note that it was added later.
 | [D-145](145-a-restored-date-comes-back-as-a-draft.md) | 2026-11-11 | A date brought back comes back as a draft | in force |
 | [D-146](146-a-cancelled-date-brought-back-stays-cancelled.md) | 2026-11-11 | A date that was cancelled before it was hidden comes back still cancelled | in force |
 | [D-147](147-a-postponed-date-brought-back-stays-postponed.md) | 2026-11-11 | A date that was postponed before it was hidden comes back still postponed | in force |
+| [D-148](148-a-visitor-erasure-request-records-a-tick-and-a-short-note.md) | 2026-11-12 | A visitor erasure request records a required tick and a short note on how the person was checked | in force |
+| [D-149](149-no-confirmation-e-mail-after-a-visitor-erasure.md) | 2026-11-12 | A visitor is not sent a confirmation e-mail after their details are erased | in force |
+| [D-150](150-a-visitor-erasure-request-reaches-only-its-own-organisation.md) | 2026-11-12 | A visitor erasure request reaches only the organisation whose administrator filed it | in force |
 
-*147 decisions. This index is checked against the folder by
+*150 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
