@@ -2795,11 +2795,14 @@ class AssetRegister
                     //    this write really replaced, not one read before
                     //    somebody else's change), and the source of every
                     //    field a partial write was not sent. (A plain SELECT
-                    //    here would give the same answer TODAY, only because
-                    //    it would be this transaction's first plain read and
-                    //    so take its snapshot after the lock — measured:
-                    //    tools/assets-api-update-selftest.php cannot tell the
-                    //    two apart. FOR UPDATE does not depend on that order.)
+                    //    here would give the same answer TODAY only because
+                    //    it would be this transaction's first plain read, and
+                    //    so take its snapshot after the lock; over HTTP no
+                    //    test can tell the two apart. FOR UPDATE does not
+                    //    depend on that order: section S of
+                    //    tools/assets-api-update-selftest.php begins the
+                    //    transaction WITH a consistent snapshot, and goes red
+                    //    when FOR UPDATE is removed.)
                     $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? FOR UPDATE');
                     $lockedStmt->bind_param('ii', $assetId, $siteId);
                     $lockedStmt->execute();

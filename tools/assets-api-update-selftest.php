@@ -18,9 +18,20 @@
  *      the real API request (renaming the asset) runs in the web server and
  *      reads the row, then WAITS on that lock — asserted from
  *      performance_schema, never slept on. While it waits, this connection
- *      changes three OTHER fields (a text, an enum and a money figure) and
- *      commits. The rename must land AND all three other changes must survive.
- *      The audit record of the API call must name only what it changed.
+ *      changes EVERY other column (room, category, kit, confidentiality,
+ *      status, money, dates, texts — all but the six in AU_NOT_CHANGED, a list
+ *      R0 checks against the schema) and commits. The rename must land AND the
+ *      rest of the row must be exactly what the other writer left, compared
+ *      whole. The audit record of the API call must name only what it changed.
+ *      (Round 1 changed three columns; exempting `locationID` and
+ *      `isConfidential` from the rule then left every check green.)
+ *   S  THE LOCKING READ. The same race, driven in a separate PHP process that
+ *      loads the portal's own start-up but begins every transaction WITH a
+ *      consistent snapshot, so a plain read under the lock would see the row
+ *      from BEFORE the other writer committed. Only updateAsset()'s
+ *      `FOR UPDATE` keeps the result right there; without that read mode
+ *      nothing over HTTP can tell the two apart, because today the re-read is
+ *      the transaction's first plain read (round 1's plant E).
  *   P  a field that IS sent is written, an explicit null clears it, and
  *      nothing else moves;
  *   C  currency still follows its own rules (#966, D-139): an unusable code is
@@ -37,7 +48,11 @@
  *     (`PHP_CLI_SERVER_WORKERS` is unset), so the "other writer" is this
  *     test's own connection, which is the same thing to the database;
  *   - MariaDB: performance_schema is OFF there by default, and this test
- *     REFUSES rather than guessing without it.
+ *     REFUSES rather than guessing without it;
+ *   - section S swaps the connection the portal's classes use for one that
+ *     differs in nothing but how it begins a transaction; it drives
+ *     AssetRegister::updateAsset() as the handler does, not the handler itself
+ *     (section R drives the handler).
  *
  * Run it on a THROWAWAY database built from web/_sql/full_schema.sql:
  *     SELFTEST_DB_NAME=selftest_assetsapi [SELFTEST_DB_HOST=… SELFTEST_DB_PORT=…
@@ -325,6 +340,9 @@ $removeAll = static function () use ($db, $site): void {
         run($db, 'DELETE FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblAssets` WHERE `assetID` = ?', 'i', [$id]);
     }
+    // The race's fixture rows (their links from the assets are ON DELETE SET NULL).
+    run($db, 'DELETE FROM `tblAssetCategories` WHERE `siteID` = ? AND `categoryName` LIKE ?', 'is', [$site, AU_PREFIX . '%']);
+    run($db, 'DELETE FROM `tblAssetLocations` WHERE `siteID` = ? AND `locationName` LIKE ?', 'is', [$site, AU_PREFIX . '%']);
     // Signing in and each API call write activity records naming the
     // administrator; they hold a link to the account, so they go first.
     run($db, 'DELETE FROM `tblActivityLogs` WHERE `userID` = ?', 'i', [AU_ADMIN]);
@@ -444,41 +462,206 @@ $raceApi = static function (array $body, mysqli $holder, int $assetId, callable 
 echo "Assets API partial update (#1001)\n";
 
 // =============================================================================
-// R. The race: an API rename while somebody else changes three other fields
+// The "other writer": a second connection that changes EVERY column
+// =============================================================================
+// Round 2 of the independent check (#1001): the first version of this race
+// changed three columns of about forty, not including the issue's own example
+// (moving the asset to another room), and exempting `locationID` and
+// `isConfidential` from the partial-write rule left every check green. So the
+// other writer now changes every column except the six below, and the row is
+// compared WHOLE afterwards. R0 asks the SCHEMA which columns exist, so a column
+// added to tblAssets later that this writer does not change fails R0 — the list
+// below is the one thing a reader has to keep up to date, and it fails both ways.
+
+/** The only tblAssets columns the other writer leaves alone, and why. */
+const AU_NOT_CHANGED = [
+    'assetID',   // the row's identity
+    'siteID',    // which organisation it belongs to: moving it is not an edit
+    'name',      // the field the API request IS sent; it must win
+    'createdAt', // when it was made
+    'updatedAt', // set by the database on every write, including the API's
+    'isDeleted', // a deleted asset is a different question (see the notes)
+];
+
+// Fixture rows the race needs so every link can really change: a category,
+// two rooms (the asset starts in the first; the other writer moves it to the
+// second) and a parent asset to bundle it under.
+run($db, 'INSERT INTO `tblAssetCategories` (`siteID`, `categoryName`) VALUES (?, ?)', 'is', [$site, AU_PREFIX . ' category']);
+$fixCategory = (int) $db->insert_id;
+run($db, 'INSERT INTO `tblAssetLocations` (`siteID`, `locationName`) VALUES (?, ?)', 'is', [$site, AU_PREFIX . ' room one']);
+$fixRoomOne = (int) $db->insert_id;
+run($db, 'INSERT INTO `tblAssetLocations` (`siteID`, `locationName`) VALUES (?, ?)', 'is', [$site, AU_PREFIX . ' room two']);
+$fixRoomTwo = (int) $db->insert_id;
+$fixParent = $makeAsset(AU_PREFIX . ' parent kit', 'EUR');
+
+/** The whole row, every column, as the test's own connection sees it. */
+$fullRow = static fn (int $id): array => rows($db, 'SELECT * FROM `tblAssets` WHERE `assetID` = ?', 'i', [$id])[0] ?? [];
+/** A race asset: an ordinary one, standing in room one. */
+$makeRaceAsset = static function (string $name) use ($db, $makeAsset, $fixRoomOne): int {
+    $id = $makeAsset($name, 'EUR');
+    run($db, 'UPDATE `tblAssets` SET `locationID` = ? WHERE `assetID` = ?', 'ii', [$fixRoomOne, $id]);
+    return $id;
+};
+/**
+ * Inside $holder's open transaction (it already holds the row's lock), change
+ * every column but AU_NOT_CHANGED to something different, and answer the row
+ * as $holder now sees it — what the row must still hold once the API is done.
+ */
+$changeEverything = static function (mysqli $holder, int $id) use ($fixCategory, $fixRoomTwo, $fixParent): array {
+    $tag   = 'AU-' . bin2hex(random_bytes(6));
+    $token = bin2hex(random_bytes(16));
+    $admin = AU_ADMIN;
+    $u = $holder->prepare(
+        "UPDATE `tblAssets` SET `assetKind` = 'digital', `description` = 'Changed meanwhile', `categoryID` = ?, `locationID` = ?,"
+        . " `manufacturer` = 'Other maker', `model` = 'Other model', `serialNumber` = 'SN-CHANGED-MEANWHILE', `assetTagCode` = ?,"
+        . " `features` = 'Other features', `conditionState` = 'poor', `status` = 'in-repair', `purchaseDate` = '2020-01-02',"
+        . " `purchaseStore` = 'Other shop', `purchaseCostPence` = 12345, `currency` = 'USD', `warrantyExpiry` = '2030-01-01',"
+        . " `warrantyDetails` = 'Other warranty', `licenseKey` = 'not-a-real-cipher-text', `licenseSeats` = 7, `renewalDate` = '2031-02-03',"
+        . " `accessUrl` = 'https://example.invalid/other', `depreciationMethod` = 'straight-line', `usefulLifeMonths` = 36,"
+        . " `salvageValuePence` = 100, `currentValuePence` = 999, `valuationDate` = '2026-05-06', `insurerName` = 'Other insurer',"
+        . " `insurancePolicyNumber` = 'POL-OTHER', `insuredValuePence` = 4321, `insuranceRenewalDate` = '2027-07-08',"
+        . " `ownershipTerms` = 'Other terms', `isConfidential` = 1, `publicToken` = ?, `publicPageEnabled` = 0,"
+        . " `labelSymbology` = 'code128', `parentAssetID` = ?, `createdByID` = ? WHERE `assetID` = ?"
+    );
+    $u->bind_param('iissiii', $fixCategory, $fixRoomTwo, $tag, $token, $fixParent, $admin, $id);
+    $u->execute();
+    $u->close();
+    $s = $holder->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ?');
+    $s->bind_param('i', $id);
+    $s->execute();
+    $row = $s->get_result()->fetch_assoc() ?? [];
+    $s->close();
+    return $row;
+};
+/** The columns (except name and updatedAt) where $after differs from $expected. */
+$differences = static function (array $expected, array $after): array {
+    $out = [];
+    foreach ($expected as $col => $value) {
+        if ($col === 'name' || $col === 'updatedAt') {
+            continue;
+        }
+        $a = $value === null ? null : (string) $value;
+        $b = array_key_exists($col, $after) === false || $after[$col] === null ? null : (string) $after[$col];
+        if ($a !== $b) {
+            $out[$col] = ['should be' => $a, 'is' => $b];
+        }
+    }
+    return $out;
+};
+
+// =============================================================================
+// R. The race over HTTP: an API rename while somebody else changes every column
 // =============================================================================
 echo "\nSection R — a change made while the API request waits survives it\n";
-$chair = $makeAsset(AU_PREFIX . ' chair', 'EUR');
-$chairToken = $freshToken('/assets/edit?id=' . $chair);
+$chair       = $makeRaceAsset(AU_PREFIX . ' chair');
+$chairStart  = $fullRow($chair);
+$chairToken  = $freshToken('/assets/edit?id=' . $chair);
 $auditBefore = (int) (rows($db, 'SELECT COALESCE(MAX(`auditID`), 0) AS `m` FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$chair])[0]['m'] ?? 0);
-$holder = $holdAsset($chair);
+$holder      = $holdAsset($chair);
+$chairExpected = [];
 $race = $raceApi(['assetID' => $chair, 'name' => AU_PREFIX . ' chair renamed', 'csrf_token' => $chairToken], $holder, $chair,
-    static function () use ($holder, $chair): void {
-        // Somebody else: a stocktake sets the status, the edit page fixes the
-        // serial number and raises the insured value. Text, enum and money.
-        $u = $holder->prepare("UPDATE `tblAssets` SET `serialNumber` = 'SN-CHANGED-MEANWHILE', `status` = 'in-repair', `insuredValuePence` = 4321 WHERE `assetID` = ?");
-        $u->bind_param('i', $chair);
-        $u->execute();
-        $u->close();
+    static function () use ($holder, $chair, $changeEverything, &$chairExpected): void {
+        $chairExpected = $changeEverything($holder, $chair);
         $holder->commit();
         $holder->close();
     });
-$chairRow = $assetRow($chair);
+$chairRow = $fullRow($chair);
+$unchanged = [];
+foreach ($chairStart as $col => $value) {
+    if (in_array($col, AU_NOT_CHANGED, true) === false
+        && ($value === null ? null : (string) $value) === (($chairExpected[$col] ?? null) === null ? null : (string) $chairExpected[$col])) {
+        $unchanged[] = $col;
+    }
+}
+check('R0 the premise of the comparison: the other writer changed EVERY column of tblAssets except the six named in AU_NOT_CHANGED, and each of those six exists (asked of the schema, so a new column fails here)',
+    count($chairStart) > 30 && $unchanged === [] && array_diff(AU_NOT_CHANGED, array_keys($chairStart)) === [],
+    'columns the other writer left as they were: ' . json_encode($unchanged) . '; named but missing: ' . json_encode(array_values(array_diff(AU_NOT_CHANGED, array_keys($chairStart)))));
 check('R1 the premise: the API request was seen WAITING on the lock this test holds on this asset row (it had already read the row)',
     $race['seen'] === true);
 check('R2 the field the API WAS sent is written: the asset is renamed (HTTP 200)',
     $race['status'] === 200 && ($chairRow['name'] ?? '') === AU_PREFIX . ' chair renamed',
-    'HTTP ' . $race['status'] . ' ' . json_encode($chairRow) . ' ' . mb_substr($race['body'], 0, 200));
-check('R3 the serial number somebody else changed while the request waited SURVIVES (not put back to SN-ORIGINAL)',
-    ($chairRow['serialNumber'] ?? '') === 'SN-CHANGED-MEANWHILE', json_encode($chairRow));
-check('R4 the status somebody else changed while the request waited SURVIVES (still in-repair, not in-service)',
-    ($chairRow['status'] ?? '') === 'in-repair', json_encode($chairRow));
-check('R5 the insured value somebody else changed while the request waited SURVIVES (4321, not 1000)',
-    (int) ($chairRow['insuredValuePence'] ?? 0) === 4321, json_encode($chairRow));
+    'HTTP ' . $race['status'] . ' ' . mb_substr($race['body'], 0, 200));
+$chairLost = $differences($chairExpected, $chairRow);
+check('R3 EVERY column somebody else changed while the request waited SURVIVES it — room, category, kit, confidentiality, status, money, dates, texts and the rest — compared as the whole row',
+    $chairExpected !== [] && $chairLost === [], 'put back or changed: ' . json_encode($chairLost));
+check('R4 the issue\'s own example, named on its own: the asset moved to room two while the request waited is STILL in room two',
+    (int) ($chairRow['locationID'] ?? 0) === $fixRoomTwo, 'locationID ' . var_export($chairRow['locationID'] ?? null, true) . ', room two is ' . $fixRoomTwo);
+check('R5 and it is still marked confidential (a field whose loss would show it to people who should not see it)',
+    (int) ($chairRow['isConfidential'] ?? 0) === 1, 'isConfidential ' . var_export($chairRow['isConfidential'] ?? null, true));
 $raceAudit = rows($db, 'SELECT `changeSet` FROM `tblAssetAudit` WHERE `assetID` = ? AND `action` = \'update\' AND `auditID` > ? ORDER BY `auditID`', 'ii', [$chair, $auditBefore]);
 $raceDiff  = json_decode((string) ($raceAudit[0]['changeSet'] ?? 'null'), true);
-check('R6 the API call\'s audit record names ONLY the name as changed — it does not claim (or hide) a change to the serial number, status or insured value',
+check('R6 the API call\'s audit record names ONLY the name as changed — it neither claims nor hides a change to anything the other writer changed',
     count($raceAudit) === 1 && is_array($raceDiff) === true && array_keys($raceDiff) === ['name'],
     json_encode($raceAudit));
+
+// =============================================================================
+// S. The re-read under the lock must be a LOCKING read (FOR UPDATE)
+// =============================================================================
+// Plant E of round 1: dropping FOR UPDATE from updateAsset()'s re-read under the
+// lock turned NOTHING red, because today that read is the transaction's FIRST
+// plain read and so takes its snapshot after the lock was granted. The round-2
+// check showed the order is all that saves it: started WITH a consistent
+// snapshot, a plain read sees the row as it was BEFORE the other writer
+// committed, and the whole race fails. Currency::withParentLocked() is the one
+// place that begins the transaction and it must not change for a test, so this
+// section reaches the same state from OUTSIDE it: a separate PHP process loads
+// the scratch copy's own start-up (the file every page loads), puts in its place
+// a connection whose begin_transaction() always asks for a consistent snapshot
+// (a subclass of mysqli; everything else is the portal's), and calls
+// updateAsset() exactly as the API handler does — a read first, then a partial
+// write naming only `name`. FOR UPDATE then decides the answer by itself.
+echo "\nSection S — the row is re-read with a LOCKING read, whatever the transaction's snapshot\n";
+$bench = $makeRaceAsset(AU_PREFIX . ' bench');
+$worker = $child . $sep . 'snapshot-first-worker.php';
+file_put_contents($worker, "<?php\n// Written by tools/assets-api-update-selftest.php for ONE run (#1001, section S).\n"
+    . "declare(strict_types=1);\n"
+    . "\$_SERVER['REQUEST_URI'] = '/'; \$_SERVER['HTTP_HOST'] = '127.0.0.1'; \$_SERVER['REQUEST_METHOD'] = 'GET'; \$_SERVER['REMOTE_ADDR'] = '127.0.0.1';\n"
+    . 'require ' . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'bootstrap.php', true) . ";\n"
+    . "final class SnapshotFirstMysqli extends mysqli\n{\n"
+    . "    public function begin_transaction(int \$flags = 0, ?string \$name = null): bool\n    {\n"
+    . "        return parent::begin_transaction(\$flags | MYSQLI_TRANS_START_WITH_CONSISTENT_SNAPSHOT, \$name);\n    }\n}\n"
+    . '$conn = new SnapshotFirstMysqli(' . var_export($dbHost, true) . ', ' . var_export($dbUser, true) . ', ' . var_export($dbPass, true)
+    . ', ' . var_export($dbName, true) . ', ' . var_export($dbPort, true) . ");\n"
+    . "\$conn->set_charset('utf8mb4');\n"
+    . "// The portal's own connection is strict (#593); this one is made the same.\n"
+    . "\$mode = (string) (\$mysqli->query('SELECT @@SESSION.sql_mode AS `m`')->fetch_assoc()['m'] ?? '');\n"
+    . "\$set = \$conn->prepare('SET SESSION sql_mode = ?'); \$set->bind_param('s', \$mode); \$set->execute(); \$set->close();\n"
+    . "(new ReflectionProperty(\\Portal\\Core\\App::class, 'db'))->setValue(null, \$conn);\n"
+    . "if (\\Portal\\Core\\App::db() !== \$conn) { echo 'NOT SWAPPED'; exit(3); }\n"
+    . '$id = ' . $bench . ";\n"
+    . "\$existing = \\Portal\\Core\\AssetRegister::get(\$id); // the handler's read, before the lock\n"
+    . "if (\$existing === null) { echo 'NO ASSET'; exit(3); }\n"
+    . "\$data = \$existing;\n"
+    . "\$data['name'] = " . var_export(AU_PREFIX . ' bench renamed', true) . ";\n"
+    . "\$data['currency'] = null;   // not sent, exactly as _coerce.php passes it\n"
+    . "\$data['licenseKey'] = '';   // not sent: leave the stored key alone\n"
+    . "echo \\Portal\\Core\\AssetRegister::updateAsset(\$id, \$data, " . AU_ADMIN . ", ['name']) === true ? 'UPDATED' : 'REFUSED';\n");
+$benchHolder   = $holdAsset($bench);
+$benchExpected = [];
+$workerOut     = $child . $sep . 'snapshot-first-worker.out';
+$workerProc    = proc_open([PHP_BINARY, '-d', 'display_errors=stderr', '-d', 'log_errors=0', $worker],
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $workerOut, 'w'], 2 => ['file', $workerOut, 'a']], $workerPipes, $child, $env);
+$benchSeen = false;
+for ($i = 0; $i < 100 && $benchSeen === false && is_resource($workerProc) === true && proc_get_status($workerProc)['running'] === true; $i++) {
+    $benchSeen = $waitingOnRow('tblAssets', $bench, $benchHolder);
+    if ($benchSeen === false) {
+        usleep(100000);
+    }
+}
+$benchExpected = $changeEverything($benchHolder, $bench);
+$benchHolder->commit();
+$benchHolder->close();
+$workerExit = is_resource($workerProc) === true ? proc_close($workerProc) : -1;
+$workerSaid = trim((string) @file_get_contents($workerOut));
+$benchRow   = $fullRow($bench);
+check('S1 the premise: the worker (the portal\'s start-up, with a connection that begins every transaction WITH a consistent snapshot) was seen WAITING on this asset\'s lock',
+    $benchSeen === true, 'worker said: ' . mb_substr($workerSaid, 0, 300));
+check('S2 updateAsset() renamed the asset from that worker',
+    $workerExit === 0 && str_ends_with($workerSaid, 'UPDATED') === true && ($benchRow['name'] ?? '') === AU_PREFIX . ' bench renamed',
+    'exit ' . $workerExit . ': ' . mb_substr($workerSaid, 0, 400));
+$benchLost = $differences($benchExpected, $benchRow);
+check('S3 even with the snapshot taken BEFORE the other writer committed, every column it changed SURVIVES — the re-read under the lock is a locking read (FOR UPDATE), which ignores the snapshot',
+    $benchExpected !== [] && $benchLost === [], 'put back or changed: ' . json_encode($benchLost));
 
 // =============================================================================
 // P. A field sent is written; an explicit null clears; nothing else moves
