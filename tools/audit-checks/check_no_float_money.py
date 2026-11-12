@@ -25,10 +25,12 @@ A PHP statement under web/ is reported when it multiplies by 100 (`* 100`,
   - casts to a float: `(float)`, `(double)`, `(real)`, `floatval(`, `doubleval(`
     (the function names in any capitals, as PHP reads them); or
   - reads a request value directly: `$_POST`, `$_GET`, `$_REQUEST`, `$_COOKIE`
-    (PHP converts such text to a number by itself, through a float) — except a
-    request value cast to a whole number first (`(int) $_GET[…]`,
-    `intval($_GET[…])`), which is no float: `((int) $_GET['page'] - 1) * 100`
-    is pagination, and round 2 of the check found it reported.
+    (PHP converts such text to a number by itself, through a float) — EVEN
+    when it is cast to a whole number first. Round 3 excused `(int) $_GET[…]`
+    and `intval($_GET[…])` for the sake of a paging sum, and round 4 of the
+    check showed that let the #1004 fault straight back: `(int) $_POST['amount']
+    * 100` reads "12.50" as 1200 and "1e3" through a float. Nothing under web/
+    needs the exception; a real paging statement goes in ALLOWED with its reason.
 Statements are cut by PHP's own tokeniser (float-money-statements.php) at `;`,
 `{` and `}`, with comments removed and string contents emptied, because every
 handler #1004 changed QUOTES the old code in a comment explaining the fix, and
@@ -39,7 +41,8 @@ piece of its CODE, with the reason. The list FAILS BOTH WAYS: an entry that no
 longer matches anything is reported, because a stale exception reads as a
 guarantee. It is EMPTY today: nothing under web/ needs the shape.
 
-WHAT IT CANNOT SEE, said plainly (each measured by a "blind" case in the self-test):
+WHAT IT CANNOT SEE, said plainly (each is a "blind" case in the self-test, which
+asserts it is NOT reported — so a change that started seeing one would be noticed):
   - the float made in one statement and multiplied in another
     (`$f = (float) $raw;` … `$p = (int) round($f * 100);`) — how
     `Giving::parseAmount()` and the count page's envelope sum were written
@@ -81,15 +84,13 @@ ALLOWED: dict[str, list[tuple[str, str]]] = {}
 TIMES_100 = re.compile(r'\*\s*100(?:\.0*)?(?![0-9.])|(?<![0-9.$\w])100(?:\.0*)?\s*\*')
 FLOAT_CAST = re.compile(r'\(float\)|\b(?:floatval|doubleval)\s*\(', re.IGNORECASE)
 REQUEST = re.compile(r'\$_(?:POST|GET|REQUEST|COOKIE)\b')
-# A request value made a whole number first is no float; it is taken out before REQUEST is asked.
-INT_OF_REQUEST = re.compile(r'\(int\)\s*\$_(?:POST|GET|REQUEST|COOKIE)\s*\[[^\]]*\]|\bintval\s*\(\s*\$_(?:POST|GET|REQUEST|COOKIE)\s*\[[^\]]*\]\s*\)', re.IGNORECASE)
 
 
 def money_from_text(code: str) -> bool:
     """Does one statement turn text into hundredths through a float (the rule in the header)?"""
     if TIMES_100.search(code) is None:
         return False
-    return FLOAT_CAST.search(code) is not None or REQUEST.search(INT_OF_REQUEST.sub('', code)) is not None
+    return FLOAT_CAST.search(code) is not None or REQUEST.search(code) is not None
 
 
 def statements(paths: list[str]) -> dict[str, list[list]]:
@@ -185,9 +186,12 @@ SELF_TEST_CASES = [
     ('times 1001', "<?php\n$x = (float) $v * 1001;\n", False),
     ('FLOATVAL in capitals (PHP function names ignore case)', "<?php\n$p = (int) (FLOATVAL($v) * 100);\n", True),
     ('(integer) is not a float, but (FLOAT) in capitals is', "<?php\n$p = (int) round((FLOAT) $v * 100);\n", True),
-    ('a request value cast to int first (pagination)', "<?php\n$offset = ((int) $_GET['page'] - 1) * 100;\n", False),
-    ('intval of a request value (pagination)', "<?php\n$offset = (intval($_GET['page']) - 1) * 100;\n", False),
-    ('a request value cast to int, and ANOTHER used raw', "<?php\n$p = ((int) $_GET['a']) + $_POST['b'] * 100;\n", True),
+    ('(int) of a request value: "12.50" would be 1200 (round 4)', "<?php\n$p = (int) $_POST['amount'] * 100;\n", True),
+    ('intval() of a request value', "<?php\n$p = intval($_POST['amount']) * 100;\n", True),
+    ('(integer) of a request value', "<?php\n$p = (integer) $_POST['amount'] * 100;\n", True),
+    ('(INT) in capitals', "<?php\n$p = (INT) $_POST['amount'] * 100;\n", True),
+    ('(int) with no spaces', "<?php\n$p = (int)$_POST['x']*100;\n", True),
+    ('a paging sum is reported too (it belongs in ALLOWED with its reason)', "<?php\n$offset = ((int) $_GET['page'] - 1) * 100;\n", True),
     ('blind: text multiplied with no cast (trim)', "<?php\n$p = (int) round(trim($raw) * 100);\n", False),
     ('blind: text multiplied with no cast (str_replace)', "<?php\n$p = round(str_replace(',', '', $raw) * 100);\n", False),
     ('blind: filter_input', "<?php\n$p = filter_input(INPUT_POST, 'a') * 100;\n", False),
@@ -195,6 +199,12 @@ SELF_TEST_CASES = [
     ('blind: $_SERVER', "<?php\n$p = (int) round($_SERVER['X_AMOUNT'] * 100);\n", False),
     ('blind: * 1e2', "<?php\n$p = (int) round((float) $v * 1e2);\n", False),
     ('blind: * 1_00', "<?php\n$p = (int) round((float) $v * 1_00);\n", False),
+    ('blind: a variable holding 100', "<?php\n$hundred = 100;\n$p = (int) round((float) $v * $hundred);\n", False),
+    ('blind: a constant holding 100', "<?php\nconst HUNDRED = 100;\n$p = (int) round((float) $v * HUNDRED);\n", False),
+    ('blind: bcmul()', "<?php\n$p = (int) bcmul((string) (float) $v, '100');\n", False),
+    ('blind: JavaScript in a page', "<?php $a = 1; ?>\n<script>var p = Math.round(parseFloat(v) * 100);</script>\n", False),
+    ('blind: the words in markup', "<?php $a = 1; ?>\n<p>(int) round((float) $v * 100)</p>\n", False),
+    ('a percentage that casts to a float IS reported (it would go in ALLOWED with its reason)', "<?php\n$pct = (float) $done / $all * 100;\n", True),
 ]
 
 

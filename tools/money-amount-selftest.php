@@ -13,7 +13,8 @@
  * FIGURES ONLY (the owner, D-152); a FILE the portal reads (`fromFile`) — the
  * bank-statement import (D-152) and the asset import (D-153), nothing else —
  * also reads commas between groups of three and the record's own currency
- * sign or code. This test proves it:
+ * sign or code — but never a sign SHARED by several currencies ("$", "¥"),
+ * which is refused with the reason (D-155). This test proves it:
  *
  *   A  the converter itself (no database), over a TABLE OF DIMENSIONS rather
  *      than a few examples, in BOTH modes: every count of figures before the
@@ -140,6 +141,19 @@ const PLUS          = 'Leave out the plus sign: type the amount in figures, for 
 const MINUS_PLACE   = 'A minus sign can only come first, for example -12.50.';
 const ONE_POINT     = 'An amount can have only one decimal point, for example 12.50.';
 const NO_FIGURES    = 'That has no figures in it: type the amount in figures, for example 12.50.';
+const FILE_NO_FIGURES = 'That cell has no figures in it: it should hold an amount, for example 12.50.';
+const FILE_PLUS     = 'Leave out the plus sign: the cell should hold the amount in figures, for example 12.50.';
+const MINUS_NOT_HERE      = 'A minus sign has no place here: the amount cannot be negative. Type the figures only, for example 12.50.';
+const FILE_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative. The cell should hold figures only, for example 12.50.';
+/** D-155's sentence for a shared sign, in an organisation keeping its money in $code. */
+function sharedSign(string $sign, string $who, string $code): string
+{
+    return 'The sign ' . $sign . ' is used by several currencies (' . $who . '), so the portal cannot tell which money this is. '
+        . 'Write the three-letter code of the currency the cell is in instead (this organisation keeps its money in ' . $code
+        . ', for example ' . $code . ' 12.50), or leave the sign out if the amount is in ' . $code . '.';
+}
+const DOLLARS = 'US, Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars among them';
+const YEN_YUAN = 'the Chinese yuan and the Japanese yen';
 const NO_CURRENCY_START  = 'That amount is written with a currency (';
 const NO_CURRENCY_END    = '), but no currency is chosen for this organisation, so the portal cannot tell what money it is. Choose the organisation\'s currency in Admin, Settings, Organisation, then import the file again.';
 const BAD_COMMAS    = 'The commas in that amount are in the wrong places: a comma may only separate groups of three figures (1,234.50), and the decimals follow a point (12.50).';
@@ -291,13 +305,19 @@ check('A5 a power of ten is refused in every spelling (' . implode(', ', $exps) 
 // A6 — signs.
 $signs = [];
 foreach ($modes as $modeName => $fromFile) {
-    foreach (['+5' => PLUS, '--5' => MINUS_PLACE, '5-' => MINUS_PLACE, '1-2' => MINUS_PLACE, '-' => NO_FIGURES] as $t => $want) {
-        if (Currency::parseAmount($t, '', allowNegative: true, fromFile: $fromFile) !== $want) {
-            $signs[] = $modeName . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', allowNegative: true, fromFile: $fromFile), true);
+    foreach ([true, false] as $allowNegative) {
+        $minus = $allowNegative === true ? MINUS_PLACE : ($fromFile === true ? FILE_MINUS_NOT_HERE : MINUS_NOT_HERE);
+        $cases = ['+5' => $fromFile === true ? FILE_PLUS : PLUS, '--5' => $minus, '5-' => $minus, '1-2' => $minus,
+            '-' => $fromFile === true ? FILE_NO_FIGURES : NO_FIGURES];
+        foreach ($cases as $t => $want) {
+            $got = Currency::parseAmount($t, '', allowNegative: $allowNegative, fromFile: $fromFile);
+            if ($got !== $want) {
+                $signs[] = $modeName . ($allowNegative === true ? ' (negatives allowed) ' : ' (no negatives) ') . $t . ' → ' . var_export($got, true);
+            }
         }
     }
 }
-check('A6 signs: "-3" is refused where negatives are not allowed ("cannot be negative") and is -300 where they are; "-0" and "-0.00" are 0 either way; each other shape gets ITS true reason in both modes — "+5" the plus sign, "--5", "5-" and "1-2" where a minus may stand, "-" alone no figures; "- 5" (a space) figures only',
+check('A6 signs: "-3" is refused where negatives are not allowed ("cannot be negative") and is -300 where they are; "-0" and "-0.00" are 0 either way; each other shape gets ITS true reason, in both modes, with negatives allowed AND not — "+5" the plus sign; "--5", "5-", "1-2": where a minus may stand when one is allowed, and that it has no place at all when none is (round 3 told a box that cannot be negative to put the minus first, which only led to "cannot be negative"); "-" alone no figures; "- 5" (a space) figures only',
     Currency::parseAmount('-3', '') === NEGATIVE && Currency::parseAmount('-3', '', allowNegative: true) === -300
     && Currency::parseAmount('-0', '') === 0 && Currency::parseAmount('-0.00', '') === 0 && $signs === []
     && Currency::parseAmount('- 5', '', allowNegative: true) === FIGURES_ONLY, implode(' | ', $signs));
@@ -310,7 +330,7 @@ foreach ($modes as $modeName => $fromFile) {
             $points[] = $modeName . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', fromFile: $fromFile), true);
         }
     }
-    if (Currency::parseAmount('.', '', fromFile: $fromFile) !== NO_FIGURES) {
+    if (Currency::parseAmount('.', '', fromFile: $fromFile) !== ($fromFile === true ? FILE_NO_FIGURES : NO_FIGURES)) {
         $points[] = $modeName . ' .';
     }
 }
@@ -383,15 +403,33 @@ foreach ([['£12.50', '£'], ['GBP 12.50', 'GBP'], ['-£3', '£'], ['€1,234.50
         $told[] = 'no currency ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', allowNegative: true, fromFile: true), true);
     }
 }
-foreach ([['$12.50', 'GBP', '$'], ['USD 5', 'GBP', 'USD'], ['£12.50', 'EUR', '£'], ['$5', 'CAD', '$']] as [$t, $code, $sign]) {
+foreach ([['A$12.50', 'NZD', 'A$'], ['USD 5', 'GBP', 'USD'], ['£12.50', 'EUR', '£'], ['€5', 'GBP', '€'], ['NZ$5', 'AUD', 'NZ$']] as [$t, $code, $sign]) {
     $want = 'That amount is written in another currency (' . $sign . '), not ' . $code . '. Import a file kept in ' . $code
         . ', or check the organisation\'s currency in Admin, Settings, Organisation.';
     if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
         $told[] = $code . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
     }
 }
-check('A10e a FILE\'s amount with a currency sign says the TRUE reason and what to do: with no currency chosen for the organisation ("£12.50", "GBP 12.50", "-£3", "€1,234.50", "$5") it says so and points at Organisation settings; in another currency ("$12.50" for GBP) it names both — round 2 said "it should be figures" for all of them',
+check('A10e a FILE\'s amount with a currency sign says the TRUE reason and what to do: with no currency chosen for the organisation ("£12.50", "GBP 12.50", "-£3", "€1,234.50", "$5") it says so and points at Organisation settings; in another currency with a sign or code of its own ("A$12.50" for NZD, "€5" for GBP) it names both — round 2 said "it should be figures" for all of them',
     $told === [], implode(' | ', $told));
+// A10f — D-155: a sign SHARED by several currencies is refused even when it is
+// the organisation's own, with the true reason; its code and unique sign read.
+$shared = [];
+foreach ([['$12.50', 'USD', '$', DOLLARS], ['$12.50', 'AUD', '$', DOLLARS], ['$12.50', 'NZD', '$', DOLLARS], ['$12.50', 'CAD', '$', DOLLARS],
+          ['-$3.00', 'AUD', '$', DOLLARS], ['$12.50', 'GBP', '$', DOLLARS], ['¥12', 'CNY', '¥', YEN_YUAN]] as [$t, $code, $sign, $who]) {
+    $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
+    if ($got !== sharedSign($sign, $who, $code)) {
+        $shared[] = $code . ' ' . $t . ' → ' . var_export($got, true);
+    }
+}
+foreach ([['USD 12.50', 'USD', 1250], ['AUD 12.50', 'AUD', 1250], ['A$12.50', 'AUD', 1250], ['NZ$12.50', 'NZD', 1250], ['CA$12.50', 'CAD', 1250],
+          ['CN¥12.50', 'CNY', 1250], ['NZD 1,234.50', 'NZD', 123450]] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
+        $shared[] = $code . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
+    }
+}
+check('A10f a FILE cell with a sign SHARED by several currencies ("$", "¥") is refused even in a USD, AUD, NZD, CAD or CNY organisation whose own sign it is, saying it is shared and asking for the code (D-155) — never "another currency"; the code ("AUD 12.50") and a sign unique to the currency ("A$", "NZ$", "CA$", "CN¥") still read',
+    $shared === [], implode(' | ', $shared));
 check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar), in both modes',
     Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD')
     && Currency::parseAmount('5', 'JPY', fromFile: true) === Currency::whyNotChoosable('JPY'));
@@ -1076,7 +1114,8 @@ $importId = (int) (rows($db, "SELECT MAX(`importID`) AS `m` FROM `tblBankImports
 $txns = array_map('intval', array_column(rows($db, 'SELECT `amountPence` FROM `tblBankTxns` WHERE `importID` = ? ORDER BY `txnID`', 'i', [$importId]), 'amountPence'));
 check('G3 confirmed, the two credits are stored exactly: 123450 and 1250', $txns === [123450, 1250], 'HTTP ' . $confirm['status'] . '; ' . json_encode($txns));
 foreach (['G4' => ['0,500', 'the amount "0,500" was not read. ' . BAD_COMMAS],
-          'G4b' => ['$5.00', 'the amount "$5.00" was not read. That amount is written in another currency ($), not GBP. Import a file kept in GBP, or check the organisation\'s currency in Admin, Settings, Organisation.'],
+          'G4b' => ['$5.00', 'the amount "$5.00" was not read. ' . sharedSign('$', DOLLARS, 'GBP')],
+          'G4d' => ['€5.00', 'the amount "€5.00" was not read. That amount is written in another currency (€), not GBP. Import a file kept in GBP, or check the organisation\'s currency in Admin, Settings, Organisation.'],
           'G4c' => ['1e17', 'the amount "1e17" was not read. ' . POWER_OF_TEN]] as $label => [$cell, $said]) {
     $before = rows($db, "SELECT COUNT(*) AS `n` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['n'];
     $page   = $flashAfter($upload('money-selftest-' . bin2hex(random_bytes(4)) . '.csv', "Date,Description,Amount\n01/11/2026,Money selftest,\"{$cell}\"\n"));
@@ -1163,10 +1202,11 @@ $assetUpload('money-selftest-assets.csv', "Name,Purchase Cost\nMoney selftest as
 $assetConfirm = $http('POST', '/assets/import', ['csrf_token' => $freshToken('/assets/import'), 'action' => 'confirm']);
 check('I1 a spreadsheet with "£1,234.56", "1,000" and "GBP 7.50" imports three assets costing 123456, 100000 and 750 — the asset\'s own currency sign and code and thousands commas are read (D-153)',
     $assetCosts() === [123456, 100000, 750], 'HTTP ' . $assetConfirm['status'] . '; ' . json_encode($assetCosts()));
-$preview = $flashAfter($assetUpload('money-selftest-assets-2.csv', "Name,Purchase Cost\nMoney selftest asset D,\"$5.00\"\nMoney selftest asset E,\"0,500\"\n"));
+$preview = $flashAfter($assetUpload('money-selftest-assets-2.csv', "Name,Purchase Cost\nMoney selftest asset D,\"€5.00\"\nMoney selftest asset E,\"0,500\"\nMoney selftest asset F,\"$5.00\"\n"));
 $http('POST', '/assets/import', ['csrf_token' => $freshToken('/assets/import'), 'action' => 'cancel']);
-check('I2 another currency\'s sign ("$5.00") and a misplaced comma ("0,500") are each refused with the true reason, and neither asset is made',
-    str_contains($preview, 'Purchase Cost "$5.00": That amount is written in another currency ($), not GBP.') === true
+check('I2 another currency\'s sign ("€5.00"), a misplaced comma ("0,500") and a shared sign ("$5.00", D-155) are each refused with the true reason, and no asset is made',
+    str_contains($preview, 'Purchase Cost "€5.00": That amount is written in another currency (€), not GBP.') === true
+    && str_contains($preview, 'Purchase Cost "$5.00": ' . sharedSign('$', DOLLARS, 'GBP')) === true
     && str_contains($preview, 'Purchase Cost "0,500": ' . BAD_COMMAS) === true && count($assetCosts()) === 3,
     mb_substr(preg_replace('/\s+/', ' ', strip_tags($preview)) ?? '', 0, 600));
 
