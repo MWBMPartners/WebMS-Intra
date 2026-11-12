@@ -3662,7 +3662,7 @@ class GdprEraser
             || (string) $request['status'] !== 'processing'
         ) {
             throw new \RuntimeException(
-                'Erasure request #' . $requestId . ' is not a request for a visitor\'s e-mail address that is being '
+                'Erasure request #' . $requestId . ' is not a request for an e-mail address that is being '
                 . 'carried out, so nothing was changed.'
             );
         }

@@ -114,7 +114,9 @@ never automatically.**
    and its own copy of the address replaced.
 
 What it deliberately does **not** reach: any account, even a member's using
-the same address (a member asks from their own account); another
+the same address (what is found through a member's account is erased by that
+member's own request; a request they sent through the anonymous prayer form is
+not, and only this request reaches it); another
 organisation's suggestions, records or mail on the same installation (D-150:
 that organisation's administrator did not check who is asking, and files its
 own); any other mail to the same address (only the approval e-mail's subject

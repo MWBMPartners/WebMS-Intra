@@ -902,8 +902,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h3 class="h6 mt-3">An e-mail address: event suggestions and anonymous-form prayer requests sent with it</h3>
     <p>
         Anybody can suggest an event without signing in. They give a name and an e-mail address,
-        and are e-mailed if it is approved. They have no account, so they cannot ask for erasure
-        from the portal, and an ordinary erasure request cannot find them. Nothing clears these
+        and are e-mailed if it is approved. The suggestion is not linked to any account, so an
+        ordinary erasure request cannot find it. Nothing clears these
         details automatically: they stay on the event until the person asks.
     </p>
     <p>
@@ -940,7 +940,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         afterwards; it then shows in the record of sent mail with a later time, and filing the
         request again clears it.
         It does <strong>not</strong> touch any account, even a member&rsquo;s using the same address
-        &mdash; a member asks for their own erasure from their account &mdash; nor anything at another
+        &mdash; what is found through a member&rsquo;s account is erased by that member&rsquo;s own request,
+        which does not reach a request they sent through the anonymous prayer form &mdash; nor anything at another
         organisation on the same installation, which files its own request.
     </p>
 

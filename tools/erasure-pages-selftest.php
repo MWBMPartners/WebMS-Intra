@@ -229,7 +229,11 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 215; // #988/#1009 check round 2 added one: the
+const EXPECTED_CHECKS = 216; // #988/#1009 check round 3 added one: the
+                            // administrators' help section on this request,
+                            // its heading and its quote of the card's, pinned
+                            // as rendered (N43). 216.
+                            // #988/#1009 check round 2 added one: the
                             // filed request's sealed line and its activity
                             // record, read back whole for an address that IS a
                             // member's (N42). 215.
@@ -4132,8 +4136,8 @@ ok('N3 an administrator who ticks the box and notes how they checked files ONE r
         && $filed['message'] === '[success] Erasure request #' . $vId . ' is filed for that address and is at pending review. '
             . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
             . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
-            . 'address (their name, address, network address and words), and the e-mails telling that address a '
-            . 'suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'address (their name, address, network address and words), the old activity records of such a '
+            . 'suggestion that quote the address, and the e-mails telling that address a suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
             . 'prayer form, which only a request filed here can reach.'
         && str_starts_with($again['message'], '[info] Nothing new was filed: erasure request #' . $vId . ' for that address') === true
@@ -4193,10 +4197,11 @@ foreach ($listDoc->querySelectorAll('a') as $a) {
     }
 }
 $byHandMsg = act($jar['adm'], $vId, 'finish_by_hand');
-ok('N4 the list shows the request as having no account, for event suggestions and anonymous prayer requests, offers Execute and Cancel for it but neither "Dealt with by hand" nor "Review free text", and a hand-made "Dealt with by hand" press is refused with the reason and changes nothing (#964, #1009)',
-    str_contains(text($listNow), 'No account: event suggestions and anonymous prayer requests') === true
+ok('N4 the list labels the request as one for an e-mail address, for event suggestions and anonymous-form prayer requests - never as having no account, since N42 shows the address can be a member\'s - offers Execute and Cancel for it but neither "Dealt with by hand" nor "Review free text", and a hand-made "Dealt with by hand" press is refused with the reason and changes nothing (#964, #1009)',
+    str_contains(text($listNow), 'E-mail address: event suggestions and anonymous-form prayer requests') === true
+        && str_contains(text($listNow), 'No account: ') === false
         && $forThis('execute') === 1 && $forThis('cancel') === 1 && $forThis('finish_by_hand') === 0 && $reviewLinks === 0
-        && str_starts_with($byHandMsg, '[warning] Erasure request #' . $vId . ' is for a visitor\'s e-mail address') === true
+        && str_starts_with($byHandMsg, '[warning] Erasure request #' . $vId . ' is for an e-mail address, and nothing in') === true
         && request($vId)['status'] === 'pending_review' && auditLines($vId) === 1,
     'execute ' . $forThis('execute') . ', cancel ' . $forThis('cancel') . ', by hand ' . $forThis('finish_by_hand') . ', review links ' . $reviewLinks . ' | ' . $byHandMsg);
 
@@ -4597,6 +4602,13 @@ $n988Card = renderedRegion((string) req($jar['adm'], 'GET', '/admin/erasure-requ
 
     return [$found[0], $found[0]->nextElementSibling];
 });
+// N43: the administrators' help says the same thing about the same card, and
+// quotes its heading; #1009 round 3 changed the card and the help together, and
+// the round-3 check put the OLD heading back in the help with every check green.
+$n988AdminHelp = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['body'],
+    $sectionAfter('An e-mail address: event suggestions and anonymous-form prayer requests sent with it'));
+ok('N43 the administrators\' help section on this request - its heading, which is the card\'s, its quote of that heading, and what it reaches - is exactly the pinned markup an administrator receives (#1009, D-176)',
+    renderedPin('help admin, e-mail address requests', $n988AdminHelp), mb_substr($n988AdminHelp, 0, 900));
 ok('N40 the erasure page\'s visitor card says what the request reaches, that an anonymous prayer request sent without an e-mail address cannot be found, and that a member\'s own erasure does not reach a request they sent through the anonymous form - exactly as pinned (#1009, D-176)',
     renderedPin('erasure page, visitor card', $n988Card), mb_substr($n988Card, 0, 900));
 

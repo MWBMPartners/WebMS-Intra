@@ -108,8 +108,8 @@ if ($action === 'file_visitor') {
         $_SESSION['flash_msg']  = 'Erasure request #' . $filedId . ' is filed for that address and is at pending review. '
             . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
             . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
-            . 'address (their name, address, network address and words), and the e-mails telling that address a '
-            . 'suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'address (their name, address, network address and words), the old activity records of such a '
+            . 'suggestion that quote the address, and the e-mails telling that address a suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
             . 'prayer form, which only a request filed here can reach.';
         $_SESSION['flash_type'] = 'success';
@@ -305,7 +305,8 @@ if ($action === 'putback') {
 //    ninety lines.
 $byHand = $action === 'finish_by_hand';
 
-// 🧾 #964: a request for a visitor's e-mail address. Decided by the request's
+// 🧾 #964: a request for an e-mail address (D-176: not always a visitor's -
+//    a member's anonymous-form prayer request is reached only this way). Decided by the request's
 //    own stated kind, never by an empty account number: every COMPLETED
 //    request has one, and an old request whose account had gone would
 //    otherwise be run against an address that may be a member's.
@@ -314,7 +315,7 @@ if ($isVisitor === true && $byHand === true) {
     // Nothing in a visitor request can need doing by hand: it has five steps,
     // none of which can refuse for ever, so "run it again" is always the
     // answer. Refused before the claim, so nothing is changed.
-    $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is for a visitor\'s e-mail address, and nothing in '
+    $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is for an e-mail address, and nothing in '
         . 'such a request is ever left to be done by hand. Press Execute instead. Nothing was changed.';
     $_SESSION['flash_type'] = 'warning';
     header('Location: ' . Router::url('admin/erasure-requests'));
@@ -374,7 +375,7 @@ if ($isVisitor === true) {
         $outcome = GdprEraser::executeVisitorAddress($requestId, $adminId);
     } catch (\Throwable $e) {
         Logger::exception($e);
-        Logger::activity('GdprErasureStopped', 'Erasure request #' . $requestId . ' for a visitor\'s e-mail address stopped before it finished', $adminId);
+        Logger::activity('GdprErasureStopped', 'Erasure request #' . $requestId . ' for an e-mail address stopped before it finished', $adminId);
         $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' stopped before it finished. The steps already done '
             . 'are safe to repeat, and its report lists them. If the request shows as "pending review" below, run it '
             . 'again. If it shows as "processing", it could not be put back and needs setting back by whoever looks '
@@ -384,7 +385,7 @@ if ($isVisitor === true) {
         exit();
     }
     if ($outcome['failed'] > 0) {
-        Logger::activity('GdprErasureIncomplete', 'Erasure request #' . $requestId . ' for a visitor\'s e-mail address: '
+        Logger::activity('GdprErasureIncomplete', 'Erasure request #' . $requestId . ' for an e-mail address: '
             . $outcome['failed'] . ' of ' . $outcome['steps'] . ' steps failed; request back at pending review', $adminId);
         $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is not complete: ' . $outcome['failed'] . ' of '
             . $outcome['steps'] . ' steps could not be done. The request is back at pending review, so run it again; '
@@ -393,7 +394,7 @@ if ($isVisitor === true) {
         header('Location: ' . Router::url('admin/erasure-requests'));
         exit();
     }
-    Logger::activity('GdprErasureExecuted', 'Executed erasure request #' . $requestId . ' for a visitor\'s e-mail address', $adminId);
+    Logger::activity('GdprErasureExecuted', 'Executed erasure request #' . $requestId . ' for an e-mail address', $adminId);
     $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is completed: all ' . $outcome['steps'] . ' steps ran '
         . 'and none failed. Its report lists each step, and the audit chain can be verified there.';
     $_SESSION['flash_type'] = 'success';

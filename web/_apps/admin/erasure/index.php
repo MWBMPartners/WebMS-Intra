@@ -89,7 +89,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         and the request keeps the network address it was sent from. If they ask for those to be erased, file the
         request here by the address they gave. It reaches only, at this organisation: the name and address given with
         event suggestions; the anonymous prayer requests sent with that address, whose name, address, network address
-        and words are emptied; and the e-mails telling that address a suggestion was approved. The events and the
+        and words are emptied; the old activity records of such a suggestion that quote the address, written before the
+        portal stopped putting addresses there, whose address and browser details are emptied; and the e-mails telling
+        that address a suggestion was approved. The events and the
         prayer requests themselves are kept. An anonymous prayer request sent without an e-mail address cannot be
         found this way. It does not touch any account, even a member&rsquo;s using the same address. A member who sent
         a request through the anonymous form while signed in is in the same position as a visitor: that request is not
@@ -153,7 +155,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row py-2 border-bottom align-items-center small">
                     <div class="col-md-4">
                         <?php if ($visitorRow === true): ?>
-                            <strong>No account: event suggestions and anonymous prayer requests</strong>
+                            <strong>E-mail address: event suggestions and anonymous-form prayer requests</strong>
                         <?php else: ?>
                             <strong><?php echo htmlspecialchars((string) ($r['subjectName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong>
                         <?php endif; ?>
