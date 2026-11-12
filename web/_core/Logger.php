@@ -495,6 +495,76 @@ class Logger
         }
     }
 
+    /**
+     * 🕶️ An activity record that NAMES NOBODY, on purpose (#988).
+     *
+     * For a page that PROMISES the person sending it that what they send is
+     * anonymous, and for nothing else. Today that is one handler:
+     * `prayer-requests/anonymous-save.php`, and the one record it causes
+     * elsewhere (`PrayerChain::maybeAutoAssign()` for an anonymous request).
+     * `tools/audit-checks/check_activity_naming_nobody.py` names every caller
+     * and fails when one is added or taken away without the list changing.
+     *
+     * WHY A SEPARATE METHOD AND NOT `activity($type, $words, null)`. Passing
+     * null to `activity()` means "I did not say who", and since #626 that
+     * method then fills `userID` from the session, so a member who used the
+     * anonymous prayer form while signed in got a record tying the
+     * "anonymous" request to their account, readable by the organisation's
+     * administrators. Null cannot mean two things, so "deliberately nobody"
+     * gets its own name rather than a magic value.
+     *
+     * WHAT IT LEAVES OUT, AND WHY ALL OF IT. Leaving out only the account
+     * number would not be enough: the record would still carry the session's
+     * fingerprint (the SAME fingerprint as that member's own sign-in record,
+     * so the two join), the session facts (which hold the account number in
+     * so many words), and the network address and browser name (the same as
+     * on every other record of that visit). So this writes the organisation,
+     * the type and the words, and leaves `userID`, `requestHeaders`,
+     * `sessionID`, `visitorIP`, `userAgent` and `sessionDataSnapshot` EMPTY,
+     * whoever is signed in or not.
+     *
+     * The words must name nobody either: they are the caller's, and
+     * `check_activity_descriptions_personal.py` reads this method's calls as
+     * it reads `activity()`'s.
+     *
+     * WHAT IT CANNOT DO. It cannot make the thing being recorded anonymous.
+     * The anonymous prayer request keeps the network address it came from in
+     * its own row (`tblPrayerRequests.submitterIP`, kept on purpose, D-176),
+     * and an administrator who compares that with a member's sign-in records
+     * could match the two. This method only stops the ACTIVITY LOG from
+     * doing the matching for them.
+     *
+     * Never throws, like every method here; a failed write leaves one line in
+     * PHP's own error log with the type and the words, and no address.
+     *
+     * @param string $type        The record type, as for `activity()`.
+     * @param string $description Fixed words and numbers only; never a person's details.
+     */
+    public static function activityNamingNobody(string $type, string $description = ''): void
+    {
+        $siteId = null;
+        try {
+            $siteId  = Site::id();
+            $failure = self::insertRow(
+                'INSERT INTO `tblActivityLogs` ' .
+                '(`siteID`, `userID`, `activityType`, `activityDescription`, `requestHeaders`, `sessionID`, `visitorIP`, `userAgent`, `sessionDataSnapshot`) ' .
+                'VALUES (?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',
+                'iss',
+                [$siteId, $type, $description]
+            );
+        } catch (Throwable $e) {
+            $failure = get_class($e) . ': ' . $e->getMessage();
+        }
+
+        if ($failure !== null) {
+            self::writeFallback('an activity record that names nobody', $failure, [
+                'type'        => $type,
+                'description' => $description,
+                'site'        => $siteId,
+            ]);
+        }
+    }
+
     /* ---------------------------------------------------------------------- */
     /* Audit Trail — Before/After Change Tracking                             */
     /* ---------------------------------------------------------------------- */

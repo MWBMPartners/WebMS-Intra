@@ -59,7 +59,7 @@ table named in this document exists; it cannot check what is said about it.
 6. Per-request report at `/admin/erasure-requests/report?id=N` shows every action
    taken and verifies the **sealed audit chain**.
 
-### Somebody without an account who suggested an event (#964, D-140)
+### Somebody without an account: an event suggestion or an anonymous prayer request (#964, D-140; #1009, D-176)
 
 A visitor can suggest an event without signing in, giving a name and an e-mail
 address (`tblEvents.submitterName`, `submitterEmail`), and is e-mailed if it is
@@ -70,7 +70,7 @@ never automatically.**
 1. The visitor asks the organisation by some other route. An administrator
    checks, **outside the portal**, that it really is the person who uses that
    address, then files the request on `/admin/erasure-requests` ("Somebody
-   without an account who suggested an event"), ticking a box that says so
+   without an account"), ticking a box that says so
    and writing a short note (at most 300 characters) on how they checked
    (D-148). Nothing is filed without both. The sealed audit chain records the
    statement, the note and the administrator's account number. The note is
@@ -78,7 +78,7 @@ never automatically.**
    details in it. No e-mail is sent to the address (D-149).
 2. The request is filed already at `pending_review`, of kind `visitor_address`
    (`tblErasureRequest.subjectKind`), with no account.
-3. **Execute** runs four steps, each with its own audit line, in this order:
+3. **Execute** runs five steps, each with its own audit line, in this order:
    `submitterName` and `submitterEmail` are emptied on every event at this
    organisation suggested **without signing in** with that address (first, so
    that a suggestion approved while the run is going has no address left to
@@ -88,7 +88,12 @@ never automatically.**
    one waiting message afterwards. Admin, Integrations, Email lists only the
    last ten sends, so such a row is easily pushed off that list: if an approval
    may have been pressed while the request ran, file a fresh request for the
-   address afterwards, which clears it); an activity record written before
+   address afterwards, which clears it); every **anonymous prayer request**
+   sent to this organisation without an account (`submitterID` empty) whose
+   `submitterEmail` is that address has `submitterName`, `submitterEmail`,
+   `submitterIP`, `subject`, `body` and `partnerNote` emptied - the same
+   columns a member's own erasure empties on their requests (D-016, #715) -
+   and the request kept (#1009, D-176); an activity record written before
    #963 that reads exactly "Event #N submitted by anonymous" and the address, at
    this organisation and naming no account, has the address replaced by
    "[erased]" and its network address, browser, request headers, session
@@ -99,7 +104,8 @@ never automatically.**
    it recorded under this organisation **or under no organisation** (the row
    stays). A row recorded under no organisation cannot be told apart from this
    organisation's, so it is cleared even if it was really another
-   organisation's. The events themselves are kept. Then the request is closed
+   organisation's. The events and the prayer requests themselves are kept.
+   Then the request is closed
    and its own copy of the address replaced.
 
 What it deliberately does **not** reach: any account, even a member's using
@@ -122,6 +128,24 @@ request does not find the row and the address stays in it. The address is
 matched exactly apart from capitals and the spaces round it: the database's own
 comparison would also treat an accented address as the same, so it only finds
 candidates.
+
+### An anonymous prayer request, and the activity log (#988)
+
+The anonymous prayer form (`/prayer-requests/anonymous`) never stores an
+account on the request, and since #988 the activity records the form writes
+(and the automatic assignment to a prayer partner) name nobody either - even
+when a member sends it while signed in. They are written
+by `Logger::activityNamingNobody()`, which keeps the record's type, words and
+organisation and leaves out the account number, the session's fingerprint and
+facts, the network address, the browser name and the request headers. The
+request itself keeps the network address it was sent from (D-176), and only a
+visitor-address request (above) empties it. A request sent with no e-mail
+address cannot be found by any erasure, and its network address stays until
+the request is deleted. A signed-in member opening the form is told it is not
+linked to their account, and that the network address is kept. One record
+outside the form still follows the ordinary rule: where reCAPTCHA v3 is the
+captcha in use and it REFUSES the request (nothing is then sent), its own
+"CaptchaRejected" record names a signed-in member's account (#1017).
 
 ## Giving records
 

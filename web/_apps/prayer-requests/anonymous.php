@@ -18,7 +18,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   0.11.0
  * -----------------------------------------------------------------------------
  */
 
@@ -53,6 +53,17 @@ unset($_SESSION['pr_anon_kept']);
 $keptText = static fn (string $field): string => (is_array($kept) === true && is_string($kept[$field] ?? null) === true)
     ? $kept[$field]
     : '';
+
+// 🕶️ #988: a member who is SIGNED IN may still use this form, and is told
+//    what that means, because the page's whole promise is anonymity. Since
+//    #988 the request and every activity record about it name nobody (the
+//    request row never held an account; the records used to, through
+//    Logger::activity()'s session fallback). What the sentence must NOT
+//    promise is that nobody could ever work it out: the request keeps the
+//    network address it came from (D-176), the same as on the member's own
+//    sign-in records, so it says that too. Told only when signed in - a
+//    visitor without an account has no account to be linked to.
+$signedIn = Auth::check();
 ?>
 <!doctype html>
 <html lang="en" data-bs-theme="light">
@@ -129,6 +140,17 @@ $keptText = static fn (string $field): string => (is_array($kept) === true && is
             Use this form if you don't have an account.  Requests submitted here go
             <strong>only to the leadership team</strong> for confidential prayer.
         </p>
+
+        <?php if ($signedIn === true): ?>
+            <div class="alert alert-info small" data-anonymous-signed-in>
+                <i class="fa-solid fa-user-secret me-1"></i>
+                You are signed in, but a request sent from this form is <strong>not linked to your account</strong>,
+                not even for the people who run this portal: the leadership team sees only the name and e-mail address
+                you type below, if any. Like every request sent here, it does keep the network address it was sent from.
+                To send a request under your own name, use
+                <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">the members' prayer request form</a>.
+            </div>
+        <?php endif; ?>
 
         <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/anonymous/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
             <input type="hidden" name="csrf_token"

@@ -3353,6 +3353,7 @@ foreach ([
     'self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId)',
     'self::eraseSuggesterDetails($db, $requestId, $address, $siteId)',
     'self::eraseVisitorActivityRecords($db, $requestId, $address, $siteId)',
+    'self::eraseAnonymousPrayerRequests($db, $requestId, $address, $siteId)',
     'self::closeVisitorAddressRequest($db, $requestId, $processedByID, $steps)',
 ] as $mustCall) {
     if (str_contains($executeVisitorBody, $mustCall) === false) {
@@ -3399,8 +3400,21 @@ if ($memberActivityCols === null || $memberActivityCols !== \Portal\Core\GdprEra
     $visitorFaults[] = 'a visitor\'s old activity record does not have the same columns emptied as a member\'s own records: '
         . json_encode($memberActivityCols) . ' against ' . json_encode(\Portal\Core\GdprEraser::VISITOR_ACTIVITY_NULL_COLS);
 }
+// #1009 (D-176): an anonymous prayer request gets the SAME columns emptied as
+// a member's own request (D-016, #715). Held twice for the same reason as the
+// activity list above, so the two must be the same list.
+$memberPrayerCols = null;
+foreach ($instructions as $instruction) {
+    if ((string) $instruction['table'] === 'tblPrayerRequests' && (string) $instruction['userCol'] === 'submitterID') {
+        $memberPrayerCols = array_map('strval', (array) ($instruction['nullCols'] ?? []));
+    }
+}
+if ($memberPrayerCols === null || $memberPrayerCols !== \Portal\Core\GdprEraser::VISITOR_PRAYER_NULL_COLS) {
+    $visitorFaults[] = 'an anonymous prayer request does not have the same columns emptied as a member\'s own request: '
+        . json_encode($memberPrayerCols) . ' against ' . json_encode(\Portal\Core\GdprEraser::VISITOR_PRAYER_NULL_COLS);
+}
 check(
-    'a visitor\'s name and address on an event suggestion are emptied by a request for their address - the suggestions first - which also takes the address and the browser details out of the activity records written before #963 and clears the approval e-mail in the mail queue and the send log, found by its subject; filing needs a short note on how the administrator checked (#964, D-140, D-148)',
+    'a visitor\'s name and address on an event suggestion are emptied by a request for their address - the suggestions first - which also empties their anonymous prayer requests as a member\'s own are emptied, takes the address and the browser details out of the activity records written before #963 and clears the approval e-mail in the mail queue and the send log, found by its subject; filing needs a short note on how the administrator checked (#964, D-140, D-148; #1009, D-176)',
     $visitorFaults === [],
     implode('; ', $visitorFaults)
 );
@@ -3418,6 +3432,18 @@ foreach ([
         $accountFaults[] = 'eraseSuggesterDetails() no longer holds: ' . $pin;
     }
 }
+// #1009: the prayer step's two statements, read the same way.
+$prayerStepText = $methodBody((string) file_get_contents($eraserFile), 'function eraseAnonymousPrayerRequests(');
+foreach ([
+    'WHERE `siteID` = ? AND `submitterID` IS NULL AND `submitterEmail` LIKE ? FOR UPDATE',
+    'WHERE `requestID` = ? AND `submitterID` IS NULL',
+    'self::VISITOR_PRAYER_NULL_COLS',
+    'mb_strtolower(trim((string) $row[\'submitterEmail\'])) !== $wanted',
+] as $pin) {
+    if (str_contains($prayerStepText, $pin) === false) {
+        $accountFaults[] = 'eraseAnonymousPrayerRequests() no longer holds: ' . $pin;
+    }
+}
 foreach (['processEntry(', 'self::catalogue(', 'keepGivingRecords(', 'eraseProfileImages(', 'eraseAuditTrailAboutPerson(',
           'eraseDemoDataRegisterEntries(', 'self::closeRequest(', 'eraseGivingStatementFiles('] as $accountStep) {
     if (str_contains($executeVisitorBody, $accountStep) === true) {
@@ -3431,7 +3457,7 @@ if (str_contains($fileVisitorText, '(`siteID`, `userID`, `subjectEmail`, ') === 
     $accountFaults[] = 'a visitor request is no longer filed with an EMPTY account number';
 }
 check(
-    'a request for a visitor\'s address can never reach an account: it names none, empties only suggestions made WITHOUT signing in, matches the address exactly apart from capitals and the spaces round it, and runs none of an account erasure\'s steps (#964, D-140)',
+    'a request for a visitor\'s address can never reach an account: it names none, empties only suggestions and anonymous prayer requests made WITHOUT an account, matches the address exactly apart from capitals and the spaces round it, and runs none of an account erasure\'s steps (#964, D-140; #1009)',
     $accountFaults === [],
     implode('; ', $accountFaults)
 );

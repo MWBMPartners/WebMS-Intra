@@ -6,9 +6,12 @@
 --   A. `tblErasureRequest` gains `subjectKind`: whose erasure a request is.
 --      'account' (the default, and every request that exists already) is a
 --      person with an account, found through `userID`. 'visitor_address' is an
---      e-mail address with NO account: somebody who suggested an event without
---      signing in, filed by an administrator who has checked, outside the
---      portal, that it is really them.
+--      e-mail address with NO account: somebody who suggested an event or
+--      (since #1009, D-176) sent an anonymous prayer request without signing
+--      in, filed by an administrator who has checked, outside the portal, that
+--      it is really them. The column's comment was widened for #1009 in this
+--      file rather than by a new migration: no installation exists yet (D-135),
+--      and only the comment changed, not the column.
 --
 -- -----------------------------------------------------------------------------
 -- WHY
@@ -49,7 +52,7 @@ SET @c := (
       AND `COLUMN_NAME`  = 'subjectKind'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblErasureRequest` ADD COLUMN `subjectKind` ENUM(''account'',''visitor_address'') NOT NULL DEFAULT ''account'' COMMENT ''Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address with NO account, filed by an administrator for somebody who suggested an event without signing in (#964, D-140); it reaches only the name and address on this organisation''''s event suggestions and the approval e-mails sent to that address, and never an account'' AFTER `notes`',
+    'ALTER TABLE `tblErasureRequest` ADD COLUMN `subjectKind` ENUM(''account'',''visitor_address'') NOT NULL DEFAULT ''account'' COMMENT ''Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address with NO account, filed by an administrator for somebody who suggested an event or sent an anonymous prayer request without signing in (#964, D-140; #1009, D-176); it reaches only this organisation''''s event suggestions, anonymous prayer requests and approval e-mails for that address, and never an account'' AFTER `notes`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

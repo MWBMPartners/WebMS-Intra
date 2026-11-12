@@ -110,7 +110,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 93;
+const EXPECTED_CHECKS = 94; // #988 added one: the record that names nobody on purpose. 94.
 
 function refuse(string $why): never
 {
@@ -280,7 +280,8 @@ function removeWorld(): void
 {
     q('DELETE FROM tblTotpBackupCodes WHERE userID BETWEEN 962200 AND 962299');
     q('DELETE FROM tblConsentLog WHERE userID BETWEEN 962200 AND 962299 OR userAgent = ?', 's', [AGENT]);
-    q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 962200 AND 962299 OR userAgent = ? OR visitorIP = ?', 'ss', [AGENT, '192.0.2.62']);
+    // #988: the record that names nobody keeps no browser name to find it by, so it goes by its type.
+    q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 962200 AND 962299 OR userAgent = ? OR visitorIP = ? OR activityType = 'Al988Nobody'", 'ss', [AGENT, '192.0.2.62']);
     q('DELETE FROM tblErrors WHERE userID BETWEEN 962200 AND 962299 OR userAgent = ?', 's', [AGENT]);
     q('DELETE FROM tblTrustedDevices WHERE userID BETWEEN 962200 AND 962299');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 962200 AND 962299');
@@ -1740,6 +1741,24 @@ $_SESSION = [];
 $r = $write([], null, 'Al626NoSession');
 ok('…and with no session at all it still names nobody, so a failed sign-in is not attributed to anybody',
     is_array($r) === true && $r['userID'] === null, json_encode($r));
+
+// #988: the ONE deliberate exception, for a page that promises anonymity.
+// Asked with somebody SIGNED IN, because that is the case the fallback above
+// fills in, and with an address and a browser name, so "left out" is a
+// measurement and not the absence of something to keep.
+$serverWas                   = [$_SERVER['REMOTE_ADDR'] ?? null, $_SERVER['HTTP_USER_AGENT'] ?? null];
+$_SESSION                    = $signedIn;
+$_SERVER['REMOTE_ADDR']      = '203.0.113.88';
+$_SERVER['HTTP_USER_AGENT']  = AGENT;
+Logger::activityNamingNobody('Al988Nobody', AGENT . ' #988');
+$_SESSION = [];
+[$_SERVER['REMOTE_ADDR'], $_SERVER['HTTP_USER_AGENT']] = $serverWas;
+$r = one('SELECT siteID, userID, activityDescription, requestHeaders, sessionID, visitorIP, userAgent, sessionDataSnapshot FROM tblActivityLogs WHERE activityType = ? ORDER BY logID DESC LIMIT 1', 's', ['Al988Nobody']);
+ok('…and a record written by Logger::activityNamingNobody() names NOBODY even with a member signed in: no account, and none of the session fingerprint, session facts, network address, browser name or headers that would join it to her own records - only its organisation and its words (#988)',
+    is_array($r) === true && $r['userID'] === null && $r['sessionID'] === null && $r['sessionDataSnapshot'] === null
+        && $r['visitorIP'] === null && $r['userAgent'] === null && $r['requestHeaders'] === null
+        && $r['activityDescription'] === AGENT . ' #988' && $r['siteID'] !== null,
+    json_encode($r));
 
 // ───── Records written BEFORE that fix: the cleaner brings them into line ────
 // Four shapes, planted as the portal really wrote them, with the cleaner's

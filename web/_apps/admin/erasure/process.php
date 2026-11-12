@@ -11,7 +11,8 @@
  * SIX actions. The first files a NEW request, so it names none:
  *   file_visitor
  *            file a request for a VISITOR's e-mail address - somebody who
- *            suggested an event without signing in and has no account (#964,
+ *            suggested an event or sent an anonymous prayer request without
+ *            signing in and has no account (#964, #1009,
  *            D-140). Only after the administrator ticks that they checked,
  *            outside the portal, that it is really that person, and writes a
  *            short note on how (D-148). Filed at
@@ -101,11 +102,12 @@ if ($action === 'file_visitor') {
     $filedId = (int) $filed['requestID'];
     if ($filed['outcome'] === 'filed') {
         Logger::activity('GdprErasureVisitorFiled', 'Filed erasure request #' . $filedId
-            . ' for the e-mail address of somebody who suggested an event without an account', $adminId);
+            . ' for the e-mail address of somebody without an account', $adminId);
         $_SESSION['flash_msg']  = 'Erasure request #' . $filedId . ' is filed for that address and is at pending review. '
-            . 'Nothing has been erased yet: press Execute when you are ready. It reaches only the name and address '
-            . 'given with event suggestions at this organisation, and the e-mails telling that address a suggestion '
-            . 'was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
+            . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
+            . 'address (their name, address, network address and words), and the e-mails telling that address a '
+            . 'suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account.';
         $_SESSION['flash_type'] = 'success';
     } elseif ($filed['outcome'] === 'already-open') {
@@ -306,7 +308,7 @@ $byHand = $action === 'finish_by_hand';
 //    otherwise be run against an address that may be a member's.
 $isVisitor = (string) ($row['subjectKind'] ?? '') === GdprEraser::KIND_VISITOR_ADDRESS;
 if ($isVisitor === true && $byHand === true) {
-    // Nothing in a visitor request can need doing by hand: it has three steps,
+    // Nothing in a visitor request can need doing by hand: it has five steps,
     // none of which can refuse for ever, so "run it again" is always the
     // answer. Refused before the claim, so nothing is changed.
     $_SESSION['flash_msg']  = 'Erasure request #' . $requestId . ' is for a visitor\'s e-mail address, and nothing in '
@@ -362,7 +364,7 @@ if ($claimed === false) {
 }
 
 if ($isVisitor === true) {
-    // 🗑️ The three visitor steps (GdprEraser::executeVisitorAddress()), and
+    // 🗑️ The five visitor steps (GdprEraser::executeVisitorAddress()), and
     //    the same three honest endings as an account's run below. The
     //    activity record never names the address.
     try {

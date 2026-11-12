@@ -979,6 +979,15 @@ return [
         //    What was hard to defend was the half-measure: the portal emptied
         //    their name, e-mail and network address from the very same row and
         //    left what they had said about themselves.
+        //
+        // 🙏 #1009, D-176. A request sent through the ANONYMOUS form has no
+        //    account (`submitterID` is empty, even for a member who was signed
+        //    in: #988), so the instruction above can never reach it. A request
+        //    filed by the visitor's e-mail address does instead
+        //    (GdprEraser::executeVisitorAddress(), its prayer step), and
+        //    empties the SAME columns (GdprEraser::VISITOR_PRAYER_NULL_COLS;
+        //    tools/gdpr-coverage-selftest.php fails if the two lists differ).
+        //    A request sent with no e-mail address cannot be found at all.
     ],
     'tblProjectPledge' => [
         'decision' => 'erase',

@@ -15,12 +15,14 @@
  *   • Always pending + leadership + isAnonymous=1 (no congregation broadcast)
  *   • Always redirects to a generic success page (no enumeration / abuse signal)
  *   • Opt-in round-robin auto-assign to a prayer partner (#311, migration 148)
+ *   • Every activity record it writes NAMES NOBODY, even for a member who is
+ *     signed in (#988, Logger::activityNamingNobody())
  *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * -----------------------------------------------------------------------------
  */
 
@@ -55,14 +57,14 @@ if ($featureEnabled === false || $anonymousEnabled === false) {
 
 // 🔐 CSRF
 if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    Logger::activity('PrayerRequestAnonRejected', 'Invalid CSRF on anonymous prayer-request save');
+    Logger::activityNamingNobody('PrayerRequestAnonRejected', 'Invalid CSRF on anonymous prayer-request save');
     header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Security check failed. Please try again.'), true, 302);
     exit();
 }
 
 // 🤖 Captcha
 if (Captcha::verify($_POST, 'prayer-request') === false) {
-    Logger::activity('PrayerRequestAnonRejected', 'Captcha failed on anonymous prayer-request save');
+    Logger::activityNamingNobody('PrayerRequestAnonRejected', 'Captcha failed on anonymous prayer-request save');
     header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Captcha verification failed. Please try again.'), true, 302);
     exit();
 }
@@ -98,7 +100,7 @@ $anonBucket = $anonFamily . AddressFingerprint::of(RateLimiter::clientIp());
 $anonMax    = 5;
 $anonWindow = 900; // 15 minutes, in seconds
 if (RateLimiter::tooMany($anonBucket, $anonMax, $anonWindow) === true) {
-    Logger::activity('PrayerRequestAnonBlocked', 'Too many anonymous prayer requests from this connection; this one was NOT saved, and the visitor was told so');
+    Logger::activityNamingNobody('PrayerRequestAnonBlocked', 'Too many anonymous prayer requests from this connection; this one was NOT saved, and the visitor was told so');
     $_SESSION['pr_anon_kept'] = ['name' => $name, 'email' => $email, 'subject' => $subject, 'body' => $body];
     $waitMinutes = max(1, (int) ceil(RateLimiter::retryAfter($anonBucket, $anonMax, $anonWindow) / 60));
     header(
@@ -188,24 +190,30 @@ $stmt->close();
 if ($ok === false) {
     Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_FAIL', $mysqli->error, '');
 } else {
-    // #933: never the visitor's network address in the words. Logger already
-    //    keeps it in the record's own column (visitorIP) and the request's own
-    //    row has a copy (submitterIP), so a third copy in the words added
-    //    nothing. Be exact about what removes them, because it depends on who
-    //    sent it. A visitor who is not signed in: the record names nobody, an
-    //    erasure cannot find it, and only the activity log's own clear-out
-    //    removes it (or nothing does, where the log is kept for ever, D-117). A
-    //    member who IS signed in: this page does not refuse them, and
-    //    Logger::activity() puts the session's account in `userID` when none is
-    //    passed (#626), so this "anonymous" request's record names their account
-    //    - which an erasure then reaches, and which an administrator reading the
-    //    log can see. Whether an anonymous request should be tied to an account
-    //    at all is #988; this comment only says what happens today.
-    Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
+    // 🕶️ #988: this record NAMES NOBODY, whoever sent the request. The form
+    //    is the anonymous one, so the record of it must not be the thing that
+    //    says who sent it. Logger::activity() would put the session's account
+    //    in `userID` when none is passed (#626), and also the session's
+    //    fingerprint and facts, the network address and the browser name -
+    //    so a member who used this form while signed in got a record tying
+    //    the "anonymous" request to their account, readable by the
+    //    organisation's administrators. Logger::activityNamingNobody() writes
+    //    the type and these words and nothing else.
+    //
+    //    The same goes for the three refusals above (form token, captcha, too
+    //    many): each says somebody tried to send an anonymous request, and
+    //    must not say who.
+    //
+    //    #933: never the visitor's network address in the words. It is kept
+    //    in ONE place, the request's own row (`submitterIP`, D-176), and an
+    //    erasure request filed by the visitor's e-mail address empties it
+    //    there (GdprEraser::executeVisitorAddress(), #1009).
+    Logger::activityNamingNobody('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
 
     // 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless
     // prayer-requests.autoAssign = 'true'; swallows its own failures.
-    PrayerChain::maybeAutoAssign($siteId, $newId);
+    // #988: true, so the record of the assignment names nobody either.
+    PrayerChain::maybeAutoAssign($siteId, $newId, true);
 }
 
 // ✅ Always show success — even on failure, prevent fingerprinting

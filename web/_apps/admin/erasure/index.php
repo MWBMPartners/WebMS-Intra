@@ -68,8 +68,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <p class="text-secondary">UK GDPR Article 17 requests. Process within one month of confirmation.</p>
 
 <?php
-// 🧾 #964, D-140. Somebody who suggested an event WITHOUT signing in has no
-//    account, so they cannot ask from "Request data erasure" and an ordinary
+// 🧾 #964, D-140; #1009, D-176. Somebody who suggested an event or sent an
+//    anonymous prayer request WITHOUT signing in has no account, so they cannot ask from "Request data erasure" and an ordinary
 //    request cannot find them. They ask the organisation some other way, and
 //    an administrator files it here by their e-mail address. The tick-box is
 //    the identity check the portal can record: it cannot check who is asking
@@ -79,13 +79,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    in it (see GdprEraser::fileVisitorAddressRequest()).
 ?>
 <div class="card mb-3"><div class="card-body">
-    <h2 class="h6">Somebody without an account who suggested an event</h2>
+    <h2 class="h6">Somebody without an account: an event suggestion or an anonymous prayer request</h2>
     <p class="small text-secondary mb-2">
         A person who suggested an event without signing in gave a name and an e-mail address, and was e-mailed if it
-        was approved. If they ask for those to be erased, file the request here by the address they gave. It reaches
-        only the name and address given with event suggestions at this organisation, and the e-mails telling that
-        address a suggestion was approved. The events themselves are kept. It does not touch any account, even a
-        member&rsquo;s using the same address. Nothing is erased until you press Execute on the request.
+        was approved. A person who sent an anonymous prayer request may have given a name and an e-mail address too,
+        and the request keeps the network address it was sent from. If they ask for those to be erased, file the
+        request here by the address they gave. It reaches only, at this organisation: the name and address given with
+        event suggestions; the anonymous prayer requests sent with that address, whose name, address, network address
+        and words are emptied; and the e-mails telling that address a suggestion was approved. The events and the
+        prayer requests themselves are kept. An anonymous prayer request sent without an e-mail address cannot be
+        found this way. It does not touch any account, even a member&rsquo;s using the same address. Nothing is erased
+        until you press Execute on the request.
     </p>
     <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -144,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row py-2 border-bottom align-items-center small">
                     <div class="col-md-4">
                         <?php if ($visitorRow === true): ?>
-                            <strong>Event suggestions, no account</strong>
+                            <strong>No account: event suggestions and anonymous prayer requests</strong>
                         <?php else: ?>
                             <strong><?php echo htmlspecialchars((string) ($r['subjectName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></strong>
                         <?php endif; ?>

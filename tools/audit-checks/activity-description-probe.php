@@ -9,7 +9,8 @@
  * file under the folder it is given with PHP's OWN tokeniser (never a regular
  * expression: this repository has paid for hand-written PHP readers many
  * times, #494 and #763 among them) and prints ONE JSON document: for every
- * call to `Logger::activity(` (written `Logger::`, `Portal\Core\Logger::` or
+ * call to `Logger::activity(` or `Logger::activityNamingNobody(` (#988: the
+ * same two first arguments, so the same rules apply) (written `Logger::`, `Portal\Core\Logger::` or
  * `\Portal\Core\Logger::`), the names its SECOND argument — the description —
  * is built from, and the text of its FIRST argument (the record's type), so
  * an exception can name the one record it covers rather than a whole file.
@@ -272,7 +273,9 @@ foreach ($files as $path => $info) {
     }
 
     for ($i = 0; $i < $n; $i++) {
-        if (is_array($toks[$i]) === false || $toks[$i][0] !== T_STRING || $toks[$i][1] !== 'activity') {
+        if (is_array($toks[$i]) === false || $toks[$i][0] !== T_STRING
+            || in_array($toks[$i][1], ['activity', 'activityNamingNobody'], true) === false
+        ) {
             continue;
         }
         $p = $i - 1;

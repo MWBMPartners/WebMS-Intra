@@ -320,6 +320,9 @@ PLANTS = [
     ("plant-max",       "Logger::activity('P8', 'Name ' . max($fullName, ''));"),
     ("plant-qualified", "\\Portal\\Core\\Logger::activity('P9', 'Pickup ' . $pickupName);"),
     ("plant-wrapper",   "$log = static function (string $type, string $words): void { Logger::activity($type, $words); };"),
+    # #988: the record that names nobody on purpose is read by the same rules -
+    # its WORDS must not name anybody either.
+    ("plant-nobody",    "Logger::activityNamingNobody('P10', 'Sent by ' . $submitterEmail);"),
     # The same name and file as an ON_PURPOSE entry, under ANOTHER record type:
     # the exception must not stretch to it. Written into the copy's checkout page.
     ("plant-wrong-type", None),

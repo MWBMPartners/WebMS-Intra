@@ -229,7 +229,16 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 196; // #1012 check round 1 added five: the driven
+const EXPECTED_CHECKS = 209; // #988 and #1009 added thirteen to section N:
+                            // the anonymous prayer form's own request and its
+                            // record naming nobody (N1b), what the visitor
+                            // request does to anonymous prayer requests (N8c),
+                            // four plants on that step (N22-N25), a signed-in
+                            // member using the form (N30) and a visitor not
+                            // told the member's sentence (N31), four plants on
+                            // the records naming nobody (N32-N35) and the clean
+                            // run after them (N36). 209.
+                            // #1012 check round 1 added five: the driven
                             // failed read (P6b the copy refuses, P6c My data
                             // and Request erasure say "could not be read")
                             // and three plants (P13b, P13c, P13d). 196.
@@ -610,6 +619,10 @@ function removeWorld(): void
     q('DELETE FROM tblEmailLog WHERE emailLogID BETWEEN 917500 AND 917599');
     q('DELETE FROM tblMailQueue WHERE siteID IN (?, ?) OR queueID BETWEEN 917400 AND 917499', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblEvents WHERE siteID IN (?, ?) OR eventID BETWEEN 917300 AND 917399', 'ii', [ORG_A, ORG_B]);
+    // Section N (#988, #1009): the anonymous prayer requests, sent through the
+    // real form and put in by hand, and the form's own limit's tally.
+    q('DELETE FROM `tblPrayerRequests` WHERE `siteID` IN (?, ?) OR `requestID` BETWEEN 917600 AND 917699', 'ii', [ORG_A, ORG_B]);
+    q("DELETE FROM `tblApiRateLimits` WHERE `bucket` LIKE 'prayer:anon:%'");
     q('DELETE FROM tblActivityLogs WHERE userID BETWEEN 917000 AND 917999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblErrors WHERE userID BETWEEN 917000 AND 917999 OR siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 917000 AND 917999', 'ii', [ORG_A, ORG_B]);
@@ -3735,6 +3748,11 @@ head('N. Somebody without an account who suggested an event (#964, D-140)');
 // empties the two columns and clears the approval e-mail's send-log and
 // mail-queue rows - and NOTHING ELSE.
 //
+// #1009 (D-176) widened the same request to anonymous prayer requests at the
+// organisation (N1b drives the real form, N8c and N22-N25 the step), and #988
+// made the anonymous form's records name nobody even for a signed-in member
+// (N30-N36, driven over HTTP as that member).
+//
 // HOW THIS IS ARRANGED. N1 drives the real public form and the real moderation
 // handler once, so the rows the erasure must reach are the ones the portal
 // really writes. Every other row is put in by hand, each standing for ONE
@@ -3791,6 +3809,32 @@ const AL_OTHER   = 9170605; // A, the old sentence with the address and MORE wor
 const AL_TYPE    = 9170606; // A, the exact sentence under ANOTHER activity type: left alone
 const ER_A       = 9170701; // A, an SMTP line on the Errors page quoting the visitor's address: left alone
 const OLD_SENTENCE = 'Event #917399 submitted by anonymous ';
+// #1009 (D-176): anonymous prayer requests put in by hand, each differing
+// from the visitor's own in ONE way only. Every one has all six columns the
+// request empties FILLED, so "emptied" and "left alone" are both measurable.
+const PR_CASE   = 917601; // A, no account, the visitor's address in other capitals with spaces round it: emptied
+const PR_B      = 917602; // B, no account, the visitor's address: left alone (D-150)
+const PR_LONG   = 917603; // A, no account, the LONGER address: left alone
+const PR_MEMBER = 917604; // A, sent by MAY's ACCOUNT, holding the visitor's address: left alone
+const ROLE_PRAYER_A = 917034; // the prayer team role, A's own copy: makes the administrator the partner a request is given to (#988)
+/** What a visitor request empties on an anonymous prayer request: the same list as a member's own erasure (D-016). */
+const PRAYER_EMPTIED = ['submitterName', 'submitterEmail', 'submitterIP', 'subject', 'body', 'partnerNote'];
+/** The five columns that tie an activity record to a browser, and the account: all must be empty on a record naming nobody. */
+const NOBODY_COLS = ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'];
+
+/** One anonymous prayer request through the REAL form, as whoever holds this jar. The form writes its token over two lines. */
+function sendAnonymousPrayer(string $jar, array $fields, bool $goodToken = true): array
+{
+    // The form's own limit is five from one address in fifteen minutes, and
+    // every request here comes from 127.0.0.1: the tally is cleared first, so
+    // each send is judged on its own.
+    q("DELETE FROM `tblApiRateLimits` WHERE `bucket` LIKE 'prayer:anon:%'");
+    $form = req($jar, 'GET', '/prayer-requests/anonymous');
+    $csrf = preg_match('/name="csrf_token"\s+value="([0-9a-f]{64})"/', $form['body'], $m) === 1 ? $m[1] : '';
+    $sent = req($jar, 'POST', '/prayer-requests/anonymous/save', ['csrf_token' => $goodToken === true ? $csrf : str_repeat('0', 64)] + $fields);
+
+    return ['form' => $form, 'sent' => $sent, 'token' => $csrf];
+}
 
 $approvalSubject = 'Your event suggestion has been approved'; // word for word, as EventSuggestions sends it
 $n964Clear = static function (): void {
@@ -3803,6 +3847,7 @@ $n964Clear = static function (): void {
     q('DELETE FROM `tblEmailLog` WHERE `emailLogID` IN (?, ?, ?, ?)', 'iiii', [EL_NULL, EL_B, EL_MAY, EL_LONG]);
     q('DELETE FROM `tblActivityLogs` WHERE `logID` IN (?, ?, ?, ?, ?, ?)', 'iiiiii', [AL_A, AL_B, AL_LONG, AL_MEMBER, AL_OTHER, AL_TYPE]);
     q('DELETE FROM `tblErrors` WHERE `errorID` = ?', 'i', [ER_A]);
+    q('DELETE FROM `tblPrayerRequests` WHERE `requestID` IN (?, ?, ?, ?)', 'iiii', [PR_CASE, PR_B, PR_LONG, PR_MEMBER]);
 };
 /** Every row the request must leave alone, plus the two hand-made rows it must reach, put back as new. */
 $n964Fixtures = static function () use ($n964Clear, $approvalSubject): void {
@@ -3852,6 +3897,18 @@ $n964Fixtures = static function () use ($n964Clear, $approvalSubject): void {
     $activity(AL_TYPE, ORG_A, null, 'EventEdited', OLD_SENTENCE . VERA_ADDR);
     q("INSERT INTO `tblErrors` (`errorID`, `siteID`, `errorPlatform`, `errorSeverity`, `errorCode`, `errorTitle`, `errorDetail`) "
         . "VALUES (?, ?, 'SMTP', 'Warning', '550', 'P964 refused', ?)", 'iis', [ER_A, ORG_A, '550 no such user <' . VERA_ADDR . '>']);
+    // #1009: anonymous prayer requests, every column the request empties FILLED.
+    $prayer = static function (int $id, int $site, ?int $by, string $email): void {
+        q('INSERT INTO `tblPrayerRequests` (`requestID`, `siteID`, `submitterID`, `submitterName`, `submitterEmail`, `submitterIP`, '
+            . '`subject`, `body`, `partnerNote`, `visibility`, `status`, `isAnonymous`, `createdAt`, `updatedAt`) '
+            . "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'leadership', 'active', 1, '2026-10-01 09:00:00', '2026-10-02 09:00:00')",
+            'iiissssss', [$id, $site, $by, 'P1009 Name ' . $id, $email, '198.51.100.' . ($id % 250), 'P1009 subject ' . $id,
+                'P1009 my own words ' . $id, 'P1009 partner note ' . $id]);
+    };
+    $prayer(PR_CASE, ORG_A, null, ' ' . strtoupper(VERA_ADDR) . ' ');
+    $prayer(PR_B, ORG_B, null, VERA_ADDR);
+    $prayer(PR_LONG, ORG_A, null, VERA_LONG);
+    $prayer(PR_MEMBER, ORG_A, MAY, VERA_ADDR);
 };
 /** The rows that must NOT change, as they stand now. */
 $n964Untouched = static fn (): array => [
@@ -3861,6 +3918,7 @@ $n964Untouched = static fn (): array => [
     'account' => one('SELECT * FROM `tblUsers` WHERE `userID` = ?', 'i', [MAY]),
     'activity' => q('SELECT * FROM `tblActivityLogs` WHERE `logID` IN (?, ?, ?, ?, ?) ORDER BY `logID`', 'iiiii', [AL_B, AL_LONG, AL_MEMBER, AL_OTHER, AL_TYPE]),
     'errors'  => q('SELECT * FROM `tblErrors` WHERE `errorID` = ?', 'i', [ER_A]),
+    'prayer'  => q('SELECT * FROM `tblPrayerRequests` WHERE `requestID` IN (?, ?, ?) ORDER BY `requestID`', 'iii', [PR_B, PR_LONG, PR_MEMBER]),
 ];
 
 // The mail route for this section: SMTP with no mail server named, so nothing
@@ -3915,6 +3973,24 @@ ok('N1 THE PREMISE: a visitor suggests an event through the real form and an adm
     $veraId > 0 && ($veraEvent['submitterName'] ?? '') === 'P964 Vera Visitor' && ($veraEvent['submitterEmail'] ?? '') === VERA_TYPED
         && $veraEvent['submittedByID'] === null && ($veraEvent['submissionStatus'] ?? '') === 'approved' && count($realLog) === 1,
     'submit ' . $sent['status'] . ' ' . $sent['location'] . ' | moderate ' . $moderated['status'] . ' | event ' . json_encode($veraEvent === null ? null : array_intersect_key($veraEvent, array_flip(['eventID', 'submitterName', 'submitterEmail', 'submissionStatus']))) . ' | log rows ' . count($realLog));
+
+// ── N1b. The real anonymous prayer form, as the same visitor (#1009, #988) ──
+$prayerBeforeLog = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+$veraPray        = sendAnonymousPrayer($veraJar, ['name' => 'P964 Vera Visitor', 'email' => VERA_TYPED, 'subject' => 'P1009 for my family', 'body' => 'P1009 the visitor\'s own words']);
+$veraPrayer      = one("SELECT * FROM `tblPrayerRequests` WHERE `siteID` = ? AND `subject` = 'P1009 for my family' ORDER BY `requestID` DESC LIMIT 1", 'i', [ORG_A]);
+$veraPrayerId    = (int) ($veraPrayer['requestID'] ?? 0);
+$veraPrayerLog   = one("SELECT * FROM `tblActivityLogs` WHERE `logID` > ? AND `activityType` = 'PrayerRequestAnonSubmitted' ORDER BY `logID` DESC LIMIT 1", 'i', [$prayerBeforeLog]);
+$veraLogEmpty    = $veraPrayerLog !== null;
+foreach (NOBODY_COLS as $col) {
+    $veraLogEmpty = $veraLogEmpty && $veraPrayerLog[$col] === null;
+}
+ok('N1b THE PREMISE FOR #1009: the same visitor, not signed in, sends an anonymous prayer request through the real form; it holds the name, the address as typed and the network address it came from, and no account; and its activity record names nobody and keeps no network address, browser, headers or session details (#1009, #988)',
+    $veraPray['sent']['status'] === 302 && str_contains($veraPray['sent']['location'], 'submitted=1') === true
+        && $veraPrayerId > 0 && $veraPrayer['submitterID'] === null && $veraPrayer['submitterName'] === 'P964 Vera Visitor'
+        && $veraPrayer['submitterEmail'] === VERA_TYPED && (string) $veraPrayer['submitterIP'] !== '' && (int) $veraPrayer['isAnonymous'] === 1
+        && $veraLogEmpty === true && (string) ($veraPrayerLog['activityDescription'] ?? '') === 'Anonymous request #' . $veraPrayerId . ' submitted',
+    'send ' . $veraPray['sent']['status'] . ' ' . $veraPray['sent']['location'] . ' | ' . json_encode($veraPrayer === null ? null : array_intersect_key($veraPrayer, array_flip(['requestID', 'submitterID', 'submitterName', 'submitterEmail', 'submitterIP'])))
+        . ' | record ' . json_encode($veraPrayerLog === null ? null : array_intersect_key($veraPrayerLog, array_flip(array_merge(NOBODY_COLS, ['activityDescription'])))));
 
 // ── N2. What is refused, and files nothing ───────────────────────────────────
 $visitorRequests = static fn (): array => q("SELECT * FROM `tblErasureRequest` WHERE `siteID` IN (?, ?) AND `subjectKind` = 'visitor_address' ORDER BY `requestID`", 'ii', [ORG_A, ORG_B]);
@@ -4063,8 +4139,8 @@ foreach ($listDoc->querySelectorAll('a') as $a) {
     }
 }
 $byHandMsg = act($jar['adm'], $vId, 'finish_by_hand');
-ok('N4 the list shows the request as event suggestions with no account, offers Execute and Cancel for it but neither "Dealt with by hand" nor "Review free text", and a hand-made "Dealt with by hand" press is refused with the reason and changes nothing (#964)',
-    str_contains(text($listNow), 'Event suggestions, no account') === true
+ok('N4 the list shows the request as having no account, for event suggestions and anonymous prayer requests, offers Execute and Cancel for it but neither "Dealt with by hand" nor "Review free text", and a hand-made "Dealt with by hand" press is refused with the reason and changes nothing (#964, #1009)',
+    str_contains(text($listNow), 'No account: event suggestions and anonymous prayer requests') === true
         && $forThis('execute') === 1 && $forThis('cancel') === 1 && $forThis('finish_by_hand') === 0 && $reviewLinks === 0
         && str_starts_with($byHandMsg, '[warning] Erasure request #' . $vId . ' is for a visitor\'s e-mail address') === true
         && request($vId)['status'] === 'pending_review' && auditLines($vId) === 1,
@@ -4073,10 +4149,11 @@ ok('N4 the list shows the request as event suggestions with no account, offers E
 // ── N5-N9. Execute, and what it did ───────────────────────────────────────────
 $veraBefore = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [$veraId]);
 $caseBefore = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [EV_CASE]);
+$prayersBefore = q('SELECT * FROM `tblPrayerRequests` WHERE `requestID` IN (?, ?) ORDER BY `requestID`', 'ii', [$veraPrayerId, PR_CASE]);
 $runMsg     = act($jar['adm'], $vId, 'execute');
 $vReqAfter  = request($vId);
-ok('N5 Execute completes the request, and the request then holds no address: its own made-up one, no account, completed by this administrator (#964)',
-    str_starts_with($runMsg, '[success] Erasure request #' . $vId . ' is completed: all 4 steps ran and none failed.') === true
+ok('N5 Execute completes the request, and the request then holds no address: its own made-up one, no account, completed by this administrator (#964; five steps since #1009)',
+    str_starts_with($runMsg, '[success] Erasure request #' . $vId . ' is completed: all 5 steps ran and none failed.') === true
         && $vReqAfter['status'] === 'completed' && $vReqAfter['subjectEmail'] === 'deleted-' . $vId . '@example.invalid'
         && $vReqAfter['userID'] === null && (int) $vReqAfter['processedByID'] === ADM && $vReqAfter['subjectKind'] === 'visitor_address',
     $runMsg . ' | ' . json_encode($vReqAfter));
@@ -4097,7 +4174,7 @@ ok('N6 the name and address are emptied on BOTH of the visitor\'s suggestions at
         && $caseAfter['submitterName'] === null && $caseAfter['submitterEmail'] === null
         && $sameApartFromTwo($veraBefore, $veraAfter) === true && $sameApartFromTwo($caseBefore, $caseAfter) === true,
     json_encode([$veraAfter['submitterName'] ?? 'gone', $veraAfter['submitterEmail'] ?? 'gone', $caseAfter['submitterName'] ?? 'gone', $caseAfter['submitterEmail'] ?? 'gone']));
-ok('N7 NOTHING ELSE IS REACHED: the same address at organisation B, a longer address that contains it, the address with an accent the database calls equal, an event naming a member, the member\'s own waiting and sent mail to the same address, the member\'s ACCOUNT, activity records at B, naming the member, under another type or with more words, and the Errors page\'s line quoting the address are all exactly as they were (#964, D-140, D-150)',
+ok('N7 NOTHING ELSE IS REACHED: the same address at organisation B, a longer address that contains it, the address with an accent the database calls equal, an event naming a member, the member\'s own waiting and sent mail to the same address, the member\'s ACCOUNT, activity records at B, naming the member, under another type or with more words, the Errors page\'s line quoting the address, and anonymous prayer requests at B, with the longer address or sent by the member\'s account, are all exactly as they were (#964, D-140, D-150; #1009)',
     $untouchedAfter === $untouchedBefore,
     'changed: ' . json_encode(array_keys(array_filter([
         'events'  => $untouchedBefore['events'] !== $untouchedAfter['events'],
@@ -4106,6 +4183,7 @@ ok('N7 NOTHING ELSE IS REACHED: the same address at organisation B, a longer add
         'account' => $untouchedBefore['account'] !== $untouchedAfter['account'],
         'activity' => $untouchedBefore['activity'] !== $untouchedAfter['activity'],
         'errors'  => $untouchedBefore['errors'] !== $untouchedAfter['errors'],
+        'prayer'  => $untouchedBefore['prayer'] !== $untouchedAfter['prayer'],
     ]))));
 $queueGone = one('SELECT COUNT(*) AS n FROM `tblMailQueue` WHERE `queueID` = ?', 'i', [MQ_A]);
 $logRows   = q('SELECT `emailLogID`, `toRecipients`, `errorDetail`, `subject`, `status` FROM `tblEmailLog` WHERE `emailLogID` = ? OR `emailLogID` = ? ORDER BY `emailLogID`', 'ii', [(int) ($realLog[0]['emailLogID'] ?? 0), EL_NULL]);
@@ -4124,13 +4202,31 @@ ok('N8b the activity record the public form wrote before #963 - "Event #N submit
         'visitorIP' => null, 'userAgent' => null, 'requestHeaders' => null, 'sessionID' => null, 'sessionDataSnapshot' => null],
     json_encode($alA));
 
+$prayersAfter = q('SELECT * FROM `tblPrayerRequests` WHERE `requestID` IN (?, ?) ORDER BY `requestID`', 'ii', [$veraPrayerId, PR_CASE]);
+$prayersRight = count($prayersBefore) === 2 && count($prayersAfter) === 2;
+foreach ($prayersAfter as $i => $after) {
+    $before = $prayersBefore[$i] ?? [];
+    foreach (PRAYER_EMPTIED as $col) {
+        $prayersRight = $prayersRight && $after[$col] === null;
+        unset($before[$col], $after[$col]);
+    }
+    $prayersRight = $prayersRight && $before === $after; // everything else, `updatedAt` included, as it was
+}
+$prayersHadThem = true;
+foreach ($prayersBefore as $before) {
+    $prayersHadThem = $prayersHadThem && $before['submitterEmail'] !== null && $before['submitterIP'] !== null && $before['body'] !== null;
+}
+ok('N8c BOTH of the visitor\'s anonymous prayer requests at this organisation - the one sent through the real form, and one in other capitals with spaces round it - are KEPT with the name, the address, the network address, the visitor\'s own words and a partner\'s note emptied, and nothing else on them changed, not even when they were last edited (#1009, D-176, D-016)',
+    $prayersHadThem === true && $prayersRight === true,
+    json_encode(array_map(static fn (array $r): array => array_intersect_key($r, array_flip(array_merge(['requestID', 'updatedAt'], PRAYER_EMPTIED))), $prayersAfter)));
+
 $trail     = q('SELECT `action`, `tableName`, `recordKey`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? ORDER BY `auditID`', 'i', [$vId]);
 $shape     = array_map(static fn (array $t): string => $t['action'] . ' ' . $t['tableName'] . ' ' . (string) $t['recordKey'], $trail);
 $trailText = mb_strtolower((string) json_encode($trail, JSON_UNESCAPED_UNICODE));
 $activity  = mb_strtolower((string) json_encode(q('SELECT * FROM `tblActivityLogs` WHERE `logID` > ?', 'i', [$activityBefore]), JSON_UNESCAPED_UNICODE));
 $report    = req($jar['adm'], 'GET', '/admin/erasure-requests/report?id=' . $vId);
-ok('N9 the sealed report has one line per step, in order - filed, the suggestions (first, so one approved mid-run has no address left), the old activity records, the mail queue, the send log, completed - its chain verifies on the report page, and neither it nor any activity record written since holds the address anywhere (#964)',
-    $shape === ['filed tblErasureRequest ', 'anonymise tblEvents 2 events', 'anonymise tblActivityLogs 1 records', 'delete tblMailQueue 1 deleted, 0 changed', 'anonymise tblEmailLog 2 rows, 0 error lines', 'completed tblErasureRequest ']
+ok('N9 the sealed report has one line per step, in order - filed, the suggestions (first, so one approved mid-run has no address left), the anonymous prayer requests, the old activity records, the mail queue, the send log, completed - its chain verifies on the report page, and neither it nor any activity record written since holds the address anywhere (#964, #1009)',
+    $shape === ['filed tblErasureRequest ', 'anonymise tblEvents 2 events', 'anonymise tblPrayerRequests 2 requests', 'anonymise tblActivityLogs 1 records', 'delete tblMailQueue 1 deleted, 0 changed', 'anonymise tblEmailLog 2 rows, 0 error lines', 'completed tblErasureRequest ']
         && str_contains($trailText, 'p964.vera') === false && str_contains($activity, 'p964.vera') === false
         && $report['status'] === 200 && str_contains($report['body'], 'verified') === true,
     implode(' | ', $shape) . ' | report ' . $report['status']);
@@ -4160,7 +4256,7 @@ $n964Observe = static function () use ($n964Fixtures, $n964Untouched, $n964FileV
     if (str_starts_with((string) $f['message'], '[success]') === false) {
         $wrong[] = 'filing through the real form was refused: ' . $f['message'];
     }
-    foreach (['events', 'queue', 'log', 'account', 'activity', 'errors'] as $part) {
+    foreach (['events', 'queue', 'log', 'account', 'activity', 'errors', 'prayer'] as $part) {
         if ($before[$part] !== $after[$part]) {
             $wrong[] = 'untouched ' . $part . ' changed';
         }
@@ -4181,6 +4277,16 @@ $n964Observe = static function () use ($n964Fixtures, $n964Untouched, $n964FileV
     if ($browser !== ['visitorIP' => null, 'userAgent' => null, 'requestHeaders' => null, 'sessionID' => null, 'sessionDataSnapshot' => null]) {
         $wrong[] = 'the old activity record still holds browser details';
     }
+    $prayer = one('SELECT * FROM `tblPrayerRequests` WHERE `requestID` = ?', 'i', [PR_CASE]);
+    if ($prayer === null) {
+        $wrong[] = 'the anonymous prayer request was deleted';
+    } else {
+        foreach (PRAYER_EMPTIED as $col) {
+            if ($prayer[$col] !== null) {
+                $wrong[] = 'the anonymous prayer request still holds ' . $col;
+            }
+        }
+    }
     if (request($id)['status'] !== 'completed') {
         $wrong[] = 'the request is not completed: ' . $msg;
     }
@@ -4197,7 +4303,9 @@ $n964NoteBlock = preg_match('/        <div class="col-md-7">\n.*?\n        <\/di
 $plantFile = static fn (string $rel): string => $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
 $plants = [
     'N11 a match that trusts the database\'s comparison (the PHP test made always true): the accented and longer addresses\' events are emptied too' => [
-        '_core/GdprEraser.php', ["if (\$wanted === '' || mb_strtolower(trim((string) \$row['submitterEmail'])) !== \$wanted) {" => 'if (false) {'], 'untouched events changed'],
+        // The suggestions' comparison is named with the comment after it: the
+        // prayer step (#1009) makes the same comparison, under its own comment.
+        '_core/GdprEraser.php', ["if (\$wanted === '' || mb_strtolower(trim((string) \$row['submitterEmail'])) !== \$wanted) {\n                    continue; // a longer address" => "if (false) {\n                    continue; // a longer address"], 'untouched events changed'],
     // BOTH statements carry the condition, so a plant that drops only one stays
     // green - each alone keeps a member's row out. That is the design; this
     // plant takes both away to show the condition is what does it.
@@ -4230,6 +4338,22 @@ $plants = [
     // left every check green while section N posted its fields directly.
     'N20 the note box and its warning taken off the real page: the form is missing them, and a filing through it is refused for want of a note' => [
         '_apps/admin/erasure/index.php', [$n964NoteBlock => ''], 'the note box or its warning is missing from the real form'],
+    // #1009 (D-176): the prayer step.
+    'N25 the prayer step trusts the database\'s comparison (its PHP test made always true): the request carrying the LONGER address is emptied too' => [
+        '_core/GdprEraser.php', ["if (\$wanted === '' || mb_strtolower(trim((string) \$row['submitterEmail'])) !== \$wanted) {\n                    continue; // not this address" => "if (false) {\n                    continue; // not this address"],
+        'untouched prayer changed'],
+    'N22 the anonymous prayer step left out of the run: the visitor\'s anonymous prayer request keeps their address' => [
+        '_core/GdprEraser.php', ["\$outcomes[] = self::asOneStep(\$db, static fn (): string => self::eraseAnonymousPrayerRequests(\$db, \$requestId, \$address, \$siteId));" => ''],
+        'the anonymous prayer request still holds submitterEmail'],
+    'N23 the prayer step\'s organisation test made always true: organisation B\'s anonymous prayer request is emptied too (D-150)' => [
+        '_core/GdprEraser.php', ["'WHERE `siteID` = ? AND `submitterID` IS NULL AND `submitterEmail` LIKE ? FOR UPDATE'" => "'WHERE (`siteID` = ? OR TRUE) AND `submitterID` IS NULL AND `submitterEmail` LIKE ? FOR UPDATE'"],
+        'untouched prayer changed'],
+    // BOTH statements carry the no-account condition, as N12's do.
+    'N24 the "sent without an account" condition dropped from both statements: a request a MEMBER sent with the same address is emptied' => [
+        '_core/GdprEraser.php', [
+            "'WHERE `siteID` = ? AND `submitterID` IS NULL AND `submitterEmail` LIKE ? FOR UPDATE'" => "'WHERE `siteID` = ? AND `submitterEmail` LIKE ? FOR UPDATE'",
+            "'WHERE `requestID` = ? AND `submitterID` IS NULL'" => "'WHERE `requestID` = ?'",
+        ], 'untouched prayer changed'],
 ];
 foreach ($plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);
@@ -4255,6 +4379,118 @@ $cleanAgain = $n964Observe();
 ok('N21 with every plant taken out again, the same fresh run is green: every observation the plants turned red holds (#964)',
     $cleanAgain === [], implode('; ', $cleanAgain));
 $n964Clear();
+
+// ── N30-N36. #988: the anonymous form, used by a member who IS signed in ─────
+// The form promises anonymity, so every activity record it causes must name
+// nobody - not the account, and not the session's fingerprint, facts, network
+// address, browser or headers, any of which would join it to the member's own
+// sign-in record. Logger::activity() would fill all of them from the session
+// (#626); Logger::activityNamingNobody() leaves them out. The administrator is
+// made A's prayer partner and automatic assignment switched on, so the one
+// record the form causes ELSEWHERE (PrayerChain::maybeAutoAssign()) runs too.
+q("INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `description`, `isStandard`) VALUES (?, ?, 'prayer_team', 'Prayer Team', 'Prays for the requests given to them', 1)", 'ii', [ROLE_PRAYER_A, ORG_A]);
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [ADM, ROLE_PRAYER_A, ORG_A]);
+siteSetting(ORG_A, 'prayer-requests.autoAssign', 'true');
+siteSetting(ORG_A, 'prayer-requests.notifyOnAssign', 'false');
+/**
+ * May, signed in, opens the anonymous form, sends one request and one with a
+ * bad form token. Everything that is WRONG, as a list (empty when right).
+ */
+$n988Observe = static function () use (&$jar): array {
+    $wrong  = [];
+    $before = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+    $subject = 'P988 anonymous ' . bin2hex(random_bytes(4));
+    $sent   = sendAnonymousPrayer($jar['may'], ['subject' => $subject, 'body' => 'P988 words']);
+    $bad    = sendAnonymousPrayer($jar['may'], ['subject' => 'P988 refused', 'body' => 'P988 refused words'], false);
+    $notice = \Dom\HTMLDocument::createFromString($sent['form']['body'], LIBXML_NOERROR)->querySelector('[data-anonymous-signed-in]');
+    $words  = $notice === null ? '' : trim((string) preg_replace('/\s+/', ' ', (string) $notice->textContent));
+    if (str_contains($words, 'not linked to your account') === false || str_contains($words, 'keep the network address') === false) {
+        $wrong[] = 'the signed-in member is not told';
+    }
+    $row = one('SELECT * FROM `tblPrayerRequests` WHERE `siteID` = ? AND `subject` = ?', 'is', [ORG_A, $subject]);
+    if ($row === null || str_contains($sent['sent']['location'], 'submitted=1') === false) {
+        $wrong[] = 'the request was not saved';
+
+        return $wrong;
+    }
+    if ($row['submitterID'] !== null) {
+        $wrong[] = 'the saved request names an account';
+    }
+    if ((int) ($row['assignedToUserID'] ?? 0) !== ADM) {
+        $wrong[] = 'the request was not given to the prayer partner, so the assignment record was not tested';
+    }
+    $records = q('SELECT * FROM `tblActivityLogs` WHERE `logID` > ? ORDER BY `logID`', 'i', [$before]);
+    $byType  = [];
+    foreach ($records as $r) {
+        $byType[(string) $r['activityType']][] = $r;
+        if ((int) ($r['userID'] ?? 0) === MAY) {
+            $wrong[] = 'a record names the member (' . $r['activityType'] . ')';
+        }
+    }
+    $expect = [
+        'PrayerRequestAnonSubmitted' => ['the saved request\'s record', 'Anonymous request #' . (int) $row['requestID'] . ' submitted'],
+        'PrayerRequestAutoAssigned'  => ['the assignment record', 'Request #' . (int) $row['requestID'] . ' auto-assigned to user #' . ADM],
+        'PrayerRequestAnonRejected'  => ['the refusal record', 'Invalid CSRF on anonymous prayer-request save'],
+    ];
+    foreach ($expect as $type => [$what, $text]) {
+        $found = $byType[$type] ?? [];
+        if (count($found) !== 1 || (string) $found[0]['activityDescription'] !== $text) {
+            $wrong[] = $what . ' is missing or worded otherwise';
+            continue;
+        }
+        foreach (NOBODY_COLS as $col) {
+            if ($found[0][$col] !== null) {
+                $wrong[] = $what . ' holds ' . $col;
+            }
+        }
+    }
+
+    return $wrong;
+};
+$n988First = $n988Observe();
+ok('N30 A MEMBER WHO IS SIGNED IN uses the anonymous form: the page tells her the request is not linked to her account and that its network address is kept; the request holds no account; and the record of it, the record of its automatic assignment to a prayer partner and the record of a refused send ALL name nobody - no account, network address, browser, headers or session details - and no record written meanwhile names her (#988)',
+    $n988First === [], implode('; ', $n988First));
+$visitorForm = req($veraJar, 'GET', '/prayer-requests/anonymous');
+ok('N31 a visitor who is NOT signed in is shown the form without the signed-in member\'s sentence, which would describe an account they do not have (#988)',
+    $visitorForm['status'] === 200 && str_contains($visitorForm['body'], 'name="subject"') === true
+        && str_contains($visitorForm['body'], 'data-anonymous-signed-in') === false,
+    'HTTP ' . $visitorForm['status']);
+$n988Plants = [
+    'N32 the saved request\'s record written with Logger::activity() again: it names the signed-in member' => [
+        '_apps/prayer-requests/anonymous-save.php', ["Logger::activityNamingNobody('PrayerRequestAnonSubmitted'," => "Logger::activity('PrayerRequestAnonSubmitted',"],
+        'the saved request\'s record holds userID'],
+    'N33 the automatic assignment not told the request was anonymous: its record names the signed-in member' => [
+        '_apps/prayer-requests/anonymous-save.php', ['PrayerChain::maybeAutoAssign($siteId, $newId, true);' => 'PrayerChain::maybeAutoAssign($siteId, $newId);'],
+        'the assignment record holds userID'],
+    'N34 the record naming nobody keeps the session\'s fingerprint after all, which joins it to her sign-in record' => [
+        '_core/Logger.php', ["'VALUES (?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL)',\n                'iss',\n                [\$siteId, \$type, \$description]" => "'VALUES (?, NULL, ?, ?, NULL, ?, NULL, NULL, NULL)',\n                'isss',\n                [\$siteId, \$type, \$description, self::sessionFingerprint()]"],
+        'the saved request\'s record holds sessionID'],
+    'N35 the signed-in member\'s sentence taken off the form' => [
+        '_apps/prayer-requests/anonymous.php', ['<?php if ($signedIn === true): ?>' => '<?php if (false): ?>'],
+        'the signed-in member is not told'],
+];
+foreach ($n988Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $n988Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#988)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$n988Clean = $n988Observe();
+ok('N36 with every #988 plant taken out again, the same run is green (#988)', $n988Clean === [], implode('; ', $n988Clean));
 
 // =============================================================================
 head('O. A worker\'s own data download lists the records carrying their name, and nothing else from them (#929; D-142, D-151)');
@@ -4961,6 +5197,8 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblEvents WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR eventID BETWEEN 917300 AND 917399) '
     . '+ (SELECT COUNT(*) FROM tblMailQueue WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR queueID BETWEEN 917400 AND 917499) '
     . '+ (SELECT COUNT(*) FROM tblEmailLog WHERE emailLogID BETWEEN 917500 AND 917599) '
+    // Section N (#988, #1009).
+    . '+ (SELECT COUNT(*) FROM `tblPrayerRequests` WHERE `siteID` IN (' . ORG_A . ', ' . ORG_B . ') OR `requestID` BETWEEN 917600 AND 917699) '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
     //    are switched off while the world is removed, so nothing is taken away
     //    by a parent going: each has to be deleted by name or it is left

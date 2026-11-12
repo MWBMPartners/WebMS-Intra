@@ -100,8 +100,11 @@ class PrayerChain
      * brand-new requestID so this is normally moot). Every failure is
      * caught + logged; this method never throws, so it never aborts the
      * caller's submission flow.
+     *
+     * @param bool $sentAnonymously True for a request sent through the
+     *   anonymous form: the record of the assignment then names nobody (#988).
      */
-    public static function maybeAutoAssign(int $siteId, int $requestId): void
+    public static function maybeAutoAssign(int $siteId, int $requestId, bool $sentAnonymously = false): void
     {
         if ((App::settings('prayer-requests.autoAssign') ?? 'false') !== 'true') {
             return;
@@ -125,10 +128,19 @@ class PrayerChain
             $stmt->close();
 
             if ($assigned === true) {
-                Logger::activity(
-                    'PrayerRequestAutoAssigned',
-                    'Request #' . $requestId . ' auto-assigned to user #' . $partnerId
-                );
+                // 🕶️ #988: for a request sent through the ANONYMOUS form this
+                //    record runs inside the sender's own request, so
+                //    Logger::activity() would name the sender's account (and
+                //    their session) as the one who caused it - tying
+                //    "Request #N" to them. It names nobody instead; the
+                //    partner's number in the words is the organisation's own
+                //    fact about who is praying, not the sender's.
+                $words = 'Request #' . $requestId . ' auto-assigned to user #' . $partnerId;
+                if ($sentAnonymously === true) {
+                    Logger::activityNamingNobody('PrayerRequestAutoAssigned', $words);
+                } else {
+                    Logger::activity('PrayerRequestAutoAssigned', $words);
+                }
                 self::notifyAssignment($siteId, $requestId, $partnerId);
             }
         } catch (\Throwable $e) {

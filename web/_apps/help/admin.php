@@ -899,7 +899,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         note somebody types a name into will not be caught by it.
     </p>
 
-    <h3 class="h6 mt-3">Somebody without an account who suggested an event</h3>
+    <h3 class="h6 mt-3">Somebody without an account: an event suggestion or an anonymous prayer request</h3>
     <p>
         Anybody can suggest an event without signing in. They give a name and an e-mail address,
         and are e-mailed if it is approved. They have no account, so they cannot ask for erasure
@@ -907,10 +907,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         details automatically: they stay on the event until the person asks.
     </p>
     <p>
+        The same is true of an <strong>anonymous prayer request</strong>. Whoever sends one may give
+        a name and an e-mail address, and the request keeps the network address it was sent from. It
+        is never linked to an account &mdash; not even when a member sends it while signed in &mdash;
+        so an ordinary erasure request cannot find it either.
+    </p>
+    <p>
         If such a person asks you to erase them, <strong>first check, outside the portal, that it
         really is the person who uses that address</strong> &mdash; for example by replying to that
         address and waiting for an answer. Then open <em>Erasure requests</em>, fill in their address
-        under &ldquo;Somebody without an account who suggested an event&rdquo;, write a short note on
+        under &ldquo;Somebody without an account&rdquo;, write a short note on
         how you checked, tick the box that says you checked, and file it. The request&rsquo;s report
         records the note and that you said so. <strong>That note is kept for ever, so do not put the
         person&rsquo;s details in it.</strong> Nothing is erased until you press
@@ -920,8 +926,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         It empties the name and address on every event suggested at <em>your</em> organisation with
         that address, takes the address out of the activity log&rsquo;s record of each such suggestion
         made before the portal stopped writing addresses there (#963), and clears the e-mails telling that address a suggestion was
-        approved, from the mail waiting to be sent and from the record of sent mail. The events
-        themselves are kept. Two limits: an approval e-mail that waited and was later sent by the
+        approved, from the mail waiting to be sent and from the record of sent mail. It also empties
+        the name, the address, the network address and the words of every anonymous prayer request
+        sent to <em>your</em> organisation with that address, and a prayer partner&rsquo;s note on it.
+        The events and the prayer requests themselves are kept. An anonymous prayer request sent
+        <em>without</em> an e-mail address cannot be found this way. Two more limits: an approval e-mail that waited and was later sent by the
         scheduled job through Microsoft 365 or Google may be recorded under another organisation, and
         then keeps the address (#1006); and if a mail server&rsquo;s refusal quoted the address on the
         Errors page, that line is deleted only by the retention clear-out &mdash; the scheduled

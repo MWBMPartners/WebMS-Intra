@@ -3491,11 +3491,13 @@ class GdprEraser
                 'tblErasureRequest',
                 null,
                 'Filed by the administrator with account #' . $adminId . ' for an e-mail address that has no account: '
-                . 'somebody who suggested an event without signing in (D-140). The administrator states that they '
+                . 'somebody who suggested an event or sent an anonymous prayer request without signing in (D-140, '
+                . 'D-176). The administrator states that they '
                 . 'checked, outside the portal, that the request comes from the person who uses this address, and '
                 . 'noted how (D-148): "' . $note . '". No e-mail was sent to it (D-149). Nothing has been erased by '
                 . 'this: the request is at pending review, and an administrator still has to run it. It reaches this '
-                . 'organisation (D-150): the name and address given with event suggestions here, activity records '
+                . 'organisation (D-150): the name and address given with event suggestions here, the name, address, '
+                . 'network address and words of anonymous prayer requests sent here with it, activity records '
                 . 'written before #963 that quote the address, and the approval e-mails sent to it - including a '
                 . 'send-log row recorded under no organisation, which cannot be told apart from this one\'s; no '
                 . 'account is touched, even one using the same address.'
@@ -3529,7 +3531,7 @@ class GdprEraser
      * any request that is not a visitor-address request at `processing`.
      *
      * -------------------------------------------------------------------------
-     * FOUR STEPS, EACH WITH ITS OWN AUDIT LINE, AND NOTHING ELSE
+     * FIVE STEPS, EACH WITH ITS OWN AUDIT LINE, AND NOTHING ELSE
      * -------------------------------------------------------------------------
      *   1. The suggestions: `submitterName` and `submitterEmail` are emptied on
      *      every event at this organisation suggested WITHOUT signing in with
@@ -3550,19 +3552,29 @@ class GdprEraser
      *      fresh request for the address clears it. Holding the event row locked across a mail send to close
      *      the window was rejected: a send can wait on a mail server for a long
      *      time, and every edit of that event would wait with it.
-     *   2. The activity log: a record written before #963 by the public form
+     *   2. The anonymous prayer requests (#1009, D-176): every prayer request
+     *      at this organisation sent through the anonymous form (no account,
+     *      `submitterID IS NULL`) whose `submitterEmail` IS this address has
+     *      the name, the address and the network address it was sent from
+     *      emptied, AND the visitor's own words (`subject`, `body`) and a
+     *      prayer partner's note about them (`partnerNote`) - exactly what a
+     *      member's own erasure empties on their requests (D-016, #715;
+     *      VISITOR_PRAYER_NULL_COLS). The row stays: the organisation's record
+     *      that a request was made and prayed for. A request sent without an
+     *      e-mail address cannot be found this way at all, and is not.
+     *   3. The activity log: a record written before #963 by the public form
      *      read "Event #N submitted by anonymous <address>". Such a record at
      *      this organisation, naming nobody's account, whose address IS this
      *      one, has the address replaced by "[erased]" AND its network address,
      *      browser, request headers, session fingerprint and session facts
      *      emptied - the treatment a member's own records get; the record
      *      stays.
-     *   3. The mail queue: a waiting approval e-mail to this address, kept for
+     *   4. The mail queue: a waiting approval e-mail to this address, kept for
      *      this organisation, is deleted, so it can never be sent afterwards.
      *      BEFORE the send log, for the same reason `execute()` puts it first:
      *      it waits for a run of the mail job to finish, so anything that run
-     *      writes into the send log is there for step 4 to clean.
-     *   4. The send log: the address is taken out of the record of each
+     *      writes into the send log is there for step 5 to clean.
+     *   5. The send log: the address is taken out of the record of each
      *      approval e-mail to it, and that row's reason text emptied. The row
      *      stays — it is the organisation's record that a message was sent.
      *      A row recorded under NO organisation is treated as this one's, so
@@ -3581,7 +3593,8 @@ class GdprEraser
      *   and that request is checked by the e-mail link sent to them. A visitor
      *   request reaching an account would let an administrator's say-so empty
      *   a member's records.
-     * - It reaches only THIS ORGANISATION's suggestions and mail. Another
+     * - It reaches only THIS ORGANISATION's suggestions, prayer requests and
+     *   mail. Another
      *   organisation on the same installation may be a different party whose
      *   administrator did not check who is asking (the one-install,
      *   many-organisations rule); that organisation files its own request.
@@ -3603,8 +3616,11 @@ class GdprEraser
      *
      * Like `execute()`, a failed step puts the request back to pending review
      * untouched, so running it again finds the address; every step is safe to
-     * repeat. It never needs the free-text review (#724): it empties a name and
-     * an address, not anybody's own words.
+     * repeat. It never needs the free-text review (#724). Step 2 does empty
+     * somebody's own words, but the review exists to decide which lines of a
+     * MEMBER's free text are about them; an anonymous prayer request is the
+     * visitor's own words about their own request by construction, which is
+     * what D-016 empties without a review for a member's requests too.
      *
      * @param int      $requestId     The request, at `processing`.
      * @param int|null $processedByID The administrator who pressed Execute.
@@ -3652,6 +3668,7 @@ class GdprEraser
         try {
             $outcomes   = [];
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseSuggesterDetails($db, $requestId, $address, $siteId));
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAnonymousPrayerRequests($db, $requestId, $address, $siteId));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseVisitorActivityRecords($db, $requestId, $address, $siteId));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $address, $subject, $siteId));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId));
@@ -3771,6 +3788,116 @@ class GdprEraser
             return self::STEP_CHANGED;
         }
         self::logAudit($db, $requestId, 'none', 'tblEvents', null, 'no event suggested at this organisation without signing in carries this address');
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /**
+     * The columns a visitor-address request empties on an anonymous prayer
+     * request (#1009, D-176): the same list the catalogue's tblPrayerRequests
+     * instruction empties on a MEMBER's own requests (`submitterID`), so a
+     * visitor's request is treated exactly as a member's is (D-016, #715).
+     * Kept as its own constant because that instruction lives inside
+     * catalogue(); tools/gdpr-coverage-selftest.php fails if the two differ.
+     */
+    public const VISITOR_PRAYER_NULL_COLS = ['submitterName', 'submitterEmail', 'submitterIP', 'subject', 'body', 'partnerNote'];
+
+    /**
+     * 🙏 Step 2 of a visitor-address request (#1009, D-176): the anonymous
+     *    prayer requests sent to this organisation with this address.
+     *
+     * `prayer-requests/anonymous-save.php` stores a visitor's name, e-mail
+     * address and network address on the request (`submitterName`,
+     * `submitterEmail`, `submitterIP`). It stores no account - not even for a
+     * member who is signed in (#988) - so an ordinary erasure, which finds a
+     * person through their account, can never reach them. D-176 (the owner,
+     * 12 November 2026): the same request by e-mail address as an event
+     * suggestion (D-140, D-148 to D-150) reaches them, and the network
+     * address, kept until then, is emptied by it.
+     *
+     * EXACTLY THESE ROWS: at this organisation (D-150); sent WITHOUT an
+     * account (`submitterID IS NULL`, in BOTH statements, so a member's own
+     * request can never be reached through a visitor request whatever it
+     * holds); whose `submitterEmail` IS this address, capitals and the spaces
+     * round it aside. The LIKE only finds candidates (`\`, `%` and `_`
+     * escaped); the exact comparison is made here, row by row, and each row is
+     * emptied by its own number, as eraseSuggesterDetails() does.
+     *
+     * WHAT IS EMPTIED: VISITOR_PRAYER_NULL_COLS - the name, the address, the
+     * network address, the visitor's own words and a partner's note about
+     * them. That is exactly what a member's own erasure empties on their
+     * requests (D-016: "empty a person's own words about themselves"); a
+     * first reading of D-176 that emptied only the three contact columns
+     * would have left the very half-measure the catalogue's own note on this
+     * table calls hard to defend. WHAT STAYS: the row, its organisation,
+     * kind, status, when it was made and answered, and who moderated it and
+     * who was given it to pray for - the organisation's own record.
+     * `updatedAt` is written back as it was.
+     *
+     * WHAT IT CANNOT REACH: a request sent without an e-mail address. Nothing
+     * on it says whose it is, so a request by address cannot find it; its
+     * network address stays until the request is deleted by hand.
+     *
+     * Exactly one audit line, including when nothing matched. A failure is a
+     * FAILED step, not a crash; the fault's own words are not recorded.
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function eraseAnonymousPrayerRequests(\mysqli $db, int $requestId, string $address, int $siteId): string
+    {
+        $like    = '%' . addcslashes($address, '\\%_') . '%';
+        $wanted  = mb_strtolower(trim($address));
+        $emptied = 0;
+        $problem = false;
+        try {
+            $find = $db->prepare(
+                'SELECT `requestID`, `submitterEmail` FROM `tblPrayerRequests` '
+                . 'WHERE `siteID` = ? AND `submitterID` IS NULL AND `submitterEmail` LIKE ? FOR UPDATE'
+            );
+            $find->bind_param('is', $siteId, $like);
+            $find->execute();
+            $rows = $find->get_result()->fetch_all(MYSQLI_ASSOC);
+            $find->close();
+
+            $emptiedCols = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = NULL', self::VISITOR_PRAYER_NULL_COLS));
+            $clear       = $db->prepare(
+                'UPDATE `tblPrayerRequests` SET ' . $emptiedCols . ', `updatedAt` = `updatedAt` '
+                . 'WHERE `requestID` = ? AND `submitterID` IS NULL'
+            );
+            foreach ($rows as $row) {
+                if ($wanted === '' || mb_strtolower(trim((string) $row['submitterEmail'])) !== $wanted) {
+                    continue; // not this address: a longer one containing it, or one differing by more than capitals
+                }
+                $prayerId = (int) $row['requestID'];
+                $clear->bind_param('i', $prayerId);
+                $clear->execute();
+                $emptied++;
+            }
+            $clear->close();
+        } catch (\Throwable $e) {
+            $problem = true;
+        }
+
+        if ($problem === true) {
+            self::logAudit($db, $requestId, 'failed', 'tblPrayerRequests', null, 'the name, address and words of anonymous prayer requests could not be emptied; run the request again');
+
+            return self::STEP_FAILED;
+        }
+        if ($emptied > 0) {
+            self::logAudit(
+                $db,
+                $requestId,
+                'anonymise',
+                'tblPrayerRequests',
+                $emptied . ' requests',
+                'the name, e-mail address, network address, own words and any prayer partner\'s note emptied on '
+                . $emptied . ' anonymous prayer request(s) sent to this organisation without an account; the requests '
+                . 'themselves are kept (D-176, D-016)'
+            );
+
+            return self::STEP_CHANGED;
+        }
+        self::logAudit($db, $requestId, 'none', 'tblPrayerRequests', null, 'no anonymous prayer request sent to this organisation carries this address');
 
         return self::STEP_UNCHANGED;
     }
