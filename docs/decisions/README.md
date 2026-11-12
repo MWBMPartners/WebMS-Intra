@@ -212,7 +212,8 @@ appended with its real date and a note that it was added later.
 | [D-154](154-a-members-dbs-copy-leaves-out-who-recorded-it.md) | 2026-11-12 | A member's copy of their own DBS checks leaves out who recorded each one | in force |
 | [D-155](155-a-shared-currency-sign-in-an-imported-file-is-refused.md) | 2026-11-12 | A currency sign shared by several currencies is refused in an imported file, with the true reason | in force |
 | [D-156](156-later-issues-are-triaged-before-the-first-install.md) | 2026-11-12 | Issues raised after 5 November are triaged: only the risky ones are fixed before the first install | in force |
+| [D-157](157-the-pound-sign-in-a-file-is-read-only-for-pounds-sterling.md) | 2026-11-12 | "£" in an imported file is read only for an organisation using pounds sterling | in force |
 
-*156 decisions. This index is checked against the folder by
+*157 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
