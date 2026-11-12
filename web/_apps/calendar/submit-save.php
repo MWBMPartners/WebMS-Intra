@@ -340,8 +340,13 @@ $stmt->close();
 //    rewrite a description either, so the address would have outlived any
 //    request to remove it. The record now says what happened and which event
 //    it was; who sent it is on the event's own row, which only the moderation
-//    page shows. Records written before #963 still hold addresses; removing
-//    them is erasure work (#964), not this change.
+//    page shows. Records written before #963 still hold addresses. An erasure
+//    request filed for the visitor's address (#964, D-140) takes the address
+//    out of such a record at the organisation that filed it - but only the
+//    exact sentence this line used to write, "Event #N submitted by anonymous
+//    <address>", on a record naming no account (GdprEraser::
+//    eraseVisitorActivityRecords()). Nothing removes them otherwise, and a
+//    record at another organisation needs that organisation's own request.
 if ($isLoggedIn === true) {
     Logger::activity('EventSubmitted', 'Event #' . $newId . ' submitted by user ' . $submitterId);
 } else {

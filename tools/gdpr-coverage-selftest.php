@@ -3352,11 +3352,29 @@ foreach ([
     'self::eraseMailQueueMessages($requestId, $address, $subject, $siteId)',
     'self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId)',
     'self::eraseSuggesterDetails($db, $requestId, $address, $siteId)',
+    'self::eraseVisitorActivityRecords($db, $requestId, $address, $siteId)',
     'self::closeVisitorAddressRequest($db, $requestId, $processedByID, $steps)',
 ] as $mustCall) {
     if (str_contains($executeVisitorBody, $mustCall) === false) {
         $visitorFaults[] = 'executeVisitorAddress() does not contain: ' . $mustCall;
     }
+}
+// #964 round 2: the suggestions step runs FIRST, so that a suggestion approved
+// while the run is going finds no address left to e-mail.
+$firstStep = strpos($executeVisitorBody, 'self::eraseSuggesterDetails(');
+$mailStep  = strpos($executeVisitorBody, 'self::eraseMailQueueMessages(');
+if ($firstStep === false || $mailStep === false || $firstStep > $mailStep) {
+    $visitorFaults[] = 'the suggestions step does not run before the mail-queue step';
+}
+// D-148: the note on how the administrator checked is required, kept short,
+// and written into the filed line.
+$fileVisitorRaw = $methodBody((string) file_get_contents($eraserFile), 'function fileVisitorAddressRequest(');
+if (str_contains($fileVisitorRaw, "return ['outcome' => 'no-note', 'requestID' => 0];") === false
+    || str_contains($fileVisitorRaw, 'mb_strlen($note) > self::VISITOR_NOTE_MAX') === false
+    || str_contains($fileVisitorRaw, 'noted how (D-148): "\' . $note . \'".') === false
+    || str_contains((string) file_get_contents($eraserFile), 'public const VISITOR_NOTE_MAX = 300;') === false
+) {
+    $visitorFaults[] = 'a visitor request is no longer refused without a note of at most 300 characters, or the note is not written into the filed line (D-148)';
 }
 $suggestionsSource = (string) @file_get_contents(__DIR__ . '/../web/_core/EventSuggestions.php');
 if (str_contains($suggestionsSource, "public const APPROVAL_SUBJECT = 'Your event suggestion has been approved';") === false
@@ -3368,7 +3386,7 @@ if (str_contains($suggestionsSource, "public const APPROVAL_SUBJECT = 'Your even
     $visitorFaults[] = 'the approval e-mail\'s subject is not the one constant, word for word as it has always been sent';
 }
 check(
-    'a visitor\'s name and address on an event suggestion are emptied by a request for their address, which also clears the approval e-mail in the mail queue and the send log, found by its subject (#964, D-140)',
+    'a visitor\'s name and address on an event suggestion are emptied by a request for their address - the suggestions first - which also takes the address out of the activity records written before #963 and clears the approval e-mail in the mail queue and the send log, found by its subject; filing needs a short note on how the administrator checked (#964, D-140, D-148)',
     $visitorFaults === [],
     implode('; ', $visitorFaults)
 );
@@ -3426,7 +3444,7 @@ if (($schemaComment[1] ?? 'a') !== str_replace("''''", "''", $migrationComment[1
 $processCode = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/process.php'));
 if (str_contains($processCode, '$isVisitor = (string) ($row[\'subjectKind\'] ?? \'\') === GdprEraser::KIND_VISITOR_ADDRESS;') === false
     || str_contains($processCode, 'GdprEraser::executeVisitorAddress($requestId, $adminId)') === false
-    || str_contains($processCode, 'GdprEraser::fileVisitorAddressRequest($siteId, $address, $checked, $adminId)') === false
+    || str_contains($processCode, 'GdprEraser::fileVisitorAddressRequest($siteId, $address, $checked, $adminId, $note)') === false
     || str_contains($processCode, '$checked = ($_POST[\'checkedOffPortal\'] ?? \'\') === \'1\';') === false
 ) {
     $kindFaults[] = 'the erasure page does not file a visitor request through GdprEraser with the tick-box, or does not decide a visitor run by the request\'s own kind';

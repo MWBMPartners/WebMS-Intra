@@ -3368,22 +3368,27 @@ class GdprEraser
      * -------------------------------------------------------------------------
      * HOW THE CHECK IS RECORDED, AND WHY NOT MORE
      * -------------------------------------------------------------------------
-     * The administrator has to tick a box saying they checked; without it
-     * nothing is filed. The request's sealed audit trail then records that
-     * statement and who made it, by account number, exactly as
-     * `confirmOnBehalf()` does. It records the claim; it cannot test it.
+     * D-148 (the owner, 12 November 2026): the administrator has to tick a box
+     * saying they checked AND write a short note on HOW (for example "replied
+     * from that address"); without both nothing is filed. The request's sealed
+     * audit trail then records the statement, the note and who made them, by
+     * account number, as `confirmOnBehalf()` records its claim. It records the
+     * claim; it cannot test it.
      *
-     * There is deliberately NO box for HOW they checked. A sentence such as
-     * "she rang from 07700 900123 and gave her date of birth" would put more
-     * personal details into `tblErasureAudit`, which is never erased and is
-     * deliberately absent from the personal-data catalogue (#510 rule 7d) —
-     * the reason `finishByHand()` takes no typed text either (#710).
+     * ⚠️ THE NOTE IS KEPT FOR EVER. It goes into `tblErasureAudit`, which is
+     *    never erased and is deliberately absent from the personal-data
+     *    catalogue (#510 rule 7d). So it is held to VISITOR_NOTE_MAX
+     *    characters, and the page tells the administrator, beside the box, not
+     *    to put the person's details in it. A first build had no note at all,
+     *    for exactly that reason; D-148 chose the record of HOW over that risk,
+     *    and the length limit and the warning are how the risk is kept small.
+     *    Nothing here can tell whether a note names somebody: that is the
+     *    administrator's care, said to them where they type it.
      *
-     * And NO confirming e-mail is sent to the address. The administrator has
-     * already checked; D-134 allows the address to be used for the approval
-     * e-mail alone; and sending one would write the address into the send log
-     * again moments before the erasure takes it out. (Owner question, raised
-     * with #964: built this way pending an answer.)
+     * NO confirming e-mail is sent to the address (D-149). The administrator
+     * has already been in touch; D-134 allows the address to be used for the
+     * approval e-mail alone; and sending one would write the address into the
+     * send log again moments before the erasure takes it out.
      *
      * -------------------------------------------------------------------------
      * WHAT IT DOES
@@ -3397,24 +3402,45 @@ class GdprEraser
      * one is still waiting or running, is refused with that one's number,
      * matched by MailQueue::listHasAddress() (capitals ignored, spaces round
      * it ignored). The read of the open requests and the insert are in ONE
-     * transaction, the read taken `FOR UPDATE`, so two administrators pressing
-     * at once queue behind each other rather than both filing.
+     * transaction, the read taken `FOR UPDATE`.
+     *
+     * ⚠️ TWO PRESSES AT ONCE DO NOT SIMPLY QUEUE. A first version of this said
+     *    they "queue behind each other"; the independent check measured two
+     *    simultaneous filings and got ERROR 1213, a DEADLOCK: each holds the
+     *    gap lock its `FOR UPDATE` read took and each insert waits for the
+     *    other's, so the database gives one of them up. That one is now tried
+     *    ONCE more, from the start, and by then the other has committed, so the
+     *    second try is refused as "already-open" (or files, if the other was
+     *    for a different address). If the second try ALSO fails, the error goes
+     *    to the caller and the page says "could not be filed, try again" -
+     *    nothing was filed by that press either way.
      *
      * @param int    $siteId           The organisation the administrator is in (`Site::id()`).
      * @param string $address          The address as typed. Spaces round it are dropped.
      * @param bool   $checkedOffPortal True only when the "I have checked" box was ticked.
      * @param int    $adminId          Who is filing it.
+     * @param string $howChecked       The administrator's note on how they checked (D-148).
+     *   Spaces round it are dropped; it must not be empty and must be at most
+     *   VISITOR_NOTE_MAX characters. Runs of white space, line breaks
+     *   included, are made one space, so the trail holds one line.
      *
      * @return array{outcome: string, requestID: int} `outcome` is 'filed',
-     *   'not-checked', 'not-an-address' or 'already-open'; `requestID` is the
-     *   new request, or the open one, or 0.
+     *   'not-checked', 'no-note', 'note-too-long', 'not-an-address' or
+     *   'already-open'; `requestID` is the new request, or the open one, or 0.
      *
      * @throws \Throwable If the database refuses. Nothing is then filed.
      */
-    public static function fileVisitorAddressRequest(int $siteId, string $address, bool $checkedOffPortal, int $adminId): array
+    public static function fileVisitorAddressRequest(int $siteId, string $address, bool $checkedOffPortal, int $adminId, string $howChecked = ''): array
     {
         if ($checkedOffPortal !== true) {
             return ['outcome' => 'not-checked', 'requestID' => 0];
+        }
+        $note = trim((string) preg_replace('/\s+/u', ' ', $howChecked));
+        if ($note === '') {
+            return ['outcome' => 'no-note', 'requestID' => 0];
+        }
+        if (mb_strlen($note) > self::VISITOR_NOTE_MAX) {
+            return ['outcome' => 'note-too-long', 'requestID' => 0];
         }
         $address = trim($address);
         if ($address === '' || mb_strlen($address) > 255 || filter_var($address, FILTER_VALIDATE_EMAIL) === false
@@ -3426,7 +3452,7 @@ class GdprEraser
         $db   = App::db();
         $kind = self::KIND_VISITOR_ADDRESS;
 
-        return self::asOneStep($db, static function () use ($db, $siteId, $address, $adminId, $kind): array {
+        $file = static fn (): array => self::asOneStep($db, static function () use ($db, $siteId, $address, $adminId, $kind, $note): array {
             $stmt = $db->prepare(
                 'SELECT `requestID`, `subjectEmail` FROM `tblErasureRequest` '
                 . 'WHERE `siteID` = ? AND `subjectKind` = ? AND `status` IN (\'pending_review\', \'processing\') '
@@ -3466,16 +3492,33 @@ class GdprEraser
                 null,
                 'Filed by the administrator with account #' . $adminId . ' for an e-mail address that has no account: '
                 . 'somebody who suggested an event without signing in (D-140). The administrator states that they '
-                . 'checked, outside the portal, that the request comes from the person who uses this address. No '
-                . 'e-mail was sent to it. Nothing has been erased by this: the request is at pending review, and an '
-                . 'administrator still has to run it. It reaches only the name and address given with event '
-                . 'suggestions at this organisation and the approval e-mails sent to that address; no account is '
-                . 'touched, even one using the same address.'
+                . 'checked, outside the portal, that the request comes from the person who uses this address, and '
+                . 'noted how (D-148): "' . $note . '". No e-mail was sent to it (D-149). Nothing has been erased by '
+                . 'this: the request is at pending review, and an administrator still has to run it. It reaches only '
+                . 'this organisation (D-150): the name and address given with event suggestions here, activity '
+                . 'records written before #963 that quote the address, and the approval e-mails sent to it; no '
+                . 'account is touched, even one using the same address.'
             );
 
             return ['outcome' => 'filed', 'requestID' => $requestId];
         });
+
+        try {
+            return $file();
+        } catch (\mysqli_sql_exception $e) {
+            // 1213: this press lost a deadlock with another (see the
+            // docblock). Its transaction was rolled back by asOneStep(), so
+            // nothing of it was saved; try once more, from the start.
+            if ((int) $e->getCode() !== 1213) {
+                throw $e;
+            }
+
+            return $file();
+        }
     }
+
+    /** The longest note on how a visitor was checked (D-148). It is kept for ever, so it is kept short. */
+    public const VISITOR_NOTE_MAX = 300;
 
     /**
      * 🗑️ Carry out a request filed for a VISITOR's e-mail address (#964, D-140).
@@ -3485,20 +3528,36 @@ class GdprEraser
      * any request that is not a visitor-address request at `processing`.
      *
      * -------------------------------------------------------------------------
-     * THREE STEPS, EACH WITH ITS OWN AUDIT LINE, AND NOTHING ELSE
+     * FOUR STEPS, EACH WITH ITS OWN AUDIT LINE, AND NOTHING ELSE
      * -------------------------------------------------------------------------
-     *   1. The mail queue: a waiting approval e-mail to this address, kept for
-     *      this organisation, is deleted, so it can never be sent afterwards.
-     *      FIRST, for the same reason `execute()` puts it first: it waits for a
-     *      run of the mail job to finish, so anything that run writes into the
-     *      send log is there for step 2 to clean.
-     *   2. The send log: the address is taken out of the record of each
-     *      approval e-mail to it, and that row's reason text emptied. The row
-     *      stays — it is the organisation's record that a message was sent.
-     *   3. The suggestions: `submitterName` and `submitterEmail` are emptied on
+     *   1. The suggestions: `submitterName` and `submitterEmail` are emptied on
      *      every event at this organisation suggested WITHOUT signing in with
      *      this address. The event itself — its name, times, place, status,
      *      who approved it — is the organisation's and is kept.
+     *      FIRST, so that a suggestion approved while the run is going finds no
+     *      address left to e-mail (EventSuggestions reads the row's address
+     *      after the approval is stored, and answers "no address" for an
+     *      empty one). With the mail steps first, an approval landing between
+     *      them and this step would queue a fresh approval e-mail that this run
+     *      had already passed.
+     *   2. The activity log: a record written before #963 by the public form
+     *      read "Event #N submitted by anonymous <address>". Such a record at
+     *      this organisation, naming nobody's account, whose address IS this
+     *      one, has the address replaced by "[erased]"; the record stays.
+     *   3. The mail queue: a waiting approval e-mail to this address, kept for
+     *      this organisation, is deleted, so it can never be sent afterwards.
+     *      BEFORE the send log, for the same reason `execute()` puts it first:
+     *      it waits for a run of the mail job to finish, so anything that run
+     *      writes into the send log is there for step 4 to clean.
+     *   4. The send log: the address is taken out of the record of each
+     *      approval e-mail to it, and that row's reason text emptied. The row
+     *      stays — it is the organisation's record that a message was sent.
+     *      A row recorded under NO organisation is treated as this one's, so
+     *      it is cleared even if it was really another organisation's; and a
+     *      row recorded under ANOTHER organisation is not reached, which
+     *      includes a queued approval e-mail later sent by the scheduled job
+     *      through Microsoft 365 or Google, logged under whichever
+     *      organisation the job was working in (#1006).
      *
      * -------------------------------------------------------------------------
      * WHAT IT DELIBERATELY DOES NOT DO
@@ -3518,7 +3577,9 @@ class GdprEraser
      *   the same address is somebody's own and is left alone.
      * - It does not look at the Errors page: a mail server's refusal there has
      *   no subject, so nothing says it was about the approval e-mail. Those
-     *   lines expire on that page's own clear-out.
+     *   lines are deleted by the Errors page's own clear-out after
+     *   `errors.retentionDays` - ONLY where that scheduled job has been set up;
+     *   where it has not, they stay.
      * - Its address match is EXACT apart from capitals and the spaces round it
      *   (the database's comparison would also let `josé@` match `jose@` under
      *   this schema's collation, so the database only finds candidates and
@@ -3574,9 +3635,10 @@ class GdprEraser
         $status  = '';
         try {
             $outcomes   = [];
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseSuggesterDetails($db, $requestId, $address, $siteId));
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseVisitorActivityRecords($db, $requestId, $address, $siteId));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $address, $subject, $siteId));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $address, $subject, $siteId));
-            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseSuggesterDetails($db, $requestId, $address, $siteId));
             foreach ($outcomes as $outcome) {
                 $steps++;
                 if ($outcome === self::STEP_FAILED) {
@@ -3693,6 +3755,98 @@ class GdprEraser
             return self::STEP_CHANGED;
         }
         self::logAudit($db, $requestId, 'none', 'tblEvents', null, 'no event suggested at this organisation without signing in carries this address');
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /** The ONE wording the public form used, before #963, for a visitor's suggestion. Matched exactly. */
+    private const PRE_963_SUGGESTION_RECORD = '/^Event #(\d+) submitted by anonymous (.*)$/su';
+
+    /**
+     * 🧾 Step 2 of a visitor-address request (#964): the activity records the
+     *    public form wrote BEFORE #963, which quote the visitor's address.
+     *
+     * Until #963 `calendar/submit-save.php` recorded a visitor's suggestion as
+     * `Event #N submitted by anonymous <address>` (established by
+     * `git show 6043f25a^:web/_apps/calendar/submit-save.php`, the
+     * `Logger::activity('EventSubmitted', …)` line). The record names no account
+     * (`userID` is empty: the visitor was not signed in), so no ordinary erasure
+     * reaches it, and the activity log keeps a description as written for as
+     * long as it keeps the record - for ever where that is the choice (#932).
+     *
+     * EXACTLY THAT RECORD AND NOTHING ELSE: `activityType` 'EventSubmitted', at
+     * this organisation (D-150), naming no account, whose WHOLE description is
+     * that fixed sentence AND whose address part IS this address (capitals and
+     * the spaces round it aside, as every other step here). A description that
+     * merely mentions the address somewhere is somebody else's words and is
+     * left alone - matching free text by an address would reach records about
+     * other things. The LIKE only finds candidates; the pattern decides.
+     *
+     * The address is replaced by "[erased]", the word the send log uses; the
+     * record, its event number, its time and everything else stay - the
+     * organisation's record that a suggestion was made.
+     *
+     * Exactly one audit line, including when nothing matched; a failure is a
+     * FAILED step, and the fault's own words are not recorded.
+     *
+     * @return string One of the STEP_ constants.
+     */
+    private static function eraseVisitorActivityRecords(\mysqli $db, int $requestId, string $address, int $siteId): string
+    {
+        $like     = 'Event #% submitted by anonymous %' . addcslashes($address, '\\%_') . '%';
+        $wanted   = mb_strtolower(trim($address));
+        $type     = 'EventSubmitted';
+        $replaced = 0;
+        $problem  = false;
+        try {
+            $find = $db->prepare(
+                'SELECT `logID`, `activityDescription` FROM `tblActivityLogs` '
+                . 'WHERE `activityType` = ? AND `siteID` = ? AND `userID` IS NULL AND `activityDescription` LIKE ? FOR UPDATE'
+            );
+            $find->bind_param('sis', $type, $siteId, $like);
+            $find->execute();
+            $rows = $find->get_result()->fetch_all(MYSQLI_ASSOC);
+            $find->close();
+
+            $write = $db->prepare(
+                'UPDATE `tblActivityLogs` SET `activityDescription` = ? WHERE `logID` = ? AND `userID` IS NULL'
+            );
+            foreach ($rows as $row) {
+                if (preg_match(self::PRE_963_SUGGESTION_RECORD, (string) $row['activityDescription'], $m) !== 1
+                    || $wanted === '' || mb_strtolower(trim($m[2])) !== $wanted
+                ) {
+                    continue; // another sentence, or another address
+                }
+                $text  = 'Event #' . $m[1] . ' submitted by anonymous [erased]';
+                $logId = (int) $row['logID'];
+                $write->bind_param('si', $text, $logId);
+                $write->execute();
+                $replaced++;
+            }
+            $write->close();
+        } catch (\Throwable $e) {
+            $problem = true;
+        }
+
+        if ($problem === true) {
+            self::logAudit($db, $requestId, 'failed', 'tblActivityLogs', null, 'the address could not be taken out of the activity records of a suggestion; run the request again');
+
+            return self::STEP_FAILED;
+        }
+        if ($replaced > 0) {
+            self::logAudit(
+                $db,
+                $requestId,
+                'anonymise',
+                'tblActivityLogs',
+                $replaced . ' records',
+                'the address taken out of ' . $replaced . ' activity record(s) of a suggestion made without signing in, '
+                . 'written before #963 as "submitted by anonymous" and the address; the records are kept'
+            );
+
+            return self::STEP_CHANGED;
+        }
+        self::logAudit($db, $requestId, 'none', 'tblActivityLogs', null, 'no activity record of a suggestion at this organisation quotes this address');
 
         return self::STEP_UNCHANGED;
     }

@@ -72,11 +72,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    account, so they cannot ask from "Request data erasure" and an ordinary
 //    request cannot find them. They ask the organisation some other way, and
 //    an administrator files it here by their e-mail address. The tick-box is
-//    the whole of the identity check the portal can record: it cannot check
-//    who is asking itself, so it makes the administrator say they have, and
-//    the request's report records that statement and who made it. There is
-//    deliberately no box for HOW they checked (see
-//    GdprEraser::fileVisitorAddressRequest()).
+//    the identity check the portal can record: it cannot check who is asking
+//    itself, so it makes the administrator say they have and, since D-148,
+//    note HOW, and the request's report records both and who made them. The
+//    note is kept for ever, so the page says not to put the person's details
+//    in it (see GdprEraser::fileVisitorAddressRequest()).
 ?>
 <div class="card mb-3"><div class="card-body">
     <h2 class="h6">Somebody without an account who suggested an event</h2>
@@ -94,7 +94,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <label for="visitorEmail" class="form-label small">Their e-mail address</label>
             <input type="email" id="visitorEmail" name="visitorEmail" required maxlength="255" class="form-control form-control-sm" autocomplete="off">
         </div>
-        <div class="col-md-5">
+        <div class="col-md-7">
+            <label for="howChecked" class="form-label small">How you checked it is them</label>
+            <input type="text" id="howChecked" name="howChecked" required maxlength="<?php echo (int) GdprEraser::VISITOR_NOTE_MAX; ?>" class="form-control form-control-sm" autocomplete="off" aria-describedby="howCheckedHelp">
+            <div id="howCheckedHelp" class="form-text">
+                For example &ldquo;replied from that address&rdquo;. At most <?php echo (int) GdprEraser::VISITOR_NOTE_MAX; ?>
+                characters. <strong>This note is kept with the request for ever and is never erased, so do not put the
+                person&rsquo;s name, address, telephone number or any other details in it.</strong>
+            </div>
+        </div>
+        <div class="col-md-10">
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="checkedOffPortal" name="checkedOffPortal" value="1" required>
                 <label class="form-check-label small" for="checkedOffPortal">

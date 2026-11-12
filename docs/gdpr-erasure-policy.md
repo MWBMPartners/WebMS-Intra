@@ -70,28 +70,44 @@ never automatically.**
 1. The visitor asks the organisation by some other route. An administrator
    checks, **outside the portal**, that it really is the person who uses that
    address, then files the request on `/admin/erasure-requests` ("Somebody
-   without an account who suggested an event"), ticking a box that says so.
-   Nothing is filed without the tick. The sealed audit chain records that
-   statement and the administrator's account number; there is no box for
-   *how* they checked, because whatever was typed there would sit in
-   `tblErasureAudit` for ever. No e-mail is sent to the address.
+   without an account who suggested an event"), ticking a box that says so
+   and writing a short note (at most 300 characters) on how they checked
+   (D-148). Nothing is filed without both. The sealed audit chain records the
+   statement, the note and the administrator's account number. The note is
+   kept for ever, so the page tells the administrator not to put the person's
+   details in it. No e-mail is sent to the address (D-149).
 2. The request is filed already at `pending_review`, of kind `visitor_address`
    (`tblErasureRequest.subjectKind`), with no account.
-3. **Execute** runs three steps, each with its own audit line:
-   the approval e-mail still waiting in `tblMailQueue` for this organisation is
-   deleted; the address is taken out of the `tblEmailLog` record of each
-   approval e-mail to it (the row stays); and `submitterName` and
-   `submitterEmail` are emptied on every event at this organisation suggested
-   **without signing in** with that address. The events themselves are kept.
-   Then the request is closed and its own copy of the address replaced.
+3. **Execute** runs four steps, each with its own audit line, in this order:
+   `submitterName` and `submitterEmail` are emptied on every event at this
+   organisation suggested **without signing in** with that address (first, so
+   that a suggestion approved while the run is going has no address left to
+   e-mail); an activity record written before #963 that reads exactly "Event
+   #N submitted by anonymous" and the address, at this organisation and naming
+   no account, has the address replaced by "[erased]"; the approval e-mail
+   still waiting in `tblMailQueue` for this organisation is deleted; and the
+   address is taken out of the `tblEmailLog` record of each approval e-mail to
+   it recorded under this organisation **or under no organisation** (the row
+   stays). A row recorded under no organisation cannot be told apart from this
+   organisation's, so it is cleared even if it was really another
+   organisation's. The events themselves are kept. Then the request is closed
+   and its own copy of the address replaced.
 
 What it deliberately does **not** reach: any account, even a member's using
 the same address (a member asks from their own account); another
-organisation's suggestions or mail on the same installation (that
-organisation's administrator did not check who is asking, and files its own);
-any other mail to the same address (only the approval e-mail's subject is
-matched, `EventSuggestions::APPROVAL_SUBJECT`); and the Errors page, whose
-lines carry no subject and expire on their own clear-out. The address is
+organisation's suggestions, records or mail on the same installation (D-150:
+that organisation's administrator did not check who is asking, and files its
+own); any other mail to the same address (only the approval e-mail's subject
+is matched, `EventSuggestions::APPROVAL_SUBJECT`); and the Errors page, whose
+lines carry no subject. Those lines are deleted by the Errors page's own
+clear-out after `errors.retentionDays` **only where that scheduled job has
+been set up**; where it has not, they stay.
+
+What it **cannot** reach today, said plainly: an approval e-mail that waited in
+the queue and was later sent by the scheduled job through Microsoft 365 or
+Google is recorded in the send log under whichever organisation the job was
+working in, not the message's (#1006). If that is another organisation, this
+request does not find the row and the address stays in it. The address is
 matched exactly apart from capitals and the spaces round it: the database's own
 comparison would also treat an accented address as the same, so it only finds
 candidates.

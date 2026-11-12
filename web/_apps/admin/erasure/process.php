@@ -13,7 +13,8 @@
  *            file a request for a VISITOR's e-mail address - somebody who
  *            suggested an event without signing in and has no account (#964,
  *            D-140). Only after the administrator ticks that they checked,
- *            outside the portal, that it is really that person. Filed at
+ *            outside the portal, that it is really that person, and writes a
+ *            short note on how (D-148). Filed at
  *            "pending review"; nothing is erased until Execute is pressed.
  * The other five are each only for a request of the organisation being looked at:
  *   execute  run a request that is at "pending review";
@@ -84,8 +85,11 @@ if ($action === 'file_visitor') {
     $typed   = $_POST['visitorEmail'] ?? '';
     $address = is_string($typed) === true ? $typed : '';
     $checked = ($_POST['checkedOffPortal'] ?? '') === '1';
+    // D-148: how the administrator checked, kept for ever with their number.
+    $how     = $_POST['howChecked'] ?? '';
+    $note    = is_string($how) === true ? $how : '';
     try {
-        $filed = GdprEraser::fileVisitorAddressRequest($siteId, $address, $checked, $adminId);
+        $filed = GdprEraser::fileVisitorAddressRequest($siteId, $address, $checked, $adminId, $note);
     } catch (\Throwable $e) {
         Logger::exception($e);
         $_SESSION['flash_msg']  = 'The request could not be filed, and nothing was saved. Try again in a minute; if it '
@@ -108,6 +112,15 @@ if ($action === 'file_visitor') {
         $_SESSION['flash_msg']  = 'Nothing new was filed: erasure request #' . $filedId . ' for that address is already '
             . 'waiting or being carried out.';
         $_SESSION['flash_type'] = 'info';
+    } elseif ($filed['outcome'] === 'no-note') {
+        $_SESSION['flash_msg']  = 'Nothing was filed. Write a short note on how you checked that the request comes from '
+            . 'the person who uses this address (for example "replied from that address"). It is kept with the '
+            . 'request for ever, so do not put the person\'s details in it.';
+        $_SESSION['flash_type'] = 'warning';
+    } elseif ($filed['outcome'] === 'note-too-long') {
+        $_SESSION['flash_msg']  = 'Nothing was filed: the note on how you checked is longer than '
+            . GdprEraser::VISITOR_NOTE_MAX . ' characters. Keep it short - it is kept with the request for ever.';
+        $_SESSION['flash_type'] = 'warning';
     } elseif ($filed['outcome'] === 'not-checked') {
         $_SESSION['flash_msg']  = 'Nothing was filed. Tick the box to say you have checked, outside the portal, that '
             . 'the request really comes from the person who uses this address. The portal cannot check that for you: '

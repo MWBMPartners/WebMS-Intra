@@ -910,14 +910,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         If such a person asks you to erase them, <strong>first check, outside the portal, that it
         really is the person who uses that address</strong> &mdash; for example by replying to that
         address and waiting for an answer. Then open <em>Erasure requests</em>, fill in their address
-        under &ldquo;Somebody without an account who suggested an event&rdquo;, tick the box that
-        says you checked, and file it. The request&rsquo;s report records that you said so. Nothing is
-        erased until you press <strong>Execute</strong> on it.
+        under &ldquo;Somebody without an account who suggested an event&rdquo;, write a short note on
+        how you checked, tick the box that says you checked, and file it. The request&rsquo;s report
+        records the note and that you said so. <strong>That note is kept for ever, so do not put the
+        person&rsquo;s details in it.</strong> Nothing is erased until you press
+        <strong>Execute</strong> on it.
     </p>
     <p>
         It empties the name and address on every event suggested at <em>your</em> organisation with
-        that address, and clears the e-mails telling that address a suggestion was approved, from
-        the mail waiting to be sent and from the record of sent mail. The events themselves are kept.
+        that address, takes the address out of the activity log&rsquo;s record of each such suggestion
+        made before the portal stopped writing addresses there (#963), and clears the e-mails telling that address a suggestion was
+        approved, from the mail waiting to be sent and from the record of sent mail. The events
+        themselves are kept. Two limits: an approval e-mail that waited and was later sent by the
+        scheduled job through Microsoft 365 or Google may be recorded under another organisation, and
+        then keeps the address (#1006); and if a mail server&rsquo;s refusal quoted the address on the
+        Errors page, that line is deleted only by the Errors page&rsquo;s own clear-out, and only where
+        that scheduled job has been set up.
         It does <strong>not</strong> touch any account, even a member&rsquo;s using the same address
         &mdash; a member asks for their own erasure from their account &mdash; nor anything at another
         organisation on the same installation, which files its own request.
