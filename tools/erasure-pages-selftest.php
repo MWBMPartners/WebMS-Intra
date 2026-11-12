@@ -229,7 +229,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 209; // #988 and #1009 added thirteen to section N:
+const EXPECTED_CHECKS = 214; // #988/#1009 check round 1 added five: the
+                            // signed-in notice and the visitor's note on the
+                            // anonymous form, the prayer help's two sections and
+                            // the erasure page's visitor card, each pinned as
+                            // rendered (N37-N40), and a plant putting the
+                            // notice's round-1 wording back (N41). 214.
+                            // #988 and #1009 added thirteen to section N:
                             // the anonymous prayer form's own request and its
                             // record naming nobody (N1b), what the visitor
                             // request does to anonymous prayer requests (N8c),
@@ -3822,6 +3828,16 @@ const PRAYER_EMPTIED = ['submitterName', 'submitterEmail', 'submitterIP', 'subje
 /** The five columns that tie an activity record to a browser, and the account: all must be empty on a record naming nobody. */
 const NOBODY_COLS = ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'];
 
+/** A picker for renderedRegion(): the ONE element carrying this attribute, or nothing if there is not exactly one. */
+function oneMarked(string $attribute): \Closure
+{
+    return static function (\Dom\HTMLDocument $doc) use ($attribute): array {
+        $found = $doc->querySelectorAll('[' . $attribute . ']');
+
+        return $found->length === 1 ? [$found->item(0)] : [];
+    };
+}
+
 /** One anonymous prayer request through the REAL form, as whoever holds this jar. The form writes its token over two lines. */
 function sendAnonymousPrayer(string $jar, array $fields, bool $goodToken = true): array
 {
@@ -4109,7 +4125,13 @@ ok('N3 an administrator who ticks the box and notes how they checked files ONE r
     count($requests) === 1 && $vReq['subjectEmail'] === 'p964.VERA@selftest.invalid' && $vReq['userID'] === null
         && $vReq['status'] === 'pending_review' && $vReq['confirmToken'] === null && $vReq['confirmedAt'] !== null
         && (int) $vReq['siteID'] === ORG_A
-        && str_starts_with($filed['message'], '[success] Erasure request #' . $vId . ' is filed for that address') === true
+        && $filed['message'] === '[success] Erasure request #' . $vId . ' is filed for that address and is at pending review. '
+            . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
+            . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
+            . 'address (their name, address, network address and words), and the e-mails telling that address a '
+            . 'suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
+            . 'prayer form, which only a request filed here can reach.'
         && str_starts_with($again['message'], '[info] Nothing new was filed: erasure request #' . $vId . ' for that address') === true
         && ($filedLine['action'] ?? '') === 'filed'
         && str_contains((string) ($filedLine['details'] ?? ''), 'administrator with account #' . ADM . ' ') === true
@@ -4402,9 +4424,12 @@ $n988Observe = static function () use (&$jar): array {
     $subject = 'P988 anonymous ' . bin2hex(random_bytes(4));
     $sent   = sendAnonymousPrayer($jar['may'], ['subject' => $subject, 'body' => 'P988 words']);
     $bad    = sendAnonymousPrayer($jar['may'], ['subject' => 'P988 refused', 'body' => 'P988 refused words'], false);
-    $notice = \Dom\HTMLDocument::createFromString($sent['form']['body'], LIBXML_NOERROR)->querySelector('[data-anonymous-signed-in]');
-    $words  = $notice === null ? '' : trim((string) preg_replace('/\s+/', ' ', (string) $notice->textContent));
-    if (str_contains($words, 'not linked to your account') === false || str_contains($words, 'keep the network address') === false) {
+    // #988/#1009 round 1: compared with the PINNED notice, whole, not with two
+    // phrases - the round-1 notice held both phrases and still left out that the
+    // address can be matched with her sign-ins and that her own erasure does not
+    // reach the request (N41 puts that wording back and must go red).
+    $notice = renderedRegion((string) $sent['form']['body'], oneMarked('data-anonymous-signed-in'));
+    if ($notice === '' || $notice !== (readRenderedPins()['pins']['anonymous prayer form, signed-in notice'] ?? null)) {
         $wrong[] = 'the signed-in member is not told';
     }
     $row = one('SELECT * FROM `tblPrayerRequests` WHERE `siteID` = ? AND `subject` = ?', 'is', [ORG_A, $subject]);
@@ -4468,6 +4493,20 @@ $n988Plants = [
     'N35 the signed-in member\'s sentence taken off the form' => [
         '_apps/prayer-requests/anonymous.php', ['<?php if ($signedIn === true): ?>' => '<?php if (false): ?>'],
         'the signed-in member is not told'],
+    // #988/#1009 check round 1: the round-1 notice, which said the request was
+    // not linked "not even for the people who run this portal" and said nothing
+    // about matching the address or about erasure.
+    'N41 the signed-in notice put back as round 1 wrote it, without the address being matchable with her sign-ins or what erasing her account does not reach' => [
+        '_apps/prayer-requests/anonymous.php', [
+            "                the leadership team sees only the name and e-mail address you type below, if any.\n"
+            . "                It does keep the network address it was sent from, and anyone with access to the portal's records\n"
+            . "                could compare that address with the one stored each time you sign in, so it is not anonymous to them.\n"
+            . "                Because it is not linked to your account, asking for your account to be deleted will not remove it:\n"
+            . "                to have it erased, ask the organisation, which can find it only if you give an e-mail address below.\n"
+            => "                not even for the people who run this portal: the leadership team sees only the name and e-mail address\n"
+            . "                you type below, if any. Like every request sent here, it does keep the network address it was sent from.\n",
+        ],
+        'the signed-in member is not told'],
 ];
 foreach ($n988Plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);
@@ -4491,6 +4530,43 @@ foreach ($n988Plants as $label => [$rel, $swaps, $expect]) {
 }
 $n988Clean = $n988Observe();
 ok('N36 with every #988 plant taken out again, the same run is green (#988)', $n988Clean === [], implode('; ', $n988Clean));
+
+// ── N37-N40. What a person is told, pinned as RENDERED (#988, #1009) ───────
+// Each is the markup the person receives, compared whole with the sidecar, so a
+// sentence cannot be reworded, dropped or hidden without the pin being taken
+// again on purpose. N37 is ALSO what N30's observation compares with, so the
+// plants N35 and N41 drive it red.
+$n988Notice = renderedRegion((string) req($jar['may'], 'GET', '/prayer-requests/anonymous')['body'], oneMarked('data-anonymous-signed-in'));
+ok('N37 the anonymous form tells a SIGNED-IN member, before she sends, that the request is not linked to her account, that its network address is kept and could be compared with the one stored at each of her sign-ins by anyone with access to the portal\'s records, that erasing her account does not reach it and only asking the organisation does - and only with an e-mail address - exactly as pinned (#988, #1009)',
+    renderedPin('anonymous prayer form, signed-in notice', $n988Notice), mb_substr($n988Notice, 0, 900));
+$n988Note = renderedRegion((string) req($veraJar, 'GET', '/prayer-requests/anonymous')['body'], oneMarked('data-anonymous-erasure-note'));
+ok('N38 the anonymous form tells a VISITOR with no account that the network address is kept and how to have the request erased - ask the organisation, which can find it only by an e-mail address given with it - exactly as pinned (#1009, D-176)',
+    renderedPin('anonymous prayer form, visitor note', $n988Note), mb_substr($n988Note, 0, 900));
+$n988Help     = (string) req($jar['adm'], 'GET', '/help/prayer-requests')['body'];
+$n988HelpAnon = renderedRegion($n988Help, $sectionAfter('Anonymous Submissions'));
+$n988HelpMods = renderedRegion($n988Help, $sectionAfter('For Moderators'));
+ok('N39 the prayer-requests help says an anonymous-form request is never linked to an account, keeps its network address and is erased only on request by its e-mail address, and tells moderators the real submitter is kept only for the "Display my name as Anonymous" tick-box - both sections exactly as pinned (#988, #1009)',
+    // Both asked before they are combined: `&&` would skip recording the second
+    // when the first differs, and an unrecorded pin is reported as guarding nothing.
+    [renderedPin('help prayer requests, anonymous submissions', $n988HelpAnon), renderedPin('help prayer requests, for moderators', $n988HelpMods)] === [true, true],
+    mb_substr($n988HelpAnon, 0, 500) . ' | ' . mb_substr($n988HelpMods, 0, 500));
+$n988Card = renderedRegion((string) req($jar['adm'], 'GET', '/admin/erasure-requests')['body'], static function (\Dom\HTMLDocument $doc): array {
+    // The card's heading and the explanation under it. Not the form after it,
+    // which carries this page's form token and so differs on every run.
+    $found = [];
+    foreach ($doc->querySelectorAll('h2') as $h) {
+        if (trim((string) preg_replace('/\s+/', ' ', (string) $h->textContent)) === 'Somebody without an account: an event suggestion or an anonymous prayer request') {
+            $found[] = $h;
+        }
+    }
+    if (count($found) !== 1 || $found[0]->nextElementSibling === null || $found[0]->nextElementSibling->tagName !== 'P') {
+        return [];
+    }
+
+    return [$found[0], $found[0]->nextElementSibling];
+});
+ok('N40 the erasure page\'s visitor card says what the request reaches, that an anonymous prayer request sent without an e-mail address cannot be found, and that a member\'s own erasure does not reach a request they sent through the anonymous form - exactly as pinned (#1009, D-176)',
+    renderedPin('erasure page, visitor card', $n988Card), mb_substr($n988Card, 0, 900));
 
 // =============================================================================
 head('O. A worker\'s own data download lists the records carrying their name, and nothing else from them (#929; D-142, D-151)');

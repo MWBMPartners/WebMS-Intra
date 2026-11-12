@@ -3347,7 +3347,9 @@ class GdprEraser
     /**
      * A request filed by an administrator for an e-mail ADDRESS that has no
      * account: somebody who suggested an event without signing in (#964,
-     * D-140). Stored in `tblErasureRequest.subjectKind`.
+     * D-140), or who sent a prayer request through the anonymous form -
+     * signed in or not, since that form links no account (#1009, D-176, #988).
+     * Stored in `tblErasureRequest.subjectKind`.
      */
     public const KIND_VISITOR_ADDRESS = 'visitor_address';
 
@@ -3361,7 +3363,12 @@ class GdprEraser
      * e-mail address (`calendar/submit-save.php`). They have no account, so an
      * ordinary erasure — which finds a person through their account number —
      * can never reach those two columns, nor the approval e-mail D-134 sends to
-     * that address. D-140 (the owner, 11 November 2026): erase them on request,
+     * that address. The same is true of a prayer request sent through the
+     * anonymous form (`prayer-requests/anonymous-save.php`), which stores a
+     * name, an e-mail address and the network address it came from and NO
+     * account, even for a member who was signed in (#988) - so that member's
+     * own erasure, which matches `submitterID`, cannot reach it either. D-176
+     * (12 November 2026): this same request reaches those too. D-140 (the owner, 11 November 2026): erase them on request,
      * never automatically; an administrator files the request by e-mail
      * address, after checking OUTSIDE the portal that it really is that person.
      *

@@ -93,7 +93,12 @@ never automatically.**
    `submitterEmail` is that address has `submitterName`, `submitterEmail`,
    `submitterIP`, `subject`, `body` and `partnerNote` emptied - the same
    columns a member's own erasure empties on their requests (D-016, #715) -
-   and the request kept (#1009, D-176); an activity record written before
+   and the request kept (#1009, D-176). As for suggestions, a request with the
+   same address that arrives after this step has run is NOT reached by this
+   run and keeps its address; a fresh request for the address clears it. A
+   member's own account erasure never reaches an anonymous-form request,
+   because the request holds no account (#988); only this request does. An
+   activity record written before
    #963 that reads exactly "Event #N submitted by anonymous" and the address, at
    this organisation and naming no account, has the address replaced by
    "[erased]" and its network address, browser, request headers, session

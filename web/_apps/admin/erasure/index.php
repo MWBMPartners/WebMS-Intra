@@ -88,8 +88,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         event suggestions; the anonymous prayer requests sent with that address, whose name, address, network address
         and words are emptied; and the e-mails telling that address a suggestion was approved. The events and the
         prayer requests themselves are kept. An anonymous prayer request sent without an e-mail address cannot be
-        found this way. It does not touch any account, even a member&rsquo;s using the same address. Nothing is erased
-        until you press Execute on the request.
+        found this way. It does not touch any account, even a member&rsquo;s using the same address. A member who sent
+        a request through the anonymous form while signed in is in the same position as a visitor: that request is not
+        linked to their account, so their own erasure does not reach it, and it is erased only by a request filed here.
+        Nothing is erased until you press Execute on the request.
     </p>
     <form method="post" action="<?php echo htmlspecialchars(Router::url('admin/erasure-requests/process'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

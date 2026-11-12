@@ -104,7 +104,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <ul>
                 <li>Sent to <em>leadership only</em> (never broadcast)</li>
                 <li>Marked as <em>pending</em> for moderator review</li>
-                <li>Treated as anonymous by default — name &amp; email are optional</li>
+                <li>Never linked to an account, even when the person sending it is signed in — name &amp; email are optional</li>
+                <li>Kept with the network address it was sent from, which is not shown on any page</li>
+                <li>Erased only when the person asks the organisation, by the e-mail address they gave with it;
+                    a request sent without an e-mail address cannot be found that way. Deleting a member's
+                    account does not reach it, because it is not linked to the account.</li>
             </ul>
         </li>
     </ol>
@@ -159,9 +163,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         visibility or add a testimony note when marking answered.
     </p>
     <p class="text-muted small">
-        Anonymous submissions made by logged-in members still record the real submitter
-        so moderators can offer pastoral follow-up. Submissions via the public anonymous
-        route only contain the optional name &amp; email the submitter provided.
+        A request a signed-in member sends with "<em>Display my name as Anonymous</em>"
+        ticked still records the real submitter, so moderators can offer pastoral follow-up.
+        A request sent through the public anonymous form records no account, even when the
+        person sending it was signed in: it holds only the optional name &amp; email they typed,
+        and the network address it was sent from.
     </p>
 </section>
 

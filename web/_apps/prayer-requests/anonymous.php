@@ -61,8 +61,15 @@ $keptText = static fn (string $field): string => (is_array($kept) === true && is
 //    Logger::activity()'s session fallback). What the sentence must NOT
 //    promise is that nobody could ever work it out: the request keeps the
 //    network address it came from (D-176), the same as on the member's own
-//    sign-in records, so it says that too. Told only when signed in - a
-//    visitor without an account has no account to be linked to.
+//    sign-in records, so it says plainly that somebody with access to the
+//    portal's records could match the two. It also says what follows from the
+//    request NOT being linked: the member's own erasure (which finds their
+//    requests by `submitterID`) cannot reach it, and only a request filed by
+//    the e-mail address given with it can (D-176, #1009) - said BEFORE they
+//    send, because after is too late to add an address. A visitor without an
+//    account is told the same thing about erasure, in its own sentence: they
+//    have no account to be linked to. Both are pinned as rendered by section N
+//    of tools/erasure-pages-selftest.php.
 $signedIn = Auth::check();
 ?>
 <!doctype html>
@@ -144,12 +151,21 @@ $signedIn = Auth::check();
         <?php if ($signedIn === true): ?>
             <div class="alert alert-info small" data-anonymous-signed-in>
                 <i class="fa-solid fa-user-secret me-1"></i>
-                You are signed in, but a request sent from this form is <strong>not linked to your account</strong>,
-                not even for the people who run this portal: the leadership team sees only the name and e-mail address
-                you type below, if any. Like every request sent here, it does keep the network address it was sent from.
+                You are signed in, but a request sent from this form is <strong>not linked to your account</strong>:
+                the leadership team sees only the name and e-mail address you type below, if any.
+                It does keep the network address it was sent from, and anyone with access to the portal's records
+                could compare that address with the one stored each time you sign in, so it is not anonymous to them.
+                Because it is not linked to your account, asking for your account to be deleted will not remove it:
+                to have it erased, ask the organisation, which can find it only if you give an e-mail address below.
                 To send a request under your own name, use
                 <a href="<?php echo htmlspecialchars(Site::url('prayer-requests/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="alert-link">the members' prayer request form</a>.
             </div>
+        <?php else: ?>
+            <p class="small text-muted" data-anonymous-erasure-note>
+                This form keeps the network address your request is sent from. If you later want your request and
+                your details erased, ask the organisation: it can find your request only if you give an e-mail
+                address below.
+            </p>
         <?php endif; ?>
 
         <form method="post" action="<?php echo htmlspecialchars(Site::url('prayer-requests/anonymous/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
