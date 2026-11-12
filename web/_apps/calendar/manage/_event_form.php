@@ -84,6 +84,27 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
         </select>
     </div>
 
+    <?php
+    // ✍️ WHY IT IS CANCELLED OR POSTPONED (#998). Members read this under the
+    //    "This event has been cancelled / postponed" banner on the event's own
+    //    page. Until #998 nothing could set it. The rule — kept only while the
+    //    status is Cancelled or Postponed, emptied otherwise, at most
+    //    `EventCancelReason::MAX_LENGTH` characters — lives in
+    //    `Portal\Core\EventCancelReason`; this box only collects the words.
+    //    It is always drawn (no script hides it), so it works with scripts
+    //    off and the hint says when it is used. `maxlength` is a courtesy to
+    //    whoever types; the handler refuses a longer one with the reason.
+    ?>
+    <div class="col-12">
+        <label class="form-label" for="eventCancelReason">Reason for cancelling or postponing</label>
+        <textarea class="form-control" id="eventCancelReason" name="cancelReason" rows="2"
+                  maxlength="<?php echo (int) \Portal\Core\EventCancelReason::MAX_LENGTH; ?>"
+                  aria-describedby="eventCancelReasonHelp"><?php echo htmlspecialchars((string) ($ev['cancelReason'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></textarea>
+        <div id="eventCancelReasonHelp" class="form-text">
+            Optional. Shown to members on the event's page when the status is Cancelled or Postponed. It is removed when the status is anything else.
+        </div>
+    </div>
+
     <div class="col-12">
         <label class="form-label">Description</label>
         <textarea class="form-control" name="description" rows="4"><?php echo htmlspecialchars($ev['description'] ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>

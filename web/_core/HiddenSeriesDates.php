@@ -53,8 +53,9 @@
  *     really has at the moment of writing.
  *
  *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
- *     nothing under web/ writes `cancelReason` today (#998), so the words say
- *     "with its reason if it was given one".
+ *     a reason is optional (`EventCancelReason`, #998, is the one writer, and
+ *     it never touches a hidden date), so the words say "with its reason if it
+ *     was given one".
  *   • The series' repeat rule (`tblRecurrenceRules`) is NOT touched. The
  *     calendar feed already re-checks that a rule matches the series' PUBLISHED
  *     dates before it collapses them into one entry (`calendar/export.php`), so
@@ -152,6 +153,16 @@
  * dates on one day: the plan would add a date onto a day the restore had just
  * filled. Both writers take the series row first, so whichever is second sees
  * what the first committed, and neither can deadlock the other on it.
+ *
+ * EDITING A HIDDEN DATE IS REFUSED (#1000)
+ * -----------------------------------------------------------------------------
+ * A hidden date's STATUS decides what it comes back as (D-145 to D-147), so
+ * changing it while it is hidden changes what "Bring back" will do — and the
+ * Manage Events edit page used to load a date with no `isDeleted` test, so an
+ * administrator who typed its edit address could do exactly that. The edit
+ * page and its save handler now refuse a hidden date, and `editRefusalWords()`
+ * is the one sentence both show: bring it back first, from this class's card.
+ * The series bulk update and the events API already refused one.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -476,6 +487,40 @@ final class HiddenSeriesDates
         );
 
         return $answer;
+    }
+
+    /**
+     * 🚫 The plain sentence for an attempt to EDIT a hidden date on the Manage
+     * Events page (#1000) — shown on the page when its edit address is opened,
+     * and as the message when its form is posted anyway. The ONLY place these
+     * words are written.
+     *
+     * Said truthfully to this organisation's own administrator, because a
+     * hidden date of THEIR organisation is not a secret from them (another
+     * organisation's number is answered as an ordinary "not found" by the
+     * pages, never with these words).
+     *
+     * A date with no series has no "Hidden dates" card — that card is on a
+     * series' bulk-edit page and lists that series' dates (D-143) — and
+     * nothing else in the portal un-hides an event: the only statement under
+     * web/ that sets `isDeleted = 0` on `tblEvents` is `restore()` here
+     * (established with `grep -rnE "SET[^;]*isDeleted\`? *= *0" web/_apps web/_core`,
+     * which also finds only other tables). So that case says so plainly
+     * rather than sending somebody to look for a card that is not there.
+     *
+     * @param bool $posted true when a SAVE was refused, which adds "Nothing was
+     *                     saved." — the page drawn on opening the address has
+     *                     saved nothing to speak of.
+     */
+    public static function editRefusalWords(?int $seriesId, bool $posted): string
+    {
+        $words = $seriesId !== null && $seriesId > 0
+            ? 'This date is hidden, so it cannot be edited. Bring it back first, from the "Hidden dates" card at the foot '
+                . 'of its series\' bulk-edit page, and then edit it.'
+            : 'This event is hidden, so it cannot be edited. It is not part of a series, so it has no "Hidden dates" card, '
+                . 'and no page in the portal can bring it back.';
+
+        return $posted === true ? $words . ' Nothing was saved.' : $words;
     }
 
     /**

@@ -31,6 +31,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventCancelReason;
 use Portal\Core\HiddenSeriesDates;
 use Portal\Core\I18n;
 use Portal\Core\Logger;
@@ -175,6 +176,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $setClauses[]  = 'status = ?';
         $paramTypes   .= 's';
         $paramValues[] = $bulkStatus;
+    } else {
+        // An unrecognised word changes no status, as before; recorded as
+        // "no status" so the reason rule below reads the same thing.
+        $bulkStatus = '';
+    }
+
+    // ✍️ WHY THEY ARE CANCELLED OR POSTPONED (#998). The rule and the one
+    //    writer are `Portal\Core\EventCancelReason`; this decides only how a
+    //    BULK box is read, which differs from the single-event form because
+    //    this box starts EMPTY rather than holding each date's own reason:
+    //      • a reason typed, with Status set to Cancelled or Postponed — every
+    //        chosen date takes that reason;
+    //      • the box left empty — every chosen date KEEPS its own reason while
+    //        its status still carries one (an empty box here means "no
+    //        change", as every other box on this card does);
+    //      • whatever the box, a date set to Draft or Published LOSES its
+    //        reason, and the message says how many did;
+    //      • a reason typed with any other Status choice — "No change", Draft
+    //        or Published — is REFUSED with the reason and nothing is
+    //        changed, because the words would otherwise be dropped silently
+    //        (no status change says which dates should carry them).
+    //    Read as it ARRIVED: an array is refused, never passed to `trim()`.
+    $bulkReasonRaw     = $_POST['bulkCancelReason'] ?? null;
+    $bulkReasonRefusal = EventCancelReason::whyRefused($bulkReasonRaw);
+    if ($bulkReasonRefusal !== null) {
+        $_SESSION['flash_msg']  = str_replace('Nothing was saved.', 'Nothing was changed.', $bulkReasonRefusal);
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
+        exit();
+    }
+    $bulkReason = is_string($bulkReasonRaw) === true ? EventCancelReason::normalise($bulkReasonRaw) : null;
+    if ($bulkReason !== null && EventCancelReason::carriesReason($bulkStatus) === false) {
+        $_SESSION['flash_msg']  = 'A reason is kept only for Cancelled or Postponed dates. Set Status to Cancelled or Postponed '
+            . 'to give the chosen dates that reason, or empty the reason box. Nothing was changed.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
+        exit();
     }
 
     $bulkCategoryID = trim($_POST['bulkCategoryID'] ?? '');
@@ -248,19 +286,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ♻️ `isDeleted = 0` FOR THE SAME REASON (#691). The checkbox list shows live dates only, but the
     //    write did not say so, so a forged number could change a HIDDEN date's status — publishing a
     //    date that is not even in the diary, which would then come back "published" by a route that
-    //    never went through `HiddenSeriesDates`. This page changes a hidden date only by bringing it back;
-    //    the single-event edit page (`calendar/manage/save.php`) does not yet refuse one (#1000).
+    //    never went through `HiddenSeriesDates`. This page changes a hidden date only by bringing it back,
+    //    and the single-event edit page (`calendar/manage/index.php` and `save.php`) refuses one too (#1000).
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses)
          . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL';
 
-    $stmt = $mysqli->prepare($sql);
-    if ($stmt !== false) {
+    // 🔒 The status and its reason land TOGETHER (#998): one transaction, so
+    //    nobody can read a cancelled date whose reason has not been written
+    //    yet, and a failure leaves neither. The status UPDATE locks the rows
+    //    it changes, so a second administrator's bulk update waits for this
+    //    one rather than interleaving between the two statements.
+    $reasonCleared = 0;
+    $mysqli->begin_transaction();
+    try {
+        $stmt = $mysqli->prepare($sql);
         $stmt->bind_param($paramTypes, ...$paramValues);
         $stmt->execute();
         $affected = $stmt->affected_rows;
         $stmt->close();
-    } else {
-        $affected = 0;
+
+        // Only when a status was chosen: with "No change" no reason can
+        // change either (a typed reason was refused above).
+        if ($bulkStatus !== '') {
+            $reasonCleared = EventCancelReason::write(
+                $mysqli,
+                $siteId,
+                // The same numbers the status UPDATE was given, and the same
+                // series: the writer repeats "this organisation, live and the
+                // portal's own" on its own statement, and `$seriesID` keeps a
+                // number posted by hand for ANOTHER series' date from having
+                // its reason changed when its status was not.
+                array_values($validIds),
+                $bulkReason !== null,
+                $bulkReason,
+                $seriesID
+            )['cleared'];
+        }
+        $mysqli->commit();
+    } catch (\Throwable $e) {
+        $mysqli->rollback();
+        throw $e;
     }
 
     Logger::activity(
@@ -269,7 +334,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $userId
     );
 
-    $_SESSION['flash_msg']  = $affected . ' event(s) updated successfully.';
+    $_SESSION['flash_msg']  = $affected . ' event(s) updated successfully.'
+        . ($bulkReason !== null ? ' Those dates now carry the reason you gave.' : '')
+        . ($reasonCleared > 0
+            ? ' ' . ($reasonCleared === 1
+                ? '1 date lost the reason it had for being cancelled or postponed'
+                : $reasonCleared . ' dates lost the reasons they had for being cancelled or postponed')
+                . ', because a reason is kept only while a date is cancelled or postponed.'
+            : '');
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
     exit();
@@ -445,6 +517,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <option value="1">Yes</option>
                         <option value="0">No</option>
                     </select>
+                </div>
+                <?php
+                // ✍️ #998. Empty means "no change", like every box on this
+                //    card; how it is read is explained beside the handler
+                //    above, and the rule itself is `EventCancelReason`'s.
+                ?>
+                <div class="col-12">
+                    <label class="form-label" for="bulkCancelReason">Reason for cancelling or postponing</label>
+                    <textarea name="bulkCancelReason" id="bulkCancelReason" class="form-control form-control-sm" rows="2"
+                              maxlength="<?php echo (int) EventCancelReason::MAX_LENGTH; ?>"
+                              aria-describedby="bulkCancelReasonHelp"></textarea>
+                    <div id="bulkCancelReasonHelp" class="form-text">
+                        Use with Status set to Cancelled or Postponed: every chosen date then shows members this reason. Leave it empty to keep each date's own reason. Dates set to Draft or Published lose their reason.
+                    </div>
                 </div>
             </div>
         </div>

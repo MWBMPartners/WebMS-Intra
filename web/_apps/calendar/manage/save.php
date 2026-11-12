@@ -21,9 +21,11 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\EventCancelReason;
 use Portal\Core\EventRecurrence;
 use Portal\Core\Events;
 use Portal\Core\Geocoder;
+use Portal\Core\HiddenSeriesDates;
 use Portal\Core\GeoLocation;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
@@ -119,6 +121,27 @@ if (in_array($status, ['draft', 'published', 'cancelled', 'postponed'], true) ==
 }
 $isPublic      = isset($_POST['isPublic']) === true ? 1 : 0;
 $isFeatured    = isset($_POST['isFeatured']) === true ? 1 : 0;
+
+// ✍️ WHY IT IS CANCELLED OR POSTPONED (#998). `Portal\Core\EventCancelReason`
+//    is the one rule and the one writer; this only collects what was posted.
+//    Refused HERE, before any upload is stored, so a refusal leaves nothing
+//    behind. "Did it ARRIVE" is kept apart from "what does it hold" (#677):
+//    the Manage Events form always sends the box, so an empty box is a real
+//    instruction to remove the reason, while a post that does not carry the
+//    field at all leaves a kept reason alone.
+$cancelReasonArrived = array_key_exists('cancelReason', $_POST);
+$cancelReasonRefusal = EventCancelReason::whyRefused($cancelReasonArrived === true ? $_POST['cancelReason'] : null);
+if ($cancelReasonRefusal !== null) {
+    $_SESSION['flash_msg']  = $cancelReasonRefusal;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
+$cancelReason = $cancelReasonArrived === true ? EventCancelReason::normalise((string) $_POST['cancelReason']) : null;
+// A reason typed (or left in the box) while choosing a status that carries
+// none is not stored — and the message says so, because quietly dropping
+// words somebody typed is how they come to believe members can read them.
+$cancelReasonNotKept = $cancelReason !== null && EventCancelReason::carriesReason($status) === false;
 
 // 📍 Location fields
 $locationName    = trim($_POST['locationName'] ?? '');
@@ -271,11 +294,14 @@ $storedZone = null;
 //    against the row being edited. A new event starts from OFF, no dates.
 $storedWebsite = \Portal\Core\PublicWebsite::NEW_EVENT_VALUES;
 $storedWebsiteFound = false;
+// The row being edited, as stored (null for a new event, or when the number
+// is not one of this organisation's own events). See #1000 below.
+$zoneRow = null;
 if ($action === 'update') {
     // The portal's own events only (`externalFeedID IS NULL`): an event copied in
     // from an outside calendar cannot be edited here at all (the UPDATE below
     // refuses one too), so its zone is none of this form's business.
-    $zoneStmt = $mysqli->prepare('SELECT `timezone`, `showOnWebsite`, `websiteFrom`, `websiteUntil` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? AND `externalFeedID` IS NULL LIMIT 1');
+    $zoneStmt = $mysqli->prepare('SELECT `timezone`, `showOnWebsite`, `websiteFrom`, `websiteUntil`, `isDeleted`, `seriesID` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? AND `externalFeedID` IS NULL LIMIT 1');
     if ($zoneStmt !== false) {
         $zoneEventId = (int) ($_POST['eventID'] ?? 0);
         $zoneSiteId  = Site::id();
@@ -292,6 +318,39 @@ if ($action === 'update') {
                 'websiteUntil'  => $zoneRow['websiteUntil'] === null ? null : (string) $zoneRow['websiteUntil'],
             ];
         }
+    }
+
+    // 🚫 NOT THIS ORGANISATION'S EVENT, OR A HIDDEN ONE (#1000) — refused
+    //    HERE, before any upload is stored, so a refusal leaves nothing behind.
+    //    This is the cheap first ask; the UPDATE below asks again under a row
+    //    lock, because the date could be hidden between the two.
+    //
+    //    • Not found — a number that is not one of this organisation's own
+    //      events (another organisation's, an imported one, or none). The
+    //      update used to change 0 rows and then say "updated successfully",
+    //      which was untrue; it now says nothing was saved. One answer for all
+    //      of them, so it never tells anybody another organisation has an
+    //      event with that number (#514's rule).
+    //    • Hidden — this organisation's own date, so the words are truthful:
+    //      bring it back first (`HiddenSeriesDates::editRefusalWords()`). A
+    //      hidden date's status decides what it comes back as (D-145 to
+    //      D-147), which is why it must not be changed while hidden. The
+    //      answer lands on the series' bulk-edit page, where the "Hidden
+    //      dates" card is, when it has a series.
+    if ($zoneRow === null) {
+        $_SESSION['flash_msg']  = 'That event could not be found here, so nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('calendar/manage'));
+        exit();
+    }
+    if ((int) $zoneRow['isDeleted'] === 1) {
+        $hiddenSeries = $zoneRow['seriesID'] === null ? null : (int) $zoneRow['seriesID'];
+        $_SESSION['flash_msg']  = HiddenSeriesDates::editRefusalWords($hiddenSeries, true);
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . ($hiddenSeries !== null
+            ? Site::url('calendar/manage/series-edit') . '?seriesID=' . $hiddenSeries
+            : Site::url('calendar/manage')));
+        exit();
     }
 }
 $keepsStoredZone = $storedZone !== null && Site::phpCanOpenZone($storedZone) === true
@@ -440,7 +499,12 @@ $processUpload = function (string $fieldName) use ($uploadsDir, $slug): ?string 
         return null;
     }
     $detectedMime = (string) finfo_file($finfo, (string) $file['tmp_name']);
-    finfo_close($finfo);
+    // ⚠️ No `finfo_close()`. It has done nothing since PHP 8.1 (the finfo
+    //    object is freed when it goes out of scope) and PHP 8.5 deprecates it,
+    //    so every picture saved here wrote a deprecation notice into the
+    //    portal's error log. Found by #998's upload check (section U of
+    //    tools/event-repeat-pages-selftest.php, check J02); the same call in
+    //    seven other files is #1003.
 
     $expectedMime = [
         'jpg'  => ['image/jpeg'],
@@ -575,6 +639,10 @@ $appendVenueCoverageFlash = function (string $eventStart, ?string $eventEnd, str
     }
 };
 
+// The one sentence for a reason that is not stored (#998), shared by create and
+// update so the two cannot drift.
+$reasonNotKeptWords = 'The reason for cancelling or postponing was not kept, because a reason is kept only while an event is cancelled or postponed.';
+
 // -----------------------------------------------------------------------------
 // ➕ Create event
 // -----------------------------------------------------------------------------
@@ -608,6 +676,15 @@ if ($action === 'create') {
         $hostOrgName, $partnerOrgs, $heroImage, $posterImage, $profileImage,
         $websiteValues['showOnWebsite'], $websiteValues['websiteFrom'], $websiteValues['websiteUntil'],
     ];
+
+    // ✍️ #998: the reason, decided by `EventCancelReason::toStore()` from the
+    //    status (NULL unless it is cancelled or postponed). In the INSERT
+    //    itself, not written afterwards, because the dates a repeat makes in
+    //    this same request are COPIED from this row's columns: they take its
+    //    status, so they take the reason that goes with it.
+    $insertColumns[] = 'cancelReason';
+    $insertTypes    .= 's';
+    $insertValues[]  = EventCancelReason::toStore($status, $cancelReason);
 
     if ($venueLinkActive === true) {
         $insertColumns[] = 'venueID';
@@ -1416,7 +1493,8 @@ if ($action === 'create') {
         'the Manage Events form, a new event' . ($repeatMade > 0 ? ' and the ' . $repeatMade . ' other dates of its series' : '')
     );
 
-    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . $repeatNote . ($geoWarning !== null ? ' ' . $geoWarning : '');
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . $repeatNote . ($geoWarning !== null ? ' ' . $geoWarning : '')
+        . ($cancelReasonNotKept === true ? ' ' . $reasonNotKeptWords : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: ' . Site::url('calendar/manage'));
@@ -1508,13 +1586,69 @@ if ($action === 'update') {
     // eventID is never trusted on its own, so the condition is repeated here: a forged post against an
     // imported event's id updates 0 rows rather than silently overwriting a row the next refresh from
     // the source calendar would just overwrite again anyway.
-    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL';
+    //
+    // ♻️ `isDeleted = 0` on the write itself too (#1000): a hidden date is
+    //    changed only by bringing it back (`HiddenSeriesDates`).
+    $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses) . ' WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL';
 
-    $stmt = $mysqli->prepare($sql);
-    if ($stmt !== false) {
-        $stmt->bind_param($paramTypes, ...$paramValues);
-        $stmt->execute();
-        $stmt->close();
+    // 🔒 CHECK, THEN WRITE, UNDER ONE LOCK (#1000, #998). The refusal near the
+    //    top of this file read the row without a lock, so another
+    //    administrator could hide it (the Delete button, the pattern page, the
+    //    API) between that read and this write. The transaction opens FIRST
+    //    and the row is then read `FOR UPDATE` (#697: a lock outside a
+    //    transaction is decoration), so "it is live" stays true until the
+    //    commit, and the status and its reason land together.
+    $reasonCleared    = 0;
+    $refusedUnderLock = null;
+    $mysqli->begin_transaction();
+    try {
+        $lockStmt = $mysqli->prepare(
+            'SELECT `isDeleted`, `seriesID` FROM `tblEvents` '
+            . 'WHERE `eventID` = ? AND `siteID` = ? AND `externalFeedID` IS NULL FOR UPDATE'
+        );
+        $lockStmt->bind_param('ii', $eventID, $siteId);
+        $lockStmt->execute();
+        $lockedRow = $lockStmt->get_result()->fetch_assoc();
+        $lockStmt->close();
+
+        if ($lockedRow === null) {
+            $refusedUnderLock = ['words' => 'That event could not be found here, so nothing was saved.', 'type' => 'danger', 'to' => Site::url('calendar/manage')];
+        } elseif ((int) $lockedRow['isDeleted'] === 1) {
+            $lockedSeries     = $lockedRow['seriesID'] === null ? null : (int) $lockedRow['seriesID'];
+            $refusedUnderLock = [
+                'words' => HiddenSeriesDates::editRefusalWords($lockedSeries, true),
+                'type'  => 'warning',
+                'to'    => $lockedSeries !== null
+                    ? Site::url('calendar/manage/series-edit') . '?seriesID=' . $lockedSeries
+                    : Site::url('calendar/manage'),
+            ];
+        }
+
+        if ($refusedUnderLock === null) {
+            $stmt = $mysqli->prepare($sql);
+            $stmt->bind_param($paramTypes, ...$paramValues);
+            $stmt->execute();
+            $stmt->close();
+
+            // ✍️ The reason, by its one writer, from the status the row now
+            //    holds. The form always sends the box, so `$cancelReasonArrived`
+            //    is true from it; a hand-made post without the field keeps a
+            //    kept reason.
+            $reasonCleared = EventCancelReason::write($mysqli, $siteId, [$eventID], $cancelReasonArrived, $cancelReason)['cleared'];
+            $mysqli->commit();
+        } else {
+            $mysqli->rollback();
+        }
+    } catch (\Throwable $e) {
+        $mysqli->rollback();
+        throw $e;
+    }
+
+    if ($refusedUnderLock !== null) {
+        $_SESSION['flash_msg']  = $refusedUnderLock['words'];
+        $_SESSION['flash_type'] = $refusedUnderLock['type'];
+        header('Location: ' . $refusedUnderLock['to']);
+        exit();
     }
 
     Logger::activity('EventUpdated', 'Updated event #' . $eventID . ': ' . $eventName, $userId);
@@ -1525,7 +1659,8 @@ if ($action === 'update') {
         \Portal\Core\PublicWebsite::recordChange($eventID, $eventName, $websiteJudged['changes'], $userId === null ? null : (int) $userId, 'the Manage Events form');
     }
 
-    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
+    $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '')
+        . ($cancelReasonNotKept === true || $reasonCleared > 0 ? ' ' . $reasonNotKeptWords : '');
     $_SESSION['flash_type'] = 'success';
     $appendVenueCoverageFlash($startDateTime, $endDt, $timezone);
     header('Location: ' . Site::url('calendar/manage'));

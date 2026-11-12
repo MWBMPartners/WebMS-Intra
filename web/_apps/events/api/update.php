@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\EventCancelReason;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\PublicWebsite;
@@ -332,6 +333,19 @@ if ($nothingToWrite === false) {
     if ($ok === false) {
         Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_FAIL', $db->error, '');
         ApiResponse::error('Failed to update event', 500);
+    }
+
+    // ✍️ #998: a status that no longer carries a reason loses the reason.
+    //    This endpoint takes no reason of its own (the published description
+    //    has no such field, and adding one is #1002), so it only ever EMPTIES
+    //    one: through the one writer, `EventCancelReason::write()`, with
+    //    "no reason sent", which keeps a reason while the status still
+    //    carries one and removes it otherwise. Without this, a date the API
+    //    set back to published kept its old reason, which would reappear —
+    //    out of date — the next time anybody cancelled it. Asked only when a
+    //    status was sent, so an update of the name alone touches nothing else.
+    if (array_key_exists('status', $body) === true) {
+        EventCancelReason::write($db, $siteId, [$eventId], false, null);
     }
 
     Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);

@@ -23,6 +23,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Events;
+use Portal\Core\HiddenSeriesDates;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
@@ -44,8 +45,10 @@ $siteId = Site::id();
 // -----------------------------------------------------------------------------
 // 🔍 Check if we're editing a specific event
 // -----------------------------------------------------------------------------
-$editId    = (int) ($_GET['edit'] ?? 0);
-$editEvent = null;
+$editId     = (int) ($_GET['edit'] ?? 0);
+$editEvent  = null;
+// Set below when the date asked for is one of this organisation's HIDDEN dates (#1000).
+$hiddenEdit = null;
 $editPeople = [];
 
 if ($editId > 0) {
@@ -57,6 +60,27 @@ if ($editId > 0) {
         $stmt->execute();
         $editEvent = $stmt->get_result()->fetch_assoc();
         $stmt->close();
+    }
+
+    // 🚫 A HIDDEN DATE IS NOT OPENED FOR EDITING (#1000).
+    //    This load has no `isDeleted` test on purpose — it is what lets the
+    //    page say WHY instead of a bare "not found" — so the test is here. A
+    //    hidden date's status decides what it comes back as (D-145 to D-147),
+    //    and the series bulk update and the events API already refuse to
+    //    change one; this form, and `save.php` behind it, used not to.
+    //
+    //    The words are truthful rather than "not found" because the row is
+    //    THIS organisation's (the load is scoped to `siteID`), and a hidden date
+    //    of an administrator's own organisation is no secret from them — its
+    //    series' bulk-edit page lists it. Another organisation's number never
+    //    gets this far: the load above finds nothing, exactly as before.
+    if ($editEvent !== null && (int) ($editEvent['isDeleted'] ?? 0) === 1) {
+        $hiddenSeries = $editEvent['seriesID'] === null ? null : (int) $editEvent['seriesID'];
+        $hiddenEdit   = [
+            'words'    => HiddenSeriesDates::editRefusalWords($hiddenSeries, false),
+            'seriesID' => $hiddenSeries,
+        ];
+        $editEvent = null;
     }
 
     if ($editEvent !== null) {
@@ -252,6 +276,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
         <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($hiddenEdit !== null): ?>
+    <?php
+    // 🚫 #1000: the edit address of a hidden date. Not dismissible and not the
+    //    flash box, so it can never be mistaken for the result of a save; the
+    //    list of live events is drawn below it as usual.
+    ?>
+    <div class="alert alert-warning" role="status" data-hidden-date-refusal>
+        <i class="fa-solid fa-eye-slash me-1"></i>
+        <?php echo htmlspecialchars($hiddenEdit['words'], ENT_QUOTES, 'UTF-8'); ?>
+        <?php if ($hiddenEdit['seriesID'] !== null): ?>
+            <a class="alert-link" href="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit') . '?seriesID=' . (int) $hiddenEdit['seriesID'], ENT_QUOTES, 'UTF-8'); ?>">Open its series' bulk-edit page</a>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 

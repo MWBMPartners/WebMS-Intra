@@ -46,6 +46,11 @@
  *     connection while the real restore waits on it over HTTP. That needs no
  *     second worker, because the two events that must be ordered are this
  *     connection's commit and the page's read, not two requests.
+ *   • Section U (#998, #1000) drives the events API with an administrator's
+ *     signed-in session only, never with an API key, and only the half of the
+ *     reason rule the API has: it takes no reason of its own (#1002), so it
+ *     can only EMPTY one. Its race (U39-U41) is the section T kind: this
+ *     connection holds the row while the real save waits on it.
  *   • An imported event being copied. `FeedImporter` is the only thing that
  *     creates one and the form cannot reach that path; the `externalFeedID IS
  *     NULL` guard on both new statements is what states the rule, and
@@ -4119,9 +4124,10 @@ ok('T36j ...and nothing was added at all (no new row)', count(repatRows('EVREP R
 // -----------------------------------------------------------------------------
 // T36k — A DATE CANCELLED BEFORE IT WAS HIDDEN COMES BACK STILL CANCELLED (D-146).
 // -----------------------------------------------------------------------------
-// Cancelled through the real bulk update. The REASON is written with SQL,
-// because nothing under web/ writes `cancelReason` today (searched:
-// `grep -rn cancelReason web/_apps web/_core` finds only readers).
+// Cancelled through the real bulk update. The REASON is written with SQL. That
+// was the only way when this was written (nothing under web/ wrote
+// `cancelReason` until #998); it is kept, because what this checks is the
+// restore, and section U drives the reason's own writer.
 createEvent($jar['admin'], 'EVREP Restore cancelled', '2030-07-07T10:00', '2030-07-07T11:00', [
     'repeatFrequency' => 'weekly',
     'repeatCount'     => '2',
@@ -4165,8 +4171,9 @@ ok('T36o ...and the activity log says so, compared exactly',
 //
 // One helper builds each world the same way: a weekly series of `$count`
 // dates; the dates after the first are given `$status` through the REAL bulk
-// update and a reason with SQL (nothing under web/ writes `cancelReason`,
-// #998); a real pattern change cuts the series to ONE date, hiding the rest.
+// update and a reason with SQL (written before #998 gave the column a
+// writer; section U drives that); a real pattern change cuts the series to
+// ONE date, hiding the rest.
 /** @return array{series:int, rows:list<array<string,mixed>>} */
 $keptWorld = static function (string $name, string $firstStart, string $firstEnd, int $count, string $status, string $reason) use ($jar, $restApply): array {
     createEvent($jar['admin'], $name, $firstStart, $firstEnd, ['repeatFrequency' => 'weekly', 'repeatCount' => (string) $count]);
@@ -4354,6 +4361,433 @@ try {
 }
 ok('T47 with the organisation switched off, its hidden date is NOT brought back (read back)',
     (int) (restRow($orgId)['isDeleted'] ?? -1) === 1);
+
+// =============================================================================
+// U. Why a date is cancelled or postponed (#998), and a hidden date is not
+//    edited (#1000)
+// =============================================================================
+// #998: until it, nothing under web/ wrote `tblEvents.cancelReason`, so the
+// reason members read under the "cancelled" / "postponed" banner could only be
+// typed into the database by hand. `Portal\Core\EventCancelReason` is now the
+// one rule and the one writer. #1000: the single-event edit page and its save
+// handler did not refuse a HIDDEN date, whose status decides what it comes
+// back as (D-145 to D-147).
+//
+// Every check drives the REAL pages over HTTP and reads the row back out of
+// the database (D-065). The event page is read as a MEMBER, because members
+// are who the reason is for.
+head('U. Cancellation reasons (#998) and hidden dates on the edit page (#1000)');
+
+/** One event's status, reason and name, read fresh. */
+function reasonRow(int $eventId): ?array
+{
+    return one(
+        'SELECT eventID, eventName, eventSlug, status, cancelReason, isDeleted, seriesID, startDateTime, updatedByID '
+        . 'FROM tblEvents WHERE eventID = ?',
+        'i',
+        [$eventId]
+    );
+}
+
+/** The message the page a post redirected to shows, read from that page. */
+function messageAfter(string $jar, array $sent): string
+{
+    $to = $sent['location'] === '' ? '/calendar/manage' : (string) preg_replace('#^.*?' . preg_quote(ADDR, '#') . '#', '', $sent['location']);
+
+    return flashOn(req($jar, 'GET', $to)['body']);
+}
+
+/**
+ * The full set of fields the Manage Events form posts for an update, so a
+ * check changes only what it names. `cancelReason` is included — the form
+ * always sends the box — unless `$withoutReason` says otherwise.
+ */
+function reasonEdit(string $jar, int $eventId, array $changes, bool $withoutReason = false): array
+{
+    $row  = (array) one(
+        'SELECT eventID, eventName, startDateTime, endDateTime, timezone, status, locationName, seriesID, isPublic, cancelReason '
+        . 'FROM tblEvents WHERE eventID = ?',
+        'i',
+        [$eventId]
+    );
+    $post = editPostFor($row, managePage($jar)['token']);
+    if ($withoutReason === true) {
+        unset($post['cancelReason']);
+    }
+
+    return req($jar, 'POST', '/calendar/manage/save', array_merge($post, $changes));
+}
+
+/** @return array<string,string> */
+function editPostFor(array $row, string $token): array
+{
+    return [
+        'csrf_token'    => $token,
+        'action'        => 'update',
+        'eventID'       => (string) ($row['eventID'] ?? '0'),
+        'eventName'     => (string) ($row['eventName'] ?? 'EVREP Reason'),
+        'description'   => 'Made by tools/event-repeat-pages-selftest.php.',
+        'startDateTime' => str_replace(' ', 'T', substr((string) ($row['startDateTime'] ?? '2031-05-04 10:00:00'), 0, 16)),
+        'endDateTime'   => str_replace(' ', 'T', substr((string) ($row['endDateTime'] ?? '2031-05-04 11:00:00'), 0, 16)),
+        'timezone'      => (string) ($row['timezone'] ?? ZONE),
+        'status'        => (string) ($row['status'] ?? 'published'),
+        'locationName'  => (string) ($row['locationName'] ?? ''),
+        'seriesID'      => (string) ($row['seriesID'] ?? ''),
+        'isPublic'      => ((int) ($row['isPublic'] ?? 1)) === 1 ? '1' : '',
+        'cancelReason'  => (string) ($row['cancelReason'] ?? ''),
+    ];
+}
+
+/** The event's own page, read by a member. */
+function memberEventPage(string $jar, int $eventId): string
+{
+    $slug = (string) (reasonRow($eventId)['eventSlug'] ?? '');
+
+    return req($jar, 'GET', '/calendar/event?slug=' . rawurlencode($slug))['body'];
+}
+
+$notKept = 'The reason for cancelling or postponing was not kept, because a reason is kept only while an event is cancelled or postponed.';
+
+// -----------------------------------------------------------------------------
+// U01-U09 — the single-event form.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Reason one', '2031-05-04T10:00', '2031-05-04T11:00', ['isPublic' => '1']);
+$reasonId = (int) (eventsNamed('EVREP Reason one')[0]['eventID'] ?? 0);
+ok('U01 (premise) a published one-off event with no reason exists',
+    $reasonId > 0 && (string) (reasonRow($reasonId)['status'] ?? '') === 'published'
+    && reasonRow($reasonId)['cancelReason'] === null, json_encode(reasonRow($reasonId)));
+
+$editForm = req($jar['admin'], 'GET', '/calendar/manage?edit=' . $reasonId)['body'];
+ok('U02 the edit form offers the reason box, named as the handler reads it',
+    preg_match('/<textarea[^>]*name="cancelReason"/', $editForm) === 1
+    && str_contains((string) file_get_contents(dirname(__DIR__) . '/web/_apps/calendar/manage/save.php'), "\$_POST['cancelReason']"));
+
+// A reason holding markup, so the page's escaping is tested by the same row.
+$sent = reasonEdit($jar['admin'], $reasonId, ['status' => 'cancelled', 'cancelReason' => "  EVREP the hall is <b>flooded</b>  "]);
+ok('U03 CANCELLED WITH A REASON: stored, trimmed, exactly as typed (read back)',
+    (string) (reasonRow($reasonId)['status'] ?? '') === 'cancelled'
+    && (string) (reasonRow($reasonId)['cancelReason'] ?? '') === 'EVREP the hall is <b>flooded</b>',
+    'HTTP ' . $sent['status'] . ' ' . json_encode(reasonRow($reasonId)));
+$memberPage = memberEventPage($jar['member'], $reasonId);
+ok('U04 a member sees the cancelled banner and the reason on the event page',
+    str_contains($memberPage, 'This event has been cancelled') && str_contains(text($memberPage), 'EVREP the hall is <b>flooded</b>'),
+    mb_substr(text($memberPage), 0, 400));
+ok('U05 ...and the reason is ESCAPED: the markup shows as text, never as markup',
+    str_contains($memberPage, 'EVREP the hall is &lt;b&gt;flooded&lt;/b&gt;') && str_contains($memberPage, '<b>flooded</b>') === false);
+$editAgain = req($jar['admin'], 'GET', '/calendar/manage?edit=' . $reasonId)['body'];
+ok('U06 the edit form shows the stored reason in its box, escaped',
+    str_contains($editAgain, 'EVREP the hall is &lt;b&gt;flooded&lt;/b&gt;</textarea>'));
+
+// Postponed, with a two-line reason as a browser sends it (Windows line ends).
+reasonEdit($jar['admin'], $reasonId, ['status' => 'postponed', 'cancelReason' => "EVREP the minister is ill\r\nA new date will follow"]);
+ok('U07 POSTPONED WITH A REASON: stored, with the line end made plain (read back)',
+    (string) (reasonRow($reasonId)['status'] ?? '') === 'postponed'
+    && (string) (reasonRow($reasonId)['cancelReason'] ?? '') === "EVREP the minister is ill\nA new date will follow",
+    json_encode(reasonRow($reasonId)));
+$memberPage = memberEventPage($jar['member'], $reasonId);
+ok('U08 a member sees the postponed banner and both lines of the reason',
+    str_contains($memberPage, 'This event has been postponed')
+    && preg_match('/EVREP the minister is ill<br\s*\/?>\s*A new date will follow/', $memberPage) === 1,
+    mb_substr(text($memberPage), 0, 400));
+
+// A post WITHOUT the field (not the form, which always sends it) keeps the
+// reason: "did it arrive" (#677).
+reasonEdit($jar['admin'], $reasonId, ['status' => 'cancelled'], true);
+ok('U09 a post that does not carry the reason field keeps the stored reason (read back)',
+    (string) (reasonRow($reasonId)['status'] ?? '') === 'cancelled'
+    && (string) (reasonRow($reasonId)['cancelReason'] ?? '') === "EVREP the minister is ill\nA new date will follow",
+    json_encode(reasonRow($reasonId)));
+
+// Back to published, with the old reason still in the box (as the form draws it).
+$sent = reasonEdit($jar['admin'], $reasonId, ['status' => 'published']);
+ok('U10 BACK TO PUBLISHED: the reason is removed (read back)',
+    (string) (reasonRow($reasonId)['status'] ?? '') === 'published' && reasonRow($reasonId)['cancelReason'] === null,
+    json_encode(reasonRow($reasonId)));
+ok('U11 ...and the message says so, word for word',
+    str_contains(messageAfter($jar['admin'], $sent), $notKept), messageAfter($jar['admin'], $sent));
+
+// Too long: refused, nothing changed.
+reasonEdit($jar['admin'], $reasonId, ['status' => 'cancelled', 'cancelReason' => 'EVREP short']);
+$sent = reasonEdit($jar['admin'], $reasonId, ['status' => 'postponed', 'eventName' => 'EVREP Reason renamed', 'cancelReason' => str_repeat('x', 1001)]);
+ok('U12 a reason of 1,001 characters is REFUSED and nothing is changed (read back)',
+    (string) (reasonRow($reasonId)['status'] ?? '') === 'cancelled'
+    && (string) (reasonRow($reasonId)['cancelReason'] ?? '') === 'EVREP short'
+    && (string) (reasonRow($reasonId)['eventName'] ?? '') === 'EVREP Reason one',
+    json_encode(reasonRow($reasonId)));
+ok('U13 ...with the reason why', str_contains(messageAfter($jar['admin'], $sent), 'is 1,001 characters long; it can be at most 1,000'));
+reasonEdit($jar['admin'], $reasonId, ['cancelReason' => str_repeat('y', 1000)]);
+ok('U14 ...while exactly 1,000 characters is accepted (the limit is not off by one)',
+    (string) (reasonRow($reasonId)['cancelReason'] ?? '') === str_repeat('y', 1000));
+// A request chooses the TYPE of what it sends: an array must be refused, not crash.
+$sent = reasonEdit($jar['admin'], $reasonId, ['status' => 'postponed', 'cancelReason' => ['x']]);
+ok('U15 a reason posted as an ARRAY is refused politely and nothing is changed',
+    $sent['status'] === 302 && (string) (reasonRow($reasonId)['status'] ?? '') === 'cancelled'
+    && str_contains(messageAfter($jar['admin'], $sent), 'could not be read'), 'HTTP ' . $sent['status']);
+
+// A NEW event: published with a typed reason keeps none and says so; a new
+// CANCELLED repeating series carries the reason on every date it makes.
+$made = createEvent($jar['admin'], 'EVREP Reason new published', '2031-06-01T10:00', '2031-06-01T11:00', ['cancelReason' => 'EVREP nobody reads this']);
+$newPub = eventsNamed('EVREP Reason new published')[0] ?? [];
+ok('U16 a NEW published event with a reason typed keeps no reason, and the message says so',
+    isset($newPub['eventID']) === true && reasonRow((int) $newPub['eventID'])['cancelReason'] === null
+    && str_contains($made['message'], $notKept), $made['message']);
+createEvent($jar['admin'], 'EVREP Reason new series', '2031-07-06T10:00', '2031-07-06T11:00', [
+    'status'          => 'cancelled',
+    'cancelReason'    => 'EVREP the building is closed',
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$newSeriesRows = q(
+    "SELECT status, cancelReason FROM tblEvents WHERE siteID = ? AND eventName = 'EVREP Reason new series'",
+    'i',
+    [ORG]
+);
+ok('U17 a NEW cancelled series: all three dates are cancelled WITH the reason (read back)',
+    count($newSeriesRows) === 3 && count(array_filter($newSeriesRows, static fn (array $r): bool
+        => (string) $r['status'] === 'cancelled' && (string) $r['cancelReason'] === 'EVREP the building is closed')) === 3,
+    json_encode($newSeriesRows));
+
+// -----------------------------------------------------------------------------
+// U18-U25 — the series bulk update.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Reason bulk', '2031-09-07T10:00', '2031-09-07T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+    'isPublic'        => '1',
+]);
+$bulkSeries = repatSeries('EVREP Reason bulk');
+$bulkIds    = array_map(static fn (array $r): int => (int) $r['eventID'], eventsNamed('EVREP Reason bulk'));
+$bulkPost   = static function (array $fields) use ($jar, $bulkSeries): array {
+    $sent = req($jar['admin'], 'POST', '/calendar/manage/series-edit', array_merge([
+        'csrf_token' => managePage($jar['admin'])['token'],
+        'seriesID'   => (string) $bulkSeries,
+    ], $fields));
+
+    return ['sent' => $sent, 'message' => messageAfter($jar['admin'], $sent)];
+};
+ok('U18 (premise) a three-date series to bulk-edit, none with a reason', count($bulkIds) === 3 && $bulkSeries > 0);
+$bulkPage = restPage($jar['admin'], $bulkSeries)['body'];
+ok('U19 the bulk-edit page offers the reason box', preg_match('/<textarea[^>]*name="bulkCancelReason"/', $bulkPage) === 1);
+
+$did = $bulkPost(['eventIDs' => [(string) $bulkIds[1], (string) $bulkIds[2]], 'bulkStatus' => 'cancelled', 'bulkCancelReason' => 'EVREP the heating has failed']);
+ok('U20 BULK CANCELLED WITH A REASON: both chosen dates carry it, the third does not (read back)',
+    (string) reasonRow($bulkIds[1])['cancelReason'] === 'EVREP the heating has failed'
+    && (string) reasonRow($bulkIds[2])['cancelReason'] === 'EVREP the heating has failed'
+    && (string) reasonRow($bulkIds[2])['status'] === 'cancelled'
+    && reasonRow($bulkIds[0])['cancelReason'] === null && (string) reasonRow($bulkIds[0])['status'] === 'published',
+    json_encode([reasonRow($bulkIds[0]), reasonRow($bulkIds[1]), reasonRow($bulkIds[2])]) . ' ' . $did['message']);
+ok('U21 a member sees the bulk reason on one of those dates\' pages',
+    str_contains(text(memberEventPage($jar['member'], $bulkIds[1])), 'EVREP the heating has failed'));
+
+$bulkPost(['eventIDs' => [(string) $bulkIds[1]], 'bulkStatus' => 'postponed']);
+ok('U22 bulk POSTPONED with the box empty: the date keeps its own reason (read back)',
+    (string) reasonRow($bulkIds[1])['status'] === 'postponed'
+    && (string) reasonRow($bulkIds[1])['cancelReason'] === 'EVREP the heating has failed', json_encode(reasonRow($bulkIds[1])));
+
+$did = $bulkPost(['eventIDs' => [(string) $bulkIds[0]], 'bulkCancelReason' => 'EVREP stray words']);
+ok('U23 a reason with Status left at "No change" is REFUSED, nothing changed (read back)',
+    reasonRow($bulkIds[0])['cancelReason'] === null && (string) reasonRow($bulkIds[0])['status'] === 'published'
+    && str_contains($did['message'], 'A reason is kept only for Cancelled or Postponed dates'), $did['message']);
+$did = $bulkPost(['eventIDs' => [(string) $bulkIds[2]], 'bulkStatus' => 'published', 'bulkCancelReason' => 'EVREP stray words']);
+ok('U24 a reason with Status set to Published is REFUSED, and the date stays cancelled with its reason (read back)',
+    (string) reasonRow($bulkIds[2])['status'] === 'cancelled'
+    && (string) reasonRow($bulkIds[2])['cancelReason'] === 'EVREP the heating has failed', $did['message']);
+
+// A number posted by hand for ANOTHER series' date (U17's, cancelled with a
+// reason): its status is not changed (the UPDATE says this series), and its
+// reason must not be either.
+$otherSeriesDate = (int) (q("SELECT eventID FROM tblEvents WHERE siteID = ? AND eventName = 'EVREP Reason new series' ORDER BY eventID LIMIT 1", 'i', [ORG])[0]['eventID'] ?? 0);
+$bulkPost(['eventIDs' => [(string) $bulkIds[2], (string) $otherSeriesDate], 'bulkStatus' => 'cancelled', 'bulkCancelReason' => 'EVREP replaced']);
+ok('U25 a forged number from ANOTHER series keeps its own reason; this series\' date takes the new one (read back)',
+    (string) reasonRow($otherSeriesDate)['cancelReason'] === 'EVREP the building is closed'
+    && (string) reasonRow($bulkIds[2])['cancelReason'] === 'EVREP replaced',
+    json_encode([reasonRow($otherSeriesDate), reasonRow($bulkIds[2])]));
+
+$did = $bulkPost(['eventIDs' => [(string) $bulkIds[1], (string) $bulkIds[2]], 'bulkStatus' => 'published']);
+ok('U26 BULK PUBLISHED: both dates lose their reasons (read back)',
+    reasonRow($bulkIds[1])['cancelReason'] === null && reasonRow($bulkIds[2])['cancelReason'] === null
+    && (string) reasonRow($bulkIds[1])['status'] === 'published', json_encode([reasonRow($bulkIds[1]), reasonRow($bulkIds[2])]));
+ok('U27 ...and the message counts them, word for word',
+    str_contains($did['message'], '2 dates lost the reasons they had for being cancelled or postponed, because a reason is kept only while a date is cancelled or postponed.'),
+    $did['message']);
+
+// -----------------------------------------------------------------------------
+// U28 — the events API: a status that carries no reason empties it.
+// -----------------------------------------------------------------------------
+reasonEdit($jar['admin'], $reasonId, ['status' => 'cancelled', 'cancelReason' => 'EVREP via the form']);
+$apiToken = managePage($jar['admin'])['token'];
+$apiHandle = curl_init('http://127.0.0.1:' . $port . ADDR . '/api/events/update?id=' . $reasonId);
+curl_setopt_array($apiHandle, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+    CURLOPT_COOKIEJAR => $jar['admin'], CURLOPT_COOKIEFILE => $jar['admin'], CURLOPT_TIMEOUT => 60,
+    CURLOPT_HTTPHEADER => ['Expect:', 'Content-Type: application/json', 'X-CSRF-Token: ' . $apiToken],
+    CURLOPT_POSTFIELDS => (string) json_encode(['eventID' => $reasonId, 'eventName' => 'EVREP Reason one']),
+]);
+$apiNameOnly = (string) curl_exec($apiHandle);
+$apiNameCode = (int) curl_getinfo($apiHandle, CURLINFO_HTTP_CODE);
+ok('U28 the API changing only the NAME leaves the reason alone (read back)',
+    $apiNameCode === 200 && (string) reasonRow($reasonId)['cancelReason'] === 'EVREP via the form',
+    'HTTP ' . $apiNameCode . ' ' . mb_substr($apiNameOnly, 0, 300));
+$apiToken = managePage($jar['admin'])['token'];
+curl_setopt($apiHandle, CURLOPT_HTTPHEADER, ['Expect:', 'Content-Type: application/json', 'X-CSRF-Token: ' . $apiToken]);
+curl_setopt($apiHandle, CURLOPT_POSTFIELDS, (string) json_encode(['eventID' => $reasonId, 'status' => 'published']));
+$apiAnswer = (string) curl_exec($apiHandle);
+$apiCode   = (int) curl_getinfo($apiHandle, CURLINFO_HTTP_CODE);
+ok('U29 the API setting status to published EMPTIES the reason (read back)',
+    $apiCode === 200 && (string) reasonRow($reasonId)['status'] === 'published' && reasonRow($reasonId)['cancelReason'] === null,
+    'HTTP ' . $apiCode . ' ' . mb_substr($apiAnswer, 0, 300) . ' ' . json_encode(reasonRow($reasonId)));
+
+// -----------------------------------------------------------------------------
+// U30-U40 — a hidden date cannot be edited (#1000).
+// -----------------------------------------------------------------------------
+// Hidden through the REAL Delete button, which is one of the three ways a date
+// is hidden (D-143).
+$hideWithButton = static function (int $eventId) use ($jar): void {
+    req($jar['admin'], 'POST', '/calendar/manage/delete', ['csrf_token' => managePage($jar['admin'])['token'], 'eventID' => (string) $eventId]);
+};
+$hiddenSeriesDate = $bulkIds[2];
+$bulkPost(['eventIDs' => [(string) $hiddenSeriesDate], 'bulkStatus' => 'cancelled', 'bulkCancelReason' => 'EVREP hidden reason']);
+$hideWithButton($hiddenSeriesDate);
+$hiddenBefore = reasonRow($hiddenSeriesDate);
+ok('U30 (premise) a cancelled date with a reason, hidden by the Delete button',
+    (int) ($hiddenBefore['isDeleted'] ?? 0) === 1 && (string) ($hiddenBefore['status'] ?? '') === 'cancelled'
+    && (string) ($hiddenBefore['cancelReason'] ?? '') === 'EVREP hidden reason', json_encode($hiddenBefore));
+
+$hiddenPage = req($jar['admin'], 'GET', '/calendar/manage?edit=' . $hiddenSeriesDate);
+ok('U31 OPENING ITS EDIT ADDRESS draws NO edit form for it',
+    $hiddenPage['status'] === 200 && str_contains($hiddenPage['body'], 'name="action" value="update"') === false
+    && str_contains($hiddenPage['body'], 'name="eventID" value="' . $hiddenSeriesDate . '"') === false,
+    'HTTP ' . $hiddenPage['status']);
+ok('U32 ...and says why, word for word, with a link to its series\' bulk-edit page',
+    str_contains(text($hiddenPage['body']), 'This date is hidden, so it cannot be edited. Bring it back first, from the "Hidden dates" card at the foot of its series\' bulk-edit page, and then edit it.')
+    && str_contains($hiddenPage['body'], 'calendar/manage/series-edit?seriesID=' . $bulkSeries . '"'),
+    mb_substr(text($hiddenPage['body']), 0, 600));
+
+$hiddenSave = reasonEdit($jar['admin'], $hiddenSeriesDate, ['status' => 'published', 'eventName' => 'EVREP Edited while hidden', 'cancelReason' => '']);
+$hiddenAfter = reasonRow($hiddenSeriesDate);
+ok('U33 POSTING THE FORM ANYWAY CHANGES NOTHING: still hidden, still cancelled, same name and reason (read back)',
+    $hiddenAfter === $hiddenBefore, json_encode($hiddenAfter));
+ok('U34 ...it answers on the series\' bulk-edit page, where the Hidden dates card is, saying nothing was saved',
+    str_contains($hiddenSave['location'], '/calendar/manage/series-edit?seriesID=' . $bulkSeries)
+    && messageAfter($jar['admin'], $hiddenSave) === 'This date is hidden, so it cannot be edited. Bring it back first, from the "Hidden dates" card at the foot of its series\' bulk-edit page, and then edit it. Nothing was saved.',
+    $hiddenSave['location']);
+
+// A hidden ONE-OFF event has no series, so no card: the words say so.
+createEvent($jar['admin'], 'EVREP Reason hidden one-off', '2031-10-05T10:00', '2031-10-05T11:00');
+$oneOff = (int) (eventsNamed('EVREP Reason hidden one-off')[0]['eventID'] ?? 0);
+$hideWithButton($oneOff);
+$oneOffBefore = reasonRow($oneOff);
+$oneOffPage   = req($jar['admin'], 'GET', '/calendar/manage?edit=' . $oneOff)['body'];
+ok('U35 a hidden ONE-OFF event: no edit form, and words that do not send anybody to a card that is not there',
+    (int) ($oneOffBefore['isDeleted'] ?? 0) === 1 && str_contains($oneOffPage, 'name="action" value="update"') === false
+    && str_contains(text($oneOffPage), 'This event is hidden, so it cannot be edited. It is not part of a series, so it has no "Hidden dates" card')
+    && str_contains($oneOffPage, 'series-edit?seriesID=') === false);
+reasonEdit($jar['admin'], $oneOff, ['eventName' => 'EVREP Edited while hidden']);
+ok('U36 ...and posting its form changes nothing (read back)', reasonRow($oneOff) === $oneOffBefore, json_encode(reasonRow($oneOff)));
+
+// -----------------------------------------------------------------------------
+// U36b-U36d — WHY THE FIRST ASK EXISTS AT ALL. The second ask, under the lock,
+// already refuses a hidden date, so the first one changes no row and no
+// message: deleting it leaves U33-U36 green (measured). What it does change is
+// that it comes BEFORE the picture uploads are stored, so a refused save
+// leaves no file behind. That is only visible by posting a picture.
+// -----------------------------------------------------------------------------
+$uploadsDir = $child . $sep . 'web' . $sep . '_uploads' . $sep . 'calendar';
+$pictureCount = static function () use ($uploadsDir): int {
+    return count(glob($uploadsDir . DIRECTORY_SEPARATOR . '*') ?: []);
+};
+$picture = $child . $sep . 'evrep-picture.png';
+// A real 1 x 1 PNG, so the handler's own type check accepts it.
+file_put_contents($picture, (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='));
+$postWithPicture = static function (string $jarFile, array $fields) use ($port, $picture): int {
+    $handle = curl_init('http://127.0.0.1:' . $port . ADDR . '/calendar/manage/save');
+    $fields['heroImage'] = new CURLFile($picture, 'image/png', 'evrep-picture.png');
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $jarFile, CURLOPT_COOKIEFILE => $jarFile, CURLOPT_TIMEOUT => 60,
+        CURLOPT_HTTPHEADER => ['Expect:'], CURLOPT_POSTFIELDS => $fields,
+    ]);
+    curl_exec($handle);
+
+    return (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+};
+$livePost = editPostFor((array) one(
+    'SELECT eventID, eventName, startDateTime, endDateTime, timezone, status, locationName, seriesID, isPublic, cancelReason FROM tblEvents WHERE eventID = ?',
+    'i',
+    [$reasonId]
+), managePage($jar['admin'])['token']);
+$beforeLive = $pictureCount();
+$postWithPicture($jar['admin'], $livePost);
+ok('U36b (premise) a picture posted with a LIVE event\'s form IS stored, so the check below can see one',
+    $pictureCount() === $beforeLive + 1, $beforeLive . ' then ' . $pictureCount());
+$hiddenPost = editPostFor((array) one(
+    'SELECT eventID, eventName, startDateTime, endDateTime, timezone, status, locationName, seriesID, isPublic, cancelReason FROM tblEvents WHERE eventID = ?',
+    'i',
+    [$oneOff]
+), managePage($jar['admin'])['token']);
+$beforeHidden = $pictureCount();
+$postWithPicture($jar['admin'], $hiddenPost);
+ok('U36c a picture posted with a HIDDEN event\'s form is NOT stored: the refusal comes before the upload',
+    $pictureCount() === $beforeHidden, $beforeHidden . ' then ' . $pictureCount());
+ok('U36d ...and the hidden event is still unchanged (read back)', reasonRow($oneOff) === $oneOffBefore, json_encode(reasonRow($oneOff)));
+
+// ANOTHER ORGANISATION's event: the ordinary "not found" — no hidden-date
+// words, which would confirm it exists — and nothing changes.
+q(
+    "INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime, endDateTime, timezone, status, isDeleted) "
+    . "VALUES (?, 'EVREP Other org event', 'evrep-other-org-event', '2031-11-02 10:00:00', '2031-11-02 11:00:00', ?, 'cancelled', 1)",
+    'is',
+    [OTHER, ZONE]
+);
+$otherEvent  = (int) (one("SELECT eventID FROM tblEvents WHERE siteID = ? AND eventSlug = 'evrep-other-org-event'", 'i', [OTHER])['eventID'] ?? 0);
+$otherBefore = reasonRow($otherEvent);
+$otherPage   = req($jar['admin'], 'GET', '/calendar/manage?edit=' . $otherEvent)['body'];
+$nonePage    = req($jar['admin'], 'GET', '/calendar/manage?edit=99999999')['body'];
+ok('U37 ANOTHER ORGANISATION\'S hidden event: no form and NO hidden-date words — the same as a number that does not exist',
+    str_contains($otherPage, 'name="action" value="update"') === false && str_contains($otherPage, 'data-hidden-date-refusal') === false
+    && str_contains($nonePage, 'data-hidden-date-refusal') === false && str_contains($otherPage, 'EVREP Other org event') === false);
+$otherSave = req($jar['admin'], 'POST', '/calendar/manage/save', array_merge(
+    editPostFor(['eventID' => $otherEvent, 'eventName' => 'EVREP Taken over'], managePage($jar['admin'])['token']),
+    ['status' => 'published']
+));
+ok('U38 ...posting to it changes nothing (read back), and says only that it could not be found',
+    reasonRow($otherEvent) === $otherBefore
+    && messageAfter($jar['admin'], $otherSave) === 'That event could not be found here, so nothing was saved.',
+    json_encode(reasonRow($otherEvent)));
+
+// -----------------------------------------------------------------------------
+// U39 — THE SECOND ASK, UNDER THE LOCK. The first refusal reads without a
+// lock; between it and the write the date can be hidden. This connection
+// holds the row's lock while the real save runs (its first read is a plain
+// read, so it passes), hides the date and commits; the save's locking read
+// then sees it hidden and must refuse. One worker is enough: the two events
+// that must be ordered are this connection's commit and the page's locked
+// read, not two requests (the section T precedent).
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Reason race', '2031-12-07T10:00', '2031-12-07T11:00', ['repeatFrequency' => 'weekly', 'repeatCount' => '2']);
+$raceId     = (int) (eventsNamed('EVREP Reason race')[1]['eventID'] ?? 0);
+$raceSeries = repatSeries('EVREP Reason race');
+$raceRow    = (array) one(
+    'SELECT eventID, eventName, startDateTime, endDateTime, timezone, status, locationName, seriesID, isPublic, cancelReason FROM tblEvents WHERE eventID = ?',
+    'i',
+    [$raceId]
+);
+$racePost   = array_merge(editPostFor($raceRow, managePage($jar['admin'])['token']), ['eventName' => 'EVREP Race renamed', 'status' => 'cancelled', 'cancelReason' => 'EVREP race reason']);
+$db->begin_transaction();
+q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$raceId]);
+$raceAsync = restAsyncStart($jar['admin'], '/calendar/manage/save', $racePost);
+ok('U39 (premise) the save is WAITING on this connection\'s lock, so the order below is real', $raceAsync['running'] > 0);
+q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$raceId]);
+$db->commit();
+restAsyncFinish($raceAsync);
+$raceAfter = reasonRow($raceId);
+ok('U40 HIDDEN WHILE THE SAVE WAITED: nothing was written (read back)',
+    (string) ($raceAfter['eventName'] ?? '') === 'EVREP Reason race' && (string) ($raceAfter['status'] ?? '') === 'published'
+    && $raceAfter['cancelReason'] === null, json_encode($raceAfter));
+$raceMessage = flashOn(restPage($jar['admin'], $raceSeries)['body']);
+ok('U41 ...and the answer is the hidden-date refusal, not "updated successfully"',
+    $raceMessage === 'This date is hidden, so it cannot be edited. Bring it back first, from the "Hidden dates" card at the foot of its series\' bulk-edit page, and then edit it. Nothing was saved.',
+    $raceMessage);
 
 // =============================================================================
 // J. Nothing fell over on the way
