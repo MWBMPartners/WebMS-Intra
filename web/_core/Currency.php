@@ -635,18 +635,32 @@ final class Currency
     public const FILE_REASON_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative.';
     /**
      * Added to EVERY file refusal where no negative is allowed (the asset
-     * import) and mayMeanNegative() says the cell, as given, may be written
-     * as a negative — any minus-like character, a figure in brackets, or a
-     * DR suffix (rounds 18 and 19). The one exception is "The amount cannot
-     * be negative." itself (REFUSED_NEGATIVE), which already says it. Without
-     * it, a cell such as "-R3", "−3", "–3", "(3.00)" or "3.00 DR" was told
-     * only how to write an amount, and a reader who simply dropped the
+     * import), whatever the cell looks like (round 20), except three that
+     * need it not: "No amount was entered.", "The amount cannot be
+     * negative." and FILE_REASON_MINUS_NOT_HERE, which already say so.
+     * Without it, a cell written as a negative in some way the converter
+     * does not read — "-R3", "−3", "➖3", "(3.00)", "3.00 DR", "DR 3.00" — was
+     * told only how to write an amount, and a reader who simply dropped the
      * negative marking would store a POSITIVE cost where the file meant a
-     * negative one. It is a statement about this place, true for every such
-     * cell — it never says that the cell IS negative ("12-15", "R-rated",
-     * "TOP-UP").
+     * negative one. Rounds 18 and 19 tried to give it only to cells that
+     * LOOK negative, and each check found another spelling missed (U+2212,
+     * en dash, brackets, DR; then U+2796, U+FE58, full-width brackets, DR in
+     * front…). It is a statement about this place, true of EVERY asset-import
+     * cell, so it never needs to be judged and never says a cell IS negative.
      */
     public const FILE_REASON_NOT_NEGATIVE_HERE = 'Amounts here cannot be negative.';
+
+    /**
+     * Added to EVERY file refusal where negatives ARE allowed (the bank
+     * import) whose words do not already ask for a minus sign in front of
+     * money paid out (round 20), except "No amount was entered.". Without it,
+     * "$3.00DR" told to convert to GBP and written "2.40" imports a gift
+     * where the statement meant a payment out. FILE_ADVICE_PAID_OUT_MARK is
+     * the words every such refusal must contain; fileAdvice() and
+     * manyMarkersWords() say them in their own sentence.
+     */
+    public const FILE_ADVICE_PAID_OUT      = 'Write money paid out with a minus sign in front, for example -1,234.56.';
+    private const FILE_ADVICE_PAID_OUT_MARK = 'a minus sign in front';
 
     /** The other refusals, each worded for the one shape it is given (#1004). */
     public const REFUSED_POWER_OF_TEN = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
@@ -762,12 +776,14 @@ final class Currency
      *   the converter does not recognise, a plus, a power of ten, no figures —
      *   is the one sentence FILE_REASON_UNREADABLE
      *   followed by fileAdvice(), which says exactly what is read.
-     *   Where no negative is allowed, EVERY file refusal of a cell that
-     *   mayMeanNegative() — a minus-like character anywhere, a figure in
-     *   brackets, a DR suffix — ends with FILE_REASON_NOT_NEGATIVE_HERE,
-     *   "Amounts here cannot be negative." (rounds 18 and 19), except "The
-     *   amount cannot be negative." itself, given to a cell that IS read as
-     *   negative ("-£3", "GBP -3").
+     *   Where no negative is allowed, EVERY file refusal, whatever the cell
+     *   looks like, ends with FILE_REASON_NOT_NEGATIVE_HERE, "Amounts here
+     *   cannot be negative." (round 20) — except "No amount was entered.",
+     *   "The amount cannot be negative." (given to a cell that IS read as
+     *   negative: "-£3", "GBP -3") and FILE_REASON_MINUS_NOT_HERE, which
+     *   already say so. Where negatives ARE allowed, EVERY file refusal but
+     *   "No amount was entered." asks for "a minus sign in front" of money
+     *   paid out (FILE_ADVICE_PAID_OUT, round 20).
      *
      * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
      * sign, a misplaced minus, a second decimal point, more than two decimals,
@@ -787,38 +803,30 @@ final class Currency
     public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false, bool $fromFile = false): int|string
     {
         $answer = self::readAmount($typed, $currency, $max, $allowNegative, $fromFile);
-        // Where no negative is allowed, EVERY file refusal of a cell that may
-        // be written as a negative says so too — whichever branch refused it
-        // (round 19). Words only: a refusal stays a refusal.
-        if ($fromFile === true && $allowNegative === false && is_string($answer) === true
-            && $answer !== self::REFUSED_NEGATIVE && self::mayMeanNegative($typed) === true) {
+        if ($fromFile === false || is_string($answer) === false || $answer === self::REFUSED_EMPTY) {
+            return $answer;
+        }
+        // A FILE refusal says, whatever the cell looks like, how negatives
+        // stand here (round 20). No detector of "looks negative" is used:
+        // rounds 18 and 19 each built one and each check found a spelling it
+        // missed. Words only: a refusal stays a refusal, a reading a reading.
+        if ($allowNegative === false) {
+            // The asset import: true of every cell in it.
+            if ($answer === self::REFUSED_NEGATIVE || str_starts_with($answer, self::FILE_REASON_MINUS_NOT_HERE) === true) {
+                return $answer;
+            }
+
             return $answer . ' ' . self::FILE_REASON_NOT_NEGATIVE_HERE;
         }
+        // The bank import: money paid out is written with a minus in front.
+        if (str_contains($answer, self::FILE_ADVICE_PAID_OUT_MARK) === true) {
+            return $answer;
+        }
 
-        return $answer;
+        return $answer . ' ' . self::FILE_ADVICE_PAID_OUT;
     }
 
-    /**
-     * ➖ May this cell, as given, be written as a NEGATIVE amount? True for
-     * ANY minus-like character anywhere — the hyphen-minus, U+2212 MINUS SIGN,
-     * the dashes U+2010 to U+2015 (a Windows-1252 0x96 in a bank file arrives
-     * as U+2013, the en dash), U+FE63 and U+FF0D — for a figure in brackets
-     * ("(3.00)", accountants' negative), and for a DR suffix ("3.00 DR",
-     * "3.00Dr", "3.00 dr."). It is the ONE test of that (round 19): round 18
-     * asked only for the ASCII hyphen, so "−3", "–3", "(3.00)" and "3.00 DR"
-     * in the asset import got advice that, followed literally, stored a
-     * positive cost. It may say yes for a cell that is not negative at all
-     * ("12-15", "R-rated", "TOP-UP"), which is why the sentence it triggers
-     * says only that amounts HERE cannot be negative.
-     */
-    public static function mayMeanNegative(string $typed): bool
-    {
-        return preg_match('/[\x{2D}\x{2212}\x{2010}-\x{2015}\x{FE63}\x{FF0D}]/u', $typed) === 1
-            || preg_match('/\([^()]*[0-9][^()]*\)/u', $typed) === 1
-            || preg_match('/(?<![A-Za-z])(DR|Dr|dr)\.?\s*$/u', $typed) === 1;
-    }
-
-    /** parseAmount() before its no-negatives note: the reading itself. */
+    /** parseAmount() before the words a FILE refusal ends with: the reading itself. */
     private static function readAmount(string $typed, string $currency, int $max, bool $allowNegative, bool $fromFile): int|string
     {
         $code = strtoupper(trim($currency));
@@ -1010,9 +1018,9 @@ final class Currency
      *
      * It follows the reason in exactly TWO file-mode refusals:
      * FILE_REASON_UNREADABLE (every refusal whose reason cannot be known for
-     * certain) and FILE_REASON_MINUS_NOT_HERE. Where no negative is allowed
-     * and mayMeanNegative() says yes, FILE_REASON_NOT_NEGATIVE_HERE comes
-     * after it. Every other file-mode refusal carries its own complete
+     * certain) and FILE_REASON_MINUS_NOT_HERE. Where no negative is allowed,
+     * parseAmount() puts FILE_REASON_NOT_NEGATIVE_HERE after the first of
+     * them (the second already says it). Every other file-mode refusal carries its own complete
      * instruction (more than two decimals, commas, more than one point, a
      * minus in the wrong place, too large, nothing entered, more than one
      * currency marker, a currency sign or code not ours, no currency chosen).
@@ -1020,9 +1028,7 @@ final class Currency
     public static function fileAdvice(string $code, bool $allowNegative = false): string
     {
         $code      = strtoupper(trim($code));
-        $keepMinus = $allowNegative === true
-            ? ' Write money paid out with a minus sign in front, for example -1,234.56.'
-            : '';
+        $keepMinus = $allowNegative === true ? ' ' . self::FILE_ADVICE_PAID_OUT : '';
 
         return ($code !== ''
             ? 'Write it in figures, with commas only between thousands if you like, for example 1,234.56. '
@@ -1083,9 +1089,9 @@ final class Currency
      * minus sign, if it has one" said nothing to money paid out written
      * without one ("££3 DR"). "GBP -3", "-GBP 3", "GBP-3", "-GBP3" and "-3"
      * all read. Where no negative is allowed, parseAmount() adds "Amounts
-     * here cannot be negative." to this sentence whenever mayMeanNegative()
-     * says the cell may be written as a negative (round 19), so following
-     * it cannot quietly turn a negative into a positive cost.
+     * here cannot be negative." to this sentence, as to every file refusal
+     * there (round 20), so following it cannot quietly turn a negative into
+     * a positive cost.
      *
      * A cell whose FIRST marker is not the organisation's gets
      * otherCurrencyWords() instead, which is true of it however many follow.

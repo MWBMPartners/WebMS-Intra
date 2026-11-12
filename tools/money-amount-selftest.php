@@ -175,41 +175,55 @@ function convertWords(string $code): string
  * front, the first ours. Round 16: where negatives are allowed it keeps the
  * minus, or following it would turn a payment out into a credit.
  */
+/**
+ * Round 20: how EVERY file refusal ends, whatever the cell looks like.
+ *   - No negatives (the asset import): "Amounts here cannot be negative." —
+ *     except "No amount was entered.", "The amount cannot be negative." and
+ *     the misplaced-minus refusal, which already say so.
+ *   - Negatives allowed (the bank import): "Write money paid out with a minus
+ *     sign in front…" unless the words already ask for "a minus sign in
+ *     front" — except "No amount was entered.".
+ * Rounds 18 and 19 gave the note only to cells that LOOKED negative, and each
+ * check found a spelling the detector missed; there is no detector now.
+ */
+const NOT_NEGATIVE_HERE = 'Amounts here cannot be negative.';
+const PAID_OUT          = 'Write money paid out with a minus sign in front, for example -1,234.56.';
+function noted(string $refusal, string $cell, bool $allowNegative): string
+{
+    if ($refusal === 'No amount was entered.' || str_ends_with($refusal, NOT_NEGATIVE_HERE) === true) {
+        return $refusal;
+    }
+    if ($allowNegative === false) {
+        return ($refusal === NEGATIVE || str_starts_with($refusal, 'A minus sign has no place here') === true)
+            ? $refusal
+            : $refusal . ' ' . NOT_NEGATIVE_HERE;
+    }
+
+    return str_contains($refusal, 'a minus sign in front') === true ? $refusal : $refusal . ' ' . PAID_OUT;
+}
+/** The more-than-one-marker sentence as a FILE refusal ends (round 20's words included). */
 function many(string $code, bool $allowNegative = false): string
 {
     $front = $allowNegative === true
         ? 'nothing in front but, at most, the code ' . $code . ', and a minus sign in front of money paid out'
         : 'nothing in front but, at most, the code ' . $code;
 
-    return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
-        . 'write the figure with ' . $front . ', and if it is in another currency, convert it to ' . $code . ' first.';
+    return noted('That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
+        . 'write the figure with ' . $front . ', and if it is in another currency, convert it to ' . $code . ' first.', '', $allowNegative);
 }
-function otherCur(string $code): string
+/** The not-read-as-ours sentence as a FILE refusal ends (round 20's words included). */
+function otherCur(string $code, bool $allowNegative = false): string
 {
-    return 'That amount starts with a currency sign or code that is not read as ' . $code . ' here. ' . convertWords($code);
+    return noted('That amount starts with a currency sign or code that is not read as ' . $code . ' here. ' . convertWords($code), '', $allowNegative);
 }
-/** The ONE file-mode sentence for a refusal whose reason is not certain (#1004 round 9). */
+/** The ONE file-mode sentence for a refusal whose reason is not certain (#1004 round 9), as a FILE refusal ends. */
 function unreadable(string $code, bool $allowNegative = false): string
 {
-    return 'That amount could not be read. ' . advice($code, $allowNegative);
+    return noted('That amount could not be read. ' . advice($code, $allowNegative), '', $allowNegative);
 }
-/**
- * Rounds 18-19: where no negative is allowed, EVERY file refusal of a cell the
- * PORTAL's Currency::mayMeanNegative() says may be written as a negative ends
- * with this, except "The amount cannot be negative." itself. The test asks the
- * portal's helper rather than keeping its own copy of the rule.
- */
-const NOT_NEGATIVE_HERE = 'Amounts here cannot be negative.';
-function noted(string $refusal, string $cell, bool $allowNegative): string
-{
-    return ($allowNegative === false && $refusal !== NEGATIVE && Currency::mayMeanNegative($cell) === true)
-        ? $refusal . ' ' . NOT_NEGATIVE_HERE
-        : $refusal;
-}
-/** The could-not-be-read refusal for cell `$t` in the given mode, with the note where it applies. */
 function unreadableFor(string $t, string $code, bool $allowNegative = false): string
 {
-    return noted(unreadable($code, $allowNegative), $t, $allowNegative);
+    return unreadable($code, $allowNegative);
 }
 const FILE_NOT_FIGURES = 'That amount could not be read. Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
 const PLUS          = 'Leave out the plus sign: type the amount in figures, for example 12.50.';
@@ -350,7 +364,7 @@ check('A3d the too-large sentence is written in the currency given: £21,474,836
 // A4 — the issue's three values, each with its TRUE reason, in both modes.
 $a4 = [];
 foreach ($modes as $fromFile) {
-    $a4[] = Currency::parseAmount('184467440737095557.12', '', fromFile: $fromFile) === TOO_LARGE_INT;
+    $a4[] = Currency::parseAmount('184467440737095557.12', '', fromFile: $fromFile) === ($fromFile === true ? noted(TOO_LARGE_INT, '', false) : TOO_LARGE_INT);
     $power = $fromFile === true ? unreadable('') : POWER_OF_TEN;
     $a4[] = Currency::parseAmount('1e17', '', fromFile: $fromFile) === $power;
     $a4[] = Currency::parseAmount('-1e30', '', fromFile: $fromFile) === ($fromFile === true ? unreadableFor('-1e30', '') : POWER_OF_TEN);
@@ -397,11 +411,11 @@ check('A6 signs: "-3" is refused where negatives are not allowed ("cannot be neg
 $points = [];
 foreach ($modes as $modeName => $fromFile) {
     foreach (['1.2.3', '12.5.5', '12..5', '12.50.', '..5'] as $t) {
-        if (Currency::parseAmount($t, '', fromFile: $fromFile) !== ONE_POINT) {
+        if (Currency::parseAmount($t, '', fromFile: $fromFile) !== ($fromFile === true ? noted(ONE_POINT, $t, false) : ONE_POINT)) {
             $points[] = $modeName . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', fromFile: $fromFile), true);
         }
     }
-    if (Currency::parseAmount('.', '', fromFile: $fromFile) !== ($fromFile === true ? FILE_NO_FIGURES : NO_FIGURES)) {
+    if (Currency::parseAmount('.', '', fromFile: $fromFile) !== ($fromFile === true ? unreadable('') : NO_FIGURES)) {
         $points[] = $modeName . ' .';
     }
 }
@@ -424,7 +438,7 @@ foreach ($commasOk as $t => $want) {
     }
 }
 foreach ($commasBad as $t) {
-    if (Currency::parseAmount($t, '', fromFile: true) !== BAD_COMMAS) {
+    if (Currency::parseAmount($t, '', fromFile: true) !== noted(BAD_COMMAS, $t, false)) {
         $badWrong[] = 'statement ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', fromFile: true), true);
     }
     if (Currency::parseAmount($t, '') !== FIGURES_ONLY) {
@@ -436,8 +450,8 @@ check('A8 commas: a TYPED box refuses every comma with the figures-only sentence
 check('A8b other separators are not amounts, in either mode: "1 234", "1_000", "1\'000"; a file\'s "1.234,50" (a comma after the point) is told the comma rule',
     Currency::parseAmount('1 234', '') === FIGURES_ONLY && Currency::parseAmount('1.234,50', '') === FIGURES_ONLY
     && Currency::parseAmount('1_000', '') === FIGURES_ONLY && Currency::parseAmount("1'000", '') === FIGURES_ONLY
-    && Currency::parseAmount('1 234', '', fromFile: true) === FILE_NOT_FIGURES && Currency::parseAmount('1.234,50', '', fromFile: true) === BAD_COMMAS
-    && Currency::parseAmount('1_000', '', fromFile: true) === FILE_NOT_FIGURES && Currency::parseAmount("1'000", '', fromFile: true) === FILE_NOT_FIGURES);
+    && Currency::parseAmount('1 234', '', fromFile: true) === unreadable('') && Currency::parseAmount('1.234,50', '', fromFile: true) === noted(BAD_COMMAS, '', false)
+    && Currency::parseAmount('1_000', '', fromFile: true) === unreadable('') && Currency::parseAmount("1'000", '', fromFile: true) === unreadable(''));
 
 // A9 — whitespace and the empty box.
 check('A9 spaces, tabs and line breaks at either end are ignored ("  12.50 ", "\t7\n"); an empty or blank box answers "No amount was entered."',
@@ -470,7 +484,7 @@ check('A10b a sign or code that is not read as the organisation\'s currency here
     $wrong === [], implode(', ', $wrong));
 $told = [];
 foreach ([['£12.50', '£'], ['GBP 12.50', 'GBP'], ['-£3', '£'], ['€1,234.50', '€'], ['$5', '$']] as [$t, $sign]) {
-    if (Currency::parseAmount($t, '', allowNegative: true, fromFile: true) !== NO_CURRENCY_START . $sign . NO_CURRENCY_END) {
+    if (Currency::parseAmount($t, '', allowNegative: true, fromFile: true) !== noted(NO_CURRENCY_START . $sign . NO_CURRENCY_END, $t, true)) {
         $told[] = 'no currency ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', allowNegative: true, fromFile: true), true);
     }
 }
@@ -531,26 +545,25 @@ foreach ([['GBP £12.50', 'GBP'], ['£GBP 12.50', 'GBP'], ['££12.50', 'GBP'], 
           ['££12.345', 'GBP'], ['£££1.2.3', 'GBP'], ['GBP £0,500', 'GBP']] as [$t, $code]) {
     foreach ([true, false] as $allowNegative) {
         $got = Currency::parseAmount($t, $code, allowNegative: $allowNegative, fromFile: true);
-        // Round 17: with no negatives allowed, a cell carrying a minus is
-        // refused as negative first, exactly as a one-marker cell is.
-        // Round 19: with no negatives allowed, a cell that may be written as
-        // a negative gets the one sentence AND "Amounts here cannot be
-        // negative." (round 17's "The amount cannot be negative." instead was
-        // untrue of "££12-15").
+        // Round 20: with no negatives allowed, EVERY such cell gets the one
+        // sentence AND "Amounts here cannot be negative." (round 17's "The
+        // amount cannot be negative." instead was untrue of "££12-15"; round
+        // 19's note only for cells that looked negative missed spellings);
+        // with negatives allowed the sentence already asks for the minus.
         $want = noted(many($code, $allowNegative), $t, $allowNegative);
         if ($got !== $want) {
             $twice[] = $code . ' ' . $t . ' (negatives ' . ($allowNegative === true ? 'allowed' : 'not allowed') . ') → ' . var_export($got, true);
         }
     }
 }
-// Round 19: with NO negatives allowed (the asset import), a cell with more than
-// one marker that may be written as a negative — any dash, brackets, DR — gets
-// the one sentence followed by "Amounts here cannot be negative.", never only
-// "The amount cannot be negative." (round 17's, untrue of "££12-15"). The
-// one-marker cells read as negative keep "The amount cannot be negative.".
+// With NO negatives allowed (the asset import), a cell with more than one
+// marker — whatever it looks like — gets the one sentence followed by "Amounts
+// here cannot be negative." (rounds 19-20), never only "The amount cannot be
+// negative." (round 17's, untrue of "££12-15"). The one-marker cells read as
+// negative keep "The amount cannot be negative."
 foreach (['-££3', 'GBP-£12', '£-£3', '££-3', '-GBP£12', '££3-', '-£$12', 'GBP £-3', '££12-15', 'GBP £12-15', '££12 R-rated',
           '£$12 TOP-UP', '££3 DR', '££(3)', '££−3', '££–3'] as $t) {
-    $want = many('GBP') . ' ' . NOT_NEGATIVE_HERE;
+    $want = many('GBP');
     if (Currency::parseAmount($t, 'GBP', fromFile: true) !== $want) {
         $twice[] = 'GBP ' . $t . ' (no negatives) → ' . var_export(Currency::parseAmount($t, 'GBP', fromFile: true), true);
     }
@@ -576,7 +589,7 @@ foreach (['GBP -3', '-GBP 3', 'GBP-3', '-GBP3', '-3'] as $t) {
         $twice[] = 'following the negative instruction, "' . $t . '" does not read as -3.00';
     }
 }
-check('A10i MORE THAN ONE currency marker in front, the first the organisation\'s own — two of ours ("GBP £12.50", "££12.50", "CAD CA$12"), ours then not ("GBP $12", "CAD US$12", "CUP ₱12"), three or four ("GBP £$12", "£££$12", "£££12", "GBP USD$12"), with or without spaces, and with another fault too ("££12.345", "-££3") — gets ONE fixed sentence naming and counting no marker (round 14); where negatives are allowed it keeps the minus ("-££3", "GBP-£12", "-GBP£12", "£-£3", "-£$12.00"), and "GBP -3", "-GBP 3", "GBP-3", "-GBP3", "-3" read as -3.00 (round 16); where they are NOT, a cell that may be written as a negative ("-££3", "GBP-£12", "££12-15", "£$12 TOP-UP", "££3 DR", "££(3)", "££−3", "££–3") gets the one sentence AND "Amounts here cannot be negative.", while "-£3" and "GBP -3" (read as negative) keep "The amount cannot be negative." (round 19)',
+check('A10i MORE THAN ONE currency marker in front, the first the organisation\'s own — two of ours ("GBP £12.50", "££12.50", "CAD CA$12"), ours then not ("GBP $12", "CAD US$12", "CUP ₱12"), three or four ("GBP £$12", "£££$12", "£££12", "GBP USD$12"), with or without spaces, and with another fault too ("££12.345", "-££3") — gets ONE fixed sentence naming and counting no marker (round 14); where negatives are allowed it keeps the minus ("-££3", "GBP-£12", "-GBP£12", "£-£3", "-£$12.00"), and "GBP -3", "-GBP 3", "GBP-3", "-GBP3", "-3" read as -3.00 (round 16); where they are NOT, every such cell ("-££3", "GBP-£12", "££12-15", "£$12 TOP-UP", "££3 DR", "££(3)", "££−3", "££–3", and the rest) gets the one sentence AND "Amounts here cannot be negative.", while "-£3" and "GBP -3" (read as negative) keep "The amount cannot be negative." (rounds 19-20)',
     $twice === [], implode(' | ', array_slice($twice, 0, 4)));
 
 // A10k — D-177: a sign made only of LETTERS is NOT read in a file. Every such
@@ -625,7 +638,9 @@ foreach ([['RUB 12', 'ZAR', otherCur('ZAR')], ['RUB12', 'ZAR', otherCur('ZAR')],
           ['L£5', 'HNL', otherCur('HNL')], ['ZAR 12', 'ZAR', 1200], ['ZAR12', 'ZAR', 1200], ['ZAR -12', 'ZAR', -1200],
           ['CHF 12', 'CHF', 1200], ['NPR 1,234.50', 'NPR', 123450]] as [$t, $code, $want]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
-    if ($got !== $want) {
+    // These run with negatives allowed: the not-read-as-ours sentence then
+    // asks for a minus on money paid out (round 20).
+    if ($got !== (is_string($want) === true ? otherCur($code, true) : $want)) {
         $codes[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
@@ -680,7 +695,7 @@ $r10 = [];
 foreach ([['$12', 'GBP'], ['€12.50', 'GBP'], ['USD 5', 'GBP'], ['-$3', 'GBP'], ['US$12', 'GBP'], ['CA$12', 'USD'], ['RUB12', 'ZAR']] as [$t, $code]) {
     foreach ([true, false] as $allowNegative) {
         $got = Currency::parseAmount($t, $code, allowNegative: $allowNegative, fromFile: true);
-        if ($got !== noted(otherCur($code), $t, $allowNegative)) {
+        if ($got !== otherCur($code, $allowNegative)) {
             $r10[] = $code . ' "' . $t . '" → ' . var_export($got, true);
         }
     }
@@ -708,7 +723,7 @@ check('A10p round 10: "$12", "€12.50", "USD 5", "-$3" and "US$12" in a GBP org
 $minus2 = [];
 foreach ([['-GBP-12', 'GBP'], ['-£-3', 'GBP'], ['-$-3', 'USD'], ['-GBP -12', 'GBP']] as [$t, $code]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
-    if ($got !== MINUS_PLACE) {
+    if ($got !== noted(MINUS_PLACE, $t, true)) {
         $minus2[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
@@ -732,7 +747,7 @@ check('A10q a minus is taken ONCE: "-GBP-12", "-£-3", "-$-3" (USD) and "-GBP -1
 $r11 = [];
 foreach ([['₱12', 'CUP'], ['£12', 'EGP'], ['£12.50', 'EGP'], ['C$12', 'CAD'], ['BR$12', 'BRL'], ['USD 12', 'GBP'], ['USD$5', 'GBP'], ['ABC$12', 'GBP']] as [$t, $code]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
-    if ($got !== otherCur($code)) {
+    if ($got !== otherCur($code, true)) {
         $r11[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
@@ -757,7 +772,7 @@ foreach (['$12', '₱12', '£12', 'C$12', 'CUP ₱12', 'GBP $12'] as $t) {
 // `[0-9.]` in amountOrSignFollows()), and ONE capital joined to a sign ("X$12"
 // is a marker, not read as GBP here; the `{1,3}` in lettersThenSymbolAtStart()).
 $r12 = [];
-foreach ([['GBP .50', 'GBP', 50], ['GBP -.50', 'GBP', -50], ['X$12', 'GBP', otherCur('GBP')], ['US$12', 'CAD', unreadable('CAD', true)],
+foreach ([['GBP .50', 'GBP', 50], ['GBP -.50', 'GBP', -50], ['X$12', 'GBP', otherCur('GBP', true)], ['US$12', 'CAD', unreadable('CAD', true)],
           ['US$12', 'AUD', unreadable('AUD', true)], ['₫12', 'GBP', unreadable('GBP', true)], ['₫12', '', unreadable('', true)]] as [$t, $code, $want]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
     if ($got !== $want) {
@@ -812,65 +827,84 @@ foreach (array_keys(Currency::choices()) as $code) {
 check('A10u round 15: a marker AFTER the figure ("£12$", "GBP 12£", "£12 €", "£12.50 GBP", "GBP 12 USD", "$12€", "£12 $5", "GBP 1,234$"), a code then a plain word ("GBP PAID 12") never get the more-than-one-marker sentence (nor are they stored); one marker ("£12", "GBP 12", "GBP -3") reads; and for all ' . $followable . ' choosable currencies the sentence\'s instruction can be followed ("CODE 12" and "12" both read) and asks for no sign',
     $r15 === [] && $followable >= 100, implode(' | ', array_slice($r15, 0, 4)));
 
-// A10w — round 19: ONE helper, Currency::mayMeanNegative(), decides whether a
-// cell may be written as a negative: ANY minus-like character (hyphen, U+2212,
-// U+2010-U+2015 dashes — a Windows-1252 0x96 arrives as U+2013 — U+FE63,
-// U+FF0D), a figure in brackets, or a DR suffix. Round 18 asked only for the
-// ASCII hyphen. With NO negatives allowed, EVERY file refusal of such a cell
-// ends "Amounts here cannot be negative." — could not be read, another
-// currency, more than one marker, a minus in the wrong place — while the note
-// never claims the cell IS negative ("12-15", "R-rated", "TOP-UP"). With
-// negatives allowed the advice asks to WRITE money paid out with a minus, never
-// to "keep" one ("(3.00)" and "3.00 DR" have none).
+// A10w — round 20: NO detector. Rounds 18 and 19 gave the note only to cells
+// that LOOKED negative, and each check found a spelling missed (U+2212, en
+// dash, brackets, DR; then U+2796, U+FE58, U+02D7, full-width brackets, DR in
+// front, "dR"…). Now, with NO negatives allowed, EVERY file refusal but "No
+// amount was entered.", "The amount cannot be negative." and the misplaced-
+// minus refusal ends "Amounts here cannot be negative." — whatever the cell
+// looks like; with negatives allowed, EVERY file refusal but "No amount was
+// entered." asks for "a minus sign in front" of money paid out. Neither
+// sentence claims the cell IS negative.
 $r19 = [];
-$mayBe  = ['−3', '–3', '—3', '‐3', '﹣3', '－3', '(3.00)', '( 3 )', '3.00 DR', '3.00Dr', '3.00 dr.', '12-15', 'R-rated', 'TOP-UP 20', '£$12 TOP-UP'];
-$mayNot = ['abc', 'R3', '3.00 DRY', '3 ADR', '(abc)', 'P.O. 1234', '12'];
-foreach ($mayBe as $t) {
-    if (Currency::mayMeanNegative($t) === false) {
-        $r19[] = 'mayMeanNegative("' . $t . '") said no';
-    }
-}
-foreach ($mayNot as $t) {
-    if (Currency::mayMeanNegative($t) === true) {
-        $r19[] = 'mayMeanNegative("' . $t . '") said yes';
-    }
-}
-foreach (['−3', '–3', '(3.00)', '3.00 DR', '12-15', 'R-rated', 'TOP-UP 20', '£−3', '£(3)', '£3 DR', '−$3', '(USD 3)'] as $t) {
-    foreach ([['GBP', false], ['GBP', true]] as [$code, $neg]) {
-        $got = Currency::parseAmount($t, $code, allowNegative: $neg, fromFile: true);
-        if (is_int($got) === true) {
-            $r19[] = $code . ' "' . $t . '" STORED as ' . $got;
+$cellsAny = ['−3', '–3', '➖3', '﹘3', '˗3', '⁻3', '₋3', '(3.00)', '（3）', '3.00 DR', 'DR 3.00', '3.00 dR', '12-15', 'R-rated', 'TOP-UP 20',
+    '£−3', '£(3)', '£3 DR', '−$3', '-$3', '$3.00DR', '(USD 3)', 'abc', 'P.O. 1234', '££3', '££−3', '££12-15', '1,23', '-1,23', '1.2.3', '-1.2.3',
+    '12.345', '-12.345', '1e17', '+5', '99999999999', '5-'];
+foreach ($cellsAny as $t) {
+    foreach ([false, true] as $neg) {
+        try {
+            $got = Currency::parseAmount($t, 'GBP', allowNegative: $neg, fromFile: true);
+        } catch (\Throwable $e) {
+            $r19[] = 'GBP "' . $t . '" threw ' . get_class($e);
             continue;
         }
-        $hasNote = str_ends_with($got, ' ' . NOT_NEGATIVE_HERE);
-        if ($neg === false && ($hasNote === false || str_contains($got, 'Write money paid out') === true)) {
-            $r19[] = $code . ' "' . $t . '" (no negatives) → ' . $got;
+        if (is_int($got) === true) {
+            $r19[] = 'GBP "' . $t . '" STORED as ' . $got;
+            continue;
         }
-        if ($neg === true && ($hasNote === true || str_contains($got, 'Keep the minus') === true)) {
-            $r19[] = $code . ' "' . $t . '" (negatives allowed) → ' . $got;
+        if ($neg === false && str_ends_with($got, ' ' . NOT_NEGATIVE_HERE) === false && str_starts_with($got, 'A minus sign has no place here') === false) {
+            $r19[] = 'GBP "' . $t . '" (no negatives) → ' . $got;
+        }
+        if ($neg === false && substr_count($got, 'cannot be negative') > 1) {
+            $r19[] = 'GBP "' . $t . '" (no negatives) says it twice → ' . $got;
+        }
+        if ($neg === true && (str_contains($got, 'a minus sign in front') === false || str_contains($got, NOT_NEGATIVE_HERE) === true
+            || str_contains($got, 'Keep the minus') === true)) {
+            $r19[] = 'GBP "' . $t . '" (negatives allowed) → ' . $got;
         }
         if (preg_match('/\b(this|that) (amount|figure) is negative\b/i', $got) === 1) {
-            $r19[] = $code . ' "' . $t . '" claims the cell IS negative: ' . $got;
+            $r19[] = 'GBP "' . $t . '" claims the cell IS negative: ' . $got;
         }
     }
 }
-// Every branch carries the note in no-negatives mode: could not be read,
-// another currency, more than one marker, a misplaced minus.
-// (Only the ASCII hyphen is READ as a minus; "−$3" is simply unreadable, which
-// is also refused with the note.)
-foreach ([['−3', 'GBP', unreadable('GBP')], ['−$3', 'GBP', unreadable('GBP')], ['-$3', 'GBP', otherCur('GBP')], ['££−3', 'GBP', many('GBP')],
-          ['5-', '', FILE_MINUS_NOT_HERE], ['(3.00)', 'GBP', unreadable('GBP')], ['3.00 DR', 'GBP', unreadable('GBP')]] as [$t, $code, $base]) {
-    if (Currency::parseAmount($t, $code, fromFile: true) !== $base . ' ' . NOT_NEGATIVE_HERE) {
-        $r19[] = $code . ' "' . $t . '" (no negatives) not ' . $base . ' + note: ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
+// Each branch, exactly, in no-negatives mode: could not be read, another
+// currency, more than one marker, commas, more than one point (round 20's
+// checker found these two last unpinned), too precise, too large.
+foreach ([['➖3', 'GBP', unreadable('GBP')], ['-$3', 'GBP', otherCur('GBP')], ['££−3', 'GBP', many('GBP')],
+          ['-1,23', 'GBP', BAD_COMMAS . ' ' . NOT_NEGATIVE_HERE], ['-1.2.3', 'GBP', ONE_POINT . ' ' . NOT_NEGATIVE_HERE],
+          ['-12.345', 'GBP', TOO_PRECISE . ' ' . NOT_NEGATIVE_HERE], ['(3.00)', 'GBP', unreadable('GBP')]] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
+        $r19[] = $code . ' "' . $t . '" (no negatives) → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
     }
 }
-// A cell READ as negative keeps "The amount cannot be negative." alone.
-foreach (['-£3', 'GBP -3', '-3'] as $t) {
-    if (Currency::parseAmount($t, 'GBP', fromFile: true) !== NEGATIVE) {
-        $r19[] = 'GBP "' . $t . '" (no negatives) → ' . var_export(Currency::parseAmount($t, 'GBP', fromFile: true), true);
+// The three that already say so are left alone: the misplaced minus (said
+// once, not twice), and a cell READ as negative; and "nothing entered".
+foreach ([['5-', '', FILE_MINUS_NOT_HERE], ['-£3', 'GBP', NEGATIVE], ['GBP -3', 'GBP', NEGATIVE], ['-3', 'GBP', NEGATIVE], ['  ', 'GBP', 'No amount was entered.']] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
+        $r19[] = ($code === '' ? 'no currency' : $code) . ' "' . $t . '" (no negatives) → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
     }
 }
-check('A10w round 19: Currency::mayMeanNegative() says yes for every minus-like character (U+2212, en and em dashes, U+2010, U+FE63, U+FF0D), brackets round a figure and a DR suffix, and no for "abc", "3.00 DRY", "(abc)"; with no negatives allowed EVERY file refusal of such a cell — could not be read, another currency, more than one marker, a misplaced minus — ends "Amounts here cannot be negative." and none claims the cell IS negative; "-£3", "GBP -3", "-3" keep "The amount cannot be negative."; with negatives allowed none gets the note and none says "Keep the minus"',
+// Negatives allowed: a misplaced minus and another currency ask for the minus
+// too — "$3.00DR" converted and written "2.40" would import a gift.
+foreach ([['-GBP-12', 'GBP', MINUS_PLACE . ' ' . PAID_OUT], ['$3.00DR', 'GBP', otherCur('GBP', true)], ['1,23', 'GBP', BAD_COMMAS . ' ' . PAID_OUT]] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, allowNegative: true, fromFile: true) !== $want) {
+        $r19[] = $code . ' "' . $t . '" (negatives allowed) → ' . var_export(Currency::parseAmount($t, $code, allowNegative: true, fromFile: true), true);
+    }
+}
+// A reading stays a reading: "-0", "-0.00" and "£-0.00" STORE 0 in the asset
+// import (the wrapper's `is_string($answer)` guard; without it a stored 0
+// would be turned into a sentence, or throw).
+foreach (['-0', '-0.00', '£-0.00', '-£0'] as $t) {
+    try {
+        $got = Currency::parseAmount($t, 'GBP', fromFile: true);
+    } catch (\Throwable $e) {
+        $got = 'threw ' . get_class($e);
+    }
+    if ($got !== 0) {
+        $r19[] = 'GBP "' . $t . '" (no negatives) did not store 0: ' . var_export($got, true);
+    }
+}
+check('A10w round 20: with no negatives allowed EVERY file refusal of ' . count($cellsAny) . ' cells of every look ("➖3", "﹘3", "˗3", "⁻3", "₋3", "（3）", "DR 3.00", "3.00 dR", "abc", "1,23", "-1.2.3", …) ends "Amounts here cannot be negative." exactly once — branch by branch: could not be read, another currency, more than one marker, commas, more than one point, too precise — except the misplaced minus, a cell read as negative and an empty cell; with negatives allowed every one asks for "a minus sign in front" of money paid out ("-GBP-12", "$3.00DR", "1,23"); none claims a cell IS negative, none is stored; and "-0", "-0.00", "£-0.00", "-£0" still store 0',
     $r19 === [], implode(' | ', array_slice($r19, 0, 4)));
 
 // A10v — round 17: where negatives ARE allowed (the bank import), the
@@ -894,20 +928,22 @@ foreach (['-1,234.56', 'ZAR -1,234.56', '-ZAR 1,234.56'] as $t) {
         $r17[] = 'following the advice, "' . $t . '" does not read as -1,234.56';
     }
 }
-// Round 18: where negatives are NOT allowed (the asset import), the same cells
-// — and any other that could not be read with a minus anywhere — keep their
-// advice and are also told "Amounts here cannot be negative.", so nothing
-// invites dropping the minus to store a positive cost. A cell with no minus is
-// not told it; no cell's reading changes.
+// Rounds 18-20: where negatives are NOT allowed (the asset import), the same
+// cells keep their advice and are also told "Amounts here cannot be
+// negative.", so nothing invites dropping the minus to store a positive cost.
+// Since round 20 every refusal there says it, minus or not; no cell's reading
+// changes.
 foreach ([['-R3', 'ZAR'], ['-3GBP', 'GBP'], ['-£3.00DR', 'GBP'], ['-abc', 'GBP'], ['-P.O. 1234', 'BWP'], ['R-rated', 'ZAR'], ['-abc', '']] as [$t, $code]) {
     $got  = Currency::parseAmount($t, $code, fromFile: true);
-    $want = unreadable($code) . ' ' . NOT_NEGATIVE_HERE;
+    $want = unreadable($code);
     if ($got !== $want || str_ends_with((string) $got, 'Amounts here cannot be negative.') === false) {
         $r17[] = ($code === '' ? 'no currency' : $code) . ' "' . $t . '" (no negatives) → ' . var_export($got, true);
     }
 }
+// Round 20: a cell with NO minus gets the note too — whatever it looks like.
 foreach ([['abc', 'GBP'], ['R3', 'ZAR'], ['P.O. 1234', 'BWP']] as [$t, $code]) {
-    if (Currency::parseAmount($t, $code, fromFile: true) !== unreadable($code)) {
+    if (Currency::parseAmount($t, $code, fromFile: true) !== unreadable($code)
+        || str_ends_with((string) Currency::parseAmount($t, $code, fromFile: true), NOT_NEGATIVE_HERE) === false) {
         $r17[] = $code . ' "' . $t . '" (no negatives, no minus) → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
     }
 }
@@ -916,7 +952,7 @@ foreach (['-R3', '-abc'] as $t) {
         $r17[] = '"' . $t . '" told amounts cannot be negative where they can';
     }
 }
-check('A10v rounds 17-19: where negatives are allowed, a bank-import cell that could not be read ("-R3", "-kr3", "-3GBP", "-£3.00DR", "-abc", "-P.O. 1234") is told to write money paid out with a minus sign in front, and following it ("-1,234.56", "ZAR -1,234.56") reads negative; where they are not, the advice names no minus, and a cell with a minus anywhere ("-R3", "-3GBP", "-£3.00DR", "-abc", "-P.O. 1234", "R-rated") is also told "Amounts here cannot be negative." — a cell with no minus is not',
+check('A10v rounds 17-19: where negatives are allowed, a bank-import cell that could not be read ("-R3", "-kr3", "-3GBP", "-£3.00DR", "-abc", "-P.O. 1234") is told to write money paid out with a minus sign in front, and following it ("-1,234.56", "ZAR -1,234.56") reads negative; where they are not, the advice names no minus and EVERY such refusal ("-R3", "-3GBP", "-£3.00DR", "-abc", "-P.O. 1234", "R-rated", and since round 20 "abc", "R3", "P.O. 1234") ends "Amounts here cannot be negative."',
     $r17 === [], implode(' | ', $r17));
 
 // A10t — the "own refusal" with ONE marker: a cell with one of the
@@ -925,6 +961,7 @@ check('A10v rounds 17-19: where negatives are allowed, a bank-import cell that c
 $r13 = [];
 foreach ([['£12.345', 'GBP', true, Currency::REFUSED_TOO_PRECISE], ['£1.2.3', 'GBP', true, ONE_POINT],
           ['-£3', 'GBP', false, Currency::REFUSED_NEGATIVE], ['GBP 0,500', 'GBP', true, BAD_COMMAS]] as [$t, $code, $neg, $want]) {
+    $want = noted($want, $t, $neg);
     $got = Currency::parseAmount($t, $code, allowNegative: $neg, fromFile: true);
     if ($got !== $want) {
         $r13[] = $code . ' "' . $t . '" → ' . var_export($got, true);
@@ -1016,7 +1053,7 @@ check('A10h no FILE refusal advises writing a currency sign by ANY spelling — 
     $advisedSign === [] && $refusals > 500 && count($allSigns) + count($letterSigns) >= 58, implode(' | ', array_slice($advisedSign, 0, 3)));
 check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar), in both modes',
     Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD')
-    && Currency::parseAmount('5', 'JPY', fromFile: true) === Currency::whyNotChoosable('JPY'));
+    && Currency::parseAmount('5', 'JPY', fromFile: true) === noted(Currency::whyNotChoosable('JPY'), '5', false));
 check('A10d the two "not figures" sentences: a typed box asks for figures only and names commas, spaces, signs, letters and other characters (D-152); a file says what the cell should look like',
     Currency::parseAmount('abc', 'GBP') === 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.'
     && Currency::parseAmount('abc', 'GBP', fromFile: true) === unreadable('GBP'));
@@ -1697,9 +1734,9 @@ $confirm = $http('POST', '/giving/reconcile/import', ['csrf_token' => $freshToke
 $importId = (int) (rows($db, "SELECT MAX(`importID`) AS `m` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['m'] ?? 0);
 $txns = array_map('intval', array_column(rows($db, 'SELECT `amountPence` FROM `tblBankTxns` WHERE `importID` = ? ORDER BY `txnID`', 'i', [$importId]), 'amountPence'));
 check('G3 confirmed, the two credits are stored exactly: 123450 and 1250', $txns === [123450, 1250], 'HTTP ' . $confirm['status'] . '; ' . json_encode($txns));
-foreach (['G4' => ['0,500', 'amount "0,500": ' . BAD_COMMAS],
-          'G4b' => ['$5.00', 'amount "$5.00": ' . otherCur('GBP')],
-          'G4d' => ['€5.00', 'amount "€5.00": ' . otherCur('GBP')],
+foreach (['G4' => ['0,500', 'amount "0,500": ' . noted(BAD_COMMAS, '0,500', true)],
+          'G4b' => ['$5.00', 'amount "$5.00": ' . otherCur('GBP', true)],
+          'G4d' => ['€5.00', 'amount "€5.00": ' . otherCur('GBP', true)],
           'G4c' => ['1e17', 'amount "1e17": ' . unreadable('GBP', true)]] as $label => [$cell, $said]) {
     $before = rows($db, "SELECT COUNT(*) AS `n` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['n'];
     $page   = $flashAfter($upload('money-selftest-' . bin2hex(random_bytes(4)) . '.csv', "Date,Description,Amount\n01/11/2026,Money selftest,\"{$cell}\"\n"));
@@ -1791,7 +1828,7 @@ $http('POST', '/assets/import', ['csrf_token' => $freshToken('/assets/import'), 
 check('I2 signs that are not read as GBP here ("€5.00", "$5.00", D-165) are refused as signs not read as GBP here, told to convert rather than relabel (rounds 10-11), and a misplaced comma ("0,500") with its reason; no asset is made',
     str_contains($preview, 'Purchase Cost "€5.00": ' . otherCur('GBP')) === true
     && str_contains($preview, 'Purchase Cost "$5.00": ' . otherCur('GBP')) === true
-    && str_contains($preview, 'Purchase Cost "0,500": ' . BAD_COMMAS) === true && count($assetCosts()) === 3,
+    && str_contains($preview, 'Purchase Cost "0,500": ' . noted(BAD_COMMAS, '0,500', false)) === true && count($assetCosts()) === 3,
     mb_substr(preg_replace('/\s+/', ' ', strip_tags($preview)) ?? '', 0, 600));
 
 echo "\n{$passed} passed, {$failed} failed.\n";

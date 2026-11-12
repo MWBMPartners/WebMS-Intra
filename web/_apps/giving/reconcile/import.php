@@ -262,7 +262,10 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    Currency::otherCurrencyWords()); which other currency it is, is never
     //    guessed. Every other start, a sign the converter does not recognise
     //    included, is "That amount could not be read." with what IS read
-    //    (Currency::fileAdvice()). Negatives are allowed so a debit can
+    //    (Currency::fileAdvice()). Every refusal but "No amount was entered."
+    //    also asks for a minus sign in front of money paid out
+    //    (Currency::FILE_ADVICE_PAID_OUT, round 20), or a reader who converts
+    //    "$3.00DR" and writes "2.40" imports a gift. Negatives are allowed so a debit can
     //    be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
