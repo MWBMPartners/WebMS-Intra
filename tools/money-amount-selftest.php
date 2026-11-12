@@ -171,8 +171,8 @@ function convertWords(string $code): string
 function many(string $code): string
 {
     return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
-        . 'write the figure with at most one ' . $code . ' sign or code in front, and if it is in another currency, '
-        . 'convert it to ' . $code . ' first.';
+        . 'write the figure with nothing in front but, at most, the code ' . $code . ', and if it is in another '
+        . 'currency, convert it to ' . $code . ' first.';
 }
 function otherCur(string $code): string
 {
@@ -697,6 +697,43 @@ foreach ([['GBP .50', 'GBP', 50], ['GBP -.50', 'GBP', -50], ['X$12', 'GBP', othe
 }
 check('A10s round 12: "GBP .50" reads as 50 and "GBP -.50" as -50; "X$12" (one capital joined to a sign) is a marker not read as GBP here; "US$12" in CAD and AUD (their "$" is their own) and "₫12" (a sign the converter does not recognise), with or without a currency, could not be read',
     $r12 === [], implode(' | ', $r12));
+
+// A10u — round 15: the cells that must NOT get the more-than-one-marker
+// sentence, because they do not have more than one marker IN FRONT — a marker
+// after the figure ("£12$", "GBP 12£", "£12 €", "£12.50 GBP"), a code then a
+// plain word ("GBP PAID 12"), or a single marker ("£12", "GBP 12"). Nothing
+// pinned this side: a planted "any sign anywhere after our marker" or "a
+// marker after the leading figures" left every check green. And the
+// sentence's instruction must be FOLLOWABLE for every choosable currency:
+// "nothing in front but, at most, the code" — round 14's "at most one ZAR
+// sign or code" pointed at "R 12", which is refused (D-177).
+$r15 = [];
+foreach ([['£12$', 'GBP'], ['GBP 12£', 'GBP'], ['£12 €', 'GBP'], ['£12.50 GBP', 'GBP'], ['GBP 12 USD', 'GBP'], ['$12€', 'USD'],
+          ['GBP PAID 12', 'GBP'], ['£12 $5', 'GBP'], ['GBP 1,234$', 'GBP']] as [$t, $code]) {
+    foreach ([true, false] as $neg) {
+        $got = Currency::parseAmount($t, $code, allowNegative: $neg, fromFile: true);
+        if ($got === many($code) || is_int($got) === true) {
+            $r15[] = $code . ' "' . $t . '" → ' . var_export($got, true);
+        }
+    }
+}
+foreach ([['£12', 'GBP', 1200], ['GBP 12', 'GBP', 1200], ['GBP -3', 'GBP', -300]] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, allowNegative: true, fromFile: true) !== $want) {
+        $r15[] = $code . ' "' . $t . '" → ' . var_export(Currency::parseAmount($t, $code, allowNegative: true, fromFile: true), true);
+    }
+}
+$followable = 0;
+foreach (array_keys(Currency::choices()) as $code) {
+    $followable++;
+    if (Currency::parseAmount($code . ' 12', $code, fromFile: true) !== 1200 || Currency::parseAmount('12', $code, fromFile: true) !== 1200) {
+        $r15[] = $code . ': "' . $code . ' 12" or "12" not read, so the sentence\'s instruction cannot be followed';
+    }
+    if (str_contains(many($code), 'sign or code in front, and') === true || str_contains(Currency::manyMarkersWords($code), ' sign or code in front, and') === true) {
+        $r15[] = $code . ': the instruction still asks for "a ' . $code . ' sign"';
+    }
+}
+check('A10u round 15: a marker AFTER the figure ("£12$", "GBP 12£", "£12 €", "£12.50 GBP", "GBP 12 USD", "$12€", "£12 $5", "GBP 1,234$"), a code then a plain word ("GBP PAID 12") never get the more-than-one-marker sentence (nor are they stored); one marker ("£12", "GBP 12", "GBP -3") reads; and for all ' . $followable . ' choosable currencies the sentence\'s instruction can be followed ("CODE 12" and "12" both read) and asks for no sign',
+    $r15 === [] && $followable >= 100, implode(' | ', array_slice($r15, 0, 4)));
 
 // A10t — the "own refusal" with ONE marker: a cell with one of the
 // organisation's markers and another fault is told that fault (round 14 keeps
