@@ -235,7 +235,8 @@ appended with its real date and a note that it was added later.
 | [D-177](177-letter-only-currency-signs-are-not-read-in-a-file.md) | 2026-11-12 | A currency sign made only of letters is not read in an imported file; the three-letter code is | in force |
 | [D-178](178-network-addresses-are-kept-and-handled-as-personal-data.md) | 2026-11-12 | Network (IP) addresses are kept for audit, security and support, and handled as personal data | in force |
 | [D-179](179-the-organisations-page-is-called-organisations.md) | 2026-11-12 | The page that manages an installation's organisations is called "Organisations" everywhere | in force |
+| [D-180](180-an-imported-date-is-decided-as-it-stands-now.md) | 2026-11-12 | An imported date is approved or declined as it stands now | in force |
 
-*179 decisions. This index is checked against the folder by
+*180 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
