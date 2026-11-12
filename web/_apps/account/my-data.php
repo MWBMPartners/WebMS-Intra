@@ -29,8 +29,9 @@ $userId   = (int) ($_SESSION['user_id'] ?? 0);
 $inventory = GdprEraser::inventory($userId);
 // 🧾 #929 (the owner's decision D-142): the care, DBS and children's check-in
 //    records that carry this person's name as the WORKER who made them,
-//    listed by kind, date and organisation only - never the other person's
-//    name, notes or the record's number. GdprEraser::recordsCarryingYourName()
+//    listed by kind, day and organisation only - never the other person's
+//    name, notes, the time or the record's number (D-142; D-151 for records
+//    in organisations the person cannot open here, which are counted). GdprEraser::recordsCarryingYourName()
 //    is the ONE place they are found and worded; the full data copy
 //    (`account/data-export`) asks it too.
 $asWorker  = GdprEraser::recordsCarryingYourName($userId);
@@ -105,13 +106,13 @@ if ($asWorker['records'] !== [] || $asWorker['notListed'] > 0 || $asWorker['coul
 <div class="card mb-3" data-records-carrying-your-name>
     <div class="card-header"><strong>Records that carry your name as the person who made them</strong></div>
     <div class="card-body">
-        <p class="small text-secondary"><?php echo htmlspecialchars($asWorker['about'], ENT_QUOTES, 'UTF-8'); ?></p>
+        <p class="small text-secondary" data-records-about><?php echo htmlspecialchars($asWorker['about'], ENT_QUOTES, 'UTF-8'); ?></p>
         <?php if ($asWorker['records'] !== []): ?>
             <div class="portal-data-list">
                 <?php foreach ($asWorker['records'] as $record): ?>
                     <div class="row py-2 border-bottom small" data-record-kind="<?php echo htmlspecialchars($record['kind'], ENT_QUOTES, 'UTF-8'); ?>">
                         <div class="col-md-3"><strong><?php echo htmlspecialchars($record['what'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
-                        <div class="col-md-2"><?php echo htmlspecialchars((string) ($record['date'] ?? 'No date recorded'), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-md-2"><?php echo htmlspecialchars((string) ($record['day'] ?? 'No date recorded'), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars($record['organisation'] ?? 'Not held against an organisation', ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-5 text-muted"><?php echo htmlspecialchars($record['yourPart'], ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
@@ -119,10 +120,11 @@ if ($asWorker['records'] !== [] || $asWorker['notListed'] > 0 || $asWorker['coul
             </div>
         <?php endif; ?>
         <?php if ($asWorker['notListedWords'] !== null): ?>
-            <p class="small text-muted mt-2 mb-0"><?php echo htmlspecialchars($asWorker['notListedWords'], ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="small text-muted mt-2 mb-0" data-records-not-listed><?php echo htmlspecialchars($asWorker['notListedWords'], ENT_QUOTES, 'UTF-8'); ?></p>
         <?php endif; ?>
         <?php if ($asWorker['couldNotRead'] !== []): ?>
-            <p class="small text-warning mt-2 mb-0">Some of these records could not be read just now, so this list may be incomplete. Please try again later.</p>
+            <?php // Pinned by section O of tools/erasure-pages-selftest.php, which drives both ways a read can fail. ?>
+            <p class="small text-warning mt-2 mb-0" data-records-could-not-read>Some of these records could not be read just now, so this list may be incomplete. Please try again later.</p>
         <?php endif; ?>
     </div>
 </div>

@@ -119,11 +119,14 @@
  *   O. (#929, D-142.) A worker's own data download: My data's page, its
  *      JSON download and the full data copy each LIST the pastoral visits,
  *      care cases, DBS checks and children's check-ins and check-outs that
- *      carry the worker's name - kind, date exactly as stored, organisation
+ *      carry the worker's name - kind, the day cut from the stored text,
+ *      organisation
  *      and a fixed sentence - and hand over nothing about the other person,
  *      no record number, and nothing from an organisation the worker has
- *      left (counted instead). A member who made none sees none. Five faults
- *      planted in the running copy, each turning its check red.
+ *      left or that is switched off (counted instead, D-151). A member who
+ *      made none sees none. A failed read of one kind, and of the person's
+ *      organisations, is driven and must be named, never shown as none.
+ *      Nine faults planted in the running copy, each turning its check red.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -216,7 +219,10 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 168; // 155 until #929 added section O (thirteen: the
+const EXPECTED_CHECKS = 174; // #929 round 2 rebuilt section O as nineteen: the
+                            // premise, seven observations, two DRIVEN read
+                            // failures, nine plants and the clean run. 174.
+                            // 155 until #929 added section O (thirteen: the
                             // premise, the list in the My data download, the
                             // records in an organisation left counted not listed,
                             // the full data copy, the page, nothing about the
@@ -481,6 +487,19 @@ const REQ_ZED = 917963; // Zed's request, carried out in section M
 const LIV     = 917049; // a live member of A: the control for the edit page and for adding to an organisation
 const UNP     = 917050; // a live account in NO organisation: the control for placing an account
 const OFF     = 917051; // a live member of A: the control for offboarding
+// #929, section O: a worker's own data download (D-142, D-151).
+const WIL        = 917055; // a worker, member of A (and of switched-off C)
+const NELL       = 917056; // a member of A who made none of these records
+const CHK        = 917057; // the person Wil recorded a DBS check for
+const ORG_C      = 917003; // a SWITCHED-OFF organisation Wil is still an active member of
+const O_CASE_A   = 917231; // a care case Wil opened in A
+const O_VISIT_A  = 917232; // a visit Wil made on it, 23:30 on the night Nuuk's clocks go forward
+const O_CHILD    = 917233; // a child in A
+const O_CHECKIN  = 917234; // that child's check-in, in AND out by Wil
+const O_DBS      = 917235; // a DBS check Wil recorded for CHK
+const O_CASE_B   = 917236; // a care case Wil opened in B
+const O_VISIT_B  = 917237; // a visit Wil made on it
+const O_CASE_C   = 917238; // a care case Wil opened in C
 
 /** Every request this run's organisations hold for one account. */
 function requestsOf(int $user): array
@@ -563,6 +582,11 @@ function removeWorld(): void
     q('DELETE FROM tblUserSites WHERE siteID IN (?, ?) OR userID BETWEEN 917000 AND 917999', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblUsers WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblSettings WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    // Section O (#929): the switched-off organisation C and what it holds.
+    q('DELETE v FROM tblCareVisit v JOIN tblCareCase c ON c.caseID = v.caseID WHERE c.siteID = ?', 'i', [ORG_C]);
+    q('DELETE FROM tblCareCase WHERE siteID = ?', 'i', [ORG_C]);
+    q('DELETE FROM tblUserSites WHERE siteID = ?', 'i', [ORG_C]);
+    q('DELETE FROM tblSites WHERE siteID = ?', 'i', [ORG_C]);
     q('DELETE FROM tblSites WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
 }
@@ -4156,46 +4180,52 @@ ok('N21 with every plant taken out again, the same fresh run is green: every obs
 $n964Clear();
 
 // =============================================================================
-head('O. A worker\'s own data download lists the records carrying their name, and nothing about the other person (#929, D-142)');
+head('O. A worker\'s own data download lists the records carrying their name, and nothing else from them (#929; D-142, D-151)');
 // =============================================================================
 // Since #703 a pastoral visit, a care case, a DBS check and a child's check-in
 // or check-out KEEP the name and number of the worker who made them. D-142:
-// the worker's own download LISTS each such record - kind, date as stored,
-// organisation and a fixed sentence - and gives nothing about the other
-// person: no name, no notes, no number.
+// the worker's own download LISTS each such record - kind, the DAY it was
+// made, the organisation and a fixed sentence - and gives nothing else from
+// it: no other person's name, no notes, no number. D-151: records in an
+// organisation the worker cannot open here are counted, not listed.
 //
-// The world, one ground each (#616): Wil is a member of A ONLY and made one
-// record of every kind, each fixed date chosen so it can be compared as text
-// (the visit's 01:30 on 29 March 2026 is a reading in London's missing hour:
-// passed through as stored, it stays 01:30; turned into a moment anywhere it
-// would not). He also opened a case in B, where he no longer belongs, and
-// made a visit on it: counted, never listed. Nell is a member of A who made
-// none. Every detail about the OTHER people is a marked string, so its
-// absence from the whole download is a measurement, not an assumption - and
-// O1 asks first that those strings really are in the database, or every
-// "absent" below would pass on nothing.
-const WIL        = 917055; // a worker, member of A only
-const NELL       = 917056; // a member of A who made none of these records
-const CHK        = 917057; // the person Wil recorded a DBS check for
-const O_CASE_A   = 917231; // a care case Wil opened in A
-const O_VISIT_A  = 917232; // a visit Wil made on it
-const O_CHILD    = 917233; // a child in A
-const O_CHECKIN  = 917234; // that child's check-in, in AND out by Wil
-const O_DBS      = 917235; // a DBS check Wil recorded for CHK
-const O_CASE_B   = 917236; // a care case Wil opened in B
-const O_VISIT_B  = 917237; // a visit Wil made on it
+// The world, one ground each (#616). Wil is a member of A ONLY and made one
+// record of every kind, each on a fixed date. He also opened a case in B (he
+// is no member there) and made a visit on it, and opened a case in C, a
+// SWITCHED-OFF organisation he is still an active member of (#929 check round
+// 1: "organisations you no longer belong to" was untrue of that one). Nell is
+// a member of A who made none. Every detail of the OTHER people is a marked
+// string, so its absence from the whole download is a measurement - and O1
+// asks first that those strings really are in the database, or every "absent"
+// below would pass on nothing.
+//
+// 🕰️ THE DAY, AND WHY A IS SET TO America/Nuuk FOR THIS SECTION. The download
+//    gives the day only, cut from the stored text. A round trip through
+//    strtotime() would read that text on the organisation's clock (start-up
+//    sets PHP's zone to it), and on the night the clocks go forward at 23:00
+//    a 23:30 reading lands on the NEXT DAY. Round 1's check used 01:30 on
+//    29 March in an organisation on UTC (the default), where that is an
+//    ordinary time, so a round-trip plant could not go red. Europe/London
+//    would not do either now: there the round trip moves the HOUR, never the
+//    day (measured with PHP's own zone data, O1 below asks it again). Nuuk
+//    goes forward at 23:00 on 28 March 2026, which moves the day; the visit
+//    is at 23:30 that evening, and the plant O10 must turn red.
+// (The constants for this section are at the top of the file, with the others.)
 
+$o929ZoneWas = one('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?', 'i', [ORG_A])['timezone'] ?? null;
+q("UPDATE `tblSites` SET `timezone` = 'America/Nuuk' WHERE `siteID` = ?", 'i', [ORG_A]);
+q("INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `isActive`) VALUES (?, 'selftest-erasure-c', 'Selftest erasure C', 0)", 'i', [ORG_C]);
 q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0)', 'issississ',
     [WIL, 'Wil Worker', 'u' . WIL . '.erasure@selftest.invalid', NELL, 'Nell None', 'u' . NELL . '.erasure@selftest.invalid', CHK, 'P929 Checked Person', 'u' . CHK . '.erasure@selftest.invalid']);
-foreach ([WIL, NELL, CHK] as $id) {
-    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+foreach ([[WIL, ORG_A], [NELL, ORG_A], [CHK, ORG_A], [WIL, ORG_C]] as [$id, $site]) {
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, $site]);
 }
-q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 Cared-For Person', 'bereavement', 'P929 secret summary', ?, 'Wil Worker', '2026-02-01 09:15:00')", 'iii', [O_CASE_A, ORG_A, WIL]);
-q("INSERT INTO `tblCareVisit` (`visitID`, `caseID`, `visitedByID`, `visitedByName`, `visitedAt`, `kind`, `notes`) VALUES (?, ?, ?, 'Wil Worker', '2026-03-29 01:30:00', 'visit', 'P929 SECRET NOTE about the person')", 'iii', [O_VISIT_A, O_CASE_A, WIL]);
+q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 Cared-For Person', 'bereavement', 'P929 secret summary', ?, 'Wil Worker', '2026-02-01 09:15:42')", 'iii', [O_CASE_A, ORG_A, WIL]);
+q("INSERT INTO `tblCareVisit` (`visitID`, `caseID`, `visitedByID`, `visitedByName`, `visitedAt`, `kind`, `notes`) VALUES (?, ?, ?, 'Wil Worker', '2026-03-28 23:30:00', 'visit', 'P929 SECRET NOTE about the person')", 'iii', [O_VISIT_A, O_CASE_A, WIL]);
 q("INSERT INTO `tblKidProfiles` (`childID`, `siteID`, `fullName`, `isActive`) VALUES (?, ?, 'P929 Child Name', 1)", 'ii', [O_CHILD, ORG_A]);
-q("INSERT INTO `tblKidCheckins` (`checkinID`, `childID`, `badgeCode`, `checkedInAt`, `checkedInByID`, `checkedInByName`, `checkedOutAt`, `checkedOutByID`, `checkedOutByName`, `pickupName`) VALUES (?, ?, '929929', '2026-04-05 10:00:00', ?, 'Wil Worker', '2026-04-05 12:00:00', ?, 'Wil Worker', 'P929 Grandparent')", 'iiii', [O_CHECKIN, O_CHILD, WIL, WIL]);
-q("INSERT INTO `tblDbsChecks` (`dbsCheckID`, `userID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedByID`, `recordedByName`, `recordedAt`, `notes`) VALUES (?, ?, 'enhanced-barred', 'P929-REF-SECRET', '2025-11-11', '2028-11-11', 'valid', ?, 'Wil Worker', '2026-01-20 14:00:00', 'P929 dbs note')", 'iii', [O_DBS, CHK, WIL]);
-q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 B Person', 'hospital', 'P929 B summary', ?, 'Wil Worker', '2025-12-01 08:00:00')", 'iii', [O_CASE_B, ORG_B, WIL]);
+q("INSERT INTO `tblKidCheckins` (`checkinID`, `childID`, `badgeCode`, `checkedInAt`, `checkedInByID`, `checkedInByName`, `checkedOutAt`, `checkedOutByID`, `checkedOutByName`, `pickupName`) VALUES (?, ?, '929929', '2026-04-05 10:00:07', ?, 'Wil Worker', '2026-04-05 12:00:09', ?, 'Wil Worker', 'P929 Grandparent')", 'iiii', [O_CHECKIN, O_CHILD, WIL, WIL]);
+q("INSERT INTO `tblDbsChecks` (`dbsCheckID`, `userID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedByID`, `recordedByName`, `recordedAt`, `notes`) VALUES (?, ?, 'enhanced-barred', 'P929-REF-SECRET', '2025-11-11', '2028-11-11', 'valid', ?, 'Wil Worker', '2026-01-20 14:00:31', 'P929 dbs note')", 'iii', [O_DBS, CHK, WIL]);
+q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 B Person', 'hospital', 'P929 B summary', ?, 'Wil Worker', '2025-12-01 08:00:00'), (?, ?, 'P929 C Person', 'family', 'P929 C summary', ?, 'Wil Worker', '2025-10-01 10:00:00')", 'iiiiii', [O_CASE_B, ORG_B, WIL, O_CASE_C, ORG_C, WIL]);
 q("INSERT INTO `tblCareVisit` (`visitID`, `caseID`, `visitedByID`, `visitedByName`, `visitedAt`, `kind`, `notes`) VALUES (?, ?, ?, 'Wil Worker', '2025-12-02 08:30:00', 'call', 'P929 B note')", 'iii', [O_VISIT_B, O_CASE_B, WIL]);
 foreach (['wil' => WIL, 'nell' => NELL] as $who => $id) {
     q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
@@ -4205,37 +4235,69 @@ foreach (['wil' => WIL, 'nell' => NELL] as $who => $id) {
     }
 }
 
-// What the other people are, as stored - and the records' own numbers. None of
-// these may appear ANYWHERE in Wil's downloads or his page.
+// What the other people are, as stored, and the records' own numbers. None
+// of these may appear ANYWHERE in Wil's downloads or his page. (The TIME of
+// day, which the download leaves out, is not searched for: the full data copy
+// carries Wil's own activity records, whose times could match by chance. The
+// exact comparison of every entry, O2, is what pins it.)
 $o929Secrets = ['P929 Cared-For Person', 'P929 secret summary', 'bereavement', 'P929 SECRET NOTE', 'P929 Child Name', 'P929 Grandparent',
     '929929', 'P929 Checked Person', 'P929-REF-SECRET', 'enhanced-barred', 'P929 dbs note', 'P929 B Person', 'P929 B summary', 'P929 B note',
-    (string) O_CASE_A, (string) O_VISIT_A, (string) O_CHILD, (string) O_CHECKIN, (string) O_DBS, (string) O_CASE_B, (string) O_VISIT_B, (string) CHK];
+    'P929 C Person', 'P929 C summary', 'Selftest erasure C', 'Selftest erasure B',
+    (string) O_CASE_A, (string) O_VISIT_A, (string) O_CHILD, (string) O_CHECKIN, (string) O_DBS, (string) O_CASE_B, (string) O_VISIT_B, (string) O_CASE_C, (string) CHK];
 $o929Premise = one(
     'SELECT (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `personName` = \'P929 Cared-For Person\' AND `openedByID` = ?) '
     . '+ (SELECT COUNT(*) FROM `tblCareVisit` WHERE `visitID` = ? AND `notes` LIKE \'P929 SECRET NOTE%\' AND `visitedByID` = ?) '
     . '+ (SELECT COUNT(*) FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` WHERE k.`checkinID` = ? AND p.`fullName` = \'P929 Child Name\' AND k.`checkedInByID` = ? AND k.`checkedOutByID` = ?) '
     . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `dbsCheckID` = ? AND `referenceNumber` = \'P929-REF-SECRET\' AND `recordedByID` = ?) '
-    . '+ (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `siteID` = ? AND `openedByID` = ?) AS `n`',
-    'iiiiiiiiiiii', [O_CASE_A, WIL, O_VISIT_A, WIL, O_CHECKIN, WIL, WIL, O_DBS, WIL, O_CASE_B, ORG_B, WIL]
+    . '+ (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `siteID` = ? AND `openedByID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblCareCase` c JOIN `tblSites` s ON s.`siteID` = c.`siteID` JOIN `tblUserSites` us ON us.`siteID` = s.`siteID` AND us.`userID` = ? AND us.`isActive` = 1 WHERE c.`caseID` = ? AND s.`isActive` = 0) '
+    . '+ (SELECT COUNT(*) FROM `tblSites` WHERE `siteID` = ? AND `timezone` = \'America/Nuuk\') AS `n`',
+    'iiiiiiiiiiiiiii', [O_CASE_A, WIL, O_VISIT_A, WIL, O_CHECKIN, WIL, WIL, O_DBS, WIL, O_CASE_B, ORG_B, WIL, WIL, O_CASE_C, ORG_A]
 );
-ok('O1 premise: Wil\'s five kinds of record, and the case in B, are in the database carrying his number beside the other people\'s details, and Wil and Nell can sign in (#929)',
-    (int) ($o929Premise['n'] ?? 0) === 5 && isset($jar['wil'], $jar['nell']) === true, json_encode($o929Premise));
+// PHP's own zone data, asked here too: the plant O10 is only a test if a
+// round trip in Nuuk moves this reading to the next day.
+$o929RoundTrip = (static function (): array {
+    $was = date_default_timezone_get();
+    $out = [];
+    foreach (['America/Nuuk', 'Europe/London'] as $zone) {
+        date_default_timezone_set($zone);
+        $out[$zone] = date('Y-m-d', (int) strtotime('2026-03-28 23:30:00'));
+    }
+    date_default_timezone_set($was);
+
+    return $out;
+})();
+ok('O1 premise: Wil\'s five kinds of record, his case and visit in B, and his case in switched-off C (where he is still an active member) are in the database beside the other people\'s details; A is on America/Nuuk, where a strtotime() round trip moves the 23:30 visit to the next day (in London it would not); Wil and Nell can sign in (#929)',
+    (int) ($o929Premise['n'] ?? 0) === 7 && $o929RoundTrip === ['America/Nuuk' => '2026-03-29', 'Europe/London' => '2026-03-28']
+    && isset($jar['wil'], $jar['nell']) === true, json_encode([$o929Premise, $o929RoundTrip]));
 
 // The list D-142 asks for, written out in the test - words included - so a
 // change to any of them is a change somebody has to make here too.
-$o929Expected = [
-    ['kind' => 'dbs-check-recorded', 'what' => 'DBS (safeguarding) check', 'date' => '2026-01-20 14:00:00', 'organisation' => null,
+$o929About = 'These records carry your name because you made them. They are usually about somebody else - a person being cared for, a person whose DBS check was recorded, or a child - so each is listed only by its kind, the day it was made and the organisation that holds it, and nothing else from the record is given (decision D-142). They keep your name and account number even if you are erased (decisions D-016, D-110 and D-111).';
+$o929Rows = [
+    'dbs-check-recorded' => ['kind' => 'dbs-check-recorded', 'what' => 'DBS (safeguarding) check', 'day' => '2026-01-20', 'organisation' => null,
         'yourPart' => 'Your name and account number are on this record as the person who recorded the check.'],
-    ['kind' => 'care-case-opened', 'what' => 'Pastoral care case', 'date' => '2026-02-01 09:15:00', 'organisation' => 'Selftest erasure A',
+    'care-case-opened' => ['kind' => 'care-case-opened', 'what' => 'Pastoral care case', 'day' => '2026-02-01', 'organisation' => 'Selftest erasure A',
         'yourPart' => 'Your name and account number are on this record as the person who opened the case.'],
-    ['kind' => 'care-visit', 'what' => 'Pastoral care visit', 'date' => '2026-03-29 01:30:00', 'organisation' => 'Selftest erasure A',
+    'care-visit' => ['kind' => 'care-visit', 'what' => 'Pastoral care visit', 'day' => '2026-03-28', 'organisation' => 'Selftest erasure A',
         'yourPart' => 'Your name and account number are on this record as the person who made the visit.'],
-    ['kind' => 'child-checked-in', 'what' => 'Child\'s check-in', 'date' => '2026-04-05 10:00:00', 'organisation' => 'Selftest erasure A',
+    'child-checked-in' => ['kind' => 'child-checked-in', 'what' => 'Child\'s check-in', 'day' => '2026-04-05', 'organisation' => 'Selftest erasure A',
         'yourPart' => 'Your name and account number are on this record as the helper who checked the child in.'],
-    ['kind' => 'child-checked-out', 'what' => 'Child\'s check-out', 'date' => '2026-04-05 12:00:00', 'organisation' => 'Selftest erasure A',
+    'child-checked-out' => ['kind' => 'child-checked-out', 'what' => 'Child\'s check-out', 'day' => '2026-04-05', 'organisation' => 'Selftest erasure A',
         'yourPart' => 'Your name and account number are on this record as the helper who checked the child out.'],
 ];
-$o929NotListedWords = '2 more records of these kinds carry your name in organisations you no longer belong to. They are not listed here; those organisations can tell you about them.';
+$o929NotListed = static fn (int $n): string => $n . ' more records of these kinds carry your name in organisations you cannot open here. They are not listed; the organisation that holds each one can tell you about it.';
+$o929CouldNotRead = 'Some of these records could not be read just now, so this list may be incomplete. Please try again later.';
+/** The whole answer expected, for a list of kinds shown, a count not listed, and the kinds that could not be read. */
+$o929Answer = static function (array $kinds, int $notListed, array $unread) use ($o929About, $o929Rows, $o929NotListed): array {
+    return [
+        'about'          => $o929About,
+        'records'        => array_values(array_map(static fn (string $k): array => $o929Rows[$k], $kinds)),
+        'notListed'      => $notListed,
+        'notListedWords' => $notListed === 0 ? null : $o929NotListed($notListed),
+        'couldNotRead'   => $unread,
+    ];
+};
 
 /** The three things one person is handed: My data's page, its JSON download, and the full data copy. */
 $o929Fetch = static function (string $who) use (&$jar): array {
@@ -4249,17 +4311,32 @@ $o929Fetch = static function (string $who) use (&$jar): array {
         'export' => $export,
         'mine'   => json_decode($json['body'], true)['recordsCarryingYourName'] ?? null,
         'copy'   => json_decode($export['body'], true)['data']['recordsCarryingYourName'] ?? null,
+        'ok'     => $page['status'] === 200 && $json['status'] === 200 && $export['status'] === 200,
     ];
 };
-/** The rows My data DRAWS in the new card, read from the parsed page, each as its four columns' text and its kind. */
-$o929PageRows = static function (string $html): ?array {
+/**
+ * What My data DRAWS in the card, read from the parsed page: each row's kind
+ * and its four columns' text, and the exact text of the three sentences the
+ * card can carry (about, not listed, could not be read). null when the card
+ * is not on the page, [] when it is there more than once.
+ */
+$o929PageView = static function (string $html): ?array {
     $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
     $cards = $doc->querySelectorAll('[data-records-carrying-your-name]');
     if ($cards->length === 0) {
         return null;
     }
+    if ($cards->length !== 1) {
+        return [];
+    }
+    $card  = $cards->item(0);
+    $say   = static function (string $selector) use ($card): ?string {
+        $found = $card->querySelectorAll($selector);
+
+        return $found->length === 1 ? trim((string) preg_replace('/\s+/', ' ', (string) $found->item(0)->textContent)) : ($found->length === 0 ? null : '(more than one)');
+    };
     $rows = [];
-    foreach ($cards->item(0)->querySelectorAll('.portal-data-list > .row') as $row) {
+    foreach ($card->querySelectorAll('.portal-data-list > .row') as $row) {
         $cells = [];
         foreach ($row->children as $cell) {
             $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
@@ -4267,33 +4344,67 @@ $o929PageRows = static function (string $html): ?array {
         $rows[] = [(string) $row->getAttribute('data-record-kind'), $cells];
     }
 
-    return $cards->length === 1 ? $rows : [];
+    return ['rows' => $rows, 'about' => $say('[data-records-about]'), 'notListed' => $say('[data-records-not-listed]'), 'couldNotRead' => $say('[data-records-could-not-read]')];
 };
-$o929PageExpected = array_map(static fn (array $r): array => [$r['kind'], [$r['what'], $r['date'], $r['organisation'] ?? 'Not held against an organisation', $r['yourPart']]], $o929Expected);
+/** What the page must draw for an expected answer. */
+$o929PageFor = static function (array $answer) use ($o929CouldNotRead): array {
+    return [
+        'rows'         => array_map(static fn (array $r): array => [$r['kind'], [$r['what'], $r['day'], $r['organisation'] ?? 'Not held against an organisation', $r['yourPart']]], $answer['records']),
+        'about'        => $answer['about'],
+        'notListed'    => $answer['notListedWords'],
+        'couldNotRead' => $answer['couldNotRead'] === [] ? null : $o929CouldNotRead,
+    ];
+};
+/** Does one person's three answers all equal the expected answer? */
+$o929Matches = static function (array $got, array $answer) use ($o929PageView, $o929PageFor): bool {
+    return $got['ok'] === true && $got['mine'] === $answer && $got['copy'] === $answer && $o929PageView($got['page']['body']) === $o929PageFor($answer);
+};
+$o929Edit = static function (string $rel, string $from, string $to, callable $run) use ($plantFile) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    if (substr_count($original, $from) !== 1) {
+        return null;
+    }
+    file_put_contents($path, str_replace($from, $to, $original));
+    try {
+        return $run();
+    } finally {
+        file_put_contents($path, $original);
+    }
+};
 
-/** Everything section O asserts, as a list of what was WRONG (empty when right), so a planted fault can be asked which observation it turned red. */
-$o929Observe = static function () use ($o929Fetch, $o929PageRows, $o929Expected, $o929PageExpected, $o929NotListedWords, $o929Secrets): array {
+/**
+ * Everything section O asserts, as a list of what was WRONG (empty when right),
+ * so a planted fault can be asked which observation it turned red. Two
+ * failures are DRIVEN inside it every time, so a plant that breaks how they
+ * are answered goes red too:
+ *   - one kind cannot be read: a column of `tblCareVisit` is renamed for
+ *     the moment (error 1054, a real database failure, not 1146);
+ *   - the person's organisations cannot be read: the call is made to throw in
+ *     the running copy (SiteGate asks the same question earlier in the same
+ *     request and its answer is kept, so a database fault would stop the
+ *     request at the gate instead of reaching this).
+ */
+$o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o929PageView, $o929Secrets, $o929Edit, $db): array {
     $wrong = [];
+    $all   = ['dbs-check-recorded', 'care-case-opened', 'care-visit', 'child-checked-in', 'child-checked-out'];
     $wil   = $o929Fetch('wil');
     $nell  = $o929Fetch('nell');
-    foreach (['page', 'json', 'export'] as $part) {
-        if ($wil[$part]['status'] !== 200 || $nell[$part]['status'] !== 200) {
-            $wrong[] = 'a download did not answer';
-            break;
-        }
+    if ($wil['ok'] === false || $nell['ok'] === false) {
+        $wrong[] = 'a download did not answer';
     }
-    $mine = $wil['mine'];
-    if (is_array($mine) === false || ($mine['records'] ?? null) !== $o929Expected
-        || array_keys($mine) !== ['about', 'records', 'notListed', 'notListedWords', 'couldNotRead'] || $mine['couldNotRead'] !== []) {
+    $mine = is_array($wil['mine']) === true ? $wil['mine'] : [];
+    $full = $o929Answer($all, 3, []);
+    if (($mine['records'] ?? null) !== $full['records'] || array_keys($mine) !== array_keys($full) || ($mine['about'] ?? null) !== $full['about']) {
         $wrong[] = 'wil list wrong';
     }
-    if (is_array($mine) === false || ($mine['notListed'] ?? null) !== 2 || ($mine['notListedWords'] ?? null) !== $o929NotListedWords) {
+    if (($mine['notListed'] ?? null) !== 3 || ($mine['notListedWords'] ?? null) !== $full['notListedWords'] || ($mine['couldNotRead'] ?? null) !== []) {
         $wrong[] = 'not-listed count wrong';
     }
-    if ($wil['copy'] === null || $wil['copy'] !== $mine) {
+    if ($wil['copy'] !== $full) {
         $wrong[] = 'wil export list wrong';
     }
-    if ($o929PageRows($wil['page']['body']) !== $o929PageExpected) {
+    if ($o929Matches($wil, $full) === false) {
         $wrong[] = 'wil page list wrong';
     }
     foreach ($o929Secrets as $secret) {
@@ -4304,47 +4415,83 @@ $o929Observe = static function () use ($o929Fetch, $o929PageRows, $o929Expected,
             }
         }
     }
-    $none = ['about' => $nell['mine']['about'] ?? null, 'records' => [], 'notListed' => 0, 'notListedWords' => null, 'couldNotRead' => []];
-    if ($nell['mine'] !== $none || $nell['copy'] !== $none || $o929PageRows($nell['page']['body']) !== null) {
+    $empty = $o929Answer([], 0, []);
+    if ($nell['ok'] === false || $nell['mine'] !== $empty || $nell['copy'] !== $empty || $o929PageView($nell['page']['body']) !== null) {
         $wrong[] = 'nell sees something';
+    }
+
+    // One kind cannot be read: its records are neither listed nor counted,
+    // the kind is named, and the page says so. B's visit drops out of the
+    // count with the rest of the visits (3 becomes 2).
+    $db->query('ALTER TABLE `tblCareVisit` RENAME COLUMN `visitedAt` TO `visitedAtP929`');
+    try {
+        $broken = $o929Fetch('wil');
+    } finally {
+        $db->query('ALTER TABLE `tblCareVisit` RENAME COLUMN `visitedAtP929` TO `visitedAt`');
+    }
+    if ($o929Matches($broken, $o929Answer(['dbs-check-recorded', 'care-case-opened', 'child-checked-in', 'child-checked-out'], 2, ['care-visit'])) === false) {
+        $wrong[] = 'kind failure answered wrong';
+    }
+
+    // The person's organisations cannot be read: fail CLOSED. Nothing held by
+    // an organisation is listed or counted, those four kinds are named, and
+    // the DBS check (no organisation) is still listed.
+    $closed = $o929Edit('_core/GdprEraser.php', 'foreach (Site::organisationsFor($userId, $db) as $org) {',
+        'foreach ((static fn (): array => throw new \RuntimeException(\'p929 planted lookup failure\'))() as $org) {',
+        static fn (): array => $o929Fetch('wil'));
+    if ($closed === null || $o929Matches($closed, $o929Answer(['dbs-check-recorded'], 0, ['care-visit', 'care-case-opened', 'child-checked-in', 'child-checked-out'])) === false) {
+        $wrong[] = 'lookup failure answered wrong';
     }
 
     return array_values(array_unique($wrong));
 };
 
 $o929First = $o929Observe();
-ok('O2 Wil\'s My data JSON download lists exactly his five records - kind, date exactly as stored (the 01:30 reading untouched), organisation (none for a DBS check) and the fixed sentence - oldest first, with nothing else in each entry (#929, D-142)',
-    in_array('wil list wrong', $o929First, true) === false && in_array('a download did not answer', $o929First, true) === false, implode('; ', $o929First));
-ok('O3 the two records in B, where Wil no longer belongs, are COUNTED and not listed, and the sentence says so (#929)',
-    in_array('not-listed count wrong', $o929First, true) === false, implode('; ', $o929First));
-ok('O4 the full data copy (account/data-export) hands over the same list as My data (#929)',
-    in_array('wil export list wrong', $o929First, true) === false, implode('; ', $o929First));
-ok('O5 the My data PAGE draws the same five rows, each with its kind, date, organisation and sentence (#929)',
-    in_array('wil page list wrong', $o929First, true) === false, implode('; ', $o929First));
-ok('O6 nothing about the other people reaches Wil - no cared-for person\'s or child\'s name, no notes, no case summary or category, no pickup name, no badge code, no DBS reference, type or subject, and no record number - anywhere in the page, the My data JSON or the full data copy (#929, D-142)',
-    in_array('other person leaked', $o929First, true) === false, implode('; ', $o929First));
+$o929Is = static fn (string $what): bool => in_array($what, $o929First, true) === false && in_array('a download did not answer', $o929First, true) === false;
+ok('O2 Wil\'s My data JSON download lists exactly his five records - kind, the DAY only (cut from the stored text, so the 23:30 visit on the night Nuuk\'s clocks go forward stays on 28 March), organisation (none for a DBS check) and the fixed sentence - oldest first, with nothing else in each entry and the "about" words exactly as written here (#929, D-142)',
+    $o929Is('wil list wrong'), implode('; ', $o929First));
+ok('O3 the three records in organisations Wil cannot open here - B, where he is no member, and C, switched off though he is still a member - are COUNTED and not listed, and the sentence is exactly the one true of both (#929, D-151)',
+    $o929Is('not-listed count wrong'), implode('; ', $o929First));
+ok('O4 the full data copy (account/data-export) hands over the same answer as My data (#929)',
+    $o929Is('wil export list wrong'), implode('; ', $o929First));
+ok('O5 the My data PAGE draws the same five rows, and its "about" and "not listed" sentences exactly (#929)',
+    $o929Is('wil page list wrong'), implode('; ', $o929First));
+ok('O6 nothing from the records reaches Wil beyond kind, day and organisation - no cared-for person\'s or child\'s name, no notes, no case summary or category, no pickup name, no badge code, no DBS reference, type or subject, no time of day, no record number, and not even the NAME of an organisation he cannot open - anywhere in the page, the My data JSON or the full data copy (#929, D-142, D-151)',
+    $o929Is('other person leaked'), implode('; ', $o929First));
 ok('O7 Nell, who made none of these records, is handed an empty list in both downloads and sees no such card on her page (#929)',
-    in_array('nell sees something', $o929First, true) === false, implode('; ', $o929First));
+    $o929Is('nell sees something'), implode('; ', $o929First));
+ok('O8 DRIVEN: when one kind cannot be read (a real database error, not "no such table"), that kind is named as unread in both downloads, nothing of it is listed or counted, and the page says "could not be read" in exactly its words (#929)',
+    $o929Is('kind failure answered wrong'), implode('; ', $o929First));
+ok('O9 DRIVEN: when Wil\'s organisations cannot be read, it fails CLOSED - nothing held by an organisation is listed or counted, those kinds are named as unread, the DBS check (no organisation) is still listed, and the page says so (#929)',
+    $o929Is('lookup failure answered wrong'), implode('; ', $o929First));
 
 // Planted in the RUNNING copy (no opcache: see the server's start), each must
 // turn its own observation red, and the file is put back byte for byte.
 $o929Plants = [
-    'O8 the other person\'s NAME read and handed over (the case\'s personName carried into each entry)' => [
+    'O10 the day worked out through a strtotime() round trip on the organisation\'s clock, not cut from the stored text' => [
+        '_core/GdprEraser.php', ["substr((string) \$row['onDate'], 0, 10)" => "date('Y-m-d', (int) strtotime((string) \$row['onDate']))"], 'wil list wrong'],
+    'O11 the other person\'s NAME read and handed over (the case\'s personName carried into each entry)' => [
         '_core/GdprEraser.php', [
             "'sql'      => 'SELECT c.`openedAt` AS `onDate`, " => "'sql'      => 'SELECT c.`personName`, c.`openedAt` AS `onDate`, ",
             "'what'         => \$spec['what'],"                    => "'what'         => \$spec['what'] . json_encode(\$row),",
         ], 'other person leaked'],
-    'O9 the record\'s NUMBER read and handed over (the visit\'s visitID carried into each entry)' => [
+    'O12 the record\'s NUMBER read and handed over (the visit\'s visitID carried into each entry)' => [
         '_core/GdprEraser.php', [
             "'sql'      => 'SELECT v.`visitedAt` AS `onDate`, " => "'sql'      => 'SELECT v.`visitID`, v.`visitedAt` AS `onDate`, ",
             "'what'         => \$spec['what'],"                   => "'what'         => \$spec['what'] . json_encode(\$row),",
         ], 'other person leaked'],
-    'O10 ANOTHER organisation\'s records listed (the own-organisations test switched off)' => [
+    'O13 ANOTHER organisation\'s records listed (the own-organisations test switched off)' => [
         '_core/GdprEraser.php', ['if ($own !== null && $siteId !== null && isset($own[$siteId]) === false) {' => 'if (false) {'], 'wil list wrong'],
-    'O11 a record TYPE missing (no check-out is ever found)' => [
+    'O14 a record TYPE missing (no check-out is ever found)' => [
         '_core/GdprEraser.php', ["WHERE k.`checkedOutByID` = ?'," => "WHERE k.`checkedOutByID` = ? AND 1 = 0',"], 'wil list wrong'],
-    'O12 the full data copy no longer asks for the list' => [
+    'O15 the full data copy no longer asks for the list' => [
         '_apps/auth/account/data-export.php', ["'recordsCarryingYourName' => GdprEraser::recordsCarryingYourName(\$userId)," => ''], 'wil export list wrong'],
+    'O16 the organisations lookup fails OPEN (a failure is taken as "every organisation")' => [
+        '_core/GdprEraser.php', ["\$own        = [];\n                \$ownUnknown = true;" => '$own = null;'], 'lookup failure answered wrong'],
+    'O17 every read failure answered as "none", as if the table were missing' => [
+        '_core/GdprEraser.php', ['if ($problem instanceof \mysqli_sql_exception && $problem->getCode() === 1146) {' => 'if (true) {'], 'kind failure answered wrong'],
+    'O18 the page\'s "could not be read" sentence deleted' => [
+        '_apps/account/my-data.php', ['<p class="small text-warning mt-2 mb-0" data-records-could-not-read>Some of these records could not be read just now, so this list may be incomplete. Please try again later.</p>' => ''], 'kind failure answered wrong'],
 ];
 foreach ($o929Plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);
@@ -4367,7 +4514,8 @@ foreach ($o929Plants as $label => [$rel, $swaps, $expect]) {
         ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
 }
 $o929Again = $o929Observe();
-ok('O13 with every plant taken out again, the same observations are all green (#929)', $o929Again === [], implode('; ', $o929Again));
+ok('O19 with every plant taken out again, the same observations are all green, the driven failures included (#929)', $o929Again === [], implode('; ', $o929Again));
+q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$o929ZoneWas, ORG_A]);
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
@@ -4391,6 +4539,7 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblCareCase WHERE caseID BETWEEN 917230 AND 917239) '
     . '+ (SELECT COUNT(*) FROM tblKidCheckins WHERE checkinID BETWEEN 917230 AND 917239) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID BETWEEN 917230 AND 917239) '
+    . '+ (SELECT COUNT(*) FROM tblSites WHERE siteID = ' . ORG_C . ') '
     . '+ (SELECT COUNT(*) FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999) '
     // Section N (#964).
     . '+ (SELECT COUNT(*) FROM tblEvents WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR eventID BETWEEN 917300 AND 917399) '

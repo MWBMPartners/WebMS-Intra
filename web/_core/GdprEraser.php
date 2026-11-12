@@ -4217,57 +4217,81 @@ class GdprEraser
 
     /**
      * 🧾 The records that carry this person's name as the WORKER who made
-     *    them, listed WITHOUT anything about the other person (#929, the
-     *    owner's decision D-142, 11 November 2026).
+     *    them, listed WITHOUT anything else from the record (#929, the
+     *    owner's decisions D-142 and D-151, 11 and 12 November 2026).
      *
      * WHY THIS EXISTS. Since #703 (D-016, D-110, D-111, D-112, D-113) a
      * pastoral visit, a pastoral care case, a DBS (safeguarding) check and a
      * child's check-in or check-out KEEP the name and account number of the
      * worker who made them, even after that worker is erased. Those records
      * are therefore part of what the portal holds about the worker, and a
-     * worker's own data download left them out. But each one is ABOUT
-     * somebody else - the person being cared for, or a child - so handing the
-     * worker the record would hand them a third party's details.
+     * worker's own data download left them out. But almost every one is ABOUT
+     * somebody else - the person being cared for, the person whose DBS check
+     * it is, or a child - so handing the worker the record would hand them a
+     * third party's details. (Not always somebody else: under D-112 a worker
+     * can make a visit on their own case, or record their own DBS check. The
+     * rule below is the same for those; the words in `about` say "usually".)
      *
      * D-142's answer, and the whole rule here: list each record by its KIND,
-     * its DATE and the fixed sentence saying the person's name is on it. Never
-     * the other person's name, never notes, never any text somebody typed,
-     * and - decided in #929 - never the record's NUMBER either: a number lets
-     * somebody who still has access (or anybody the list is passed to) open
-     * that exact record on its page, or match it against another copy, and
-     * D-142 asks for nothing that leads to the other person. A case's
-     * category, a visit's kind and a DBS check's type and dates are left out
-     * for the same reason: each says something about the other person.
+     * its DATE and a fixed sentence saying the person's name is on it.
+     *   - Never the other person's name, never notes, never any text somebody
+     *     typed. Each query below SELECTS only the date and the organisation,
+     *     so nothing else can leak however the rest of this method changes.
+     *   - Never the record's NUMBER (decided in #929): a number lets whoever
+     *     holds the list - the worker, or anybody it is passed to - open that
+     *     exact record on its page, or match it against another copy.
+     *   - The DAY only, never the time to the second (#929 check round 1).
+     *     D-142 says "its date", and a time to the second next to the
+     *     organisation's name nearly identifies the record by itself - the
+     *     same reason the number is left out. The day is the first ten
+     *     characters of the stored reading, cut as TEXT: it is never turned
+     *     into a moment, because nothing records which clock it was read on,
+     *     and on the night the clocks go forward at 23:00 (America/Nuuk) a
+     *     round trip through strtotime() moves a 23:30 reading to the NEXT
+     *     day. Section O of `tools/erasure-pages-selftest.php` plants exactly
+     *     that round trip and goes red.
+     *   - A case's category, a visit's kind and a DBS check's type and dates
+     *     are left out too: each says something about the other person.
      *
      * THE ONE PLACE these records are listed and worded. Both downloads ask it
      * - My data (`account/my-data`, page and JSON) and the full data copy
      * (`account/data-export`) - so the two cannot disagree. The reason a
      * record is KEPT is still the instruction line in catalogue(), shown
      * beside the counts by inventory() and worded by inventoryWords().
+     * `tools/audit-checks/check_worker_records_listed.py` fails when a
+     * catalogue() "retain" instruction on a worker's column (`...ByID`) is not
+     * listed here, or when this lists a column that is not such an
+     * instruction.
      *
-     * THE DATE IS AS STORED. Each column is a DATETIME the database filled in
-     * when the record was made; mysqli hands it back as text and it is passed
-     * through as that text. It is never turned into a moment or moved to
-     * another time zone, because nothing records which clock it was read on.
+     * WHICH ORGANISATIONS (D-151). Only records in organisations the person
+     * can open here are listed - the same rule as `SiteGate`
+     * (`Site::organisationsFor()`: an ACTIVE membership of an ACTIVE
+     * organisation; with one organisation only, every record is). A record
+     * anywhere else - an organisation the person has left, or one that has
+     * been switched off while they are still a member - is COUNTED, never
+     * listed: `notListed` holds the count and `notListedWords` says it, in
+     * words true of both cases. A DBS check is listed WHATEVER the
+     * organisation, because `tblDbsChecks` has no organisation column at all
+     * (it is about a person, not an organisation - see
+     * `admin/safeguarding/dbs.php`); working one out from the checked person's
+     * memberships would read that person's details to decide, which is the
+     * thing this method exists not to do.
      *
-     * WHICH ORGANISATIONS. Only records in the person's OWN organisations are
-     * listed - the same rule as `SiteGate` (`Site::organisationsFor()`; with
-     * one organisation only, every record is). A record in an organisation
-     * the person no longer belongs to is COUNTED, never listed, so nothing is
-     * silently left out: `notListed` holds that count and `notListedWords`
-     * says it. A DBS check has NO organisation column (it is about a person,
-     * not an organisation - see `admin/safeguarding/dbs.php`), so DBS checks
-     * are always listed, with `organisation` null; working one out from the
-     * checked person's memberships would read that person's details to
-     * decide, which is the thing this method exists not to do.
+     * WHEN SOMETHING CANNOT BE READ, nothing is answered as "none":
+     *   - The person's organisations cannot be read: records held by an
+     *     organisation are neither listed nor counted (listing them would
+     *     hand over another organisation's records - the fail-OPEN direction),
+     *     and their kinds go into `couldNotRead`. DBS checks, which belong to
+     *     no organisation, are still listed.
+     *   - One kind cannot be read: that kind goes into `couldNotRead`. The
+     *     ONE exception is error 1146, "no such table": the app that makes
+     *     those records is not installed, so there are none.
+     * The page says so whenever `couldNotRead` is not empty.
      *
      * WHAT IT CANNOT DO: it matches on the account NUMBER only. A record whose
-     * number was emptied before #703 kept names carries no number to match. A
-     * kind whose table is missing (the app not installed) is skipped; any
-     * other failure to read is REPORTED in `couldNotRead`, never answered as
-     * "none".
+     * number was emptied before #703 kept names carries no number to match.
      *
-     * @return array{about: string, records: list<array{kind: string, what: string, date: string|null, organisation: string|null, yourPart: string}>, notListed: int, notListedWords: string|null, couldNotRead: list<string>}
+     * @return array{about: string, records: list<array{kind: string, what: string, day: string|null, organisation: string|null, yourPart: string}>, notListed: int, notListedWords: string|null, couldNotRead: list<string>}
      */
     public static function recordsCarryingYourName(int $userId): array
     {
@@ -4276,11 +4300,13 @@ class GdprEraser
         // 🗂️ One entry per kind of record. `sql` returns the date as stored
         //    (`onDate`) and the record's organisation (`siteID`, `siteName`),
         //    and NOTHING ELSE - no number, no name, no text. Every identifier
-        //    is backticked (the reserved-word rule, #718).
+        //    is backticked (the reserved-word rule, #718). `heldBy` says
+        //    whether the record belongs to an organisation.
         $kinds = [
             'care-visit' => [
                 'what'     => 'Pastoral care visit',
                 'yourPart' => 'Your name and account number are on this record as the person who made the visit.',
+                'heldBy'   => true,
                 'sql'      => 'SELECT v.`visitedAt` AS `onDate`, c.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
                     . 'FROM `tblCareVisit` v JOIN `tblCareCase` c ON c.`caseID` = v.`caseID` '
                     . 'LEFT JOIN `tblSites` s ON s.`siteID` = c.`siteID` WHERE v.`visitedByID` = ?',
@@ -4288,19 +4314,23 @@ class GdprEraser
             'care-case-opened' => [
                 'what'     => 'Pastoral care case',
                 'yourPart' => 'Your name and account number are on this record as the person who opened the case.',
+                'heldBy'   => true,
                 'sql'      => 'SELECT c.`openedAt` AS `onDate`, c.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
                     . 'FROM `tblCareCase` c LEFT JOIN `tblSites` s ON s.`siteID` = c.`siteID` WHERE c.`openedByID` = ?',
             ],
             'dbs-check-recorded' => [
                 'what'     => 'DBS (safeguarding) check',
                 'yourPart' => 'Your name and account number are on this record as the person who recorded the check.',
-                // No organisation column: see "WHICH ORGANISATIONS" above.
+                // `tblDbsChecks` has NO organisation column, so a DBS check is
+                // listed whatever the organisation: see "WHICH ORGANISATIONS".
+                'heldBy'   => false,
                 'sql'      => 'SELECT d.`recordedAt` AS `onDate`, NULL AS `siteID`, NULL AS `siteName` '
                     . 'FROM `tblDbsChecks` d WHERE d.`recordedByID` = ?',
             ],
             'child-checked-in' => [
                 'what'     => 'Child\'s check-in',
                 'yourPart' => 'Your name and account number are on this record as the helper who checked the child in.',
+                'heldBy'   => true,
                 // The child's profile is joined for its ORGANISATION only.
                 'sql'      => 'SELECT k.`checkedInAt` AS `onDate`, p.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
                     . 'FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` '
@@ -4309,6 +4339,7 @@ class GdprEraser
             'child-checked-out' => [
                 'what'     => 'Child\'s check-out',
                 'yourPart' => 'Your name and account number are on this record as the helper who checked the child out.',
+                'heldBy'   => true,
                 'sql'      => 'SELECT k.`checkedOutAt` AS `onDate`, p.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
                     . 'FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` '
                     . 'LEFT JOIN `tblSites` s ON s.`siteID` = p.`siteID` WHERE k.`checkedOutByID` = ?',
@@ -4316,10 +4347,12 @@ class GdprEraser
         ];
 
         $out = [
-            'about'          => 'These records are about somebody else - a person being cared for, a person whose DBS check '
-                . 'was recorded, or a child - and they carry your name because you made them. Each is listed by its '
-                . 'kind, its date as the record stores it, and the organisation that holds it; nothing about the '
-                . 'other person is given (decision D-142). They keep your name and account number even if you are '
+            // "Usually" because of D-112: a worker's own case, or a DBS check
+            // they recorded for themselves, is about them.
+            'about'          => 'These records carry your name because you made them. They are usually about somebody '
+                . 'else - a person being cared for, a person whose DBS check was recorded, or a child - so each is '
+                . 'listed only by its kind, the day it was made and the organisation that holds it, and nothing else '
+                . 'from the record is given (decision D-142). They keep your name and account number even if you are '
                 . 'erased (decisions D-016, D-110 and D-111).',
             'records'        => [],
             'notListed'      => 0,
@@ -4327,9 +4360,11 @@ class GdprEraser
             'couldNotRead'   => [],
         ];
 
-        // 🏢 The person's own organisations, asked exactly as SiteGate asks.
-        //    null means "every organisation": one organisation only.
-        $own = null;
+        // 🏢 The organisations the person can open here, asked exactly as
+        //    SiteGate asks. null means "every organisation": one only.
+        //    `$ownUnknown` is the fail-CLOSED answer when they cannot be read.
+        $own        = null;
+        $ownUnknown = false;
         if (Site::isMultisiteEnabled() === true) {
             try {
                 $own = [];
@@ -4337,31 +4372,38 @@ class GdprEraser
                     $own[(int) $org['siteID']] = true;
                 }
             } catch (\Throwable $problem) {
-                // Not knowing is not "none of them": nothing is listed, and
-                // the page says it could not be read.
-                $out['couldNotRead'] = array_keys($kinds);
-
-                return $out;
+                $own        = [];
+                $ownUnknown = true;
             }
         }
 
         foreach ($kinds as $kind => $spec) {
+            if ($ownUnknown === true && $spec['heldBy'] === true) {
+                // Not knowing which organisations are the person's is not
+                // "all of them" and not "none of them": say it, list nothing.
+                $out['couldNotRead'][] = $kind;
+                continue;
+            }
+            $rows = null;
             try {
                 $stmt = $db->prepare($spec['sql']);
-                if ($stmt === false) {
-                    $out['couldNotRead'][] = $kind;
+                if ($stmt !== false) {
+                    $stmt->bind_param('i', $userId);
+                    $result = $stmt->execute() === true ? $stmt->get_result() : false;
+                    $rows   = $result === false ? null : $result->fetch_all(MYSQLI_ASSOC);
+                    $stmt->close();
+                }
+            } catch (\Throwable $problem) {
+                // 1146: the table does not exist, because the app that makes
+                // these records is not installed. Then there are none. Any
+                // other failure is reported below, never answered as "none".
+                if ($problem instanceof \mysqli_sql_exception && $problem->getCode() === 1146) {
                     continue;
                 }
-                $stmt->bind_param('i', $userId);
-                $stmt->execute();
-                $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-                $stmt->close();
-            } catch (\mysqli_sql_exception $problem) {
-                // 1146: the table does not exist, because the app that makes
-                // these records is not installed. Then there are none.
-                if ($problem->getCode() !== 1146) {
-                    $out['couldNotRead'][] = $kind;
-                }
+                $rows = null;
+            }
+            if ($rows === null) {
+                $out['couldNotRead'][] = $kind;
                 continue;
             }
             foreach ($rows as $row) {
@@ -4373,7 +4415,8 @@ class GdprEraser
                 $out['records'][] = [
                     'kind'         => $kind,
                     'what'         => $spec['what'],
-                    'date'         => $row['onDate'] === null ? null : (string) $row['onDate'],
+                    // The DAY, cut from the stored text: see "The DAY only".
+                    'day'          => $row['onDate'] === null ? null : substr((string) $row['onDate'], 0, 10),
                     'organisation' => $siteId === null ? null : (string) ($row['siteName'] ?? ''),
                     'yourPart'     => $spec['yourPart'],
                 ];
@@ -4383,17 +4426,22 @@ class GdprEraser
         // Oldest first; a record with no date goes last. The kind breaks a
         // tie, so the order never depends on the database's own.
         usort($out['records'], static function (array $a, array $b): int {
-            $byDate = strcmp((string) ($a['date'] ?? '9999'), (string) ($b['date'] ?? '9999'));
+            $byDay = strcmp((string) ($a['day'] ?? '9999'), (string) ($b['day'] ?? '9999'));
 
-            return $byDate !== 0 ? $byDate : strcmp($a['kind'], $b['kind']);
+            return $byDay !== 0 ? $byDay : strcmp($a['kind'], $b['kind']);
         });
 
+        // D-151: counted, with a sentence saying who can tell them. Worded to
+        // be true both for an organisation the person has LEFT and for one
+        // that has been SWITCHED OFF while they are still a member (#929
+        // check round 1: "organisations you no longer belong to" was untrue
+        // of the second).
         if ($out['notListed'] > 0) {
             $out['notListedWords'] = $out['notListed'] === 1
-                ? '1 more record of these kinds carries your name in an organisation you no longer belong to. It is not '
-                    . 'listed here; that organisation can tell you about it.'
-                : $out['notListed'] . ' more records of these kinds carry your name in organisations you no longer belong '
-                    . 'to. They are not listed here; those organisations can tell you about them.';
+                ? '1 more record of these kinds carries your name in an organisation you cannot open here. It is not '
+                    . 'listed; the organisation that holds it can tell you about it.'
+                : $out['notListed'] . ' more records of these kinds carry your name in organisations you cannot open '
+                    . 'here. They are not listed; the organisation that holds each one can tell you about it.';
         }
 
         return $out;

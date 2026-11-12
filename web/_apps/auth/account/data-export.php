@@ -64,7 +64,7 @@
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
  *   tblCareVisit, tblCareCase, tblDbsChecks, tblKidCheckins (only a LIST of
  *                          the records that carry your name as the worker who
- *                          made them: kind, date and organisation, never the
+ *                          made them: kind, day and organisation, never the
  *                          other person's details — #929, D-142)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
@@ -612,9 +612,9 @@ $payload = [
         // 🧾 #929 (the owner's decision D-142): the pastoral visits, care
         //    cases, DBS checks and children's check-ins and check-outs that
         //    carry this person's name as the WORKER who made them. Each is
-        //    about somebody else, so it is LISTED - kind, date as stored, and
-        //    the organisation - and nothing about the other person is handed
-        //    over: no name, no notes, no record number. Asked of
+        //    usually about somebody else, so it is LISTED - kind, the day it
+        //    was made, and the organisation - and nothing else from the record
+        //    is handed over: no name, no notes, no time, no record number. Asked of
         //    GdprEraser::recordsCarryingYourName(), the ONE place they are
         //    found and worded, which the My data page asks too.
         'recordsCarryingYourName' => GdprEraser::recordsCarryingYourName($userId),

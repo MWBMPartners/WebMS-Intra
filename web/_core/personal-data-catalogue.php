@@ -2110,9 +2110,10 @@ return [
     ],
     'tblKidCheckins' => [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
-        //    record sees it LISTED - kind, date and organisation, nothing about
-        //    the other person - in their own downloads, by
-        //    GdprEraser::recordsCarryingYourName(). Add a new worker column there too.
+        //    record sees it LISTED - kind, day and organisation, nothing else -
+        //    in their own downloads, by GdprEraser::recordsCarryingYourName().
+        //    A new kept worker column goes there too;
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
         // 🧾 'retain' SINCE #703 (the owner's decision D-111, 10 November 2026,
         //    extending D-016). It said 'unlink' and both helpers were detached;
         //    D-111 keeps them, by number and by name (`checkedInByName`,
@@ -2184,9 +2185,10 @@ return [
 
     'tblCareCase' => [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
-        //    record sees it LISTED - kind, date and organisation, nothing about
-        //    the other person - in their own downloads, by
-        //    GdprEraser::recordsCarryingYourName(). Add a new worker column there too.
+        //    record sees it LISTED - kind, day and organisation, nothing else -
+        //    in their own downloads, by GdprEraser::recordsCarryingYourName().
+        //    A new kept worker column goes there too;
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
         'decision' => 'unlink',
         // 🧾 #703, the owner's decision D-110 (10 November 2026, extending
         //    D-016): who OPENED a case is kept when that worker is erased, by
@@ -2212,9 +2214,10 @@ return [
     ],
     'tblCareVisit' => [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
-        //    record sees it LISTED - kind, date and organisation, nothing about
-        //    the other person - in their own downloads, by
-        //    GdprEraser::recordsCarryingYourName(). Add a new worker column there too.
+        //    record sees it LISTED - kind, day and organisation, nothing else -
+        //    in their own downloads, by GdprEraser::recordsCarryingYourName().
+        //    A new kept worker column goes there too;
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
         'decision' => 'unlink',
         // 🧾 WHO MADE THE VISIT IS KEPT (#703, the owner's decision D-016,
         //    3 November 2026, which "rules out unlinking the worker"). When a
@@ -2270,9 +2273,10 @@ return [
     ],
     'tblDbsChecks' => [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
-        //    record sees it LISTED - kind, date and organisation, nothing about
-        //    the other person - in their own downloads, by
-        //    GdprEraser::recordsCarryingYourName(). Add a new worker column there too.
+        //    record sees it LISTED - kind, day and organisation, nothing else -
+        //    in their own downloads, by GdprEraser::recordsCarryingYourName().
+        //    A new kept worker column goes there too;
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
         'decision' => 'retain',
         // 🧾 WHO RECORDED THE CHECK IS KEPT (#703, the owner's decision D-016,
         //    3 November 2026). From 11 October 2026 until #703 `recordedByID`
