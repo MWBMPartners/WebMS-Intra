@@ -9,8 +9,8 @@
  * auto-flips to `funded` and a thank-you email goes out to contributors who
  * supplied an address.
  *
- * Amounts in pence (minor units) — reuses Giving::parseAmount / formatAmount
- * when the Giving app is installed.
+ * Amounts in pence (minor units). A typed amount is read by
+ * Currency::parseAmount() (#1004); Giving::formatAmount writes one.
  *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/267

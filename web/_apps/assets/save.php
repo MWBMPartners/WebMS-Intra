@@ -132,14 +132,25 @@ $intOrNull = static function (string $key): ?int {
     $v = trim((string) ($_POST[$key] ?? ''));
     return $v === '' ? null : (int) $v;
 };
-$pence = static function (string $key): ?int {
-    $v = trim((string) ($_POST[$key] ?? ''));
-    if ($v === '' || is_numeric($v) === false) {
+$pence = static function (string $key, string $label) use ($fail): ?int {
+    $posted = $_POST[$key] ?? '';
+    $v      = is_string($posted) === true ? trim($posted) : '';
+    if ($v === '') {
         return null;
     }
-    // 💷 Pounds → pence (house money convention, #266) — round to avoid
-    // float-precision artefacts (e.g. 19.99 * 100 = 1998.9999999999998).
-    return (int) round(((float) $v) * 100);
+    // 💷 Whole units → hundredths through the ONE converter,
+    //    Currency::parseAmount() (#1004), never a float. The old
+    //    `(int) round((float) $v * 100)` wrapped an absurd figure into a small
+    //    or negative one, and text that was not a figure became "no value",
+    //    which on an edit CLEARED the stored amount without a word. A refused
+    //    figure now goes back to the form, with the reason, and nothing is
+    //    saved. These are number boxes, so no currency symbol is passed.
+    $hundredths = \Portal\Core\Currency::parseAmount($v, '');
+    if (is_string($hundredths) === true) {
+        $fail($label . ': ' . $hundredths . ' Nothing was saved.');
+    }
+
+    return $hundredths;
 };
 $dateOrNull = static function (string $key): ?string {
     $v = trim((string) ($_POST[$key] ?? ''));
@@ -274,7 +285,7 @@ $data = [
     'status'             => $enumOrDefault('status', AssetRegister::ASSET_STATUSES, 'in-service'),
     'purchaseDate'       => $dateOrNull('purchaseDate'),
     'purchaseStore'      => $str('purchaseStore', 255),
-    'purchaseCostPence'  => $pence('purchaseCostPounds'),
+    'purchaseCostPence'  => $pence('purchaseCostPounds', 'Purchase cost'),
     'currency'           => $currency,
     'warrantyExpiry'     => $dateOrNull('warrantyExpiry'),
     'warrantyDetails'    => $str('warrantyDetails', 500),
@@ -288,7 +299,7 @@ $data = [
     'accessUrl'          => $accessUrl,
     'depreciationMethod' => $enumOrDefault('depreciationMethod', AssetRegister::DEPRECIATION_METHODS, 'none'),
     'usefulLifeMonths'   => $intOrNull('usefulLifeMonths'),
-    'salvageValuePence'  => $pence('salvageValuePounds'),
+    'salvageValuePence'  => $pence('salvageValuePounds', 'Salvage value'),
     // 🛡️ Insurance (#404 columns, first persisted this pass — #408). Same
     // pounds→pence/date coercion helpers as every other money/date field
     // in this file — insuredValuePence follows the house pence convention
@@ -296,7 +307,7 @@ $data = [
     // purchaseDate/warrantyExpiry above.
     'insurerName'           => $str('insurerName', 150),
     'insurancePolicyNumber' => $str('insurancePolicyNumber', 100),
-    'insuredValuePence'     => $pence('insuredValuePounds'),
+    'insuredValuePence'     => $pence('insuredValuePounds', 'Insured value'),
     'insuranceRenewalDate'  => $dateOrNull('insuranceRenewalDate'),
     'isConfidential'     => $bool01('isConfidential'),
     'publicPageEnabled'  => $bool01('publicPageEnabled'),

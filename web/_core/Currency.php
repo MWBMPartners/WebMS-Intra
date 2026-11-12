@@ -25,6 +25,8 @@
  *   ofOrganisation(), ofSite()    is in (its own, else the installation's, else
  *                                 none) — exactly as Countries does for the
  *                                 country (#942).
+ *   parseAmount(),                a TYPED amount read strictly into whole
+ *   parseHundredths(), …          hundredths, or refused with the reason (#1004).
  *   addTo(), totalsWords()        totals kept and written PER CURRENCY, never
  *                                 added across currencies (D-139).
  *   unlabelledCount(),            rows saved with no currency (''), and labelling
@@ -490,6 +492,226 @@ final class Currency
         $sign  = $value < 0 ? '-' : '';
 
         return $sign . self::prefix($code) . number_format(abs($value), 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // 🔢 A typed amount → a whole number of hundredths: THE ONE CONVERTER (#1004)
+    // -------------------------------------------------------------------------
+
+    /**
+     * 💯 The largest number a signed INT column holds: 2,147,483,647. Every
+     * `…Pence` money column in web/_sql/full_schema.sql is a signed INT, so
+     * this is the most hundredths any of them can store (21,474,836.47).
+     */
+    public const INT_COLUMN_MAX = 2147483647;
+
+    /**
+     * 💯 The largest amount a DECIMAL(10,2) column holds, in hundredths
+     * (99,999,999.99). The offering-count totals and named envelopes are kept
+     * that way (tblCountSessions, tblCountEnvelopes).
+     */
+    public const DECIMAL_10_2_MAX = 9999999999;
+
+    /** What parseAmount() answers for an empty box. A caller whose box is optional tests for '' first. */
+    public const REFUSED_EMPTY = 'No amount was entered.';
+
+    /**
+     * 🔢 THE ONE CONVERTER from a typed amount ("12.50", "£1,234.50", "-3")
+     * to a whole number of hundredths of `$currency`. It answers the number
+     * (an int), or a sentence saying truthfully why the text was REFUSED (a
+     * string). Nothing is ever guessed, rounded or clamped.
+     *
+     * WHY IT EXISTS (#1004). Every money box used to do
+     * `(int) round((float) $typed * 100)`. A float holds only about sixteen
+     * significant figures, and `(int)` of a float outside PHP's integer range
+     * is not an error, only a logged warning, so an absurd amount WRAPPED:
+     * measured on PHP 8.5, "184467440737095557.12" became 4096 and was stored
+     * silently as 40.96; "1e17" became negative, so a page said "Amount cannot
+     * be negative", which was untrue; "-1e30" became a large positive number.
+     * Other boxes first stripped every character that was not a figure or a
+     * point, so "1e5" became 15.00, "-5" became 5.00 and "12,50" (a decimal
+     * comma) became 1,250.00. This reads the TEXT, figure by figure, and never
+     * goes through a float.
+     *
+     * WHAT IT ACCEPTS, decided deliberately (each is in tools/money-amount-selftest.php):
+     *   - figures, with at most ONE decimal point and at most TWO figures after
+     *     it ("12", "12.5", "12.50", ".50", "12."). Every currency the portal
+     *     can store is counted in hundredths (see "Hundredths" in the file
+     *     header), so two places is all a stored amount can carry. "12.345" is
+     *     REFUSED rather than rounded: rounding a figure somebody typed is
+     *     deciding for them;
+     *   - commas as THOUSANDS separators, only in their right places
+     *     ("1,234.50", "1,234,567"). The giving and project boxes are plain text
+     *     and people type commas; bank statements write them. A comma anywhere
+     *     else is refused, so "12,50" is never read as 1,250.00;
+     *   - this currency's OWN symbol or code in front ("£12.50", "CHF 12.50",
+     *     "-£3.00", "£-3.00"), because the giving pages and bank statements
+     *     have always been allowed to carry one. ANOTHER currency's symbol is
+     *     refused ("$12.50" for pounds), where the old strip-everything code
+     *     took it as pounds. With no currency known (''), no symbol at all;
+     *   - a leading minus, ONLY when the caller passes `$allowNegative`;
+     *   - spaces at either end. A space INSIDE the number is refused.
+     * WHAT IT REFUSES: an empty box, a power of ten ("1e17"), a "+" sign,
+     * anything else that is not a figure, more than two decimals, a misplaced
+     * comma, a negative where none is allowed, and anything above `$max`,
+     * which the caller sets to what its column holds (INT_COLUMN_MAX, the
+     * default; DECIMAL_10_2_MAX for a DECIMAL(10,2) column) or to a lower
+     * limit of its own. The size test compares the FIGURES as text, so it is
+     * exact at any length. A currency not counted in hundredths is refused
+     * outright (whyNotChoosable()): its amounts cannot be stored correctly.
+     *
+     * The sentence names no box: a caller with several puts the box's name in
+     * front ("Purchase cost: …"). It uses nothing but PHP.
+     */
+    public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false): int|string
+    {
+        $code = strtoupper(trim($currency));
+        if (isset(self::NOT_HUNDREDTHS[$code]) === true) {
+            return self::whyNotChoosable($code);
+        }
+        $text = trim($typed);
+        if ($text === '') {
+            return self::REFUSED_EMPTY;
+        }
+
+        // ➖ A minus sign and this currency's own symbol or code, in either
+        //    order: "-£3.00" (how format() writes it) and "£-3.00" (how the old
+        //    copies did). The longest prefix is tried first, so "CA$" before "$".
+        $negative = false;
+        if (str_starts_with($text, '-') === true) {
+            $negative = true;
+            $text     = substr($text, 1);
+        }
+        $prefixes = [];
+        if ($code !== '') {
+            $prefixes[] = $code;
+            if (self::symbol($code) !== '') {
+                $prefixes[] = self::symbol($code);
+            }
+            usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+        }
+        foreach ($prefixes as $prefix) {
+            if (str_starts_with($text, $prefix) === true) {
+                $text = ltrim(substr($text, strlen($prefix)), ' ');
+                break;
+            }
+        }
+        if ($negative === false && str_starts_with($text, '-') === true) {
+            $negative = true;
+            $text     = substr($text, 1);
+        }
+
+        // 🔍 What is left must be figures, commas and at most one point.
+        $notAnAmount = 'That is not an amount: type it in figures, with at most one decimal point, for example 12.50'
+            . (self::prefix($code) !== '' ? ' or ' . self::prefix($code) . '12.50' : '') . '.';
+        if (preg_match('/^[0-9,]*(\.[0-9]*)?$/D', $text) !== 1) {
+            if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
+                return 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
+            }
+
+            return $notAnAmount;
+        }
+        $point    = strpos($text, '.');
+        $whole    = $point === false ? $text : substr($text, 0, $point);
+        $fraction = $point === false ? '' : substr($text, $point + 1);
+        if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
+            return $notAnAmount;
+        }
+        if (str_contains($whole, ',') === true && preg_match('/^[0-9]{1,3}(,[0-9]{3})+$/D', $whole) !== 1) {
+            return 'The commas in that amount are in the wrong places: use a point for the decimals (12.50), '
+                . 'and a comma only between thousands (1,234.50).';
+        }
+        if (strlen($fraction) > 2) {
+            return 'An amount can have at most two figures after the decimal point, for example 12.50.';
+        }
+
+        // 🧮 The whole number of hundredths, as TEXT: the figures before the
+        //    point, then exactly two after it. Compared with the maximum as
+        //    text too, so nothing is converted before it is known to fit.
+        $figures = ltrim(str_replace(',', '', $whole) . str_pad($fraction, 2, '0'), '0');
+        if ($figures === '') {
+            $figures = '0';
+        }
+        if ($negative === true && $figures !== '0' && $allowNegative === false) {
+            return 'The amount cannot be negative.';
+        }
+        if (self::figuresAbove($figures, $max) === true) {
+            return 'That amount is too large: the most that can be stored here is ' . self::format(max(0, $max), $code) . '.';
+        }
+        $hundredths = (int) $figures;
+
+        return $negative === true ? -$hundredths : $hundredths;
+    }
+
+    /**
+     * 🔢 A whole number of hundredths sent by a PROGRAM (a JSON API's `…Pence`
+     * field), checked as strictly as parseAmount() checks typed text: a JSON
+     * whole number or a string of figures, from 0 to `$max`. Answers the int,
+     * or the end of a sentence saying why it was refused (the caller puts the
+     * field's name in front). A JSON number with a fraction or an exponent
+     * (899.5, 1e3) is REFUSED: `(int)` used to cut 899.5 to 899 without a
+     * word, and to wrap anything past PHP's integer range.
+     */
+    public static function parseHundredths(mixed $value, int $max = self::INT_COLUMN_MAX): int|string
+    {
+        if (is_int($value) === true) {
+            if ($value < 0) {
+                return 'cannot be negative.';
+            }
+            $figures = (string) $value;
+        } elseif (is_string($value) === true && preg_match('/^[0-9]+$/D', trim($value)) === 1) {
+            $figures = ltrim(trim($value), '0');
+            $figures = $figures === '' ? '0' : $figures;
+        } else {
+            return 'must be a whole number of hundredths (for example 1250 for 12.50), 0 or more, with no decimal point.';
+        }
+        if (self::figuresAbove($figures, $max) === true) {
+            return 'is too large: the most that can be stored is ' . max(0, $max) . '.';
+        }
+
+        return (int) $figures;
+    }
+
+    /**
+     * 🔢 An amount read back from a DECIMAL column ("123.45", or a SUM of
+     * them), as a whole number of hundredths, through the same converter, so
+     * no money becomes a float on its way to a comparison. The database has
+     * already bounded the value, so a refusal here means it is not something a
+     * DECIMAL column returns, and this THROWS rather than inventing a number.
+     * NULL answers 0; a caller that must tell the two apart tests for null.
+     */
+    public static function storedDecimalToHundredths(string|int|null $stored): int
+    {
+        if ($stored === null) {
+            return 0;
+        }
+        $answer = self::parseAmount((string) $stored, '', PHP_INT_MAX, true);
+        if (is_string($answer) === true) {
+            throw new \UnexpectedValueException('A stored amount could not be read as money: ' . $answer);
+        }
+
+        return $answer;
+    }
+
+    /**
+     * 🔢 Hundredths written as the text a DECIMAL(…,2) column takes:
+     * 123450 → "1234.50", -5 → "-0.05". Whole-number arithmetic only, so it
+     * is exact at any size.
+     */
+    public static function hundredthsToDecimal(int $hundredths): string
+    {
+        $sign = $hundredths < 0 ? '-' : '';
+        $abs  = abs($hundredths);
+
+        return $sign . intdiv($abs, 100) . '.' . str_pad((string) ($abs % 100), 2, '0', STR_PAD_LEFT);
+    }
+
+    /** Is a string of figures (no sign, no leading zeros) larger than $max? Compared as text, so exact at any length. */
+    private static function figuresAbove(string $figures, int $max): bool
+    {
+        $limit = (string) max(0, $max);
+
+        return strlen($figures) > strlen($limit) || (strlen($figures) === strlen($limit) && strcmp($figures, $limit) > 0);
     }
 
     /**

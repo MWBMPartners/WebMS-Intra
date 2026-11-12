@@ -77,9 +77,21 @@ $userId   = (int) ($_SESSION['user_id'] ?? 0);
 // 💷 The organisation's currency (#966); a pledge below uses its project's own.
 $currency = \Portal\Core\Currency::ofSite();
 
-$amountRaw   = (string) ($_POST['amount'] ?? '');
-$clean       = preg_replace('/[^0-9.]/', '', $amountRaw) ?? '';
-$amountPence = (int) round(((float) $clean) * 100);
+// 💷 The typed gift is read by the ONE converter, Currency::parseAmount()
+//    (#1004), in the organisation's currency (so "£12.50" or "1,000" are fine).
+//    It used to strip every character that was not a figure or a point and go
+//    through a float: "1e5" became 15.00, "-5" became 5.00, "12,50" became
+//    1,250.00, and an absurd figure wrapped. Its maximum is what the payment's
+//    INT column holds; the giving ceiling below still applies to gifts, with
+//    its own message.
+$amountRaw   = $_POST['amount'] ?? '';
+$amountPence = \Portal\Core\Currency::parseAmount(is_string($amountRaw) === true ? $amountRaw : '', $currency, \Portal\Core\Currency::INT_COLUMN_MAX);
+if (is_string($amountPence) === true) {
+    $_SESSION['flash_msg']  = $amountPence . ' Nothing was charged.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $backTo());
+    exit();
+}
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum amount is 1.00.';
     $_SESSION['flash_type'] = 'danger';

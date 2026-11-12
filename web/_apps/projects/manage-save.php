@@ -32,9 +32,7 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $id     = (int) ($_POST['projectID'] ?? 0);
 
 $title       = trim((string) ($_POST['title'] ?? ''));
-$targetRaw   = (string) ($_POST['targetAmount'] ?? '');
-$clean       = preg_replace('/[^0-9.]/', '', $targetRaw) ?? '';
-$targetPence = (int) round(((float) $clean) * 100);
+$targetRaw   = $_POST['targetAmount'] ?? '';
 $status      = (string) ($_POST['status'] ?? 'planning');
 $started     = (string) ($_POST['startedAt'] ?? '');
 $ends        = (string) ($_POST['endsAt'] ?? '');
@@ -45,7 +43,30 @@ $isPublic    = isset($_POST['isPublic']) === true ? 1 : 0;
 if (in_array($status, ['planning','active','funded','completed','cancelled'], true) === false) {
     $status = 'planning';
 }
-if ($title === '' || $targetPence < 100) {
+// 💷 The target is read by the ONE converter, Currency::parseAmount()
+//    (#1004), in the project's own currency (an edited project keeps its own,
+//    D-139; a new one is the organisation's). It used to strip everything but
+//    figures and points and go through a float, so "1e5" became 15.00 and an
+//    absurd figure wrapped into a small one.
+$targetCurrency = \Portal\Core\Currency::ofSite();
+if ($id > 0) {
+    $cur = $db->prepare('SELECT `currency` FROM `tblProject` WHERE `projectID` = ? AND `siteID` = ? LIMIT 1');
+    $cur->bind_param('ii', $id, $siteId);
+    $cur->execute();
+    $curRow = $cur->get_result()->fetch_assoc();
+    $cur->close();
+    $targetCurrency = is_array($curRow) === true ? (string) $curRow['currency'] : $targetCurrency;
+}
+$targetText  = is_string($targetRaw) === true ? $targetRaw : '';
+$targetPence = \Portal\Core\Currency::parseAmount($targetText, $targetCurrency);
+// A refused figure says why; an EMPTY box keeps the old "required" sentence below.
+if ($title !== '' && trim($targetText) !== '' && is_string($targetPence) === true) {
+    $_SESSION['flash_msg']  = 'Target amount: ' . $targetPence . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('projects/manage'));
+    exit();
+}
+if ($title === '' || is_string($targetPence) === true || $targetPence < 100) {
     $_SESSION['flash_msg']  = 'Title and target amount are required.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('projects/manage'));

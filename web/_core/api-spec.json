@@ -1472,7 +1472,7 @@
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A whole number of pence from 0 to 2147483647 (the most the column holds), sent as a JSON number or a string of figures; a decimal, an exponent (1e3), a negative or anything larger is refused with 400 (#1004). Until then a decimal was accepted and its fraction dropped, and a figure past PHP's integer range wrapped into a small or negative one."
           },
           "currency": {
             "type": "string",
@@ -1529,7 +1529,7 @@
           "salvageValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. A whole number of pence from 0 to 2147483647 (the most the column holds), sent as a JSON number or a string of figures; a decimal, an exponent (1e3), a negative or anything larger is refused with 400 (#1004). Until then a decimal was accepted and its fraction dropped, and a figure past PHP's integer range wrapped into a small or negative one."
           },
           "insurerName": {
             "type": "string",
@@ -1544,7 +1544,7 @@
           "insuredValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for 899.99, never a decimal string such as \"899.99\". The currency is whatever `currency` says. A whole number of pence from 0 to 2147483647 (the most the column holds), sent as a JSON number or a string of figures; a decimal, an exponent (1e3), a negative or anything larger is refused with 400 (#1004). Until then a decimal was accepted and its fraction dropped, and a figure past PHP's integer range wrapped into a small or negative one."
           },
           "insuranceRenewalDate": {
             "type": "string",

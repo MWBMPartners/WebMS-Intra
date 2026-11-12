@@ -62,7 +62,7 @@ if ($s2 !== false) {
     while (($r2 = $r2s->fetch_assoc()) !== null) {
         $stats['totalClaims'] += (int) ($r2['cnt'] ?? 0);
         // Claims are decimals of a currency: kept in hundredths for the one adder.
-        \Portal\Core\Currency::addTo($stats['expenseTotals'], (string) $r2['currency'], (int) round(((float) $r2['total']) * 100));
+        \Portal\Core\Currency::addTo($stats['expenseTotals'], (string) $r2['currency'], \Portal\Core\Currency::storedDecimalToHundredths($r2['total'] === null ? null : (string) $r2['total']));
     }
     $s2->close();
 }

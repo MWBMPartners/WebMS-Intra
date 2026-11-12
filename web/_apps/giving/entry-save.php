@@ -35,7 +35,11 @@ $currency  = \Portal\Core\Currency::ofSite();
 
 $donorName   = trim((string) ($_POST['donorName'] ?? ''));
 $categoryId  = (int) ($_POST['categoryID'] ?? 0);
-$amount      = Giving::parseAmount((string) ($_POST['amount'] ?? ''));
+// 💷 Read by the ONE converter, Currency::parseAmount() (#1004), in the
+//    organisation's currency, which the gift is stored in. A figure it refuses
+//    is said back with the reason below, and nothing is saved.
+$amountTyped = is_string($_POST['amount'] ?? null) === true ? (string) $_POST['amount'] : '';
+$amount      = \Portal\Core\Currency::parseAmount($amountTyped, $currency);
 $date        = (string) ($_POST['donatedAt'] ?? '');
 $method      = (string) ($_POST['method'] ?? 'cash');
 $reference   = trim((string) ($_POST['reference'] ?? ''));
@@ -48,7 +52,13 @@ $campaignSel = (int) ($_POST['campaignID'] ?? 0);
 if (in_array($method, ['cash','cheque','bank-transfer','card','standing-order','other'], true) === false) {
     $method = 'cash';
 }
-if ($amount <= 0 || $categoryId <= 0 || $date === '' || strtotime($date) === false) {
+if (trim($amountTyped) !== '' && is_string($amount) === true) {
+    $_SESSION['flash_msg']  = 'Amount: ' . $amount . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('giving/manage'));
+    exit();
+}
+if (is_string($amount) === true || $amount <= 0 || $categoryId <= 0 || $date === '' || strtotime($date) === false) {
     $_SESSION['flash_msg']  = 'Amount, category, and date are required.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('giving/manage'));

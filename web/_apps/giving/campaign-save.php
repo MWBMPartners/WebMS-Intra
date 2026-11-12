@@ -49,14 +49,33 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 $campaignId  = (int) ($_POST['campaignID'] ?? 0);
 $name        = trim((string) ($_POST['name'] ?? ''));
 $description = trim((string) ($_POST['description'] ?? ''));
-$goalAmount  = Giving::parseAmount((string) ($_POST['goalAmount'] ?? ''));
+// 💷 Read by the ONE converter, Currency::parseAmount() (#1004), in the
+//    campaign's own currency: an existing campaign keeps its own (D-139), a new
+//    one is in the organisation's. A figure it refuses is said back below.
+$goalCurrency = \Portal\Core\Currency::ofSite();
+if ($campaignId > 0) {
+    $cur = $db->prepare('SELECT `currency` FROM `tblPledgeCampaigns` WHERE `campaignID` = ? AND `siteID` = ? LIMIT 1');
+    $cur->bind_param('ii', $campaignId, $siteId);
+    $cur->execute();
+    $curRow = $cur->get_result()->fetch_assoc();
+    $cur->close();
+    $goalCurrency = is_array($curRow) === true ? (string) $curRow['currency'] : $goalCurrency;
+}
+$goalTyped   = is_string($_POST['goalAmount'] ?? null) === true ? (string) $_POST['goalAmount'] : '';
+$goalAmount  = \Portal\Core\Currency::parseAmount($goalTyped, $goalCurrency);
 $startDate   = (string) ($_POST['startDate'] ?? '');
 $endDateRaw  = trim((string) ($_POST['endDate'] ?? ''));
 $endDate     = $endDateRaw === '' ? null : $endDateRaw;
 $isActive    = isset($_POST['isActive']) ? 1 : 0;
 
 // 🛡️ Validation — a rejected save must never touch the DB (#299 edge case 2).
-if ($name === '' || $goalAmount <= 0 || $startDate === '' || strtotime($startDate) === false) {
+if (trim($goalTyped) !== '' && is_string($goalAmount) === true) {
+    $_SESSION['flash_msg']  = 'Goal amount: ' . $goalAmount . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('giving/campaigns'));
+    exit();
+}
+if ($name === '' || is_string($goalAmount) === true || $goalAmount <= 0 || $startDate === '' || strtotime($startDate) === false) {
     $_SESSION['flash_msg']  = 'Name, a positive goal amount, and a valid start date are required.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('giving/campaigns'));

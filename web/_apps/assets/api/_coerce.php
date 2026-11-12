@@ -141,10 +141,16 @@ function assets_api_build_data(array $body, ?array $existing): array
         if ($v === null || $v === '') {
             return null;
         }
-        if (is_numeric($v) === false || (float) $v < 0) {
-            \Portal\Core\ApiResponse::error("$key must be a non-negative integer number of pence", 400);
+        // 💷 Checked by Currency::parseHundredths() (#1004): a JSON whole
+        //    number or a string of figures, 0 up to what the INT column holds.
+        //    `is_numeric()` + `(int)` used to cut 899.5 to 899 without a word
+        //    and wrap a figure past PHP's integer range into a small or
+        //    negative one.
+        $hundredths = \Portal\Core\Currency::parseHundredths($v);
+        if (is_string($hundredths) === true) {
+            \Portal\Core\ApiResponse::error($key . ' ' . $hundredths, 400);
         }
-        return (int) $v;
+        return $hundredths;
     };
 
     // -------------------------------------------------------------------

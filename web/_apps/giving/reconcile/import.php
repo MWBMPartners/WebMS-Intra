@@ -206,7 +206,7 @@ function reconcile_count_data_rows(string $raw, string $delimiter): int
  *
  * @return array{ok: bool, skip: bool, error: ?string, row: ?array{date: string, pence: int, desc: string, ref: ?string}}
  */
-function reconcile_parse_row(array $data, array $mapping, string $mode, int $rowNum): array
+function reconcile_parse_row(array $data, array $mapping, string $mode, int $rowNum, string $currency): array
 {
     $get = static function (?int $idx) use ($data): ?string {
         if ($idx === null) {
@@ -238,19 +238,21 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
         }
     }
 
-    $amountRegex = '/^-?[£$€]?[\d,]+(\.\d{1,2})?$/';
-
-    // 💷 Amount → pence (credits only; debit/zero/blank silently skipped).
+    // 💷 Amount → pence (credits only; debit/zero/blank silently skipped),
+    //    through the ONE converter, Currency::parseAmount() (#1004), in the
+    //    import's currency, negatives allowed so a debit can be recognised and
+    //    skipped. It used to accept "£", "$" or "€" whatever the import's
+    //    currency, commas anywhere ("12,50" became 1,250.00), and go through a
+    //    float. Spaces are still taken out first, as before: banks write them.
     if ($mode === 'credit') {
         $creditCell = (string) $get($mapping['credit']);
         if ($creditCell === '') {
             return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
         }
-        $cleaned = str_replace(' ', '', $creditCell);
-        if (preg_match($amountRegex, $cleaned) !== 1) {
-            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable credit amount "' . $creditCell . '".', 'row' => null];
+        $pence = \Portal\Core\Currency::parseAmount(str_replace(' ', '', $creditCell), $currency, \Portal\Core\Currency::INT_COLUMN_MAX, true);
+        if (is_string($pence) === true) {
+            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable credit amount "' . $creditCell . '". ' . $pence, 'row' => null];
         }
-        $pence = Giving::parseAmount($creditCell);
         if ($pence <= 0) {
             return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
         }
@@ -259,11 +261,10 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
         if ($amountCell === '') {
             return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
         }
-        $cleaned = str_replace(' ', '', $amountCell);
-        if (preg_match($amountRegex, $cleaned) !== 1) {
-            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable amount "' . $amountCell . '".', 'row' => null];
+        $pence = \Portal\Core\Currency::parseAmount(str_replace(' ', '', $amountCell), $currency, \Portal\Core\Currency::INT_COLUMN_MAX, true);
+        if (is_string($pence) === true) {
+            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable amount "' . $amountCell . '". ' . $pence, 'row' => null];
         }
-        $pence = Giving::parseAmount($amountCell);
         if ($pence <= 0) {
             // Zero or negative (debit encoded as a negative signed amount).
             return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
@@ -314,7 +315,7 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
  *
  * @return array{rows: list<array{date: string, pence: int, desc: string, ref: ?string}>, skipped: int, errors: list<string>}
  */
-function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $delimiter): array
+function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $delimiter, string $currency): array
 {
     $fh = fopen('php://temp', 'r+');
     if ($fh === false) {
@@ -330,7 +331,7 @@ function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $
     $rowNum = 1;
     while (($data = fgetcsv($fh, 0, $delimiter)) !== false) {
         $rowNum++;
-        $parsed = reconcile_parse_row($data, $mapping, $mode, $rowNum);
+        $parsed = reconcile_parse_row($data, $mapping, $mode, $rowNum, $currency);
         if ($parsed['skip'] === true) {
             $skipped++;
             continue;
@@ -447,7 +448,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $autoMapped = $mapping['date'] !== null && $mapping['description'] !== null && $mode !== null;
         if ($autoMapped === true) {
-            $parsed = reconcile_parse_csv($raw, $mapping, (string) $mode, $delimiter);
+            $parsed = reconcile_parse_csv($raw, $mapping, (string) $mode, $delimiter, $currency);
             if (count($parsed['errors']) > 0) {
                 $upload['fatalErrors'] = $parsed['errors'];
             } else {
@@ -510,7 +511,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mode = $hasCredit === true ? 'credit' : 'amount';
         $upload['mode'] = $mode;
 
-        $parsed = reconcile_parse_csv((string) $upload['rawText'], $mapping, $mode, (string) $upload['delimiter']);
+        $parsed = reconcile_parse_csv((string) $upload['rawText'], $mapping, $mode, (string) $upload['delimiter'], (string) $upload['currency']);
         if (count($parsed['errors']) > 0) {
             $upload['fatalErrors'] = $parsed['errors'];
             unset($upload['rows'], $upload['skipped']);

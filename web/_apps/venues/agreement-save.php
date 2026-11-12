@@ -69,17 +69,31 @@ $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $action = (string) ($_POST['action'] ?? 'save');
 
-/**
- * Convert a posted pounds-decimal string to an integer-pence value, or
- * null when blank/non-numeric (house money convention, #266 — mirrors
- * `_apps/assets/save.php`'s own `$pence` closure).
- */
-$toPence = static function (string $raw): ?int {
-    $v = trim($raw);
-    if ($v === '' || is_numeric($v) === false) {
+// 💷 A typed amount becomes whole hundredths through the ONE converter,
+//    Currency::parseAmount() (#1004), never `(int) round((float) $v * 100)`.
+//    That wrapped an absurd figure into a small or negative one: measured on
+//    PHP 8.5, "184467440737095557.12" was stored as 40.96, and "1e17" came out
+//    negative so the page said "Amount cannot be negative", which was untrue.
+//    It answers an int, or the true reason the text was refused, which is
+//    shown and nothing is written. These are number boxes, so no currency
+//    symbol is expected and none is passed: a "too large" refusal states the
+//    limit as a plain number.
+//    A BLANK rate box means "no rate" (null), as before. Any other text must be
+//    an amount: a figure that could not be read used to CLEAR the stored rate
+//    without a word. A refusal goes back to the form with nothing written.
+$rateOrRefuse = static function (string $raw, string $back): ?int {
+    if (trim($raw) === '') {
         return null;
     }
-    return (int) round(((float) $v) * 100);
+    $rate = \Portal\Core\Currency::parseAmount($raw, '');
+    if (is_string($rate) === true) {
+        $_SESSION['flash_msg']  = 'Rate: ' . $rate . ' Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $back);
+        exit();
+    }
+
+    return $rate;
 };
 
 if ($action === 'set-status') {
@@ -130,7 +144,7 @@ if ($action === 'supersede') {
         'termEnd'          => (string) ($_POST['termEnd'] ?? ''),
         'renewalDate'      => (string) ($_POST['renewalDate'] ?? ''),
         'noticePeriodDays' => (string) ($_POST['noticePeriodDays'] ?? ''),
-        'rateAmountPence'  => $toPence((string) ($_POST['rateAmount'] ?? '')),
+        'rateAmountPence'  => $rateOrRefuse((string) ($_POST['rateAmount'] ?? ''), Site::url('venues/agreements') . '?edit=0&supersede=' . $oldAgreementId),
         'rateUnit'         => (string) ($_POST['rateUnit'] ?? ''),
         'currency'         => (string) ($_POST['currency'] ?? ''),
         'status'           => (string) ($_POST['status'] ?? 'active'),
@@ -166,7 +180,7 @@ $data = [
     'termEnd'          => (string) ($_POST['termEnd'] ?? ''),
     'renewalDate'      => (string) ($_POST['renewalDate'] ?? ''),
     'noticePeriodDays' => (string) ($_POST['noticePeriodDays'] ?? ''),
-    'rateAmountPence'  => $toPence((string) ($_POST['rateAmount'] ?? '')),
+    'rateAmountPence'  => $rateOrRefuse((string) ($_POST['rateAmount'] ?? ''), Site::url('venues/agreements') . '?edit=' . $agreementId),
     'rateUnit'         => (string) ($_POST['rateUnit'] ?? ''),
     // Absent means "keep" on an edit (Venues::saveAgreement() decides), never today's currency (D-139).
     'currency'         => (string) ($_POST['currency'] ?? ''),

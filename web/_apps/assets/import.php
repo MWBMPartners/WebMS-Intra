@@ -322,16 +322,23 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
         }
     }
 
-    // 💷 purchaseCostPounds → purchaseCostPence — strips currency symbols/
-    // thousands separators, then requires a non-negative number.
+    // 💷 purchaseCostPounds → purchaseCostPence through the ONE converter,
+    //    Currency::parseAmount() (#1004), in the organisation's currency (the
+    //    rows are made in it). It accepts that currency's own symbol and
+    //    thousands commas in their right places. It used to strip "£", "$",
+    //    "€", every comma and every space and go through a float, so "$12" was
+    //    taken as pounds, "12,50" as 1,250.00, and an absurd figure wrapped.
     $costRaw           = $get('purchaseCostPounds');
     $purchaseCostPence = null;
     if ($costRaw !== '') {
-        $cleaned = str_replace(['£', '$', '€', ',', ' '], '', $costRaw);
-        if (is_numeric($cleaned) === false || (float) $cleaned < 0) {
-            $errors[] = 'Purchase Cost "' . $costRaw . '" is not a valid non-negative amount.';
+        // The organisation's currency is read once per request, not once per row.
+        static $importCurrency = null;
+        $importCurrency ??= \Portal\Core\Currency::ofSite();
+        $cost = \Portal\Core\Currency::parseAmount($costRaw, $importCurrency);
+        if (is_string($cost) === true) {
+            $errors[] = 'Purchase Cost "' . $costRaw . '": ' . $cost;
         } else {
-            $purchaseCostPence = (int) round(((float) $cleaned) * 100);
+            $purchaseCostPence = $cost;
         }
     }
 

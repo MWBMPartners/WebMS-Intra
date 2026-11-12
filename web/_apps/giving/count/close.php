@@ -112,7 +112,9 @@ if ($session['cashTotal'] === null || $session['chequeTotal'] === null || $sessi
 }
 
 // 💷 Work entirely in integer pence to avoid DECIMAL/float rounding drift.
-$toPence = static fn (string $v): int => (int) round(((float) $v) * 100);
+//    The stored DECIMAL text is read by Currency::storedDecimalToHundredths()
+//    (#1004), the same converter every typed amount goes through, never a float.
+$toPence = static fn (string $v): int => \Portal\Core\Currency::storedDecimalToHundredths($v);
 
 $agreedCashPence     = $toPence($session['cashTotal']);
 $agreedChequePence   = $toPence($session['chequeTotal']);
