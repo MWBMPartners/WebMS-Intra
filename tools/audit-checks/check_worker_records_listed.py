@@ -30,10 +30,15 @@ HOW IT READS THEM, and why each way.
     text search of the instruction list would miss the one written over
     several lines, and the derived instructions are not written there at all.
     No PHP, or a file that does not load: REFUSED, never "nothing wrong".
-  - The list is read from the method's source: each kind's `'sql'` string
+  - The list is read from the method's source WITH ITS COMMENTS REMOVED BY
+    PHP'S OWN TOKENISER (`token_get_all()`), then: each kind's `'sql'` string
     pieces joined, its first `FROM `tbl...` alias`, and its ONE
     `WHERE alias.`column` = ?`. The alias must be the FROM table's, or the
-    check cannot tell which table the column is on and REFUSES.
+    check cannot tell which table the column is on and REFUSES. The first
+    version read the raw text, so a kind wrapped in `/* ... */` - code that
+    never runs - still counted as listed (#929 check round 2); deciding by
+    hand what is a comment in PHP is the job this repository has already
+    lost to six rounds of regular expressions (#763), so PHP decides.
 
 WHAT IT CANNOT SEE: whether the list's query RUNS, or what it hands over.
 That is behaviour, and section O of `tools/erasure-pages-selftest.php` drives
@@ -86,6 +91,19 @@ PHP_DUMP = (
 )
 
 
+# Prints the file named by `$argv[1]` with every comment replaced by the
+# newlines it held (so nothing else moves). Asked of PHP, never of a pattern.
+PHP_WITHOUT_COMMENTS = (
+    '$o = "";'
+    'foreach (token_get_all((string) file_get_contents($argv[1])) as $t) {'
+    '  if (is_array($t) === false) { $o .= $t; continue; }'
+    '  if ($t[0] === T_COMMENT || $t[0] === T_DOC_COMMENT) { $o .= str_repeat("\\n", substr_count($t[1], "\\n")); continue; }'
+    '  $o .= $t[1];'
+    '}'
+    'echo $o;'
+)
+
+
 class Unreadable(Exception):
     """Something this check needs could not be read: it refuses, it never passes."""
 
@@ -128,10 +146,20 @@ def listed_columns(source: str) -> set[tuple[str, str]]:
     return found
 
 
+def code_without_comments(path: str) -> str:
+    """The PHP file's text with its comments removed by PHP's tokeniser."""
+    php = shutil.which('php')
+    if php is None:
+        raise Unreadable('there is no `php` on this machine, so the method cannot be read without its comments')
+    done = subprocess.run([php, '-r', PHP_WITHOUT_COMMENTS, path], capture_output=True, text=True, timeout=120, check=False)
+    if done.returncode != 0 or done.stdout == '':
+        raise Unreadable('PHP could not read ' + os.path.basename(path) + ' without its comments: ' + (done.stderr or '').strip()[:300])
+    return done.stdout
+
+
 def problems(core_dir: str) -> list[str]:
     """What is wrong, in words (empty when the two agree). Raises Unreadable."""
-    with open(os.path.join(core_dir, ERASER), encoding='utf-8') as handle:
-        source = handle.read()
+    source = code_without_comments(os.path.join(core_dir, ERASER))
     kept = kept_worker_columns(core_dir)
     listed = listed_columns(source)
     if not kept:
@@ -194,6 +222,10 @@ def self_test() -> int:
         ('a new "retain" instruction on a worker column, not listed',
          eraser.replace("'userCol' => 'approvedByID', 'action' => 'anonymise'",
                         "'userCol' => 'approvedByID', 'action' => 'retain'", 1), {'MISSING'}),
+        ('a kind wrapped in a /* ... */ comment, so it never runs (round 2: the raw text still counted it)',
+         eraser.replace(out_block.group(0), '/*\n' + out_block.group(0) + '*/\n', 1) if out_block else '', {'MISSING'}),
+        ('a kind turned into // comments, line by line',
+         eraser.replace(out_block.group(0), ''.join('// ' + line + '\n' for line in out_block.group(0).splitlines()), 1) if out_block else '', {'MISSING'}),
         ('a query whose WHERE names no table alias',
          eraser.replace("WHERE k.`checkedOutByID` = ?'", "WHERE `checkedOutByID` = ?'", 1), {'REFUSED'}),
         ('the method renamed away', eraser.replace('function recordsCarryingYourName(', 'function recordsRenamed(', 1), {'REFUSED'}),

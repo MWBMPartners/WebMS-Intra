@@ -219,7 +219,10 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 174; // #929 round 2 rebuilt section O as nineteen: the
+const EXPECTED_CHECKS = 177; // #929 round 3 added three: the driven "no such
+                            // table" view with the singular sentence (O9b),
+                            // and its two plants (O18b, O18c). 177.
+                            // #929 round 2 rebuilt section O as nineteen: the
                             // premise, seven observations, two DRIVEN read
                             // failures, nine plants and the clean run. 174.
                             // 155 until #929 added section O (thirteen: the
@@ -637,6 +640,35 @@ function putClaimColumnBack(): void
     }
 }
 
+/**
+ * 🔩 Put `tblCareVisit` back as `full_schema.sql` builds it, if section O
+ *    (#929) left it otherwise: its `visitedAt` column renamed (the driven
+ *    "one kind cannot be read") or the whole table renamed (the driven "no
+ *    such table").
+ *
+ * #929 check round 2 measured the fault this exists for: each rename was put
+ * back only by a `finally`, and the SIGINT/SIGTERM handler below ends the run
+ * with exit(), which does NOT run a `finally` - so one interrupted run left
+ * the column renamed, and every later run on that database failed. Asked in
+ * the same three places as putClaimColumnBack() (its note says why each), and
+ * BEFORE removeWorld(), which deletes from `tblCareVisit` and would itself
+ * fail on a renamed table. Only ever on a selftest_ database.
+ */
+function putSectionOBack(): void
+{
+    $tables = q("SELECT `TABLE_NAME` AS `t` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() "
+        . "AND `TABLE_NAME` IN ('tblCareVisit', 'tblCareVisitP929')");
+    $names  = array_map(static fn (array $row): string => (string) $row['t'], $tables);
+    if (in_array('tblCareVisitP929', $names, true) === true && in_array('tblCareVisit', $names, true) === false) {
+        q('RENAME TABLE `tblCareVisitP929` TO `tblCareVisit`');
+    }
+    $column = one("SELECT COUNT(*) AS `n` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+        . "AND `TABLE_NAME` = 'tblCareVisit' AND `COLUMN_NAME` = 'visitedAtP929'");
+    if ((int) ($column['n'] ?? 0) > 0) {
+        q('ALTER TABLE `tblCareVisit` RENAME COLUMN `visitedAtP929` TO `visitedAt`');
+    }
+}
+
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
 function cleanup(): void
 {
@@ -660,6 +692,7 @@ function cleanup(): void
     }
     try {
         putClaimColumnBack();
+        putSectionOBack();
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -938,6 +971,7 @@ if (function_exists('pcntl_async_signals') === true) {
     }
 }
 putClaimColumnBack();
+putSectionOBack();
 removeWorld();
 
 q("INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES (?, 'selftest-erasure-a', 'Selftest erasure A', 1), (?, 'selftest-erasure-b', 'Selftest erasure B', 1)", 'ii', [ORG_A, ORG_B]);
@@ -4285,8 +4319,14 @@ $o929Rows = [
         'yourPart' => 'Your name and account number are on this record as the helper who checked the child in.'],
     'child-checked-out' => ['kind' => 'child-checked-out', 'what' => 'Child\'s check-out', 'day' => '2026-04-05', 'organisation' => 'Selftest erasure A',
         'yourPart' => 'Your name and account number are on this record as the helper who checked the child out.'],
+    // Only in the driven "no such table" view, where C is switched ON for
+    // the moment, so Wil can open it and its case is listed.
+    'care-case-opened@C' => ['kind' => 'care-case-opened', 'what' => 'Pastoral care case', 'day' => '2025-10-01', 'organisation' => 'Selftest erasure C',
+        'yourPart' => 'Your name and account number are on this record as the person who opened the case.'],
 ];
-$o929NotListed = static fn (int $n): string => $n . ' more records of these kinds carry your name in organisations you cannot open here. They are not listed; the organisation that holds each one can tell you about it.';
+$o929NotListed = static fn (int $n): string => $n === 1
+    ? '1 more record of these kinds carries your name in an organisation you cannot open here. It is not listed; the organisation that holds it can tell you about it.'
+    : $n . ' more records of these kinds carry your name in organisations you cannot open here. They are not listed; the organisation that holds each one can tell you about it.';
 $o929CouldNotRead = 'Some of these records could not be read just now, so this list may be incomplete. Please try again later.';
 /** The whole answer expected, for a list of kinds shown, a count not listed, and the kinds that could not be read. */
 $o929Answer = static function (array $kinds, int $notListed, array $unread) use ($o929About, $o929Rows, $o929NotListed): array {
@@ -4383,7 +4423,14 @@ $o929Edit = static function (string $rel, string $from, string $to, callable $ru
  *   - the person's organisations cannot be read: the call is made to throw in
  *     the running copy (SiteGate asks the same question earlier in the same
  *     request and its answer is kept, so a database fault would stop the
- *     request at the gate instead of reaching this).
+ *     request at the gate instead of reaching this);
+ *   - a table does not exist (error 1146, "the app is not installed"): the
+ *     whole of `tblCareVisit` is renamed for the moment, and that kind must be
+ *     NONE, not unread. Organisation C is switched ON for the same moment, so
+ *     its case is listed and exactly ONE record is left counted - the only
+ *     view that reaches the singular "1 more record" sentence.
+ * Every rename is also put back by putSectionOBack(), at the start of a run
+ * and in cleanup(), because a `finally` does not run when a signal ends it.
  */
 $o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o929PageView, $o929Secrets, $o929Edit, $db): array {
     $wrong = [];
@@ -4443,6 +4490,20 @@ $o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o
         $wrong[] = 'lookup failure answered wrong';
     }
 
+    // No such table: that kind is none (1146 is the one failure that means
+    // "nothing held"), C's case is listed, and B's ONE case is counted.
+    $db->query('RENAME TABLE `tblCareVisit` TO `tblCareVisitP929`');
+    $db->query('UPDATE `tblSites` SET `isActive` = 1 WHERE `siteID` = ' . ORG_C);
+    try {
+        $gone = $o929Fetch('wil');
+    } finally {
+        $db->query('UPDATE `tblSites` SET `isActive` = 0 WHERE `siteID` = ' . ORG_C);
+        putSectionOBack();
+    }
+    if ($o929Matches($gone, $o929Answer(['care-case-opened@C', 'dbs-check-recorded', 'care-case-opened', 'child-checked-in', 'child-checked-out'], 1, [])) === false) {
+        $wrong[] = 'missing table answered wrong';
+    }
+
     return array_values(array_unique($wrong));
 };
 
@@ -4462,6 +4523,8 @@ ok('O7 Nell, who made none of these records, is handed an empty list in both dow
     $o929Is('nell sees something'), implode('; ', $o929First));
 ok('O8 DRIVEN: when one kind cannot be read (a real database error, not "no such table"), that kind is named as unread in both downloads, nothing of it is listed or counted, and the page says "could not be read" in exactly its words (#929)',
     $o929Is('kind failure answered wrong'), implode('; ', $o929First));
+ok('O9b DRIVEN: when a table does not exist (the app not installed, error 1146) that kind is NONE, not unread; and with organisation C switched on its case is listed while B\'s ONE case is counted in the singular words, exactly (#929)',
+    $o929Is('missing table answered wrong'), implode('; ', $o929First));
 ok('O9 DRIVEN: when Wil\'s organisations cannot be read, it fails CLOSED - nothing held by an organisation is listed or counted, those kinds are named as unread, the DBS check (no organisation) is still listed, and the page says so (#929)',
     $o929Is('lookup failure answered wrong'), implode('; ', $o929First));
 
@@ -4492,6 +4555,10 @@ $o929Plants = [
         '_core/GdprEraser.php', ['if ($problem instanceof \mysqli_sql_exception && $problem->getCode() === 1146) {' => 'if (true) {'], 'kind failure answered wrong'],
     'O18 the page\'s "could not be read" sentence deleted' => [
         '_apps/account/my-data.php', ['<p class="small text-warning mt-2 mb-0" data-records-could-not-read>Some of these records could not be read just now, so this list may be incomplete. Please try again later.</p>' => ''], 'kind failure answered wrong'],
+    'O18b a missing table answered as "could not be read" rather than none' => [
+        '_core/GdprEraser.php', ['$problem->getCode() === 1146) {' => '$problem->getCode() === -1) {'], 'missing table answered wrong'],
+    'O18c the singular sentence never chosen ("1 more records ... organisations")' => [
+        '_core/GdprEraser.php', ["\$out['notListedWords'] = \$out['notListed'] === 1" => "\$out['notListedWords'] = \$out['notListed'] === -1"], 'missing table answered wrong'],
 ];
 foreach ($o929Plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);

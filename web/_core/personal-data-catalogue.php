@@ -2112,8 +2112,13 @@ return [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
         //    record sees it LISTED - kind, day and organisation, nothing else -
         //    in their own downloads, by GdprEraser::recordsCarryingYourName().
-        //    A new kept worker column goes there too;
-        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
+        //    A new kept worker column goes there too. The gate
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does
+        //    ONLY for a column whose name ends in `ByID`: worker columns named
+        //    otherwise exist (performedByUserID, uploadedByUserID, assignedToID,
+        //    followUpAssignedToID...), all emptied on erasure today, and the gate
+        //    would not see one of those being kept. Widening the pattern would
+        //    also catch a person's OWN records (bookedByID, requestedByID).
         // 🧾 'retain' SINCE #703 (the owner's decision D-111, 10 November 2026,
         //    extending D-016). It said 'unlink' and both helpers were detached;
         //    D-111 keeps them, by number and by name (`checkedInByName`,
@@ -2187,8 +2192,13 @@ return [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
         //    record sees it LISTED - kind, day and organisation, nothing else -
         //    in their own downloads, by GdprEraser::recordsCarryingYourName().
-        //    A new kept worker column goes there too;
-        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
+        //    A new kept worker column goes there too. The gate
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does
+        //    ONLY for a column whose name ends in `ByID`: worker columns named
+        //    otherwise exist (performedByUserID, uploadedByUserID, assignedToID,
+        //    followUpAssignedToID...), all emptied on erasure today, and the gate
+        //    would not see one of those being kept. Widening the pattern would
+        //    also catch a person's OWN records (bookedByID, requestedByID).
         'decision' => 'unlink',
         // 🧾 #703, the owner's decision D-110 (10 November 2026, extending
         //    D-016): who OPENED a case is kept when that worker is erased, by
@@ -2216,8 +2226,13 @@ return [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
         //    record sees it LISTED - kind, day and organisation, nothing else -
         //    in their own downloads, by GdprEraser::recordsCarryingYourName().
-        //    A new kept worker column goes there too;
-        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
+        //    A new kept worker column goes there too. The gate
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does
+        //    ONLY for a column whose name ends in `ByID`: worker columns named
+        //    otherwise exist (performedByUserID, uploadedByUserID, assignedToID,
+        //    followUpAssignedToID...), all emptied on erasure today, and the gate
+        //    would not see one of those being kept. Widening the pattern would
+        //    also catch a person's OWN records (bookedByID, requestedByID).
         'decision' => 'unlink',
         // 🧾 WHO MADE THE VISIT IS KEPT (#703, the owner's decision D-016,
         //    3 November 2026, which "rules out unlinking the worker"). When a
@@ -2275,8 +2290,13 @@ return [
         // 📋 #929 (the owner's decision D-142): a WORKER whose name is on this
         //    record sees it LISTED - kind, day and organisation, nothing else -
         //    in their own downloads, by GdprEraser::recordsCarryingYourName().
-        //    A new kept worker column goes there too;
-        //    tools/audit-checks/check_worker_records_listed.py fails until it does.
+        //    A new kept worker column goes there too. The gate
+        //    tools/audit-checks/check_worker_records_listed.py fails until it does
+        //    ONLY for a column whose name ends in `ByID`: worker columns named
+        //    otherwise exist (performedByUserID, uploadedByUserID, assignedToID,
+        //    followUpAssignedToID...), all emptied on erasure today, and the gate
+        //    would not see one of those being kept. Widening the pattern would
+        //    also catch a person's OWN records (bookedByID, requestedByID).
         'decision' => 'retain',
         // 🧾 WHO RECORDED THE CHECK IS KEPT (#703, the owner's decision D-016,
         //    3 November 2026). From 11 October 2026 until #703 `recordedByID`

@@ -4423,12 +4423,20 @@ class GdprEraser
             }
         }
 
-        // Oldest first; a record with no date goes last. The kind breaks a
-        // tie, so the order never depends on the database's own.
+        // Oldest first; a record with no date goes last. Then the kind, then
+        // the organisation's name (none, for a DBS check, sorts first). Two
+        // entries still tied are identical in every field shown, so which
+        // comes first cannot be seen; before the organisation was a key, the
+        // same kind on the same day in two organisations came out in the
+        // database's own order (#929 check round 2).
         usort($out['records'], static function (array $a, array $b): int {
             $byDay = strcmp((string) ($a['day'] ?? '9999'), (string) ($b['day'] ?? '9999'));
+            if ($byDay !== 0) {
+                return $byDay;
+            }
+            $byKind = strcmp($a['kind'], $b['kind']);
 
-            return $byDay !== 0 ? $byDay : strcmp($a['kind'], $b['kind']);
+            return $byKind !== 0 ? $byKind : strcmp((string) ($a['organisation'] ?? ''), (string) ($b['organisation'] ?? ''));
         });
 
         // D-151: counted, with a sentence saying who can tell them. Worded to
