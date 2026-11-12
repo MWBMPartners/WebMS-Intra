@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 237; // #982 round 9 added M13k (an organisation
+const EXPECTED_CHECKS = 238; // #982 round 10 added M13o (an e-mail address
+                            // over 50 characters: no promise of success). 238.
+                            // #982 round 9 added M13k (an organisation
                             // administrator is told they can give a password,
                             // and can), M13l (still linked: cannot), M13m (two
                             // passkeys, Google with no hosted domain) and M13n
@@ -3911,8 +3913,12 @@ const M13_GUS = 917064; // a live member of A with NO password row: rehired by a
 const M13_LEN = 917065; // a live member of A with NO password row, still linked to Microsoft when rehired (#982 round 9)
 const M13_PIP = 917066; // a live member of A: two passkeys and Google with no hosted domain when rehired (#982 round 9)
 const M13_RIA = 917067; // a live member of A: the rehire's read fails (#982 round 9)
-foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail'] as $m13Id => $m13Name) {
-    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, 'u' . $m13Id . '.erasure@selftest.invalid']);
+const M13_OTT = 917068; // a live member of A with NO password row and an e-mail address over 50 characters (#982 round 10)
+// Ott's address is 75 characters: tblUsers.emailAddress holds 255, the sign-in
+// name the Users page would make from it (tblLocalAccounts.username) holds 50.
+const M13_OTT_MAIL = 'u917068.an-address-much-longer-than-a-sign-in-name-holds@selftest.invalid';
+foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail', M13_OTT => 'Ott Overlong'] as $m13Id => $m13Name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, $m13Id === M13_OTT ? M13_OTT_MAIL : 'u' . $m13Id . '.erasure@selftest.invalid']);
     q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
 }
 foreach ([M13_DEE => 'Dee Deadlock', M13_FAY => 'Fay Failread'] as $m13Id => $m13Name) {
@@ -4056,10 +4062,11 @@ ok('M13g rehiring an account whose password offboarding EMPTIED, with nothing el
     && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false && str_contains($deeRehire, 'passkey') === false,
     'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
 $ollyRehire = $rehireM(OFF);
-ok('M13h rehiring (as a global administrator) an account with NO password row, no passkey, no link, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that YOU can give it a password on the Users page - round 8 said nobody could, which was false (#982 round 9)',
+ok('M13h rehiring (as a global administrator) an account with NO password row, no passkey, no link, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that you can TRY giving it a password on the Users page, which will say if it cannot - never a promise (round 9\'s "You can give it" was untrue when the save refuses) and never "cannot be given" (round 8) (#982 round 10)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
-    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. You can give it a password on the Users page, because it has no other way to sign in.') === true
-    && str_contains($ollyRehire, 'cannot') === false && str_contains($ollyRehire, 'Forgot your password') === false,
+    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ollyRehire, 'You can give it') === false && str_contains($ollyRehire, 'cannot be given') === false
+    && str_contains($ollyRehire, 'Forgot your password') === false,
     'rehire said: ' . $ollyRehire);
 // M13i: Google sign-in set up for the organisation, limited to a hosted domain.
 siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
@@ -4103,9 +4110,9 @@ ok('M13j a password on the account (said as a fact, with no cause the code canno
 $gusRehire  = $rehireM(M13_GUS, 'adm');
 $gusSave    = $givePasswordM('adm', M13_GUS);
 $gusRows    = (int) one("SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ? AND `passwordHash` <> ''", 'i', [M13_GUS])['n'];
-ok('M13k an organisation administrator who rehires an account with no way in is told "You can give it a password on the Users page, because it has no other way to sign in." - and the Users page really does store one when they do (#982 round 9)',
+ok('M13k an organisation administrator who rehires an account with no way in is told it has no other way in and that they can try giving it a password on the Users page - and the Users page really does store one when they do (#982 round 10)',
     str_contains($gusRehire, 'User rehired: their account is switched on again.') === true
-    && str_contains($gusRehire, 'You can give it a password on the Users page, because it has no other way to sign in.') === true
+    && str_contains($gusRehire, 'It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
     && $gusRows === 1,
     'offboard said: ' . $gusOff . ' | rehire said: ' . $gusRehire . ' | save said: ' . $gusSave . ' | usable password rows: ' . $gusRows);
 
@@ -4125,9 +4132,26 @@ $lenRows   = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `us
 ok('M13l an account still LINKED to Microsoft (not set up here) is said to have no way in, and that it cannot be given a password on the Users page because of the link - and the save really refuses (#982 round 9)',
     str_contains($lenRehire, 'This account has no way to sign in yet') === true
     && str_contains($lenRehire, 'It is still linked to a Microsoft or Google account, so it cannot be given a password on the Users page.') === true
-    && str_contains($lenRehire, 'You can give it a password') === false
+    && str_contains($lenRehire, 'You can try giving it') === false && str_contains($lenRehire, 'You can give it') === false
     && $lenRows === 0 && str_contains($lenSave, 'No password was set') === true,
     'offboard said: ' . $lenOff . ' | rehire said: ' . $lenRehire . ' | save said: ' . $lenSave);
+
+// M13o: an account with no way in whose e-mail address is over 50 characters.
+// The Users page would make its sign-in name from that address and refuses it
+// (tblLocalAccounts.username holds 50). So the rehire must promise nothing: it
+// says to TRY, and the save really refuses - round 9's "You can give it a
+// password" was untrue for exactly this account.
+[, $ottOff] = $offboardM(M13_OTT, 'Selftest #982 round 10');
+$ottRehire  = $rehireM(M13_OTT);
+$ottSave    = $givePasswordM('root', M13_OTT);
+$ottRows    = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_OTT])['n'];
+ok('M13o an account with no way in and an e-mail address over 50 characters is promised nothing ("You can give it" / "can be given" absent) and told to TRY on the Users page - and the save really refuses, storing no password (#982 round 10)',
+    mb_strlen(M13_OTT_MAIL, 'UTF-8') > 50
+    && str_contains($ottRehire, 'This account has no way to sign in yet') === true
+    && str_contains($ottRehire, 'It has no other way to sign in. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ottRehire, 'You can give it') === false && str_contains($ottRehire, 'can be given') === false
+    && $ottRows === 0 && str_contains($ottSave, 'longer than 50 characters') === true,
+    'offboard said: ' . $ottOff . ' | rehire said: ' . $ottRehire . ' | save said: ' . $ottSave . ' | password rows: ' . $ottRows);
 
 // M13m: two passkeys (the plural sentence) and Google set up with NO hosted
 // domain (the sentence ends at the address, naming no domain).

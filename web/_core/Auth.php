@@ -3382,8 +3382,14 @@ class Auth
      * loginLocal() refuses before any comparison.
      *
      * An emptied row can be given a new password by its owner through
-     * "Forgot your password?"; an account with NO row cannot, and an
-     * administrator may not give it one (D-018).
+     * "Forgot your password?"; an account with NO row cannot do that,
+     * because that page needs a row. On the Users page an administrator can
+     * set a new password on an existing row (emptied or not), and for an
+     * account with NO row the save creates one only when the account has no
+     * other way in - no linked Microsoft or Google account and no passkey:
+     * D-018 forbids a SECOND way in, not a first - and only when the sign-in
+     * name it makes (the e-mail address) fits in 50 characters and is not
+     * already in use (admin/users/save.php, step 10b).
      *
      * @return string|null One of the PASSWORD_* words, or null when the rows
      *                     could not be read.

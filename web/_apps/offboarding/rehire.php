@@ -2,8 +2,9 @@
 // Path: public_html/offboarding/rehire.php
 /**
  * Offboarding — reactivate a user within the undo window. Restores
- * isActive flags but NOT credentials; the user must reset password
- * via /forgot-password to sign in.
+ * isActive flags but NOT credentials: offboarding removed the password,
+ * passkeys and Microsoft or Google links, and nothing here puts them
+ * back. The message afterwards says what the account has now (#982).
  *
  * #518 FIX (17 September 2026): App::isAdmin() alone let an administrator
  * of ANY organisation undo ANY offboarding record and reactivate ANY
@@ -217,32 +218,34 @@ try {
     //    only within the tenant set up here, Google only within its hosted
     //    domain when one is set. So each part is read after the commit, in its
     //    own try, and said as what IS there, with its conditions:
-    //      - the password row: usable (said as a fact only - the removal step
-    //        may have failed, or somebody may have set one since), emptied (a new one via "Forgot your password?", which needs this
-    //        portal to be able to send e-mail), or none;
+    //      - the password row: usable (said as a fact only - the removal
+    //        step may have failed, or somebody may have set one since),
+    //        emptied (a new one via "Forgot your password?", which needs
+    //        this portal to be able to send e-mail), or none;
     //      - passkeys still registered;
     //      - Microsoft / Google sign-in, only where set up, with its condition.
-    //    With nothing at all, it says the account has no way in yet and who
-    //    can change that. Round 8 said "an administrator cannot give this
-    //    account a password", which is FALSE for exactly this account
-    //    (measured): admin/users/save.php's step 10b refuses a new sign-in
-    //    only when Auth::countLoginMethods() finds another way in (D-018 forbids
-    //    a SECOND way in, not a first), and that counts a Microsoft or Google
-    //    LINK whether or not that sign-in is set up. So the sentence asks the
-    //    same two things the save does: is the account still linked, and may
-    //    THIS administrator change it at all - AccountGuard::verdict() at
-    //    REACH_ACCOUNT, the save's own gate, which logs nothing. Once this
-    //    rehire has switched the membership back on, REACH_ACCOUNT and
-    //    REACH_REHIRE go through the same rows of AccountGuard::decide(), so
-    //    whoever could rehire gets ALLOW and is told "you can"; it is still
-    //    asked so that the sentence is never written where the save would
-    //    refuse, and anything but ALLOW says nothing about it. What the save
-    //    may still refuse with its own words (an e-mail address over 50
-    //    characters, or that sign-in name already used) is not repeated here.
-    //    A password that is still there is said as a fact only: the code
-    //    cannot tell whether the removal step failed or somebody set one
-    //    since (round 9). Every branch is pinned by M13g-M13m of
-    //    tools/erasure-pages-selftest.php.
+    //    With nothing at all, it says the account has no way in yet, and
+    //    then ONE of two things:
+    //      - still LINKED to Microsoft or Google: it cannot be given a
+    //        password on the Users page. That is certain: admin/users/save.php
+    //        step 10b refuses whenever Auth::countLoginMethods() finds another
+    //        way in, and it counts a link whether or not that sign-in is set
+    //        up (D-018 forbids a SECOND way in);
+    //      - otherwise: "You can try giving it a password on the Users page,
+    //        which will say if it cannot." A promise is deliberately NOT
+    //        made. Round 8 said an administrator cannot (false: D-018 does
+    //        not forbid a FIRST way in); round 9 said "You can" (false when
+    //        the save refuses a sign-in name over 50 characters - an e-mail
+    //        address may hold 255 - or one already in use). The page does not
+    //        repeat the save's rules; it says to try, and the save says why
+    //        when it refuses (#982 round 10).
+    //    Pinned by tools/erasure-pages-selftest.php: M13g (emptied password),
+    //    M13h and M13k (no way in, as a global and as an organisation
+    //    administrator, and the save really stores a password), M13o (an
+    //    e-mail address over 50 characters: no promise, and the save really
+    //    refuses), M13i and M13m (Google with and without a hosted domain,
+    //    two passkeys), M13j (a password, one passkey, Microsoft), M13l
+    //    (still linked: the save really refuses) and M13n (the read fails).
     $facts         = null;
     $passwordState = Auth::passwordState($db, $userId);
     try {
@@ -257,7 +260,6 @@ try {
             $linkedRead->execute();
             $linked = (int) ($linkedRead->get_result()->fetch_assoc()['linked'] ?? 0);
             $linkedRead->close();
-            $mayChange = AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT);
             $facts = [];
             if ($passwordState === Auth::PASSWORD_USABLE) {
                 $facts[] = 'They have a password on this portal.';
@@ -291,8 +293,9 @@ try {
         if ($linked > 0) {
             $howTheySignIn .= ' It is still linked to a Microsoft or Google account, so it cannot be given a password '
                 . 'on the Users page.';
-        } elseif ($mayChange === AccountGuard::ALLOW) {
-            $howTheySignIn .= ' You can give it a password on the Users page, because it has no other way to sign in.';
+        } else {
+            $howTheySignIn .= ' It has no other way to sign in. You can try giving it a password on the Users page, '
+                . 'which will say if it cannot.';
         }
     } else {
         $howTheySignIn = ' ' . implode(' ', $facts);
