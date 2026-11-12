@@ -116,6 +116,14 @@
  *      longer address containing it, the address with an accent the database
  *      calls equal, and a MEMBER whose account uses the same address. Five
  *      faults planted in the running copy, each turning its check red.
+ *   O. (#929, D-142.) A worker's own data download: My data's page, its
+ *      JSON download and the full data copy each LIST the pastoral visits,
+ *      care cases, DBS checks and children's check-ins and check-outs that
+ *      carry the worker's name - kind, date exactly as stored, organisation
+ *      and a fixed sentence - and hand over nothing about the other person,
+ *      no record number, and nothing from an organisation the worker has
+ *      left (counted instead). A member who made none sees none. Five faults
+ *      planted in the running copy, each turning its check red.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -208,7 +216,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 155; // 133 until #964 added section N (sixteen: the
+const EXPECTED_CHECKS = 168; // 155 until #929 added section O (thirteen: the
+                            // premise, the list in the My data download, the
+                            // records in an organisation left counted not listed,
+                            // the full data copy, the page, nothing about the
+                            // other person anywhere, a member who made none, five
+                            // plants and the clean run after them).
+                            // 133 until #964 added section N (sixteen: the
                             // premise through the real form and approval, the
                             // refusals, the filing, the list page, the run and
                             // what it did and did not reach, the report, a
@@ -512,6 +526,9 @@ function removeWorld(): void
     q('DELETE FROM tblVisitor WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblCareAccessLog WHERE caseID = ?', 'i', [CASE_ID]);
     q('DELETE FROM tblCareVisit WHERE caseID = ?', 'i', [CASE_ID]);
+    // Section O (#929): visits on any case of the two organisations. The links
+    // are off, so deleting a case below would leave its visits behind.
+    q('DELETE v FROM tblCareVisit v JOIN tblCareCase c ON c.caseID = v.caseID WHERE c.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999');
     q('DELETE c FROM tblKidCheckins c JOIN tblKidProfiles k ON k.childID = c.childID WHERE k.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblKidProfiles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -4139,6 +4156,220 @@ ok('N21 with every plant taken out again, the same fresh run is green: every obs
 $n964Clear();
 
 // =============================================================================
+head('O. A worker\'s own data download lists the records carrying their name, and nothing about the other person (#929, D-142)');
+// =============================================================================
+// Since #703 a pastoral visit, a care case, a DBS check and a child's check-in
+// or check-out KEEP the name and number of the worker who made them. D-142:
+// the worker's own download LISTS each such record - kind, date as stored,
+// organisation and a fixed sentence - and gives nothing about the other
+// person: no name, no notes, no number.
+//
+// The world, one ground each (#616): Wil is a member of A ONLY and made one
+// record of every kind, each fixed date chosen so it can be compared as text
+// (the visit's 01:30 on 29 March 2026 is a reading in London's missing hour:
+// passed through as stored, it stays 01:30; turned into a moment anywhere it
+// would not). He also opened a case in B, where he no longer belongs, and
+// made a visit on it: counted, never listed. Nell is a member of A who made
+// none. Every detail about the OTHER people is a marked string, so its
+// absence from the whole download is a measurement, not an assumption - and
+// O1 asks first that those strings really are in the database, or every
+// "absent" below would pass on nothing.
+const WIL        = 917055; // a worker, member of A only
+const NELL       = 917056; // a member of A who made none of these records
+const CHK        = 917057; // the person Wil recorded a DBS check for
+const O_CASE_A   = 917231; // a care case Wil opened in A
+const O_VISIT_A  = 917232; // a visit Wil made on it
+const O_CHILD    = 917233; // a child in A
+const O_CHECKIN  = 917234; // that child's check-in, in AND out by Wil
+const O_DBS      = 917235; // a DBS check Wil recorded for CHK
+const O_CASE_B   = 917236; // a care case Wil opened in B
+const O_VISIT_B  = 917237; // a visit Wil made on it
+
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0)', 'issississ',
+    [WIL, 'Wil Worker', 'u' . WIL . '.erasure@selftest.invalid', NELL, 'Nell None', 'u' . NELL . '.erasure@selftest.invalid', CHK, 'P929 Checked Person', 'u' . CHK . '.erasure@selftest.invalid']);
+foreach ([WIL, NELL, CHK] as $id) {
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+}
+q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 Cared-For Person', 'bereavement', 'P929 secret summary', ?, 'Wil Worker', '2026-02-01 09:15:00')", 'iii', [O_CASE_A, ORG_A, WIL]);
+q("INSERT INTO `tblCareVisit` (`visitID`, `caseID`, `visitedByID`, `visitedByName`, `visitedAt`, `kind`, `notes`) VALUES (?, ?, ?, 'Wil Worker', '2026-03-29 01:30:00', 'visit', 'P929 SECRET NOTE about the person')", 'iii', [O_VISIT_A, O_CASE_A, WIL]);
+q("INSERT INTO `tblKidProfiles` (`childID`, `siteID`, `fullName`, `isActive`) VALUES (?, ?, 'P929 Child Name', 1)", 'ii', [O_CHILD, ORG_A]);
+q("INSERT INTO `tblKidCheckins` (`checkinID`, `childID`, `badgeCode`, `checkedInAt`, `checkedInByID`, `checkedInByName`, `checkedOutAt`, `checkedOutByID`, `checkedOutByName`, `pickupName`) VALUES (?, ?, '929929', '2026-04-05 10:00:00', ?, 'Wil Worker', '2026-04-05 12:00:00', ?, 'Wil Worker', 'P929 Grandparent')", 'iiii', [O_CHECKIN, O_CHILD, WIL, WIL]);
+q("INSERT INTO `tblDbsChecks` (`dbsCheckID`, `userID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedByID`, `recordedByName`, `recordedAt`, `notes`) VALUES (?, ?, 'enhanced-barred', 'P929-REF-SECRET', '2025-11-11', '2028-11-11', 'valid', ?, 'Wil Worker', '2026-01-20 14:00:00', 'P929 dbs note')", 'iii', [O_DBS, CHK, WIL]);
+q("INSERT INTO `tblCareCase` (`caseID`, `siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`, `openedAt`) VALUES (?, ?, 'P929 B Person', 'hospital', 'P929 B summary', ?, 'Wil Worker', '2025-12-01 08:00:00')", 'iii', [O_CASE_B, ORG_B, WIL]);
+q("INSERT INTO `tblCareVisit` (`visitID`, `caseID`, `visitedByID`, `visitedByName`, `visitedAt`, `kind`, `notes`) VALUES (?, ?, ?, 'Wil Worker', '2025-12-02 08:30:00', 'call', 'P929 B note')", 'iii', [O_VISIT_B, O_CASE_B, WIL]);
+foreach (['wil' => WIL, 'nell' => NELL] as $who => $id) {
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
+    $in = $signIn($who);
+    if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+        refuse("signing in as selftest-erasure-{$who} did not work (HTTP {$in['status']} {$in['location']})");
+    }
+}
+
+// What the other people are, as stored - and the records' own numbers. None of
+// these may appear ANYWHERE in Wil's downloads or his page.
+$o929Secrets = ['P929 Cared-For Person', 'P929 secret summary', 'bereavement', 'P929 SECRET NOTE', 'P929 Child Name', 'P929 Grandparent',
+    '929929', 'P929 Checked Person', 'P929-REF-SECRET', 'enhanced-barred', 'P929 dbs note', 'P929 B Person', 'P929 B summary', 'P929 B note',
+    (string) O_CASE_A, (string) O_VISIT_A, (string) O_CHILD, (string) O_CHECKIN, (string) O_DBS, (string) O_CASE_B, (string) O_VISIT_B, (string) CHK];
+$o929Premise = one(
+    'SELECT (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `personName` = \'P929 Cared-For Person\' AND `openedByID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblCareVisit` WHERE `visitID` = ? AND `notes` LIKE \'P929 SECRET NOTE%\' AND `visitedByID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` WHERE k.`checkinID` = ? AND p.`fullName` = \'P929 Child Name\' AND k.`checkedInByID` = ? AND k.`checkedOutByID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `dbsCheckID` = ? AND `referenceNumber` = \'P929-REF-SECRET\' AND `recordedByID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `siteID` = ? AND `openedByID` = ?) AS `n`',
+    'iiiiiiiiiiii', [O_CASE_A, WIL, O_VISIT_A, WIL, O_CHECKIN, WIL, WIL, O_DBS, WIL, O_CASE_B, ORG_B, WIL]
+);
+ok('O1 premise: Wil\'s five kinds of record, and the case in B, are in the database carrying his number beside the other people\'s details, and Wil and Nell can sign in (#929)',
+    (int) ($o929Premise['n'] ?? 0) === 5 && isset($jar['wil'], $jar['nell']) === true, json_encode($o929Premise));
+
+// The list D-142 asks for, written out in the test - words included - so a
+// change to any of them is a change somebody has to make here too.
+$o929Expected = [
+    ['kind' => 'dbs-check-recorded', 'what' => 'DBS (safeguarding) check', 'date' => '2026-01-20 14:00:00', 'organisation' => null,
+        'yourPart' => 'Your name and account number are on this record as the person who recorded the check.'],
+    ['kind' => 'care-case-opened', 'what' => 'Pastoral care case', 'date' => '2026-02-01 09:15:00', 'organisation' => 'Selftest erasure A',
+        'yourPart' => 'Your name and account number are on this record as the person who opened the case.'],
+    ['kind' => 'care-visit', 'what' => 'Pastoral care visit', 'date' => '2026-03-29 01:30:00', 'organisation' => 'Selftest erasure A',
+        'yourPart' => 'Your name and account number are on this record as the person who made the visit.'],
+    ['kind' => 'child-checked-in', 'what' => 'Child\'s check-in', 'date' => '2026-04-05 10:00:00', 'organisation' => 'Selftest erasure A',
+        'yourPart' => 'Your name and account number are on this record as the helper who checked the child in.'],
+    ['kind' => 'child-checked-out', 'what' => 'Child\'s check-out', 'date' => '2026-04-05 12:00:00', 'organisation' => 'Selftest erasure A',
+        'yourPart' => 'Your name and account number are on this record as the helper who checked the child out.'],
+];
+$o929NotListedWords = '2 more records of these kinds carry your name in organisations you no longer belong to. They are not listed here; those organisations can tell you about them.';
+
+/** The three things one person is handed: My data's page, its JSON download, and the full data copy. */
+$o929Fetch = static function (string $who) use (&$jar): array {
+    $page   = req($jar[$who], 'GET', '/account/my-data');
+    $json   = req($jar[$who], 'GET', '/account/my-data?download=1');
+    $export = req($jar[$who], 'GET', '/account/data-export');
+
+    return [
+        'page'   => $page,
+        'json'   => $json,
+        'export' => $export,
+        'mine'   => json_decode($json['body'], true)['recordsCarryingYourName'] ?? null,
+        'copy'   => json_decode($export['body'], true)['data']['recordsCarryingYourName'] ?? null,
+    ];
+};
+/** The rows My data DRAWS in the new card, read from the parsed page, each as its four columns' text and its kind. */
+$o929PageRows = static function (string $html): ?array {
+    $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $cards = $doc->querySelectorAll('[data-records-carrying-your-name]');
+    if ($cards->length === 0) {
+        return null;
+    }
+    $rows = [];
+    foreach ($cards->item(0)->querySelectorAll('.portal-data-list > .row') as $row) {
+        $cells = [];
+        foreach ($row->children as $cell) {
+            $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
+        }
+        $rows[] = [(string) $row->getAttribute('data-record-kind'), $cells];
+    }
+
+    return $cards->length === 1 ? $rows : [];
+};
+$o929PageExpected = array_map(static fn (array $r): array => [$r['kind'], [$r['what'], $r['date'], $r['organisation'] ?? 'Not held against an organisation', $r['yourPart']]], $o929Expected);
+
+/** Everything section O asserts, as a list of what was WRONG (empty when right), so a planted fault can be asked which observation it turned red. */
+$o929Observe = static function () use ($o929Fetch, $o929PageRows, $o929Expected, $o929PageExpected, $o929NotListedWords, $o929Secrets): array {
+    $wrong = [];
+    $wil   = $o929Fetch('wil');
+    $nell  = $o929Fetch('nell');
+    foreach (['page', 'json', 'export'] as $part) {
+        if ($wil[$part]['status'] !== 200 || $nell[$part]['status'] !== 200) {
+            $wrong[] = 'a download did not answer';
+            break;
+        }
+    }
+    $mine = $wil['mine'];
+    if (is_array($mine) === false || ($mine['records'] ?? null) !== $o929Expected
+        || array_keys($mine) !== ['about', 'records', 'notListed', 'notListedWords', 'couldNotRead'] || $mine['couldNotRead'] !== []) {
+        $wrong[] = 'wil list wrong';
+    }
+    if (is_array($mine) === false || ($mine['notListed'] ?? null) !== 2 || ($mine['notListedWords'] ?? null) !== $o929NotListedWords) {
+        $wrong[] = 'not-listed count wrong';
+    }
+    if ($wil['copy'] === null || $wil['copy'] !== $mine) {
+        $wrong[] = 'wil export list wrong';
+    }
+    if ($o929PageRows($wil['page']['body']) !== $o929PageExpected) {
+        $wrong[] = 'wil page list wrong';
+    }
+    foreach ($o929Secrets as $secret) {
+        foreach (['page', 'json', 'export'] as $part) {
+            if (str_contains($wil[$part]['body'], $secret) === true) {
+                $wrong[] = 'other person leaked';
+                break 2;
+            }
+        }
+    }
+    $none = ['about' => $nell['mine']['about'] ?? null, 'records' => [], 'notListed' => 0, 'notListedWords' => null, 'couldNotRead' => []];
+    if ($nell['mine'] !== $none || $nell['copy'] !== $none || $o929PageRows($nell['page']['body']) !== null) {
+        $wrong[] = 'nell sees something';
+    }
+
+    return array_values(array_unique($wrong));
+};
+
+$o929First = $o929Observe();
+ok('O2 Wil\'s My data JSON download lists exactly his five records - kind, date exactly as stored (the 01:30 reading untouched), organisation (none for a DBS check) and the fixed sentence - oldest first, with nothing else in each entry (#929, D-142)',
+    in_array('wil list wrong', $o929First, true) === false && in_array('a download did not answer', $o929First, true) === false, implode('; ', $o929First));
+ok('O3 the two records in B, where Wil no longer belongs, are COUNTED and not listed, and the sentence says so (#929)',
+    in_array('not-listed count wrong', $o929First, true) === false, implode('; ', $o929First));
+ok('O4 the full data copy (account/data-export) hands over the same list as My data (#929)',
+    in_array('wil export list wrong', $o929First, true) === false, implode('; ', $o929First));
+ok('O5 the My data PAGE draws the same five rows, each with its kind, date, organisation and sentence (#929)',
+    in_array('wil page list wrong', $o929First, true) === false, implode('; ', $o929First));
+ok('O6 nothing about the other people reaches Wil - no cared-for person\'s or child\'s name, no notes, no case summary or category, no pickup name, no badge code, no DBS reference, type or subject, and no record number - anywhere in the page, the My data JSON or the full data copy (#929, D-142)',
+    in_array('other person leaked', $o929First, true) === false, implode('; ', $o929First));
+ok('O7 Nell, who made none of these records, is handed an empty list in both downloads and sees no such card on her page (#929)',
+    in_array('nell sees something', $o929First, true) === false, implode('; ', $o929First));
+
+// Planted in the RUNNING copy (no opcache: see the server's start), each must
+// turn its own observation red, and the file is put back byte for byte.
+$o929Plants = [
+    'O8 the other person\'s NAME read and handed over (the case\'s personName carried into each entry)' => [
+        '_core/GdprEraser.php', [
+            "'sql'      => 'SELECT c.`openedAt` AS `onDate`, " => "'sql'      => 'SELECT c.`personName`, c.`openedAt` AS `onDate`, ",
+            "'what'         => \$spec['what'],"                    => "'what'         => \$spec['what'] . json_encode(\$row),",
+        ], 'other person leaked'],
+    'O9 the record\'s NUMBER read and handed over (the visit\'s visitID carried into each entry)' => [
+        '_core/GdprEraser.php', [
+            "'sql'      => 'SELECT v.`visitedAt` AS `onDate`, " => "'sql'      => 'SELECT v.`visitID`, v.`visitedAt` AS `onDate`, ",
+            "'what'         => \$spec['what'],"                   => "'what'         => \$spec['what'] . json_encode(\$row),",
+        ], 'other person leaked'],
+    'O10 ANOTHER organisation\'s records listed (the own-organisations test switched off)' => [
+        '_core/GdprEraser.php', ['if ($own !== null && $siteId !== null && isset($own[$siteId]) === false) {' => 'if (false) {'], 'wil list wrong'],
+    'O11 a record TYPE missing (no check-out is ever found)' => [
+        '_core/GdprEraser.php', ["WHERE k.`checkedOutByID` = ?'," => "WHERE k.`checkedOutByID` = ? AND 1 = 0',"], 'wil list wrong'],
+    'O12 the full data copy no longer asks for the list' => [
+        '_apps/auth/account/data-export.php', ["'recordsCarryingYourName' => GdprEraser::recordsCarryingYourName(\$userId)," => ''], 'wil export list wrong'],
+];
+foreach ($o929Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $o929Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#929)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$o929Again = $o929Observe();
+ok('O13 with every plant taken out again, the same observations are all green (#929)', $o929Again === [], implode('; ', $o929Again));
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -4155,6 +4386,11 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblCountSessions WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID = ' . CHILD . ') '
+    // Section O (#929).
+    . '+ (SELECT COUNT(*) FROM tblCareVisit WHERE visitID BETWEEN 917230 AND 917239) '
+    . '+ (SELECT COUNT(*) FROM tblCareCase WHERE caseID BETWEEN 917230 AND 917239) '
+    . '+ (SELECT COUNT(*) FROM tblKidCheckins WHERE checkinID BETWEEN 917230 AND 917239) '
+    . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID BETWEEN 917230 AND 917239) '
     . '+ (SELECT COUNT(*) FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999) '
     // Section N (#964).
     . '+ (SELECT COUNT(*) FROM tblEvents WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ') OR eventID BETWEEN 917300 AND 917399) '

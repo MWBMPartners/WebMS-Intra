@@ -62,6 +62,10 @@
  *                          your address: the subject, when, and what became
  *                          of it — #592)
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
+ *   tblCareVisit, tblCareCase, tblDbsChecks, tblKidCheckins (only a LIST of
+ *                          the records that carry your name as the worker who
+ *                          made them: kind, date and organisation, never the
+ *                          other person's details — #929, D-142)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -76,6 +80,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\Site;
@@ -604,6 +609,15 @@ $payload = [
 
             return $lines;
         })(),
+        // 🧾 #929 (the owner's decision D-142): the pastoral visits, care
+        //    cases, DBS checks and children's check-ins and check-outs that
+        //    carry this person's name as the WORKER who made them. Each is
+        //    about somebody else, so it is LISTED - kind, date as stored, and
+        //    the organisation - and nothing about the other person is handed
+        //    over: no name, no notes, no record number. Asked of
+        //    GdprEraser::recordsCarryingYourName(), the ONE place they are
+        //    found and worded, which the My data page asks too.
+        'recordsCarryingYourName' => GdprEraser::recordsCarryingYourName($userId),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

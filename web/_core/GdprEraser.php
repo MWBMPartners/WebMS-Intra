@@ -4216,6 +4216,190 @@ class GdprEraser
     }
 
     /**
+     * 🧾 The records that carry this person's name as the WORKER who made
+     *    them, listed WITHOUT anything about the other person (#929, the
+     *    owner's decision D-142, 11 November 2026).
+     *
+     * WHY THIS EXISTS. Since #703 (D-016, D-110, D-111, D-112, D-113) a
+     * pastoral visit, a pastoral care case, a DBS (safeguarding) check and a
+     * child's check-in or check-out KEEP the name and account number of the
+     * worker who made them, even after that worker is erased. Those records
+     * are therefore part of what the portal holds about the worker, and a
+     * worker's own data download left them out. But each one is ABOUT
+     * somebody else - the person being cared for, or a child - so handing the
+     * worker the record would hand them a third party's details.
+     *
+     * D-142's answer, and the whole rule here: list each record by its KIND,
+     * its DATE and the fixed sentence saying the person's name is on it. Never
+     * the other person's name, never notes, never any text somebody typed,
+     * and - decided in #929 - never the record's NUMBER either: a number lets
+     * somebody who still has access (or anybody the list is passed to) open
+     * that exact record on its page, or match it against another copy, and
+     * D-142 asks for nothing that leads to the other person. A case's
+     * category, a visit's kind and a DBS check's type and dates are left out
+     * for the same reason: each says something about the other person.
+     *
+     * THE ONE PLACE these records are listed and worded. Both downloads ask it
+     * - My data (`account/my-data`, page and JSON) and the full data copy
+     * (`account/data-export`) - so the two cannot disagree. The reason a
+     * record is KEPT is still the instruction line in catalogue(), shown
+     * beside the counts by inventory() and worded by inventoryWords().
+     *
+     * THE DATE IS AS STORED. Each column is a DATETIME the database filled in
+     * when the record was made; mysqli hands it back as text and it is passed
+     * through as that text. It is never turned into a moment or moved to
+     * another time zone, because nothing records which clock it was read on.
+     *
+     * WHICH ORGANISATIONS. Only records in the person's OWN organisations are
+     * listed - the same rule as `SiteGate` (`Site::organisationsFor()`; with
+     * one organisation only, every record is). A record in an organisation
+     * the person no longer belongs to is COUNTED, never listed, so nothing is
+     * silently left out: `notListed` holds that count and `notListedWords`
+     * says it. A DBS check has NO organisation column (it is about a person,
+     * not an organisation - see `admin/safeguarding/dbs.php`), so DBS checks
+     * are always listed, with `organisation` null; working one out from the
+     * checked person's memberships would read that person's details to
+     * decide, which is the thing this method exists not to do.
+     *
+     * WHAT IT CANNOT DO: it matches on the account NUMBER only. A record whose
+     * number was emptied before #703 kept names carries no number to match. A
+     * kind whose table is missing (the app not installed) is skipped; any
+     * other failure to read is REPORTED in `couldNotRead`, never answered as
+     * "none".
+     *
+     * @return array{about: string, records: list<array{kind: string, what: string, date: string|null, organisation: string|null, yourPart: string}>, notListed: int, notListedWords: string|null, couldNotRead: list<string>}
+     */
+    public static function recordsCarryingYourName(int $userId): array
+    {
+        $db = App::db();
+
+        // 🗂️ One entry per kind of record. `sql` returns the date as stored
+        //    (`onDate`) and the record's organisation (`siteID`, `siteName`),
+        //    and NOTHING ELSE - no number, no name, no text. Every identifier
+        //    is backticked (the reserved-word rule, #718).
+        $kinds = [
+            'care-visit' => [
+                'what'     => 'Pastoral care visit',
+                'yourPart' => 'Your name and account number are on this record as the person who made the visit.',
+                'sql'      => 'SELECT v.`visitedAt` AS `onDate`, c.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
+                    . 'FROM `tblCareVisit` v JOIN `tblCareCase` c ON c.`caseID` = v.`caseID` '
+                    . 'LEFT JOIN `tblSites` s ON s.`siteID` = c.`siteID` WHERE v.`visitedByID` = ?',
+            ],
+            'care-case-opened' => [
+                'what'     => 'Pastoral care case',
+                'yourPart' => 'Your name and account number are on this record as the person who opened the case.',
+                'sql'      => 'SELECT c.`openedAt` AS `onDate`, c.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
+                    . 'FROM `tblCareCase` c LEFT JOIN `tblSites` s ON s.`siteID` = c.`siteID` WHERE c.`openedByID` = ?',
+            ],
+            'dbs-check-recorded' => [
+                'what'     => 'DBS (safeguarding) check',
+                'yourPart' => 'Your name and account number are on this record as the person who recorded the check.',
+                // No organisation column: see "WHICH ORGANISATIONS" above.
+                'sql'      => 'SELECT d.`recordedAt` AS `onDate`, NULL AS `siteID`, NULL AS `siteName` '
+                    . 'FROM `tblDbsChecks` d WHERE d.`recordedByID` = ?',
+            ],
+            'child-checked-in' => [
+                'what'     => 'Child\'s check-in',
+                'yourPart' => 'Your name and account number are on this record as the helper who checked the child in.',
+                // The child's profile is joined for its ORGANISATION only.
+                'sql'      => 'SELECT k.`checkedInAt` AS `onDate`, p.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
+                    . 'FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` '
+                    . 'LEFT JOIN `tblSites` s ON s.`siteID` = p.`siteID` WHERE k.`checkedInByID` = ?',
+            ],
+            'child-checked-out' => [
+                'what'     => 'Child\'s check-out',
+                'yourPart' => 'Your name and account number are on this record as the helper who checked the child out.',
+                'sql'      => 'SELECT k.`checkedOutAt` AS `onDate`, p.`siteID` AS `siteID`, s.`siteName` AS `siteName` '
+                    . 'FROM `tblKidCheckins` k JOIN `tblKidProfiles` p ON p.`childID` = k.`childID` '
+                    . 'LEFT JOIN `tblSites` s ON s.`siteID` = p.`siteID` WHERE k.`checkedOutByID` = ?',
+            ],
+        ];
+
+        $out = [
+            'about'          => 'These records are about somebody else - a person being cared for, a person whose DBS check '
+                . 'was recorded, or a child - and they carry your name because you made them. Each is listed by its '
+                . 'kind, its date as the record stores it, and the organisation that holds it; nothing about the '
+                . 'other person is given (decision D-142). They keep your name and account number even if you are '
+                . 'erased (decisions D-016, D-110 and D-111).',
+            'records'        => [],
+            'notListed'      => 0,
+            'notListedWords' => null,
+            'couldNotRead'   => [],
+        ];
+
+        // 🏢 The person's own organisations, asked exactly as SiteGate asks.
+        //    null means "every organisation": one organisation only.
+        $own = null;
+        if (Site::isMultisiteEnabled() === true) {
+            try {
+                $own = [];
+                foreach (Site::organisationsFor($userId, $db) as $org) {
+                    $own[(int) $org['siteID']] = true;
+                }
+            } catch (\Throwable $problem) {
+                // Not knowing is not "none of them": nothing is listed, and
+                // the page says it could not be read.
+                $out['couldNotRead'] = array_keys($kinds);
+
+                return $out;
+            }
+        }
+
+        foreach ($kinds as $kind => $spec) {
+            try {
+                $stmt = $db->prepare($spec['sql']);
+                if ($stmt === false) {
+                    $out['couldNotRead'][] = $kind;
+                    continue;
+                }
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
+            } catch (\mysqli_sql_exception $problem) {
+                // 1146: the table does not exist, because the app that makes
+                // these records is not installed. Then there are none.
+                if ($problem->getCode() !== 1146) {
+                    $out['couldNotRead'][] = $kind;
+                }
+                continue;
+            }
+            foreach ($rows as $row) {
+                $siteId = $row['siteID'] === null ? null : (int) $row['siteID'];
+                if ($own !== null && $siteId !== null && isset($own[$siteId]) === false) {
+                    $out['notListed']++;
+                    continue;
+                }
+                $out['records'][] = [
+                    'kind'         => $kind,
+                    'what'         => $spec['what'],
+                    'date'         => $row['onDate'] === null ? null : (string) $row['onDate'],
+                    'organisation' => $siteId === null ? null : (string) ($row['siteName'] ?? ''),
+                    'yourPart'     => $spec['yourPart'],
+                ];
+            }
+        }
+
+        // Oldest first; a record with no date goes last. The kind breaks a
+        // tie, so the order never depends on the database's own.
+        usort($out['records'], static function (array $a, array $b): int {
+            $byDate = strcmp((string) ($a['date'] ?? '9999'), (string) ($b['date'] ?? '9999'));
+
+            return $byDate !== 0 ? $byDate : strcmp($a['kind'], $b['kind']);
+        });
+
+        if ($out['notListed'] > 0) {
+            $out['notListedWords'] = $out['notListed'] === 1
+                ? '1 more record of these kinds carries your name in an organisation you no longer belong to. It is not '
+                    . 'listed here; that organisation can tell you about it.'
+                : $out['notListed'] . ' more records of these kinds carry your name in organisations you no longer belong '
+                    . 'to. They are not listed here; those organisations can tell you about them.';
+        }
+
+        return $out;
+    }
+
+    /**
      * Verify the audit chain for one request. Returns true when intact,
      * false on any broken link. Lets compliance prove no row was edited.
      */

@@ -27,6 +27,13 @@ Auth::requireLogin();
 
 $userId   = (int) ($_SESSION['user_id'] ?? 0);
 $inventory = GdprEraser::inventory($userId);
+// 🧾 #929 (the owner's decision D-142): the care, DBS and children's check-in
+//    records that carry this person's name as the WORKER who made them,
+//    listed by kind, date and organisation only - never the other person's
+//    name, notes or the record's number. GdprEraser::recordsCarryingYourName()
+//    is the ONE place they are found and worded; the full data copy
+//    (`account/data-export`) asks it too.
+$asWorker  = GdprEraser::recordsCarryingYourName($userId);
 
 if (isset($_GET['download']) === true) {
     header('Content-Type: application/json; charset=utf-8');
@@ -35,6 +42,7 @@ if (isset($_GET['download']) === true) {
         'generatedAt' => date('c'),
         'userID'      => $userId,
         'inventory'   => $inventory,
+        'recordsCarryingYourName' => $asWorker,
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     exit();
 }
@@ -84,6 +92,41 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
     </div>
 </div>
+
+<?php
+// 🧾 #929 (D-142): drawn only when there is something to say, so a member who
+//    made none of these records sees nothing new. Every value printed is one
+//    of GdprEraser's own fixed words, a stored date, or an organisation's
+//    name - nothing about the other person can reach this card, because the
+//    method never reads it. No <code> table names here: the rows above are
+//    found by theirs, and a second row naming a table would muddle that.
+if ($asWorker['records'] !== [] || $asWorker['notListed'] > 0 || $asWorker['couldNotRead'] !== []):
+?>
+<div class="card mb-3" data-records-carrying-your-name>
+    <div class="card-header"><strong>Records that carry your name as the person who made them</strong></div>
+    <div class="card-body">
+        <p class="small text-secondary"><?php echo htmlspecialchars($asWorker['about'], ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php if ($asWorker['records'] !== []): ?>
+            <div class="portal-data-list">
+                <?php foreach ($asWorker['records'] as $record): ?>
+                    <div class="row py-2 border-bottom small" data-record-kind="<?php echo htmlspecialchars($record['kind'], ENT_QUOTES, 'UTF-8'); ?>">
+                        <div class="col-md-3"><strong><?php echo htmlspecialchars($record['what'], ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                        <div class="col-md-2"><?php echo htmlspecialchars((string) ($record['date'] ?? 'No date recorded'), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-md-2 text-muted"><?php echo htmlspecialchars($record['organisation'] ?? 'Not held against an organisation', ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="col-md-5 text-muted"><?php echo htmlspecialchars($record['yourPart'], ENT_QUOTES, 'UTF-8'); ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+        <?php if ($asWorker['notListedWords'] !== null): ?>
+            <p class="small text-muted mt-2 mb-0"><?php echo htmlspecialchars($asWorker['notListedWords'], ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php endif; ?>
+        <?php if ($asWorker['couldNotRead'] !== []): ?>
+            <p class="small text-warning mt-2 mb-0">Some of these records could not be read just now, so this list may be incomplete. Please try again later.</p>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="d-flex gap-2">
     <a class="btn btn-outline-primary" href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>?download=1"><i class="fa-solid fa-download me-1"></i>Download as JSON</a>
