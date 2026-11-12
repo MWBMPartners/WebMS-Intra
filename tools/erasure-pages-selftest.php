@@ -1835,8 +1835,10 @@ foreach ([ORG_A, ORG_B] as $site) {
     q("INSERT INTO tblGivingCategory (siteID, name) VALUES (?, 'Selftest erasure offering')", 'i', [$site]);
     $category[$site] = (int) one('SELECT MAX(categoryID) AS id FROM tblGivingCategory WHERE siteID = ?', 'i', [$site])['id'];
 }
-$gift = static function (int $site, int $donor, string $date, int $pence) use ($category): int {
-    q("INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, `currency`, donatedAt, method) VALUES (?, ?, ?, ?, 'EUR', ?, 'cash')", 'iiiis', [$site, $donor, $category[$site], $pence, $date]);
+// $currency: EUR by default (#966's fixture choice). A gift a Gift Aid CLAIM FILE check reads must be GBP,
+//    because since #966 (D-139) the claim file holds gifts in pounds only (Giving::GIFT_AID_CURRENCY).
+$gift = static function (int $site, int $donor, string $date, int $pence, string $currency = 'EUR') use ($category): int {
+    q("INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, `currency`, donatedAt, method) VALUES (?, ?, ?, ?, ?, ?, 'cash')", 'iiiiss', [$site, $donor, $category[$site], $pence, $currency, $date]);
 
     return (int) one('SELECT MAX(entryID) AS id FROM tblGivingEntry WHERE siteID = ? AND donorID = ?', 'ii', [$site, $donor])['id'];
 };
@@ -3375,7 +3377,7 @@ foreach ([ZED => ['Zed Zakes', true], LIV => ['Liv Live', true], OFF => ['Olly O
     }
 }
 q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `address`, `postcode`, `validFrom`) VALUES (?, ?, '9 Made-up Road', 'ZZ9 9ZZ', '2020-01-01')", 'ii', [ORG_A, ZED]);
-$gift(ORG_A, ZED, $recent, 9773); // £97.73: an amount nobody else in this world gives, so it can be found on a page
+$gift(ORG_A, ZED, $recent, 9773, 'GBP'); // 97.73: an amount nobody else in this world gives, so it can be found on a page; GBP, because the claim file holds pounds only (#966)
 
 /** Zed's line of the Gift Aid claim file, found by the declaration's postcode (the name is what is being tested). */
 $claimLineM = static function () use ($jar, $todayM): string {
