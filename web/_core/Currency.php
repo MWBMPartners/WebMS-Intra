@@ -705,8 +705,12 @@ final class Currency
      *   it for certain (#1004 rounds 9 to 15):
      *     - more than one currency marker in front: one of the organisation's
      *       own (ownMarkerAtStart()), then another that anyMarkerAtStart()
-     *       finds after it, past any spaces and at most one minus. The
-     *       organisation's code is only
+     *       finds after it, past any run of spaces and then — only if no minus came before
+     *       the organisation's marker — one minus, with nothing between that
+     *       minus and the next marker ("£-£3" counts; "-£-£3" and "£- £3"
+     *       do not, and could not be read). Where no negative is
+     *       allowed and the cell carries a minus anywhere, it is refused as
+     *       negative instead (round 17). The organisation's code is only
      *       taken where an amount or a sign follows it (a sign listed in
      *       SIGNS_OF with a symbol in it, or capitals joined to one; never a
      *       letters-only sign, so "GBP R12" could not be read), so "GBP £12",
@@ -795,10 +799,12 @@ final class Currency
                 }
                 // MORE THAN ONE currency sign or code in front: after one of
                 // the organisation's own, ANOTHER marker that
-                // anyMarkerAtStart() finds after it, past any spaces and at
-                // most one minus ("GBP £12", "££12", "GBP $12", "£$12",
-                // "GBP US$12", "GBP £$12", "AED AED$12", "£-£3"). Not after
-                // the figure: a marker after the
+                // anyMarkerAtStart() finds after it, past any run of spaces
+                // and then — only if no minus came before our marker — one
+                // minus with nothing between it and the next marker ("GBP
+                // £12", "££12", "GBP $12", "£$12", "GBP US$12", "GBP £$12",
+                // "AED AED$12", "£-£3"; NOT "-£-£3" or "£- £3", which could
+                // not be read). Not after the figure: a marker after the
                 // figure ("£12$", "GBP 12£", "£12 €") is not in front, and
                 // the cell could not be read. Every such cell gets ONE fixed
                 // sentence, manyMarkersWords(), which names, counts and
@@ -816,6 +822,17 @@ final class Currency
                 // ownMarkerAtStart() too could never change the answer
                 // (round 15 removed it, as round 11 removed `|| isKnown()`).
                 if (self::anyMarkerAtStart($text) !== '') {
+                    // Where no negative is allowed (the asset import) and the
+                    // cell carries a minus ANYWHERE, it is told that first,
+                    // exactly as a single-marker cell ("-£3", "GBP -3") is:
+                    // the one sentence would ask for "nothing in front but,
+                    // at most, the code", and following it literally ("GBP 3")
+                    // stores a POSITIVE cost where the file said minus 3
+                    // (round 17). Refused either way, so no stored value moves.
+                    if ($allowNegative === false && str_contains($typed, '-') === true) {
+                        return self::REFUSED_NEGATIVE;
+                    }
+
                     return self::manyMarkersWords($code, $allowNegative);
                 }
             }
@@ -831,7 +848,7 @@ final class Currency
         $whole    = $point === false ? $text : substr($text, 0, $point);
         $fraction = $point === false ? '' : substr($text, $point + 1);
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
-            return $fromFile === true ? self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code) : self::REFUSED_NO_FIGURES;
+            return $fromFile === true ? self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code, $allowNegative) : self::REFUSED_NO_FIGURES;
         }
         if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
             return self::REFUSED_COMMAS;
@@ -901,7 +918,7 @@ final class Currency
                 return self::REFUSED_COMMAS;
             }
             // Anything else: never a guess at which currency it might be.
-            return self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code);
+            return self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code, $allowNegative);
         }
         if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
             return self::REFUSED_POWER_OF_TEN;
@@ -934,6 +951,12 @@ final class Currency
      * all (D-165). With no currency chosen, no code is mentioned: a code would
      * be refused too.
      *
+     * Where the caller allows a negative (`$allowNegative`, the bank import's
+     * debits), it also says to keep the minus sign (round 17): without that,
+     * "-R3", "-kr3", "-3GBP" or "-£3.00DR" in a statement got "Write it in
+     * figures… (ZAR 1,234.56)", and a reader who dropped the minus imported a
+     * payment out as a credit. "-1,234.56" and "ZAR -1,234.56" both read.
+     *
      * It ends exactly TWO file-mode refusals: FILE_REASON_UNREADABLE (every
      * refusal whose reason cannot be known for certain) and
      * FILE_REASON_MINUS_NOT_HERE. Every other file-mode refusal carries its
@@ -941,15 +964,18 @@ final class Currency
      * point, a minus in the wrong place, too large, nothing entered, more than one
      * currency marker, a currency sign or code not ours, no currency chosen).
      */
-    public static function fileAdvice(string $code): string
+    public static function fileAdvice(string $code, bool $allowNegative = false): string
     {
-        $code = strtoupper(trim($code));
+        $code      = strtoupper(trim($code));
+        $keepMinus = $allowNegative === true
+            ? ' Keep the minus sign in front of money paid out, for example -1,234.56.'
+            : '';
 
-        return $code !== ''
+        return ($code !== ''
             ? 'Write it in figures, with commas only between thousands if you like, for example 1,234.56. '
                 . 'The code ' . $code . ' may go in front of a figure that is already in ' . $code . ' (' . $code . ' 1,234.56), '
                 . 'but never in front of an amount in another currency.'
-            : 'Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
+            : 'Write it in figures, with commas only between thousands if you like, for example 1,234.56.') . $keepMinus;
     }
 
     /**
@@ -978,8 +1004,9 @@ final class Currency
 
     /**
      * 💱 What a FILE's amount answers when, after one of the organisation's
-     * own markers (ownMarkerAtStart()) and past any spaces and at most one
-     * minus, ANOTHER currency marker follows — one anyMarkerAtStart() finds (a sign listed in SIGNS_OF with a
+     * own markers (ownMarkerAtStart()) — past any run of spaces and then,
+     * only if no minus came before that marker, one minus with nothing
+     * between it and the next marker — ANOTHER currency marker follows — one anyMarkerAtStart() finds (a sign listed in SIGNS_OF with a
      * symbol in it, capitals joined to one, or a known code followed by an
      * amount or a sign). That and nothing else (round 14). It names, counts
      * and judges no marker, so it is true of every such cell: the markers may
@@ -1000,7 +1027,10 @@ final class Currency
      * 15's wording reached "-££3" and "GBP-£12" too, and read literally told
      * the person to drop the minus — the converter's own REFUSED_MINUS_PLACE
      * calls a minus something that goes in front — so following it turned a
-     * £3 payment out into a £3 credit. "GBP -3", "-GBP 3" and "-3" all read.
+     * £3 payment out into a £3 credit. "GBP -3", "-GBP 3", "GBP-3", "-GBP3"
+     * and "-3" all read. Where no negative is allowed, a cell carrying a
+     * minus never reaches this sentence: it is refused as negative first
+     * (round 17), so the sentence cannot lead to a minus being dropped.
      *
      * A cell whose FIRST marker is not the organisation's gets
      * otherCurrencyWords() instead, which is true of it however many follow.
