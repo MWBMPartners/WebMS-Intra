@@ -325,11 +325,13 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     // 💷 purchaseCostPounds → purchaseCostPence through the ONE converter,
     //    Currency::parseAmount() (#1004), in its FILE mode (the owner, D-153):
     //    a spreadsheet saved with currency formatting writes "£1,234.56", so
-    //    commas between groups of three and the asset's OWN currency sign or
-    //    code are read, exactly as the bank-statement import reads them. The
-    //    rows are made in the organisation's currency, so that is the one
-    //    passed. Another currency's sign, or any sign while the organisation
-    //    has no currency chosen, is refused with the reason. It used to strip
+    //    commas between groups of three are read, and the organisation's
+    //    three-letter CODE in front, exactly as the bank-statement import reads
+    //    them. A SIGN is read only where it belongs to that one currency or is
+    //    kept for it ("£" for GBP alone, D-157); a shared sign ("$", "¥", "£"
+    //    elsewhere) is refused saying so (D-155), as is another currency's sign,
+    //    or any sign while no currency is chosen. The rows are made in the
+    //    organisation's currency, so that is the one passed. It used to strip
     //    "£", "$", "€", every comma and every space and go through a float, so
     //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure
     //    wrapped.

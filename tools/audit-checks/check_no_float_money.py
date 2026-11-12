@@ -52,8 +52,16 @@ asserts it is NOT reported — so a change that started seeing one would be noti
     `round(str_replace(',', '', $raw) * 100)`, `filter_input(…) * 100`, a
     value from a decoded JSON body (`$body['amount'] * 100`), and
     `$_SERVER[…] * 100` (not one of the four request arrays it names);
+  - a whole-number cast of a variable that was taken from the request in an
+    EARLIER statement (`$a = $_POST['x'];` … `(int) $a * 100`): the request
+    array is not in the statement that multiplies;
   - 100 written another way: `* 1e2`, `* 1_00`, or a variable or constant
-    holding 100;
+    holding 100 — and the same sum written as a division,
+    `(int) round((float) $v / 0.01)`;
+  - a statement split by a `{$…}` inside a double-quoted string: PHP's
+    tokeniser hands back that closing `}` as a plain brace, which this check
+    cuts statements at, so `(float) "{$v}" * 100` becomes two pieces, one
+    with the cast and one with the `* 100`;
   - `bcmul()` or any other route that does not multiply by a literal 100;
   - JavaScript and markup (inline HTML is not PHP and is skipped);
   - whether a percentage that DOES cast to a float is money: such a statement
@@ -204,6 +212,9 @@ SELF_TEST_CASES = [
     ('blind: bcmul()', "<?php\n$p = (int) bcmul((string) (float) $v, '100');\n", False),
     ('blind: JavaScript in a page', "<?php $a = 1; ?>\n<script>var p = Math.round(parseFloat(v) * 100);</script>\n", False),
     ('blind: the words in markup', "<?php $a = 1; ?>\n<p>(int) round((float) $v * 100)</p>\n", False),
+    ('blind: a variable taken from the request in an earlier statement', "<?php\n$a = $_POST['x'];\n$p = (int) $a * 100;\n", False),
+    ('blind: the same sum as a division by 0.01', "<?php\n$p = (int) round((float) $v / 0.01);\n", False),
+    ('blind: a {$…} in a string splits the statement', "<?php\n$p = (int) ((float) \"{$v}\" * 100);\n", False),
     ('a percentage that casts to a float IS reported (it would go in ALLOWED with its reason)', "<?php\n$pct = (float) $done / $all * 100;\n", True),
 ]
 

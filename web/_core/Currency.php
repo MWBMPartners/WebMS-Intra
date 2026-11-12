@@ -187,21 +187,36 @@ final class Currency
     ];
 
     /**
-     * 💱 Currency signs written by SEVERAL currencies, with the ones they are
-     * written by (D-155). A file cell carrying one cannot say which money it is,
-     * so file mode refuses it even in an organisation whose own currency uses
-     * it, and says so. Of the signs this class knows (SYMBOLS, plus "¥"), these
-     * are the shared ones: every SYMBOLS entry other than "$" is unique to its
-     * currency ("A$", "CA$", "NZ$", "HK$", "MX$", "NT$", "EC$", "R$", "CN¥",
-     * "€", "£", "₹", "₪", "₱"), and "£" is read as pounds sterling here because
-     * D-153's own example is "£1,234.56". Written out by hand; the list of
-     * dollars is the one D-155 names, not every dollar there is.
+     * 💱 Currency signs written by SEVERAL currencies: `who` writes them, and
+     * `readFor` is the one currency, if any, whose organisation may still read
+     * the bare sign in a file. A file cell carrying any other shared sign cannot
+     * say which money it is, so file mode refuses it, saying so (D-155).
      *
-     * @var array<string, string>
+     * Of the signs this class knows (SYMBOLS, plus "¥"), the shared ones are:
+     *   - "$" — the US dollar's entry in SYMBOLS, but written by many dollars;
+     *     read for NOBODY, not even USD (D-155);
+     *   - "¥" — the yuan and the yen; read for nobody;
+     *   - "£" — pounds sterling's entry in SYMBOLS, but also the Gibraltar,
+     *     Falkland Islands and St Helena pounds and the Egyptian, Syrian,
+     *     Lebanese and South Sudanese pounds, all currencies this class knows.
+     *     Read ONLY for a GBP organisation (the owner, D-157, keeping D-153's
+     *     "£1,234.56"); every other "£" organisation writes its code;
+     *   - "₱" — the Philippine peso's entry in SYMBOLS, but also written for
+     *     the Cuban peso (CUP), which this class knows. No decision names it;
+     *     it is treated the way D-157 treats "£" — read only for its SYMBOLS
+     *     currency (PHP), refused for any other — and that is put to the owner.
+     * Every other SYMBOLS entry belongs to one currency: "A$", "CA$", "NZ$",
+     * "HK$", "MX$", "NT$", "EC$", "R$", "CN¥", "€", "₹", "₪". Written out by
+     * hand; the lists of who writes each are the ones the decisions name, not
+     * every currency there is.
+     *
+     * @var array<string, array{who: string, readFor: string}>
      */
     private const SHARED_SIGNS = [
-        '$' => 'US, Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars among them',
-        '¥' => 'the Chinese yuan and the Japanese yen',
+        '$' => ['who' => 'US, Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars among them', 'readFor' => ''],
+        '¥' => ['who' => 'the Chinese yuan and the Japanese yen', 'readFor' => ''],
+        '£' => ['who' => 'the pound sterling and the Gibraltar, Falkland Islands, St Helena, Egyptian, Syrian, Lebanese and South Sudanese pounds', 'readFor' => 'GBP'],
+        '₱' => ['who' => 'the Philippine peso and the Cuban peso', 'readFor' => 'PHP'],
     ];
 
     /**
@@ -536,19 +551,26 @@ final class Currency
     /** What a typed box answers for a character that is not a figure, a point or a minus (D-152: figures only). */
     public const REFUSED_NOT_FIGURES = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.';
 
-    /** What a file's amount answers for a character it cannot hold (D-152, D-153). */
-    public const REFUSED_FILE_NOT_FIGURES = 'That is not an amount: it should be figures, for example 1,234.50, with nothing else in front but the currency\'s own sign.';
+    /**
+     * The REASONS a file's amount is refused (D-152, D-153). Each is followed by
+     * fileAdvice(), the one sentence saying how to write it — figures, commas
+     * only between thousands, and the three-letter CODE in front if you like.
+     * The advice never points at a currency sign: round 4 said "the currency's
+     * own sign", which is false for every currency whose sign is shared or which
+     * has no sign here at all.
+     */
+    public const FILE_REASON_NOT_FIGURES   = 'That is not an amount.';
+    public const FILE_REASON_PLUS          = 'Leave out the plus sign.';
+    public const FILE_REASON_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative.';
+    public const FILE_REASON_NO_FIGURES    = 'That cell has no figures in it.';
 
     /** The other refusals, each worded for the one shape it is given (#1004). */
     public const REFUSED_POWER_OF_TEN = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
     public const REFUSED_PLUS         = 'Leave out the plus sign: type the amount in figures, for example 12.50.';
-    public const REFUSED_FILE_PLUS    = 'Leave out the plus sign: the cell should hold the amount in figures, for example 12.50.';
     /** A misplaced minus where an amount MAY be negative (the bank import's debits). */
     public const REFUSED_MINUS_PLACE  = 'A minus sign can only come first, for example -12.50.';
     /** A minus where an amount may NOT be negative: "come first" would only lead to "cannot be negative" (round 4). */
     public const REFUSED_MINUS_NOT_HERE      = 'A minus sign has no place here: the amount cannot be negative. Type the figures only, for example 12.50.';
-    public const REFUSED_FILE_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative. The cell should hold figures only, for example 12.50.';
-    public const REFUSED_FILE_NO_FIGURES = 'That cell has no figures in it: it should hold an amount, for example 12.50.';
     public const REFUSED_ONE_POINT    = 'An amount can have only one decimal point, for example 12.50.';
     public const REFUSED_NO_FIGURES   = 'That has no figures in it: type the amount in figures, for example 12.50.';
     public const REFUSED_COMMAS       = 'The commas in that amount are in the wrong places: a comma may only separate groups of three figures (1,234.50), and the decimals follow a point (12.50).';
@@ -595,12 +617,14 @@ final class Currency
      *   - commas between groups of three ("1,234.50", "1,234,567"), the first
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
-     *   - the record's OWN currency sign or code in front ("£12.50",
-     *     "GBP 12.50", "-£3.00", "£-3.00") — but only a sign that belongs to
-     *     that ONE currency. A sign SHARED by several ("$", "¥") is refused even
-     *     when it is the organisation's own, saying it is shared and asking for
-     *     the three-letter code (the owner, D-155): "AUD 12.50" reads, "$12.50"
-     *     does not. ANOTHER currency's sign is refused, saying which; and with
+     *   - the record's three-letter CODE in front ("GBP 12.50", "AUD 1,234.50"),
+     *     and its SIGN only where the sign belongs to that one currency ("A$",
+     *     "CA$", "€", …) or is kept for it: "£" is read for GBP alone (D-157)
+     *     and "₱" for PHP alone (put to the owner; see SHARED_SIGNS). A sign
+     *     SHARED by several currencies ("$", "¥", "£" outside GBP, "₱" outside
+     *     PHP) is refused, saying it is shared (D-155): "AUD 12.50" reads,
+     *     "$12.50" does not. A minus may sit either side of a sign that is read
+     *     ("-£3.00", "£-3.00"). ANOTHER currency's sign is refused, saying which; and with
      *     NO currency chosen for the organisation, any sign is refused, saying
      *     so and what to do (D-139: an amount's money is never guessed, so
      *     "£12.50" cannot be stored as money of no known kind).
@@ -630,8 +654,8 @@ final class Currency
             return self::REFUSED_EMPTY;
         }
 
-        // ➖ A leading minus. In a file, the record's own sign or code may sit
-        //    either side of it: "-£3.00" and "£-3.00". The longest prefix is
+        // ➖ A leading minus. In a file, the record's code, or a sign read for
+        //    it, may sit either side of it: "-£3.00" and "£-3.00". The longest prefix is
         //    tried first, so "CA$" before "$". A typed box takes no sign at all.
         $negative = false;
         if (str_starts_with($text, '-') === true) {
@@ -639,12 +663,14 @@ final class Currency
             $text     = substr($text, 1);
         }
         if ($fromFile === true && $code !== '') {
-            // A sign SHARED by several currencies ("$", "¥") is never read as
-            // this one, even when it is this one's own (the owner, D-155): it is
-            // refused below with the reason. The three-letter code always reads.
+            // A sign SHARED by several currencies is read only for the one
+            // currency it is kept for ("£" for GBP, D-157); "$" and "¥" for
+            // nobody (D-155). Anything else is refused below with the reason.
+            // The three-letter code always reads.
             $prefixes = [$code];
-            if (self::symbol($code) !== '' && isset(self::SHARED_SIGNS[self::symbol($code)]) === false) {
-                $prefixes[] = self::symbol($code);
+            $sign     = self::symbol($code);
+            if ($sign !== '' && (isset(self::SHARED_SIGNS[$sign]) === false || self::SHARED_SIGNS[$sign]['readFor'] === $code)) {
+                $prefixes[] = $sign;
             }
             usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
             foreach ($prefixes as $prefix) {
@@ -669,7 +695,7 @@ final class Currency
         $whole    = $point === false ? $text : substr($text, 0, $point);
         $fraction = $point === false ? '' : substr($text, $point + 1);
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
-            return $fromFile === true ? self::REFUSED_FILE_NO_FIGURES : self::REFUSED_NO_FIGURES;
+            return $fromFile === true ? self::FILE_REASON_NO_FIGURES . ' ' . self::fileAdvice($code) : self::REFUSED_NO_FIGURES;
         }
         if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
             return self::REFUSED_COMMAS;
@@ -698,7 +724,7 @@ final class Currency
 
     /**
      * 🗣️ Why `$text` (what is left once a leading minus and, in a file, the
-     * record's own sign are taken off) is not an amount — the TRUE reason for
+     * record's code or a sign read for it are taken off) is not an amount — the TRUE reason for
      * its shape, most specific first. Round 2 of #1004's check found one
      * sentence ("no commas, spaces, currency signs or letters") given for
      * "12.5.5", which holds none of those.
@@ -718,11 +744,10 @@ final class Currency
             // D-155: a shared sign cannot say WHICH money, so it is refused —
             // and never called "another currency", which is untrue when it is
             // this organisation's own (an AUD organisation reading "$12.50").
-            if (isset(self::SHARED_SIGNS[$written]) === true) {
-                return 'The sign ' . $written . ' is used by several currencies (' . self::SHARED_SIGNS[$written] . '), so the '
-                    . 'portal cannot tell which money this is. Write the three-letter code of the currency the cell is in instead '
-                    . '(this organisation keeps its money in ' . $code . ', for example ' . $code . ' 12.50), or leave the sign out '
-                    . 'if the amount is in ' . $code . '.';
+            if (isset(self::SHARED_SIGNS[$written]) === true && self::SHARED_SIGNS[$written]['readFor'] !== $code) {
+                return 'The sign ' . $written . ' is used by several currencies (' . self::SHARED_SIGNS[$written]['who'] . '), so the '
+                    . 'portal cannot tell which money this is. If the amount is in ' . $code . ', ' . lcfirst(self::fileAdvice($code))
+                    . ' If it is in another currency, it cannot be imported into this organisation\'s records.';
             }
             if ($written !== '') {
                 return 'That amount is written in another currency (' . $written . '), not ' . $code . '. Import a file kept in '
@@ -731,22 +756,38 @@ final class Currency
         }
         $allowed = $fromFile === true ? '0-9.,+\-' : '0-9.+\-';
         if (preg_match('/[^' . $allowed . ']/', $text) === 1) {
-            return $fromFile === true ? self::REFUSED_FILE_NOT_FIGURES : self::REFUSED_NOT_FIGURES;
+            return $fromFile === true ? self::FILE_REASON_NOT_FIGURES . ' ' . self::fileAdvice($code) : self::REFUSED_NOT_FIGURES;
         }
         if (str_contains($text, '+') === true) {
-            return $fromFile === true ? self::REFUSED_FILE_PLUS : self::REFUSED_PLUS;
+            return $fromFile === true ? self::FILE_REASON_PLUS . ' ' . self::fileAdvice($code) : self::REFUSED_PLUS;
         }
         if (str_contains($text, '-') === true) {
             if ($allowNegative === true) {
                 return self::REFUSED_MINUS_PLACE;
             }
-            return $fromFile === true ? self::REFUSED_FILE_MINUS_NOT_HERE : self::REFUSED_MINUS_NOT_HERE;
+            return $fromFile === true ? self::FILE_REASON_MINUS_NOT_HERE . ' ' . self::fileAdvice($code) : self::REFUSED_MINUS_NOT_HERE;
         }
         if (substr_count($text, '.') > 1) {
             return self::REFUSED_ONE_POINT;
         }
         // A file's comma after the decimal point ("1.234,50").
         return self::REFUSED_COMMAS;
+    }
+
+    /**
+     * 📝 How to write an amount in a FILE, said the one way every file-mode
+     * refusal says it (#1004 round 5): figures, commas only between thousands
+     * if you like, and the organisation's three-letter CODE in front if you
+     * like — never a sign, because a sign is not always read (D-155, D-157).
+     * With no currency chosen, no code is offered: a code would be refused too.
+     */
+    public static function fileAdvice(string $code): string
+    {
+        $code = strtoupper(trim($code));
+
+        return $code !== ''
+            ? 'Write it in figures, with commas only between thousands if you like, and the code ' . $code . ' in front if you like, for example ' . $code . ' 1,234.56.'
+            : 'Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
     }
 
     /**

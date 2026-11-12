@@ -243,10 +243,13 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     // 💷 Amount → pence (credits only; debit/zero/blank skipped), through the
     //    ONE converter, Currency::parseAmount() (#1004), in its FILE mode
     //    (`fromFile`): a file the portal reads keeps the bank's own number
-    //    format (D-152), so commas between groups of three and the import's own
-    //    currency sign are read; another currency's sign, or any sign while the
-    //    organisation has no currency chosen, is refused with the reason and
-    //    what to do. Negatives are allowed so a debit can be recognised and skipped.
+    //    format (D-152), so commas between groups of three are read, and the
+    //    import currency's three-letter CODE in front. A SIGN is read only where
+    //    it belongs to that one currency, or is kept for it ("£" for GBP alone,
+    //    D-157); a sign shared by several ("$", "¥", "£" elsewhere) is refused
+    //    saying so (D-155), as is another currency's sign, or any sign while the
+    //    organisation has no currency chosen, each with the reason and what to
+    //    do. Negatives are allowed so a debit can be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
     //    Spaces are still taken out first, as before: banks write them.

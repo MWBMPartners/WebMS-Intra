@@ -13,8 +13,10 @@
  * FIGURES ONLY (the owner, D-152); a FILE the portal reads (`fromFile`) — the
  * bank-statement import (D-152) and the asset import (D-153), nothing else —
  * also reads commas between groups of three and the record's own currency
- * sign or code — but never a sign SHARED by several currencies ("$", "¥"),
- * which is refused with the reason (D-155). This test proves it:
+ * sign or code — but never a sign SHARED by several currencies ("$", "¥",
+ * and "£" outside a pounds-sterling organisation, D-157), which is refused
+ * with the reason (D-155); and no file refusal ever advises writing a sign.
+ * This test proves it:
  *
  *   A  the converter itself (no database), over a TABLE OF DIMENSIONS rather
  *      than a few examples, in BOTH modes: every count of figures before the
@@ -136,22 +138,31 @@ use Portal\Core\Currency;
 const TOO_LARGE_INT = 'That amount is too large: the most that can be stored here is 21,474,836.47.';
 const POWER_OF_TEN  = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
 const FIGURES_ONLY  = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.';
-const FILE_NOT_FIGURES = 'That is not an amount: it should be figures, for example 1,234.50, with nothing else in front but the currency\'s own sign.';
+/** The one way a FILE refusal says how to write an amount (round 5): figures, commas, the CODE — never a sign. */
+function advice(string $code): string
+{
+    return $code !== ''
+        ? 'Write it in figures, with commas only between thousands if you like, and the code ' . $code . ' in front if you like, for example ' . $code . ' 1,234.56.'
+        : 'Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
+}
+const FILE_NOT_FIGURES = 'That is not an amount. Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
 const PLUS          = 'Leave out the plus sign: type the amount in figures, for example 12.50.';
 const MINUS_PLACE   = 'A minus sign can only come first, for example -12.50.';
 const ONE_POINT     = 'An amount can have only one decimal point, for example 12.50.';
 const NO_FIGURES    = 'That has no figures in it: type the amount in figures, for example 12.50.';
-const FILE_NO_FIGURES = 'That cell has no figures in it: it should hold an amount, for example 12.50.';
-const FILE_PLUS     = 'Leave out the plus sign: the cell should hold the amount in figures, for example 12.50.';
+const FILE_NO_FIGURES = 'That cell has no figures in it. Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
+const FILE_PLUS     = 'Leave out the plus sign. Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
 const MINUS_NOT_HERE      = 'A minus sign has no place here: the amount cannot be negative. Type the figures only, for example 12.50.';
-const FILE_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative. The cell should hold figures only, for example 12.50.';
+const FILE_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative. Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
 /** D-155's sentence for a shared sign, in an organisation keeping its money in $code. */
 function sharedSign(string $sign, string $who, string $code): string
 {
     return 'The sign ' . $sign . ' is used by several currencies (' . $who . '), so the portal cannot tell which money this is. '
-        . 'Write the three-letter code of the currency the cell is in instead (this organisation keeps its money in ' . $code
-        . ', for example ' . $code . ' 12.50), or leave the sign out if the amount is in ' . $code . '.';
+        . 'If the amount is in ' . $code . ', ' . lcfirst(advice($code))
+        . ' If it is in another currency, it cannot be imported into this organisation\'s records.';
 }
+const POUNDS = 'the pound sterling and the Gibraltar, Falkland Islands, St Helena, Egyptian, Syrian, Lebanese and South Sudanese pounds';
+const PESOS  = 'the Philippine peso and the Cuban peso';
 const DOLLARS = 'US, Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars among them';
 const YEN_YUAN = 'the Chinese yuan and the Japanese yen';
 const NO_CURRENCY_START  = 'That amount is written with a currency (';
@@ -403,7 +414,7 @@ foreach ([['£12.50', '£'], ['GBP 12.50', 'GBP'], ['-£3', '£'], ['€1,234.50
         $told[] = 'no currency ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', allowNegative: true, fromFile: true), true);
     }
 }
-foreach ([['A$12.50', 'NZD', 'A$'], ['USD 5', 'GBP', 'USD'], ['£12.50', 'EUR', '£'], ['€5', 'GBP', '€'], ['NZ$5', 'AUD', 'NZ$']] as [$t, $code, $sign]) {
+foreach ([['A$12.50', 'NZD', 'A$'], ['USD 5', 'GBP', 'USD'], ['₹12.50', 'EUR', '₹'], ['€5', 'GBP', '€'], ['NZ$5', 'AUD', 'NZ$']] as [$t, $code, $sign]) {
     $want = 'That amount is written in another currency (' . $sign . '), not ' . $code . '. Import a file kept in ' . $code
         . ', or check the organisation\'s currency in Admin, Settings, Organisation.';
     if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
@@ -430,12 +441,56 @@ foreach ([['USD 12.50', 'USD', 1250], ['AUD 12.50', 'AUD', 1250], ['A$12.50', 'A
 }
 check('A10f a FILE cell with a sign SHARED by several currencies ("$", "¥") is refused even in a USD, AUD, NZD, CAD or CNY organisation whose own sign it is, saying it is shared and asking for the code (D-155) — never "another currency"; the code ("AUD 12.50") and a sign unique to the currency ("A$", "NZ$", "CA$", "CN¥") still read',
     $shared === [], implode(' | ', $shared));
+// A10g — D-157: "£" is read for a GBP organisation only; in any other "£"
+// organisation it is a shared sign, refused with D-155's reason. "₱" is
+// treated the same way for the Philippine peso (put to the owner).
+$pound = [];
+foreach ([['£12.50', 'GIP'], ['£12.50', 'FKP'], ['£12.50', 'SHP'], ['£12.50', 'EGP'], ['-£3.00', 'GIP'], ['£1,234.56', 'EUR']] as [$t, $code]) {
+    $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
+    if ($got !== sharedSign('£', POUNDS, $code)) {
+        $pound[] = $code . ' ' . $t . ' → ' . var_export($got, true);
+    }
+}
+if (Currency::parseAmount('₱12.50', 'CUP', fromFile: true) !== sharedSign('₱', PESOS, 'CUP')) {
+    $pound[] = 'CUP ₱12.50 → ' . var_export(Currency::parseAmount('₱12.50', 'CUP', fromFile: true), true);
+}
+foreach ([['£1,234.56', 'GBP', 123456], ['-£3.00', 'GBP', -300], ['£-3.00', 'GBP', -300], ['GIP 12.50', 'GIP', 1250], ['FKP 1,234.56', 'FKP', 123456],
+          ['₱12.50', 'PHP', 1250], ['CUP 12.50', 'CUP', 1250]] as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, allowNegative: true, fromFile: true) !== $want) {
+        $pound[] = $code . ' ' . $t . ' → ' . var_export(Currency::parseAmount($t, $code, allowNegative: true, fromFile: true), true);
+    }
+}
+check('A10g "£" in a file is read ONLY for a GBP organisation (D-157): GIP, FKP, SHP and EGP organisations, and a EUR one, are refused with the shared-sign reason, and their codes read ("GIP 12.50"); "₱" likewise reads for PHP and is refused for CUP',
+    $pound === [], implode(' | ', $pound));
+
+// A10h — no FILE refusal ever advises a currency sign (round 5): the advice is
+// figures, commas and the three-letter code, because a sign is not always read.
+$advisedSign = [];
+$refusals    = 0;
+foreach (['', 'GBP', 'USD', 'AUD', 'NZD', 'CAD', 'CNY', 'GIP', 'FKP', 'PHP', 'CUP', 'EUR', 'CHF'] as $code) {
+    foreach (['abc', '+5', '--5', '5-', '.', '-', '1.2.3', '12.345', '0,500', '1e17', '$5', '¥5', '£5', '€5', '₱5', 'A$5', 'USD 5', 'GIP 5',
+              '1 234', '12_000', '99999999999'] as $t) {
+        foreach ([true, false] as $allowNegative) {
+            $got = Currency::parseAmount($t, $code, allowNegative: $allowNegative, fromFile: true);
+            if (is_string($got) === false) {
+                continue;
+            }
+            $refusals++;
+            if (preg_match('/own sign|leave the sign|sign out|currency.?s sign|with (its|the|a) (currency )?sign|sign in front/i', $got) === 1
+                || (str_contains($got, 'Write it in figures') === true && preg_match('/Write it in figures.*sign/i', $got) === 1)) {
+                $advisedSign[] = ($code === '' ? 'no currency' : $code) . ' ' . $t . ' → ' . $got;
+            }
+        }
+    }
+}
+check('A10h no FILE refusal advises writing a currency sign — across ' . $refusals . ' refusals (13 currencies, 21 cells, negatives allowed or not); the advice is figures, commas and the three-letter code',
+    $advisedSign === [] && $refusals > 400, implode(' | ', array_slice($advisedSign, 0, 3)));
 check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar), in both modes',
     Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD')
     && Currency::parseAmount('5', 'JPY', fromFile: true) === Currency::whyNotChoosable('JPY'));
 check('A10d the two "not figures" sentences: a typed box asks for figures only and names commas, spaces, signs, letters and other characters (D-152); a file says what the cell should look like',
     Currency::parseAmount('abc', 'GBP') === 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.'
-    && Currency::parseAmount('abc', 'GBP', fromFile: true) === FILE_NOT_FIGURES);
+    && Currency::parseAmount('abc', 'GBP', fromFile: true) === 'That is not an amount. ' . advice('GBP'));
 
 // A11 — anything else that is not a figure.
 $odd = ['abc', '0x10', '１２', '١٢', '12abc', 'NaN', 'INF', '1/2', '½', '12 50', "12\x0050"];
