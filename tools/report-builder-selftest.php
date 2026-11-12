@@ -291,6 +291,20 @@ foreach ([
     // and time, and a date with no time, on a date-and-time column.
     ['completedAt', 'gte', ['2027-06-01T10:00:00'], 'a "T" between the date and the time'],
     ['completedAt', 'gte', ['2027-06-01'], 'a date with no time on a date-and-time column'],
+    // #960: what lies BETWEEN the date and the time. PHP's createFromFormat()
+    // takes a no-break space (U+00A0) or a narrow no-break space (U+202F) as
+    // a space, and takes NOTHING at all, while the databases do not: MySQL
+    // and MariaDB read the time after a no-break space as midnight, and the
+    // run-together form gives no rows on MySQL and every row on MariaDB. The
+    // first four go red if that refusal is taken out of coerceValue().
+    ['completedAt', 'between', ["2027-03-01\u{00A0}10:00", '2027-12-31 23:59'], 'a NO-BREAK space (U+00A0) between the date and the time'],
+    ['completedAt', 'gte', ["2027-03-01\u{202F}10:00:00"], 'a NARROW no-break space (U+202F) between the date and the time'],
+    ['completedAt', 'gte', ["2027-03-01\u{00A0} 10:00"], 'a no-break space followed by an ordinary one'],
+    ['completedAt', 'lt', ['2027-03-0110:00'], 'NOTHING between the date and the time (2027-03-0110:00)'],
+    // Already refused before #960 (measured on PHP 8.4.27, 8.5.12 and
+    // 8.6.0RC4: createFromFormat() itself refuses it), and pinned here so it
+    // stays refused: a year above 9999 splits the engines the same way.
+    ['completedAt', 'gte', ['10000-01-01 10:00'], 'a five-digit year (10000-01-01 10:00)'],
 ] as [$col, $op, $vals, $what]) {
     expectThrows('Z: ' . $what . ' is refused', static function () use ($tasksWith, $col, $op, $vals): void {
         ReportBuilder::compile($tasksWith(['col' => $col, 'op' => $op, 'vals' => $vals]), 1);
@@ -318,6 +332,9 @@ foreach ([
     [['2026-01-01 00:00', '26-06-01 10:00'], 'a two-digit year (26-06-01)'],
     [['2026-01-01 00:00', '2026-06-01  10:00'], 'two spaces between the date and the time'],
     [['2026-01-01 00:00', "2026-06-01\t10:00"], 'a tab between the date and the time'],
+    // #960's two new refusals must not reach this: a space AND a tab is still
+    // only ordinary white space, and every engine reads it as the time.
+    [['2026-01-01 00:00', "2026-06-01 \t10:00"], 'a space and a tab between the date and the time'],
 ] as [$vals, $what]) {
     $compiled = null;
     try {

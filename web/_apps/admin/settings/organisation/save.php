@@ -470,6 +470,22 @@ if ($countryChosen !== null && preg_match('/^[A-Z]{2}$/', $countryChosen) === 1)
 }
 
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+// 📍 A map position somebody TYPED but that cannot be used is refused, with the
+//    reason, and nothing is saved (#945). Until then a word in either box was
+//    turned into 0 -- a real place, on the equator or the prime meridian --
+//    and saved; and once validateCoords() stopped doing that, the same mistake
+//    would have quietly CLEARED this organisation's stored position instead
+//    (the null below falls through to "no position"), which loses something
+//    that was right. Refusing keeps what is stored and says what to fix. Both
+//    boxes left empty is still "no position", as before. "Typed" is asked of
+//    the text after trimming spaces, and anything that is not text (a request
+//    can send `latitude[]=1`) counts as typed, because it was sent.
+$coordTyped = static function (mixed $value): bool {
+    return $value !== null && (is_string($value) === false || trim($value) !== '');
+};
+if ($coords === null && ($coordTyped($_POST['latitude'] ?? null) === true || $coordTyped($_POST['longitude'] ?? null) === true)) {
+    $reject('Nothing was saved. The map position must be two numbers: a latitude from -90 to 90 and a longitude from -180 to 180, written with a full stop for the decimal point (for example 51.5074 and -0.1278). Fill in both boxes, or leave both empty for no map position.');
+}
 
 $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
 $w3w = null;

@@ -299,7 +299,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 521; // 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 527; // 521 until #918 and #1014 added six (three Q11b, one per person who downloads the attendance spreadsheet, and H1-H3 on the venues year schedule message); 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -1488,6 +1488,71 @@ $answer = req($jar['adm'], 'GET', ADDR_A . '/venues/booking?id=' . BOOKING);
 ok('control: somebody who manages venues still gets the form to change the booking', $answer['status'] === 200 && str_contains($answer['body'], 'venues/booking-save') === true, 'HTTP ' . $answer['status']);
 $answer = req($jar['gadm'], 'GET', ADDR_A . '/venues/booking?id=' . BOOKING);
 ok('control: a global administrator, a member of no organisation, sees the booking too', $answer['status'] === 200 && str_contains($answer['body'], VENUE_MARK) === true, 'HTTP ' . $answer['status']);
+
+// #1014: the year schedule printed no message, so a save that sends the
+// manager back to it ("Booking saved.") was never shown, and a refusal set
+// the same way was lost too. The booking form is sent AS DRAWN (nothing
+// changed), through the real handler, and the schedule it lands on is read.
+/** The fields of the booking page's "save" form, as a browser would send them untouched. */
+$hBookingForm = static function (string $html): array {
+    $doc = new DOMDocument();
+    @$doc->loadHTML('<?xml encoding="utf-8"?>' . $html);
+    foreach ($doc->getElementsByTagName('form') as $form) {
+        $fields = [];
+        foreach ((new DOMXPath($doc))->query('.//input|.//select|.//textarea', $form) as $el) {
+            $name = (string) $el->getAttribute('name');
+            if ($name === '' || $el->hasAttribute('disabled') === true) {
+                continue;
+            }
+            $type = strtolower((string) $el->getAttribute('type'));
+            if ($el->nodeName === 'input' && in_array($type, ['checkbox', 'radio'], true) === true && $el->hasAttribute('checked') === false) {
+                continue;
+            }
+            $value = $el->nodeName === 'textarea' ? $el->textContent : (string) $el->getAttribute('value');
+            if ($el->nodeName === 'select') {
+                $value = '';
+                foreach ($el->getElementsByTagName('option') as $i => $opt) {
+                    if ($i === 0 || $opt->hasAttribute('selected') === true) {
+                        $value = (string) $opt->getAttribute('value');
+                    }
+                }
+            }
+            $fields[$name] = $value;
+        }
+        if (($fields['action'] ?? '') === 'save') {
+            return $fields;
+        }
+    }
+
+    return [];
+};
+/** The message at the top of the year schedule, or '' when it shows none. */
+$hScheduleFlash = static function (string $html): string {
+    return ap_find('#<div class="alert alert-([a-z]+)" role="status" data-venues-flash>(.*?)</div>#s', $html, $m) === 1
+        ? $m[1] . ': ' . html_entity_decode(trim($m[2]), ENT_QUOTES, 'UTF-8')
+        : '';
+};
+$hFields = $hBookingForm(req($jar['adm'], 'GET', ADDR_A . '/venues/booking?id=' . BOOKING)['body']);
+$hSaved  = $hFields === [] ? ['status' => 0, 'location' => ''] : req($jar['adm'], 'POST', ADDR_A . '/venues/booking-save', $hFields);
+$hFirst  = req($jar['adm'], 'GET', ADDR_A . '/venues?venue=' . VENUE . '&year=' . $year);
+$hAgain  = req($jar['adm'], 'GET', ADDR_A . '/venues?venue=' . VENUE . '&year=' . $year);
+ok(
+    'H1. #1014: a manager saves a booking and the year schedule they are sent back to says "Booking saved."',
+    $hFields !== [] && $hSaved['status'] === 302 && str_contains($hSaved['location'], '/venues?venue=' . VENUE) === true
+        && $hScheduleFlash($hFirst['body']) === 'success: Booking saved.',
+    ($hFields === [] ? 'no save form found on the booking page; ' : '') . 'save answered HTTP ' . $hSaved['status'] . ' ' . $hSaved['location']
+        . '; the schedule showed "' . $hScheduleFlash($hFirst['body']) . '"'
+);
+ok('H2. #1014: …once only: the next visit to the schedule shows no message', $hFirst['status'] === 200 && $hScheduleFlash($hAgain['body']) === '', 'second visit showed "' . $hScheduleFlash($hAgain['body']) . '"');
+// The refusal half: a run that does not exist cannot have its status changed,
+// and the handler says so by the same route.
+$hRefused = post($jar['adm'], ADDR_A . '/venues/booking?id=' . BOOKING, ADDR_A . '/venues/booking-save', ['action' => 'group-status', 'groupID' => '0', 'statusID' => '916731', 'venueID' => (string) VENUE]);
+$hShown   = req($jar['adm'], 'GET', ADDR_A . '/venues?venue=' . VENUE . '&year=' . $year);
+ok(
+    'H3. #1014: a refusal sent back to the schedule is shown too, as a warning in red ("Could not update the run.")',
+    $hRefused['status'] === 302 && $hScheduleFlash($hShown['body']) === 'danger: Could not update the run.',
+    'HTTP ' . $hRefused['status'] . '; the schedule showed "' . $hScheduleFlash($hShown['body']) . '"'
+);
 
 // The two places the first round missed (found by the independent check,
 // 12 October 2026): the page for ONE VENUE, and the strip of booked days on
@@ -4875,6 +4940,27 @@ foreach (['aco' => 'the holder of the shipped role', 'adm' => 'A\'s administrato
         'Q11. ' . $what . ' downloads the spreadsheet, with the session in it',
         $answer['status'] === 200 && ap_find('/^Content-Type:\s*text\/csv/mi', $answer['head']) === 1 && str_contains($answer['body'], ATT_Q_MARK . ' note') === true,
         'HTTP ' . $answer['status'] . ' ' . mb_substr($answer['body'], 0, 80)
+    );
+    // #918: by now every other session of this part has been DELETED (Q29 to
+    // Q36 delete 916685-916694 through the page and the API). The spreadsheet
+    // used to ask for the organisation alone, so it carried each deleted
+    // session's note and headcount while the reports page left them out. Q11
+    // above is the positive half (the one live session IS there), so this
+    // cannot pass on a spreadsheet that is simply empty; and a session this
+    // part never managed to delete is reported, because then "not listed"
+    // would prove nothing about the rule.
+    $stillListed = [];
+    foreach ([916691 => ' own', 916692 => ' lead one', 916693 => ' lead two', 916694 => ' copied', 916685 => ' lead three', 916686 => ' lead four'] as $sid => $label) {
+        if ($deleted($sid) !== 1) {
+            $stillListed[] = 'session ' . $sid . ' was never deleted, so this check proves nothing about it';
+        } elseif (str_contains($answer['body'], ATT_Q_MARK . $label . ' note') === true) {
+            $stillListed[] = 'deleted session ' . $sid . ' is in the spreadsheet';
+        }
+    }
+    ok(
+        'Q11b. #918: ' . $what . ' gets a spreadsheet that leaves out every DELETED session, as the reports page does (six deleted, none listed)',
+        $answer['status'] === 200 && $stillListed === [],
+        implode('; ', $stillListed)
     );
 }
 $page = req($jar['aco'], 'GET', ADDR_A . '/attendance');

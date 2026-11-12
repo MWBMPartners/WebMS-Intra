@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\RotaSwaps;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -54,19 +55,24 @@ if ($uStmt !== false) {
     $uStmt->close();
 }
 
-$endDate = date('Y-m-d', strtotime('+12 weeks'));
+// 🕰️ Upcoming on the ORGANISATION's calendar, never the database server's
+//    `CURDATE()` (#987): the same rule, and the same reasons, as the Duty
+//    Roster itself (`rota/index.php` explains them). The twelve weeks are
+//    added to a bare date in UTC, which has no clock changes.
+$fromDate = RotaSwaps::today($siteId);
+$endDate  = (new \DateTimeImmutable($fromDate, new \DateTimeZone('UTC')))->modify('+12 weeks')->format('Y-m-d');
 $slots = [];
 $stmt = $db->prepare(
-    'SELECT s.slotID, s.slotDate, s.startTime, s.endTime, s.notes, s.assignedToID, '
-    . '       r.name AS roleName, r.colorHex, u.fullName AS assigneeName '
-    . 'FROM tblRotaSlot s '
-    . 'JOIN tblRotaRoleType r ON r.roleTypeID = s.roleTypeID '
-    . 'LEFT JOIN tblUsers u ON u.userID = s.assignedToID '
-    . 'WHERE s.siteID = ? AND s.slotDate >= CURDATE() AND s.slotDate <= ? '
-    . 'ORDER BY s.slotDate, r.name'
+    'SELECT `s`.`slotID`, `s`.`slotDate`, `s`.`startTime`, `s`.`endTime`, `s`.`notes`, `s`.`assignedToID`, '
+    . '       `r`.`name` AS `roleName`, `r`.`colorHex`, `u`.`fullName` AS `assigneeName` '
+    . 'FROM `tblRotaSlot` `s` '
+    . 'JOIN `tblRotaRoleType` `r` ON `r`.`roleTypeID` = `s`.`roleTypeID` '
+    . 'LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `s`.`assignedToID` '
+    . 'WHERE `s`.`siteID` = ? AND `s`.`slotDate` >= ? AND `s`.`slotDate` <= ? '
+    . 'ORDER BY `s`.`slotDate`, `r`.`name`'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('is', $siteId, $endDate);
+    $stmt->bind_param('iss', $siteId, $fromDate, $endDate);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {

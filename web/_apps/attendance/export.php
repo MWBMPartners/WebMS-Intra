@@ -75,18 +75,29 @@ if (is_string($csrfGiven) === false || Auth::verifyCsrf($csrfGiven) === false) {
 $siteId = Site::id();
 
 // 📊 Query attendance sessions with total counts
-$sql = "SELECT
-            s.sessionID,
-            s.sessionDate,
-            st.typeName AS ServiceType,
-            (SELECT SUM(ac.headcount)
-             FROM tblAttendanceCounts ac
-             WHERE ac.sessionID = s.sessionID) AS TotalAttendance,
-            s.notes
-        FROM tblAttendanceSessions s
-        LEFT JOIN tblAttendanceServiceTypes st ON st.serviceTypeID = s.serviceTypeID
-        WHERE s.siteID = ?
-        ORDER BY s.sessionDate DESC";
+//
+// 🗑️ A DELETED SESSION IS LEFT OUT (#918). Deleting a session only marks it
+//    (`isDeleted = 1`) so the record survives, and every other reader of these
+//    figures leaves such a session out: the reports page's three queries, the
+//    /attendance list and its monthly card. This query used to ask for
+//    `s.siteID = ?` alone, so the spreadsheet still carried every session
+//    somebody had deleted -- its headcount AND its free-text note -- and its
+//    column could add up to MORE than the reports page showed for the same
+//    sessions. The spreadsheet is the totals in a file (D-106), so it follows
+//    the same rule as the page. The column list is unchanged, so a spreadsheet
+//    somebody already reads into another program keeps its shape.
+$sql = 'SELECT
+            `s`.`sessionID`,
+            `s`.`sessionDate`,
+            `st`.`typeName` AS `ServiceType`,
+            (SELECT SUM(`ac`.`headcount`)
+             FROM `tblAttendanceCounts` `ac`
+             WHERE `ac`.`sessionID` = `s`.`sessionID`) AS `TotalAttendance`,
+            `s`.`notes`
+        FROM `tblAttendanceSessions` `s`
+        LEFT JOIN `tblAttendanceServiceTypes` `st` ON `st`.`serviceTypeID` = `s`.`serviceTypeID`
+        WHERE `s`.`siteID` = ? AND `s`.`isDeleted` = 0
+        ORDER BY `s`.`sessionDate` DESC';
 
 // 🔌 Use $mysqli rather than $db, because $mysqli works under BOTH routers.
 //

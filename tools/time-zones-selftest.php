@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 276;  // + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 282;  // + six in part P (#945: P17b-P17g) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3919,6 +3919,52 @@ ok(
         && (float) $nearZero['place']['lng'] === 0.0, // JSON carries 0.0 as 0, so compared as a number
     json_encode($nearZero)
 );
+// P17b-P17g (#945): a coordinate that is not a NUMBER is refused, never turned
+// into 0. GeoLocation::validateCoords() used `(float)`, which makes any text a
+// number: "north" became 0, a real place on the equator, and was saved. The
+// stored position at this point is P17's (0.00004, 0), so a refusal is proved
+// by it being UNCHANGED as well as by the words shown. Each post sends one bad
+// box beside a good one, so neither a whole-pair test nor a one-box test alone
+// can pass it.
+$orgPos = static fn (): array => [
+    one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.latitude'])['settingValue'] ?? null,
+    one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.longitude'])['settingValue'] ?? null,
+];
+$orgRefusalWords = 'Nothing was saved. The map position must be two numbers';
+foreach ([
+    'P17b a WORD in the latitude box' => ['latitude' => 'north', 'longitude' => '-0.1278'],
+    'P17c a WORD in the longitude box' => ['latitude' => '51.5074', 'longitude' => 'west'],
+    'P17d a decimal COMMA ("51,5" used to be saved as 51)' => ['latitude' => '51,5', 'longitude' => '-0.1278'],
+    'P17e one box filled and the other left empty' => ['latitude' => '51.5074', 'longitude' => ''],
+] as $what => $boxes) {
+    $sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save', ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB'] + $boxes);
+    $shown = flashAfter($adminJar, '/admin/settings/organisation');
+    ok(
+        $what . ' is REFUSED with the reason, and the stored map position is left as it was (0.00004, 0) -- never saved as 0, never cleared',
+        $sent['status'] === 302 && str_contains($shown, $orgRefusalWords) === true && $orgPos() === ['0.00004', '0'],
+        said($sent) . '; shown "' . $shown . '"; stored ' . json_encode($orgPos())
+    );
+}
+// The over-reach direction: what IS a number still saves -- the exponent form
+// the page used to write (#935), and exactly 0 in both boxes, which is a real
+// place and must never be mistaken for "nothing typed".
+$sent = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB', 'latitude' => ' 4.0E-5 ', 'longitude' => '-1.5e1']);
+ok(
+    'P17f a number in EXPONENT form (with spaces round it) is still accepted, and stored as a plain decimal (0.00004, -15)',
+    $sent['status'] === 302 && $orgPos() === ['0.00004', '-15'],
+    said($sent) . '; shown "' . flashAfter($adminJar, '/admin/settings/organisation') . '"; stored ' . json_encode($orgPos())
+);
+$sent = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB', 'latitude' => '0', 'longitude' => '0']);
+ok(
+    'P17g exactly 0 in both boxes is still a real place and is saved (0, 0)',
+    $sent['status'] === 302 && $orgPos() === ['0', '0'],
+    said($sent) . '; stored ' . json_encode($orgPos())
+);
+// Back to P17's position, which P18 and the checks after it expect.
+post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB', 'latitude' => '0.00004', 'longitude' => '0']);
 // P19: what the organisation page stored BEFORE round 2 is still read.
 $siteRow('org.latitude', '4.0E-5');
 $exponent = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);

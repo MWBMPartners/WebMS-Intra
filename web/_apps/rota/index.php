@@ -29,20 +29,40 @@ $db     = App::db();
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 $weeks  = max(1, min(12, (int) ($_GET['weeks'] ?? 8)));
-$endDate = date('Y-m-d', strtotime('+' . $weeks . ' weeks'));
+// 🕰️ "UPCOMING" IS DECIDED ON THE ORGANISATION'S CALENDAR (#987).
+//    A duty's `slotDate` is a DATE on the organisation's own calendar, never a
+//    moment. Both lists below used to ask `s.slotDate >= CURDATE()`, and
+//    `CURDATE()` is the DATABASE SERVER's date in the server's own zone --
+//    whatever the database host happens to be set to. So around midnight an
+//    organisation ahead of the server (Auckland on a UTC host, say) still saw
+//    yesterday's duties as upcoming for up to half a day, and one behind it
+//    (New York) lost today's duties hours before its day was over. The same
+//    fault #783 fixed for room bookings.
+//
+//    Today is now asked of `RotaSwaps::today()`, the ONE place the Duty Roster
+//    works out the organisation's date (the swap rules already use it to
+//    decide whether a duty has passed), and bound as text. Both sides are
+//    dates on one calendar, so comparing them as text is exact and no moment
+//    is made.
+//
+//    The end of the window is counted from that same date. Whole weeks are
+//    added to a bare date in UTC on purpose: UTC has no clock changes, so
+//    "+8 weeks" is always exactly 56 calendar days (#777's lesson).
+$fromDate = RotaSwaps::today($siteId);
+$endDate  = (new \DateTimeImmutable($fromDate, new \DateTimeZone('UTC')))->modify('+' . $weeks . ' weeks')->format('Y-m-d');
 
 // 🪞 My upcoming duties (next 8 weeks, ascending)
 $mySlots = [];
 $stmt = $db->prepare(
-    'SELECT s.slotID, s.slotDate, s.startTime, s.endTime, s.notes, '
-    . '       r.name AS roleName, r.colorHex '
-    . 'FROM tblRotaSlot s '
-    . 'JOIN tblRotaRoleType r ON r.roleTypeID = s.roleTypeID '
-    . 'WHERE s.siteID = ? AND s.assignedToID = ? AND s.slotDate >= CURDATE() AND s.slotDate <= ? '
-    . 'ORDER BY s.slotDate, s.startTime'
+    'SELECT `s`.`slotID`, `s`.`slotDate`, `s`.`startTime`, `s`.`endTime`, `s`.`notes`, '
+    . '       `r`.`name` AS `roleName`, `r`.`colorHex` '
+    . 'FROM `tblRotaSlot` `s` '
+    . 'JOIN `tblRotaRoleType` `r` ON `r`.`roleTypeID` = `s`.`roleTypeID` '
+    . 'WHERE `s`.`siteID` = ? AND `s`.`assignedToID` = ? AND `s`.`slotDate` >= ? AND `s`.`slotDate` <= ? '
+    . 'ORDER BY `s`.`slotDate`, `s`.`startTime`'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('iis', $siteId, $userId, $endDate);
+    $stmt->bind_param('iiss', $siteId, $userId, $fromDate, $endDate);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
@@ -54,17 +74,17 @@ if ($stmt !== false) {
 // 🪞 Full roster grouped by date for the same window
 $roster = [];
 $stmt = $db->prepare(
-    'SELECT s.slotID, s.slotDate, s.startTime, s.endTime, s.assignedToID, '
-    . '       r.name AS roleName, r.colorHex, '
-    . '       u.fullName AS assigneeName '
-    . 'FROM tblRotaSlot s '
-    . 'JOIN tblRotaRoleType r ON r.roleTypeID = s.roleTypeID '
-    . 'LEFT JOIN tblUsers u ON u.userID = s.assignedToID '
-    . 'WHERE s.siteID = ? AND s.slotDate >= CURDATE() AND s.slotDate <= ? '
-    . 'ORDER BY s.slotDate, r.name, s.startTime'
+    'SELECT `s`.`slotID`, `s`.`slotDate`, `s`.`startTime`, `s`.`endTime`, `s`.`assignedToID`, '
+    . '       `r`.`name` AS `roleName`, `r`.`colorHex`, '
+    . '       `u`.`fullName` AS `assigneeName` '
+    . 'FROM `tblRotaSlot` `s` '
+    . 'JOIN `tblRotaRoleType` `r` ON `r`.`roleTypeID` = `s`.`roleTypeID` '
+    . 'LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `s`.`assignedToID` '
+    . 'WHERE `s`.`siteID` = ? AND `s`.`slotDate` >= ? AND `s`.`slotDate` <= ? '
+    . 'ORDER BY `s`.`slotDate`, `r`.`name`, `s`.`startTime`'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('is', $siteId, $endDate);
+    $stmt->bind_param('iss', $siteId, $fromDate, $endDate);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {

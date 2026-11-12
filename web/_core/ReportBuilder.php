@@ -863,8 +863,37 @@ final class ReportBuilder
                 $correct = $errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0);
                 break;
             }
+            // 📅 TWO MORE REFUSALS (#960): what lies BETWEEN the date and the
+            //    time. A space in a createFromFormat() pattern matches "zero or
+            //    more" spaces, tabs, NO-BREAK SPACES (U+00A0) and NARROW
+            //    no-break spaces (U+202F), so PHP accepted two kinds of value
+            //    the databases read differently from PHP, bound as typed
+            //    (measured on MySQL 8.0.36 for #960; MySQL 9.7 and MariaDB
+            //    11.4 as the issue reports them):
+            //      - a no-break space between date and time (what a word
+            //        processor or a copied web page often holds): PHP reads
+            //        10:00, MySQL and MariaDB read MIDNIGHT, so a range gives
+            //        the wrong rows with no warning;
+            //      - NOTHING between them ('2027-03-0110:00'): PHP reads
+            //        10:00, MySQL gives no rows, MariaDB gives every row.
+            //    So the text must be plain ASCII and must hold an ordinary
+            //    space or tab. Measured over a grid of written values (years
+            //    of one to five digits, padded and unpadded parts, fourteen
+            //    separators): the ONLY values these two rules newly refuse are
+            //    the no-separator and no-break-space ones; one space, two
+            //    spaces, a tab, or a space and a tab all still compile, so no
+            //    value a saved report could sensibly hold is lost. Neither
+            //    rule is a second date pattern: the reading is still
+            //    createFromFormat()'s, unchanged.
+            //    A FIVE-DIGIT YEAR ('10000-01-01 10:00'), the issue's third
+            //    case, needs no rule here: createFromFormat() already refuses
+            //    it on PHP 8.4.27, 8.5.12 and 8.6.0RC4 (measured, 12 November
+            //    2026), and part Z of the report-builder self-test pins that.
+            if ($correct === true && (preg_match('/[^\x00-\x7F]/', $s) === 1 || strpbrk($s, " \t") === false)) {
+                $correct = false;
+            }
             if ($correct === false) {
-                throw new \InvalidArgumentException('Expected a date/time (YYYY-MM-DD HH:MM[:SS]).');
+                throw new \InvalidArgumentException('Expected a date and time written as YYYY-MM-DD HH:MM (seconds optional), with an ordinary space between the date and the time.');
             }
             return [$s, 's'];
         }

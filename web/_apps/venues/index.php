@@ -115,6 +115,23 @@ if ($venueId > 0) {
 //    currency (#966, D-139; this used to label every row with today's).
 $today    = date('Y-m-d');
 
+// 💬 THE MESSAGE FROM THE LAST THING DONE (#1014). Saving, deleting or
+//    changing the status of a booking (`venues/booking-save`), and a refused
+//    export or printable schedule, all send the person back HERE with a
+//    message in the session. Nothing prints a message centrally -- each page
+//    prints its own -- and this page printed none, so "Booking saved." never
+//    appeared and a refusal ("Could not delete that booking.") was lost just
+//    as silently. It is read and cleared before the page is drawn, the same
+//    way `venues/booking.php` does it, so it is shown once and not again on
+//    the next visit. Only the four Bootstrap colours a handler here sets are
+//    used as a class; anything else is shown as plain information.
+$flashMsg  = is_string($_SESSION['flash_msg'] ?? null) === true ? $_SESSION['flash_msg'] : '';
+$flashType = is_string($_SESSION['flash_type'] ?? null) === true ? $_SESSION['flash_type'] : 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+if (in_array($flashType, ['success', 'warning', 'danger', 'info'], true) === false) {
+    $flashType = 'info';
+}
+
 $pageTitle   = 'Venue Bookings';
 $pageSection = 'venues';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Venue Bookings' => ''];
@@ -132,6 +149,10 @@ $rowColor = static function (array $row): string {
     return Venues::statusColor(['color' => $row['statusColorRaw'] ?? null, 'statusCategory' => $row['statusCategory'] ?? null]);
 };
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo $esc($flashType); ?>" role="status" data-venues-flash><?php echo $esc($flashMsg); ?></div>
+<?php endif; ?>
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3 gap-2">
     <div>

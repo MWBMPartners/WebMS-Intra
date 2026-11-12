@@ -130,6 +130,27 @@ class GeoLocation
      * rejected as null, never silently stored one-sided). Rounds both to
      * 7dp to match the DECIMAL(10,7) column shape everywhere in the schema.
      *
+     * ONLY A NUMBER IS A COORDINATE (#945). This used to turn the value into a
+     * number with `(float)`, which makes ANY text a number: a word, a typing
+     * slip or "51,5" (a decimal comma) became 0 or 51, and 0 is a real place
+     * -- the equator, the prime meridian, the Gulf of Guinea at 0, 0. So a
+     * mistyped latitude was saved as somewhere real instead of being refused.
+     * `coordinateNumber()` below now decides, and anything it does not accept
+     * makes the whole pair null, exactly as an out-of-range or half-supplied
+     * pair always has. Exactly 0 is still a valid coordinate, and so is the
+     * exponent form ("4.0E-5"), which the organisation page used to write
+     * (#935) and which may still be stored.
+     *
+     * Every caller already treats null as "no usable position". Checked caller
+     * by caller on 12 November 2026: the events API answers 422 for a pair it
+     * was sent and could not use; the organisation page refuses the save with
+     * a reason (added with this change); the What3Words focus, the reverse
+     * geocoder and the address suggester simply do without; and the remaining
+     * forms (assets, venues, resources, events, event overrides, directory,
+     * small groups) store no position from the boxes -- some then fill one in
+     * from a what3words address or the postal address -- which is what an
+     * out-of-range pair already did there, and is a gap, not a wrong place.
+     *
      * @return array{lat: float, lng: float}|null
      */
     public static function validateCoords(mixed $lat, mixed $lng): ?array
@@ -137,12 +158,52 @@ class GeoLocation
         if ($lat === null || $lat === '' || $lng === null || $lng === '') {
             return null;
         }
-        $latF = (float) $lat;
-        $lngF = (float) $lng;
+        $latF = self::coordinateNumber($lat);
+        $lngF = self::coordinateNumber($lng);
+        if ($latF === null || $lngF === null) {
+            return null;
+        }
         if ($latF < -90.0 || $latF > 90.0 || $lngF < -180.0 || $lngF > 180.0) {
             return null;
         }
         return ['lat' => round($latF, 7), 'lng' => round($lngF, 7)];
+    }
+
+    /**
+     * The number a coordinate box holds, or null when it does not hold one.
+     *
+     * Accepted: an integer or a float handed over by code (a geocoder's
+     * answer, a JSON number), or TEXT that is a plain decimal with an optional
+     * sign -- "51.5", "-0.12", ".5", "0" -- optionally in exponent form
+     * ("4.0E-5", up to three exponent digits), with surrounding spaces
+     * ignored. This is the same shape `Sabbath::coordinate()` accepts, so a
+     * value one of them reads the other reads too.
+     *
+     * Refused (null): a word, a decimal comma ("51,5"), hexadecimal, an empty
+     * box after trimming, a true/false, an array (a request can send
+     * `latitude[]=1`, and `(float)` of an array is 1), and anything that is
+     * not a finite number (INF, NAN).
+     *
+     * The range is NOT judged here: that belongs to the caller, because
+     * latitude and longitude have different limits.
+     */
+    public static function coordinateNumber(mixed $value): ?float
+    {
+        if (is_int($value) === true || is_float($value) === true) {
+            $number = (float) $value;
+
+            return is_finite($number) === true ? $number : null;
+        }
+        if (is_string($value) === false) {
+            return null;
+        }
+        $text = trim($value);
+        if (preg_match('/\A[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d{1,3})?\z/', $text) !== 1) {
+            return null;
+        }
+        $number = (float) $text;
+
+        return is_finite($number) === true ? $number : null;
     }
 
     /**

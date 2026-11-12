@@ -75,6 +75,12 @@
  *      "We could not confirm…" and NOT "nothing was changed", and the error
  *      log must keep the line naming the request (round 5 called this
  *      untestable; it was not).
+ *   Y  "UPCOMING" ON THE ORGANISATION'S CALENDAR (#987): the organisation is
+ *      put in a zone whose date differs from the database server's right
+ *      now (UTC+14 or UTC-11, whichever does), and a duty on its today must
+ *      be listed and one on its yesterday must not -- on both Duty Roster
+ *      lists and on Manage Rota. The old `CURDATE()` gets one of those wrong
+ *      at every hour of the day.
  *   P  THE PLANTS: each fault put into the COPY of the code (count them
  *      from the list in section P — no number is written here, because one
  *      already went stale here), each of which must turn the check that
@@ -126,7 +132,7 @@ $repo = dirname(__DIR__);
 
 $passed = 0;
 $failed = 0;
-$state  = ['proc' => null, 'child' => null, 'workers' => [], 'hold' => null, 'db' => null, 'settings' => [], 'mailRows' => null];
+$state  = ['proc' => null, 'child' => null, 'workers' => [], 'hold' => null, 'db' => null, 'settings' => [], 'mailRows' => null, 'siteZone' => null];
 
 /** The scratch triggers sections U and V create, dropped by the clean-up whatever happens. */
 const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapMoveTrg', 'zzRotaSwapCanTrg'];
@@ -337,6 +343,16 @@ register_shutdown_function(static function () use (&$state, &$removePeople): voi
                 }
             } catch (Throwable $e) {
                 echo "  ! could not put the mail settings back\n";
+            }
+        }
+        // Section Y moves the organisation's time zone for a moment and puts it
+        // back itself; this is the second line of defence if it was stopped
+        // part way.
+        if (is_array($state['siteZone'] ?? null) === true) {
+            try {
+                q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [(string) $state['siteZone'][1], (int) $state['siteZone'][0]]);
+            } catch (Throwable $e) {
+                echo "  ! could not put the organisation's time zone back\n";
             }
         }
         if (is_callable($removePeople) === true) {
@@ -1364,6 +1380,97 @@ $scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $ne
     ];
 };
 
+/**
+ * Y (#987): which duties are "upcoming" is decided on the ORGANISATION's
+ * calendar, never the database server's `CURDATE()`.
+ *
+ * The organisation is put, for the length of this scenario only, in a zone far
+ * from the database server's, chosen so that ITS today is a different date
+ * from the server's at the moment the test runs: Pacific/Kiritimati (UTC+14)
+ * when that is a day ahead, else Pacific/Pago_Pago (UTC-11), which is then a
+ * day behind. (At every moment at least one of the two differs from a UTC
+ * server's date; the premise check says which, and fails rather than passing
+ * vacuously if neither does.) Two duties are then given to the asker: one on
+ * the organisation's TODAY and one on its YESTERDAY.
+ *
+ * Read on the old code, one of them is always wrong: ahead of the server,
+ * yesterday's duty is still listed (the server's date has not reached it);
+ * behind, today's duty is missing (the server's date is already tomorrow).
+ * Which half fails depends on the hour the test runs, which is why BOTH are
+ * asserted every time.
+ *
+ * Both lists on the Duty Roster ("My upcoming duties" and "Full roster") and
+ * the administrators' Manage Rota list are read.
+ */
+$zoneRoles = [];
+$scnOrgDate = static function () use (&$zoneRoles, &$people, $siteId, $run, $makePerson, $signIn, $A): array {
+    if ($zoneRoles === []) {
+        foreach (['today', 'yesterday'] as $which) {
+            $name = 'Selftest swap duty zone-' . $which . ' ' . $run;
+            q('INSERT INTO `tblRotaRoleType` (`siteID`, `name`) VALUES (?, ?)', 'is', [$siteId, $name]);
+            $zoneRoles[$which] = ['id' => (int) $GLOBALS['db']->insert_id, 'name' => $name];
+        }
+        // An administrator, for the Manage Rota list. Made here rather than with
+        // everybody else so no earlier section has one more person in it.
+        $makePerson('rotaadmin', 'Jo Rotaadmin');
+        q('UPDATE `tblUsers` SET `isAdmin` = 1 WHERE `userID` = ?', 'i', [$people['rotaadmin']['id']]);
+        $signIn('rotaadmin');
+    }
+    $serverToday = (string) (q('SELECT CURDATE() AS `d`')[0]['d'] ?? '');
+    $zone = '';
+    $orgToday = '';
+    foreach (['Pacific/Kiritimati', 'Pacific/Pago_Pago'] as $candidate) {
+        $theirs = (new DateTimeImmutable('now', new DateTimeZone($candidate)))->format('Y-m-d');
+        if ($theirs !== $serverToday) {
+            $zone = $candidate;
+            $orgToday = $theirs;
+            break;
+        }
+    }
+    $out = ['premise' => false, 'myToday' => false, 'myNoYesterday' => false, 'rosterToday' => false, 'rosterNoYesterday' => false, 'manageToday' => false, 'manageNoYesterday' => false, 'detail' => ''];
+    if ($zone === '') {
+        $out['detail'] = 'neither zone has a date different from the database server\'s (' . $serverToday . ')';
+
+        return $out;
+    }
+    $orgYesterday = (new DateTimeImmutable($orgToday, new DateTimeZone('UTC')))->modify('-1 day')->format('Y-m-d');
+    $zoneWas = (string) (q('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?', 'i', [$siteId])[0]['timezone'] ?? '');
+    $GLOBALS['state']['siteZone'] ??= [$siteId, $zoneWas];
+    try {
+        q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$zone, $siteId]);
+        q('DELETE FROM `tblRotaSlot` WHERE `roleTypeID` IN (?, ?)', 'ii', [$zoneRoles['today']['id'], $zoneRoles['yesterday']['id']]);
+        foreach (['today' => $orgToday, 'yesterday' => $orgYesterday] as $which => $date) {
+            q('INSERT INTO `tblRotaSlot` (`siteID`, `roleTypeID`, `slotDate`, `startTime`, `endTime`, `assignedToID`, `notes`, `reminderSentAt`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())', 'iisssis', [$siteId, $zoneRoles[$which]['id'], $date, '23:00:00', '23:30:00', $A, '']);
+        }
+        $page   = http('asker', 'GET', '/rota');
+        $body   = $page['body'];
+        $myAt   = strpos($body, 'My upcoming duties');
+        $fullAt = strpos($body, 'Full roster');
+        $mine   = ($myAt !== false && $fullAt !== false && $fullAt > $myAt) ? substr($body, $myAt, $fullAt - $myAt) : '';
+        $full   = $fullAt !== false ? substr($body, $fullAt) : '';
+        $manage = http('rotaadmin', 'GET', '/rota/manage');
+        // Only the list of slots counts: the "Add slot" form above it offers
+        // EVERY role type in a drop-down, both of these included.
+        $slotsAt = strpos($manage['body'], 'Upcoming slots');
+        $slotsList = $slotsAt !== false ? substr($manage['body'], $slotsAt) : '';
+        $todayName = htmlspecialchars($zoneRoles['today']['name'], ENT_QUOTES, 'UTF-8');
+        $yestName  = htmlspecialchars($zoneRoles['yesterday']['name'], ENT_QUOTES, 'UTF-8');
+        $out['premise']           = $page['status'] === 200 && $mine !== '' && $full !== '' && $manage['status'] === 200 && $slotsList !== '';
+        $out['myToday']           = str_contains($mine, $todayName);
+        $out['myNoYesterday']     = $mine !== '' && str_contains($mine, $yestName) === false;
+        $out['rosterToday']       = str_contains($full, $todayName);
+        $out['rosterNoYesterday'] = $full !== '' && str_contains($full, $yestName) === false;
+        $out['manageToday']       = str_contains($slotsList, $todayName);
+        $out['manageNoYesterday'] = $slotsList !== '' && str_contains($slotsList, $yestName) === false;
+        $out['detail'] = 'organisation in ' . $zone . ' (its today ' . $orgToday . ', the database server\'s ' . $serverToday . '); roster HTTP '
+            . $page['status'] . ', manage HTTP ' . $manage['status'];
+    } finally {
+        q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$zoneWas, $siteId]);
+    }
+
+    return $out;
+};
+
 // =============================================================================
 section('A  asking');
 // =============================================================================
@@ -1653,6 +1760,18 @@ check('X6 …the member still reads "We could not confirm…", never "nothing wa
 check('X7 …and the error-log line SURVIVES the still-open transaction — the precaution of rolling back before logging', $xd['logged'], $xd['detail']);
 
 // =============================================================================
+section('Y  "upcoming" is the organisation\'s date, not the database server\'s (#987)');
+// =============================================================================
+$y = $scnOrgDate();
+check('Y1 (the premise) the organisation is in a zone whose date today differs from the database server\'s, and all three lists were read', $y['premise'], $y['detail']);
+check('Y2 "My upcoming duties" lists a duty on the organisation\'s today', $y['myToday'], $y['detail']);
+check('Y3 …and not one on the organisation\'s yesterday', $y['myNoYesterday'], $y['detail']);
+check('Y4 "Full roster" lists the duty on the organisation\'s today', $y['rosterToday'], $y['detail']);
+check('Y5 …and not the one on its yesterday', $y['rosterNoYesterday'], $y['detail']);
+check('Y6 the administrators\' Manage Rota list does the same: today\'s duty listed…', $y['manageToday'], $y['detail']);
+check('Y7 …yesterday\'s not', $y['manageNoYesterday'], $y['detail']);
+
+// =============================================================================
 section('P  the plants: each fault must turn its check red');
 // =============================================================================
 // Each plant names the file in the COPY of web/ it edits, the exact text it
@@ -1789,6 +1908,17 @@ $plants  = [
         ["(\$holderName !== '' ? \$holderName : 'another member')", '$holderName'],
         static fn (): bool => $scnWhereNowRare()['unnamed'],
     ],
+    // #987: the fault itself, put back -- "today" read from the DATABASE
+    // SERVER's date. Whichever half of section Y the current hour exercises
+    // goes red; the guard asks for every half, so it cannot pass at any hour.
+    'P34 the Duty Roster back on the database server\'s date (CURDATE())' => ['_apps/rota/index.php',
+        ['$fromDate = RotaSwaps::today($siteId);', "\$fromDate = (string) \$db->query('SELECT CURDATE() AS `d`')->fetch_assoc()['d'];"],
+        static fn (): bool => ($r = $scnOrgDate())['premise'] && $r['myToday'] && $r['myNoYesterday'] && $r['rosterToday'] && $r['rosterNoYesterday'],
+    ],
+    'P35 Manage Rota back on the database server\'s date (CURDATE())' => ['_apps/rota/manage.php',
+        ['$fromDate = RotaSwaps::today($siteId);', "\$fromDate = (string) \$db->query('SELECT CURDATE() AS `d`')->fetch_assoc()['d'];"],
+        static fn (): bool => ($r = $scnOrgDate())['premise'] && $r['manageToday'] && $r['manageNoYesterday'],
+    ],
 ];
 foreach ($plants as $name => [$file, $edits, $guard]) {
     $path     = $copyWeb . str_replace('/', $sep, $file);
@@ -1816,7 +1946,7 @@ foreach ($plants as $name => [$file, $edits, $guard]) {
     check($name . ' — and green again once put back', $guard() === true);
 }
 $untouched = true;
-foreach (['_core/RotaSwaps.php', '_apps/rota/swap.php', '_apps/rota/swap-respond.php', '_apps/rota/index.php'] as $file) {
+foreach (['_core/RotaSwaps.php', '_apps/rota/swap.php', '_apps/rota/swap-respond.php', '_apps/rota/index.php', '_apps/rota/manage.php'] as $file) {
     $rel = str_replace('/', $sep, $file);
     if ((string) file_get_contents($copyWeb . $rel) !== (string) file_get_contents($repo . $sep . 'web' . $sep . $rel)) {
         $untouched = false;
