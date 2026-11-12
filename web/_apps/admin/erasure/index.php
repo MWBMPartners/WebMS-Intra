@@ -92,8 +92,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         and words are emptied; the old activity records of such a suggestion that quote the address, written before the
         portal stopped putting addresses there, in which the e-mail address is replaced with &ldquo;[erased]&rdquo; and the
         network address, browser, request details and session details are emptied; and the e-mails telling that address
-        a suggestion was approved, waiting or sent, including a sent one recorded under no organisation, which cannot be
-        told apart from this organisation&rsquo;s. The events and the
+        a suggestion was approved: one still waiting to be sent is deleted, and in the record of one already sent
+        &mdash; including one recorded under no organisation, which cannot be told apart from this organisation&rsquo;s
+        &mdash; the address is replaced with &ldquo;[erased]&rdquo; and any error message emptied, the record itself kept. The events and the
         prayer requests themselves are kept. An anonymous prayer request sent without an e-mail address cannot be
         found this way. It does not touch any account, even a member&rsquo;s using the same address. A member who sent
         a request through the anonymous form while signed in is in the same position as a visitor: that request is not

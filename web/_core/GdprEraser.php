@@ -3616,7 +3616,7 @@ class GdprEraser
      *   administrator did not check who is asking (the one-install,
      *   many-organisations rule); that organisation files its own request.
      * - It looks only at the approval e-mail (EventSuggestions::APPROVAL_SUBJECT),
-     *   the one message the portal sends a visitor (D-134). Any other mail to
+     *   the one message the portal sends because of a suggestion (D-134). Any other mail to
      *   the same address is somebody's own and is left alone.
      * - It does not look at the Errors page: a mail server's refusal there has
      *   no subject, so nothing says it was about the approval e-mail. The
@@ -3727,7 +3727,7 @@ class GdprEraser
     }
 
     /**
-     * 📅 Step 3 of a visitor-address request (#964): empty the name and the
+     * 📅 Step 1 of a visitor-address request (#964): empty the name and the
      *    address a visitor gave when suggesting an event.
      *
      * Every event at this organisation suggested WITHOUT signing in
@@ -3933,7 +3933,7 @@ class GdprEraser
     private const PRE_963_SUGGESTION_RECORD = '/^Event #(\d+) submitted by anonymous (.*)$/su';
 
     /**
-     * 🧾 Step 2 of a visitor-address request (#964): the activity records the
+     * 🧾 Step 3 of a visitor-address request (#964): the activity records the
      *    public form wrote BEFORE #963, which quote the visitor's address.
      *
      * Until #963 `calendar/submit-save.php` recorded a visitor's suggestion as

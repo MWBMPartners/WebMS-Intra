@@ -4151,7 +4151,8 @@ ok('N3 an administrator who ticks the box and notes how they checked files ONE r
             . 'address (their name, address, network address and words), the old activity records of such a '
             . 'suggestion that quote the address (the address replaced with "[erased]" and the network address, browser, '
             . 'request details and session details emptied), and the e-mails telling that address a suggestion was '
-            . 'approved, waiting or sent, including a sent one recorded under no organisation. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'approved (one still waiting deleted; in the record of one sent, including one recorded under no '
+            . 'organisation, the address replaced with "[erased]" and any error message emptied, the record kept). It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
             . 'prayer form, which only a request filed here can reach.'
         && str_starts_with($again['message'], '[info] Nothing new was filed: erasure request #' . $vId . ' for that address') === true

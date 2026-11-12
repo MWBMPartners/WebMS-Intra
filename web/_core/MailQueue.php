@@ -2547,10 +2547,9 @@ final class MailQueue
      * `$onlySubject` and `$onlySiteId` limit it to messages with exactly that
      * subject, kept for exactly that organisation. GdprEraser passes both for
      * an erasure filed by e-mail address (which may also be a member's own
-     * address, D-176): the only message the portal sends to the address given
-     * with an event suggestion made without signing in is the approval e-mail
-     * (D-134), so nothing else waiting for the same address is theirs to
-     * take, and a MEMBER who happens to use the same address keeps every
+     * address, D-176): the one message the portal sends BECAUSE OF an event
+     * suggestion made without signing in is the approval e-mail (D-134), so
+     * nothing else waiting for the same address belongs to this request, and a MEMBER who happens to use the same address keeps every
      * message of their own. Both null (an account's erasure) means every
      * message, as before.
      *
