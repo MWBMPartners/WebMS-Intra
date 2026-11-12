@@ -4413,8 +4413,9 @@ check('PG7 with the badge back on the website box and the tick rule alone (the c
 $p = $plant('_apps/admin/calendar/feeds-choice.php', "\$newForEveryDate = (\$scope === 'series');", '$newForEveryDate = false;',
     static fn (): bool => ($scnSeriesUntouched()['the other date'] ?? null) === 'groups');
 check('PG8 with a new choice for every date pre-filled from the opened date again (the code before #854), an untouched Save opens every date to Members', [$p['applied'], $p['result']], [true, false]);
-$p = $plant('_core/FeedAdmin.php', "                    return ['followedIds' => \$followed];\n                }, true);",
-    "                    return ['followedIds' => \$followed];\n                }, false);",
+// (decide() passes no after-resolve step since #855 round 4, so the call ends
+// `}, null, true);` again; the plant turns its `$resolveFirst` off.)
+$p = $plant('_core/FeedAdmin.php', '}, null, true);', '}, null, false);',
     static fn (): bool => ($scnStaleApproval()['that request approved'] ?? null) === false);
 check('PG9 with the decision no longer re-working the calendar first (the code before #855), the request made under the looser rule is approved as if it still counted the website', [$p['applied'], $p['result']], [true, false]);
 // Round 2 of #885's check: a writer that refuses the organisation's OWN
