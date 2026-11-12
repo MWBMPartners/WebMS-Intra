@@ -105,7 +105,9 @@
  *        365 unable to sign in (the queue's line for a route fault), and the
  *        Microsoft 365 and Google routes' own lines - each sending, each
  *        refusing, Microsoft falling back to Google - and a message for no
- *        organisation. Driven through `/cron/mail-queue` with
+ *        organisation. Round 3 added the three other places a queue row is
+ *        READ for its line: replaced by a newer message, removed by hand, and
+ *        held after a run died while handing it over. Driven through `/cron/mail-queue` with
  *        `tools/https-standin.php` standing where Microsoft and Google stand.
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
@@ -183,7 +185,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 168; // #1006 added nine: part R1 (six, then three in round 2 of its check).
+const EXPECTED_CHECKS = 171; // #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -273,6 +275,12 @@ if (($argv[1] ?? '') === '--child') {
                 foreach ($claim['rows'] as $row) {
                     $out['handled'][] = \Portal\Core\MailQueue::handle($db, $row, $claim['token']);
                 }
+                break;
+            case 'remove-waiting-from': // what "Forgot password" does to the older resets (#1006 R1)
+                $out['removed'] = \Portal\Core\MailQueue::removeWaitingFrom($db, (string) $job['origin']);
+                break;
+            case 'remove-by-hand': // what the mail-queue page's Delete does (#1006 R1)
+                $out['removed'] = \Portal\Core\MailQueue::removeByHand($db, (int) $job['queueId']);
                 break;
             case 'numbers':
                 $out['numbers']  = \Portal\Core\MailQueue::numbers($db, $job['siteId'] === null ? null : (int) $job['siteId']);
@@ -4079,6 +4087,42 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
         json_encode($ran['json']) . '; lines ' . json_encode($expired)
     );
     q("DELETE FROM tblMailQueue WHERE subject = 'R1 expired unsent'");
+    //    The three other places a row is READ to write its event line, each with
+    //    its own SELECT naming its columns (round 3 of #1006's check: dropping
+    //    siteID from any one of those lists left every check green, because a
+    //    missing organisation reads as "none" - the only one that has a whole
+    //    test is the expired message above).
+    $eventLine = static fn (string $subject): array => q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]);
+    //    a. REPLACED: a newer reset takes an older one's place (removeWaitingFrom()).
+    child(['task' => 'add', 'messages' => [row([mailOf('other')], 'R1 replaced by a newer one', ['siteId' => SITE_R1, 'origin' => 'r1-replaced:1'])]]);
+    $replaced = child(['task' => 'remove-waiting-from', 'origin' => 'r1-replaced:1']);
+    ok(
+        'a waiting message for another organisation REPLACED by a newer one is gone, and its line is under the message\'s own organisation (#1006)',
+        ($replaced['removed'] ?? 0) === 1 && count(queued("subject = 'R1 replaced by a newer one'")) === 0
+            && $eventLine('R1 replaced by a newer one') === [$line('smtp', 'expired', SITE_R1)],
+        json_encode($replaced['removed'] ?? $replaced['threw']) . '; lines ' . json_encode($eventLine('R1 replaced by a newer one'))
+    );
+    //    b. REMOVED BY HAND: what the mail-queue page's Delete calls (removeByHand()).
+    $handId = (int) (child(['task' => 'add', 'messages' => [row([mailOf('other')], 'R1 removed by hand', ['siteId' => SITE_R1])]])['ids'][0] ?? 0);
+    $byHand = child(['task' => 'remove-by-hand', 'queueId' => $handId]);
+    ok(
+        'a waiting message for another organisation REMOVED BY HAND is gone, and its line is under the message\'s own organisation (#1006)',
+        $handId > 0 && ($byHand['removed']['queueID'] ?? 0) === $handId && $eventLine('R1 removed by hand') === [$line('smtp', 'failed', SITE_R1)],
+        json_encode($byHand['removed'] ?? $byHand['threw']) . '; lines ' . json_encode($eventLine('R1 removed by hand'))
+    );
+    //    c. INTERRUPTED: a run died while handing it to the mail server more than
+    //       ten minutes ago (made so by hand), and the next run holds it.
+    child(['task' => 'add', 'messages' => [row([mailOf('other')], 'R1 interrupted mid-hand-over', ['siteId' => SITE_R1])]]);
+    q("UPDATE tblMailQueue SET status = 'sending', stage = 'handing-over', claimToken = 'r1-dead-run', claimedAt = UTC_TIMESTAMP() - INTERVAL 1 HOUR "
+        . "WHERE subject = 'R1 interrupted mid-hand-over'");
+    $ran  = $job('right');
+    $held = rowOf('R1 interrupted mid-hand-over');
+    ok(
+        'a message for another organisation whose run DIED while handing it over is held, not sent again, and its line is under the message\'s own organisation (#1006)',
+        ($held['status'] ?? '') === 'held' && $eventLine('R1 interrupted mid-hand-over') === [$line('smtp', 'held', SITE_R1)],
+        json_encode($ran['json']) . '; the row is ' . json_encode($held['status'] ?? null) . '; lines ' . json_encode($eventLine('R1 interrupted mid-hand-over'))
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 interrupted mid-hand-over'");
     //    3. Microsoft 365 cannot even sign in: the route throws, writes nothing
     //       itself, and the queue writes the line (logQueueAttempt()'s second road).
     setting('mail.provider', 'ms365');

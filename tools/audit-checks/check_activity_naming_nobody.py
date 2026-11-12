@@ -51,6 +51,17 @@ WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 - A call written through a variable class name or a wrapper.
 - Whether the words passed name somebody: `check_activity_descriptions_personal.py`
   reads this method's calls by the same rules as `activity()`'s.
+- USES (#1017) counts the constant's NAME `FOR_ANONYMOUS_PRAYER_REQUEST` and its
+  value written as ONE literal ('anonymous-prayer-request' or
+  "anonymous-prayer-request"). Another form naming itself as the anonymous form
+  by any other spelling walks past it, and these were each measured by the
+  round-2 check of #1017: the value built in pieces
+  ('anonymous-' . 'prayer-request'), built by sprintf("%s-prayer-request",
+  "anonymous"), written with an escape ("anonymous\x2Dprayer-request"), held in
+  a heredoc, and the constant looked up as text
+  (constant(Captcha::class . "::FOR_ANONYMOUS_" . "PRAYER_REQUEST")). So "only the
+  anonymous prayer form" is enforced against the plain spellings only; anything
+  else is for review.
 
 Comments are left out by PHP's own `php -w` (strip comments and white space),
 never a regular expression, so a comment mentioning the method is not a call.

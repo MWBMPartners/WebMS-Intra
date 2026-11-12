@@ -142,9 +142,15 @@ class Captcha
     //    It PROMISES whoever sends it that the request is not linked to
     //    them, even when they are a member signed in (#988), so a refusal
     //    recorded here names nobody either (#1017).
-    //    Its value is used NOWHERE else under web/, and the form is the ONLY
-    //    caller passing the constant: check_activity_naming_nobody.py counts
-    //    both, so no other form can borrow anonymous refusal records. (It was
+    //    check_activity_naming_nobody.py counts, in every PHP file under
+    //    web/, the constant's NAME and its value written as ONE literal: the
+    //    name only here and in the form, the value only here. That stops the
+    //    plain ways another form could borrow anonymous refusal records, NOT
+    //    every way: a value built in pieces ('anonymous-' . 'prayer-request',
+    //    sprintf('%s-prayer-request', 'anonymous')), written with an escape
+    //    ("anonymous\x2Dprayer-request"), held in a heredoc, or a name looked up
+    //    as text (constant(Captcha::class . '::FOR_ANONYMOUS_' . 'PRAYER_REQUEST'))
+    //    all walk past it, and the gate's header lists them. (It was
     //    'prayer-request' until round 2 of #1017's check, a word four other
     //    places use as a type of live prompt or decision; a form name is never
     //    stored or shown, so the change altered nothing a person sees.)
