@@ -3591,10 +3591,13 @@ class GdprEraser
      *      stays — it is the organisation's record that a message was sent.
      *      A row recorded under NO organisation is treated as this one's, so
      *      it is cleared even if it was really another organisation's; and a
-     *      row recorded under ANOTHER organisation is not reached, which
-     *      includes a queued approval e-mail later sent by the scheduled job
-     *      through Microsoft 365 or Google, logged under whichever
-     *      organisation the job was working in (#1006).
+     *      row recorded under ANOTHER organisation is not reached. A queued
+     *      approval e-mail the scheduled job later sends through Microsoft
+     *      365 or Google is recorded under the message's own organisation
+     *      since #1006 (12 November 2026); before that it was recorded under
+     *      whichever organisation the job was working in, so a row written
+     *      by an earlier version may still sit under another organisation
+     *      and is not reached.
      *
      * -------------------------------------------------------------------------
      * WHAT IT DELIBERATELY DOES NOT DO

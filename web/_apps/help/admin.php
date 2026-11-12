@@ -934,9 +934,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         the name, the address, the network address and the words of every anonymous prayer request
         sent to <em>your</em> organisation with that address, and a prayer partner&rsquo;s note on it.
         The events and the prayer requests themselves are kept. An anonymous prayer request sent
-        <em>without</em> an e-mail address cannot be found this way. Two more limits: an approval e-mail that waited and was later sent by the
-        scheduled job through Microsoft 365 or Google may be recorded under another organisation, and
-        then keeps the address (#1006); and if a mail server&rsquo;s refusal quoted the address on the
+        <em>without</em> an e-mail address cannot be found this way. One more limit: if a mail server&rsquo;s refusal quoted the address on the
         Errors page, that line is deleted only by the retention clear-out &mdash; the scheduled
         retention job, or <em>Run Sweep Now</em> on Admin, Maintenance, Retention (a global
         administrator&rsquo;s button) &mdash; once the period kept for errors has passed. If an approval

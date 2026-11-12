@@ -53,10 +53,15 @@ class MailerGoogle
      * @param string $subj  Email subject line
      * @param string $html  HTML body content
      * @param array  $files Array of absolute file paths to attach (optional)
+     * @param int|false|null $forSiteId The organisation this send's line in the
+     *        send log is recorded under, as Mailer::logSend()'s last argument:
+     *        false (the default) for this request's; the queue row's for a
+     *        message the mail job sends later (#1006), because the job's own
+     *        organisation is not the message's.
      *
      * @return bool True if sent successfully
      */
-    public static function send(array $to, string $subj, string $html, array $files = []): bool
+    public static function send(array $to, string $subj, string $html, array $files = [], int|false|null $forSiteId = false): bool
     {
         global $SETTINGS;
 
@@ -121,12 +126,12 @@ class MailerGoogle
         }
 
         if ($code >= 200 && $code < 300) {
-            Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'sent', $code, '', '');
+            Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'sent', $code, '', '', $forSiteId);
             return true;
         }
 
         Logger::errorPlatform('Gmail', 'Error', (string) $code, 'Gmail send failed', (string) $resp);
-        Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'failed', $code, '', mb_substr((string) $resp, 0, 500));
+        Mailer::logSend('google', $delegateUser, implode(', ', $to), $subj, $attachmentCount, 'failed', $code, '', mb_substr((string) $resp, 0, 500), $forSiteId);
         return false;
     }
 

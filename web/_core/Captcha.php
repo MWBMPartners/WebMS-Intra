@@ -138,6 +138,23 @@ class Captcha
     public const FOR_SIGN_IN        = 'sign-in';
     public const FOR_PASSWORD_RESET = 'password-reset';
 
+    // 🙈 The anonymous prayer form (`prayer-requests/anonymous-save.php`).
+    //    It PROMISES whoever sends it that the request is not linked to
+    //    them, even when they are a member signed in (#988), so a refusal
+    //    recorded here names nobody either (#1017).
+    public const FOR_ANONYMOUS_PRAYER_REQUEST = 'prayer-request';
+
+    /**
+     * The forms that promise anonymity: a refusal this class records while
+     * checking one of them is written through Logger::activityNamingNobody(),
+     * never Logger::activity() - which since #626 fills in the signed-in
+     * member's account, session fingerprint, network address and browser, and
+     * so put the member's name to a refused "anonymous" prayer request in the
+     * same second as the form's own record, which names nobody (#1017).
+     * The ONE list; `check_activity_naming_nobody.py` pins it whole.
+     */
+    private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];
+
     /** The two settings each provider keeps its keys in. */
     private const KEY_NAMES = [
         self::PROVIDER_TURNSTILE => ['auth.turnstile.siteKey', 'auth.turnstile.secretKey'],
@@ -406,8 +423,10 @@ class Captcha
      *
      * @param array<string,mixed> $postData The $_POST superglobal (or equivalent)
      * @param string              $form     Which form is asking: FOR_SIGN_IN,
-     *                                      FOR_PASSWORD_RESET, or a short name
-     *                                      of any other form ('prayer-request').
+     *                                      FOR_PASSWORD_RESET,
+     *                                      FOR_ANONYMOUS_PRAYER_REQUEST (whose
+     *                                      refusals name nobody, #1017), or a
+     *                                      short name of any other form.
      *
      * @return bool True if verification succeeded or no captcha is configured
      */
@@ -434,7 +453,7 @@ class Captcha
             $secret  = self::setting($SETTINGS, 'auth', 'recaptcha', 'secretKey');
             $version = self::setting($SETTINGS, 'auth', 'recaptcha', 'version');
             if ($version === 'v3') {
-                return self::verifyRecaptchaV3($secret, $postData, $SETTINGS);
+                return self::verifyRecaptchaV3($secret, $postData, $SETTINGS, $form);
             }
             return self::verifyRecaptchaV2($secret, $postData);
         }
@@ -592,8 +611,13 @@ class Captcha
 
     /**
      * Verify a reCAPTCHA v3 response, enforcing both action match AND score threshold.
+     *
+     * The only check here that writes a record of its own: v3 answers "yes,
+     * a real token" and then a score, and a refusal on the score or the action
+     * is recorded so an administrator can see the threshold at work. Which
+     * kind of record depends on the form (`$form`): see recordV3Refusal().
      */
-    private static function verifyRecaptchaV3(string $secret, array $post, array $settings): bool
+    private static function verifyRecaptchaV3(string $secret, array $post, array $settings, string $form): bool
     {
         $token = (string) ($post[self::RECAPTCHA_POST_FIELD] ?? '');
         if ($secret === '' || $token === '') {
@@ -611,7 +635,7 @@ class Captcha
         }
         $actualAction = (string) ($json['action'] ?? '');
         if ($actualAction !== $expectedAction) {
-            Logger::activity('CaptchaRejected', 'reCAPTCHA v3 action mismatch (expected=' . $expectedAction . ', got=' . $actualAction . ')');
+            self::recordV3Refusal($form, 'action mismatch (expected=' . $expectedAction . ', got=' . $actualAction . ')');
             return false;
         }
 
@@ -620,11 +644,35 @@ class Captcha
         $threshold    = $thresholdStr === '' ? 0.5 : (float) $thresholdStr;
         $score        = (float) ($json['score'] ?? 0.0);
         if ($score < $threshold) {
-            Logger::activity('CaptchaRejected', 'reCAPTCHA v3 score below threshold (score=' . $score . ', threshold=' . $threshold . ')');
+            self::recordV3Refusal($form, 'score below threshold (score=' . $score . ', threshold=' . $threshold . ')');
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * 📝 The activity record of one refused reCAPTCHA v3 check. ONE place for
+     * both refusals, so the two can never disagree about whose record it is.
+     *
+     * For a form on PROMISES_ANONYMITY it names nobody: no account, and none
+     * of the session fingerprint, session facts, network address, browser or
+     * headers that would join it to the member's own sign-in record (#1017).
+     * For every other form it is an ordinary record, which names a signed-in
+     * person as #626 decided - a refused check on, say, the sign-in page is
+     * exactly what an administrator looking into a member's account needs.
+     *
+     * `$why` is fixed words and the numbers reCAPTCHA answered (its action
+     * name and score, and this installation's own settings), never anything a
+     * person typed; the words of the record are what they always were.
+     */
+    private static function recordV3Refusal(string $form, string $why): void
+    {
+        if (in_array($form, self::PROMISES_ANONYMITY, true) === true) {
+            Logger::activityNamingNobody('CaptchaRejected', 'reCAPTCHA v3 ' . $why);
+            return;
+        }
+        Logger::activity('CaptchaRejected', 'reCAPTCHA v3 ' . $why);
     }
 
     // 🔧 ===========================================================================

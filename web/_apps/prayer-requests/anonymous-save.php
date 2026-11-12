@@ -16,7 +16,8 @@
  *   • Always redirects to a generic success page (no enumeration / abuse signal)
  *   • Opt-in round-robin auto-assign to a prayer partner (#311, migration 148)
  *   • Every activity record it writes NAMES NOBODY, even for a member who is
- *     signed in (#988, Logger::activityNamingNobody())
+ *     signed in (#988, Logger::activityNamingNobody()) - and so does the bot
+ *     check's own record of a refused reCAPTCHA v3 answer (#1017)
  *
  * @package   Portal\PrayerRequests
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -63,7 +64,9 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 // 🤖 Captcha
-if (Captcha::verify($_POST, 'prayer-request') === false) {
+// Named by its constant, which is what tells the check that this form promises
+// anonymity: a refusal it records then names nobody too (#1017).
+if (Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST) === false) {
     Logger::activityNamingNobody('PrayerRequestAnonRejected', 'Captcha failed on anonymous prayer-request save');
     header('Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode('Captcha verification failed. Please try again.'), true, 302);
     exit();

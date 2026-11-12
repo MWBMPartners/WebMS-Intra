@@ -27,6 +27,14 @@ file whose count has changed (a promise quietly dropped, or a new record added
 without a decision). It also pins the method's own statement, so the method
 cannot start keeping what it promises to leave out.
 
+Since #1017 one caller is not a page: `Captcha::recordV3Refusal()`, which
+records a refused reCAPTCHA v3 answer and must name nobody when the form being
+checked promises anonymity. Which forms do is ONE list in Captcha.php,
+`PROMISES_ANONYMITY`, and this check pins it WHOLE (as `php -w` prints it), so
+a form cannot be added to it - and its refusals taken off the record - without
+this check changing too; and it requires the anonymous form to name itself by
+the constant that list holds, so the form and the list cannot drift apart.
+
 WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 -----------------------------------------------------
 - Whether a listed call is really on the anonymous path: that is behaviour,
@@ -66,6 +74,26 @@ ON_PURPOSE = {
         1,
         "the automatic assignment of a request sent through the anonymous form, which runs inside the sender's request (#988)",
     ),
+    "_core/Captcha.php": (
+        1,
+        "the bot check's record of a refused reCAPTCHA v3 answer on a form in Captcha::PROMISES_ANONYMITY - today only the "
+        "anonymous prayer form (#1017)",
+    ),
+}
+
+# Statements pinned whole, as `php -w` prints them, each exactly ONCE in its
+# file. File (relative to web/) -> list of (statement, why).
+PINNED_STATEMENTS = {
+    "_core/Captcha.php": [
+        ("private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+         "the ONE list of forms whose bot-check refusals name nobody (#1017): a form added to it has its refusals "
+         "taken off the record, which is a decision, so this pin changes with it"),
+    ],
+    "_apps/prayer-requests/anonymous-save.php": [
+        ("Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)",
+         "the anonymous form names itself to the bot check by the constant Captcha::PROMISES_ANONYMITY holds, so a "
+         "refused reCAPTCHA v3 answer on it names nobody either (#1017)"),
+    ],
 }
 
 LOGGER = "_core/Logger.php"
@@ -130,6 +158,17 @@ def problems(web: str) -> list[str]:
                 "the list only on purpose."
             )
 
+    for rel, pins in sorted(PINNED_STATEMENTS.items()):
+        path = os.path.join(web, rel)
+        if os.path.isfile(path) is False:
+            wrong.append(f"{rel} is missing, and holds a statement this check pins")
+            continue
+        text = stripped(path)
+        for statement, why in pins:
+            seen = text.count(statement)
+            if seen != 1:
+                wrong.append(f"{rel} holds `{statement}` {seen} time(s), not exactly once: {why}")
+
     logger = os.path.join(web, LOGGER)
     if os.path.isfile(logger) is False:
         wrong.append(f"{LOGGER} is missing")
@@ -169,7 +208,7 @@ def self_test() -> int:
         tmp = tempfile.mkdtemp(prefix="p988-nobody-")
         try:
             web = os.path.join(tmp, "web")
-            for rel in list(ON_PURPOSE) + [LOGGER]:
+            for rel in sorted(set(list(ON_PURPOSE) + list(PINNED_STATEMENTS) + [LOGGER])):
                 dst = os.path.join(web, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copyfile(os.path.join(real, rel), dst)
@@ -230,6 +269,59 @@ def self_test() -> int:
     ok("the method keeping the network address is reported",
        applied2["v"] is True and any("literal NULLs" in g for g in got), "; ".join(got))
 
+    # 5. #1017: the bot check's refusal goes back to naming the session's account.
+    applied5 = {"v": False}
+
+    def captcha_back_to_activity(w: str) -> None:
+        applied5["v"] = replace(
+            w, "_core/Captcha.php",
+            "Logger::activityNamingNobody('CaptchaRejected',",
+            "Logger::activity('CaptchaRejected',",
+        )
+    got = with_copy(captcha_back_to_activity)
+    ok("the bot check's refusal on an anonymous form going back to Logger::activity() is reported (#1017)",
+       applied5["v"] is True and any("_core/Captcha.php calls" in g for g in got), "; ".join(got))
+
+    # 6. #1017: a second form added to the list of forms promising anonymity.
+    applied6 = {"v": False}
+
+    def list_widened(w: str) -> None:
+        applied6["v"] = replace(
+            w, "_core/Captcha.php",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST, self::FOR_SIGN_IN];",
+        )
+    got = with_copy(list_widened)
+    ok("a form added to Captcha::PROMISES_ANONYMITY without this check changing is reported (#1017)",
+       applied6["v"] is True and any("PROMISES_ANONYMITY" in g for g in got), "; ".join(got))
+
+    # 7. #1017: the anonymous form no longer names itself by the constant.
+    applied7 = {"v": False}
+
+    def form_by_literal(w: str) -> None:
+        applied7["v"] = replace(
+            w, "_apps/prayer-requests/anonymous-save.php",
+            "Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)",
+            "Captcha::verify($_POST, 'anonymous-prayer')",
+        )
+    got = with_copy(form_by_literal)
+    ok("the anonymous form naming itself to the bot check by anything but the constant is reported (#1017)",
+       applied7["v"] is True and any("FOR_ANONYMOUS_PRAYER_REQUEST" in g for g in got), "; ".join(got))
+
+    # 8. A comment quoting the pinned list does not count as the statement.
+    applied8 = {"v": False}
+
+    def list_only_in_comment(w: str) -> None:
+        applied8["v"] = replace(
+            w, "_core/Captcha.php",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+            "// private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];\n"
+            "    private const PROMISES_ANONYMITY = [];",
+        )
+    got = with_copy(list_only_in_comment)
+    ok("the list emptied, with the old statement left in a comment, is reported (a comment is not the statement)",
+       applied8["v"] is True and any("PROMISES_ANONYMITY" in g for g in got), "; ".join(got))
+
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1
 
@@ -253,8 +345,8 @@ def main() -> int:
         return 1
     total = sum(n for n, _ in ON_PURPOSE.values())
     print(f"OK: Logger::{METHOD}() is called {total} time(s), only in the {len(ON_PURPOSE)} file(s) that promise "
-          "anonymity, and still writes the account and the browser columns as empty. (A presence check: see this "
-          "file's header for what it cannot see.)")
+          "anonymity, and still writes the account and the browser columns as empty; the bot check's list of forms "
+          "promising anonymity is as pinned. (A presence check: see this file's header for what it cannot see.)")
     return 0
 
 

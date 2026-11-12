@@ -941,9 +941,20 @@ class Mailer
                 'words' => 'Not sent: ' . self::ROUTES[$route] . ' has no way past a failed certificate check. Nothing was tried.'] + $answer;
         }
         try {
+            // 🏢 THE MESSAGE'S OWN ORGANISATION goes with it (#1006). These
+            //    two routes write their own send-log line (`ownLog` above),
+            //    and without it they wrote it under Site::id(): in the
+            //    scheduled job that is whichever organisation the job's own
+            //    request resolved to, not the one the message was for. An
+            //    erasure that finds send-log rows by organisation (#964's
+            //    visitor request) then missed that row, and the organisation
+            //    the message was for had no record of sending it. SMTP never
+            //    had the fault: logQueueAttempt() writes its line, and has
+            //    always passed the row's organisation.
+            $site = self::queueRowSite($row);
             $sent = $route === self::ROUTE_GOOGLE
-                ? MailerGoogle::send($to, (string) $row['subject'], $html, $files)
-                : self::sendViaGraph($to, (string) $row['subject'], $html, $files);
+                ? MailerGoogle::send($to, (string) $row['subject'], $html, $files, $site)
+                : self::sendViaGraph($to, (string) $row['subject'], $html, $files, $site);
         } catch (\Throwable $e) {
             // These routes throw when a setting is missing. The exception's
             // text names the setting, never the message.
@@ -973,10 +984,10 @@ class Mailer
     public static function logQueueAttempt(array $row, array $answer, string $status): void
     {
         if (($answer['ownLog'] ?? false) === true) {
-            return; // Microsoft 365 and Google wrote their own line
+            return; // Microsoft 365 and Google wrote their own line, under the row's organisation (#1006)
         }
         $to     = array_map('trim', explode(',', (string) $row['toRecipients']));
-        $siteId = $row['siteID'] === null ? null : (int) $row['siteID'];
+        $siteId = self::queueRowSite($row);
         if (self::route() === self::ROUTE_SMTP && isset($answer['from']) === true && $answer['from'] !== '') {
             self::logSmtp($answer, $to, (string) $row['subject'], $status, $status === 'failed' || $status === 'held', $siteId);
 
@@ -1000,8 +1011,24 @@ class Mailer
     {
         self::logSend(
             self::route(), '', (string) $row['toRecipients'], (string) $row['subject'], (int) ($row['attachmentCount'] ?? 0), $status, null, $code, $words,
-            $row['siteID'] === null ? null : (int) $row['siteID']
+            self::queueRowSite($row)
         );
+    }
+
+    /**
+     * 🏢 The organisation a waiting message is FOR: its queue row's own
+     * `siteID`, or none. The ONE place the mail job's send-log lines take
+     * their organisation from (#1006), whichever line writes it - the queue's
+     * own (logQueueAttempt(), logQueueEvent()) or a route's (deliverQueued()
+     * hands it to Microsoft 365 and Google, which write their own). Never
+     * Site::id(): the job has no organisation of its own, and the one its
+     * request resolved to is not the message's.
+     *
+     * @param array<string, mixed> $row The queue row.
+     */
+    private static function queueRowSite(array $row): ?int
+    {
+        return ($row['siteID'] ?? null) === null ? null : (int) $row['siteID'];
     }
 
     /**
@@ -1351,10 +1378,15 @@ class Mailer
      * @param string $subj  Subject
      * @param string $html  HTML body
      * @param array  $files File paths to attach
+     * @param int|false|null $forSiteId The organisation the send-log line is
+     *        recorded under, as logSend()'s last argument: false (the
+     *        default) for this request's, which is right for a page sending
+     *        now; the queue row's for a message the mail job sends later
+     *        (#1006). Handed on to the Google fallback, which writes its own.
      *
      * @return bool True if sent successfully
      */
-    private static function sendViaGraph(array $to, string $subj, string $html, array $files = []): bool
+    private static function sendViaGraph(array $to, string $subj, string $html, array $files = [], int|false|null $forSiteId = false): bool
     {
         global $SETTINGS;
 
@@ -1423,7 +1455,7 @@ class Mailer
         }
 
         if ($result['code'] >= 200 && $result['code'] < 300) {
-            self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'sent', $result['code'], '', '');
+            self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'sent', $result['code'], '', '', $forSiteId);
             return true;
         }
 
@@ -1437,7 +1469,7 @@ class Mailer
         $errMessage = (string) ($errData['error']['message'] ?? (string) $result['body']);
 
         Logger::errorPlatform('Graph', 'Error', (string) $result['code'], 'Mail send fail', $errCode . ': ' . $errMessage);
-        self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'failed', $result['code'] > 0 ? $result['code'] : null, $errCode, $errMessage);
+        self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'failed', $result['code'] > 0 ? $result['code'] : null, $errCode, $errMessage, $forSiteId);
 
         // 🪂 Optional opt-in fallback (default OFF — a silent failover
         //    changes the visible sending identity and can break DMARC
@@ -1446,7 +1478,7 @@ class Mailer
         if ($fallback === 'google') {
             try {
                 if (MailerGoogle::isConfigured() === true) {
-                    return MailerGoogle::send($to, $subj, $html, $files);
+                    return MailerGoogle::send($to, $subj, $html, $files, $forSiteId);
                 }
             } catch (\Throwable $e) {
                 Logger::errorPlatform('Graph', 'Error', 'FALLBACK_FAIL', 'Google fallback failed', $e->getMessage());

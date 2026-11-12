@@ -98,6 +98,12 @@
  *   F9   An erasure while a run of the job is working. (M5)
  *   F10  An erasure that cannot have the run lock at all: the person is out
  *        of the queue all the same, and running it again finishes it.
+ *   R1   A message the job sends later through Microsoft 365 or Google is
+ *        recorded in the send log under the message's OWN organisation, not
+ *        the one the job's request resolved to (#1006): each route sending,
+ *        each refusing, the Microsoft 365 route falling back to Google, and a
+ *        message for no organisation. Driven through `/cron/mail-queue` with
+ *        `tools/https-standin.php` standing where Microsoft and Google stand.
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
  *   minutes themselves, twelve pages at once, and the other scheduled jobs
@@ -127,11 +133,16 @@
  *   stopped by its own process number, never by a name. Every answer must
  *   carry this run's header.
  * - NO E-MAIL LEAVES THIS MACHINE: the only mail servers are the stand-ins,
- *   on 127.0.0.1.
+ *   on 127.0.0.1. Since #1006 the portal's server also has
+ *   `tools/https-standin.php` as its HTTPS proxy, which answers for Microsoft
+ *   365 and Google ITSELF and refuses every other name, so no call the portal
+ *   makes over HTTPS leaves the machine either.
  *
  * WHAT THIS CANNOT PROVE
  * ----------------------
- * - That a real mail server accepts a message, or that one arrives.
+ * - That a real mail server accepts a message, or that one arrives. Nor that
+ *   Microsoft 365 or Google would answer as the stand-in does in R1: R1 proves
+ *   what the portal RECORDS for each answer, never what those services say.
  * - That a real web server ends a request where this test kills a process.
  *   The kills are of a child process running one run of the queue.
  * - The exact moment a kill lands. "Just after the mail server took it" is
@@ -169,7 +180,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 159;
+const EXPECTED_CHECKS = 165; // #1006 added six: part R1.
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -298,6 +309,10 @@ function refuse(string $why): never
     echo "REFUSED — {$why}. Nothing more was checked, and this run fails.\n";
     exit(1);
 }
+
+// 🎭 How the HTTPS stand-in is started and steered (#1006): one copy, shared with
+//    erasure-pages-selftest.php.
+require __DIR__ . DIRECTORY_SEPARATOR . 'https-standin-client.php';
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -439,6 +454,7 @@ const REQUEST_ID  = 931900; // the erasure request of Q9
 const REQUEST_RACE = 931901; // the erasure request of F9
 const REQUEST_LOCKED = 931902; // the erasure request of F10
 const NEWSLETTER  = 931600; // the newsletter of F2
+const SITE_R1     = 931801; // R1's organisation (#1006): it has no address, so a request can never resolve to it by itself
 const STATEMENT   = 931700; // the giving statement rows of F2 are numbered from here
 /** How this test names itself to the portal, so the records it causes can be found and removed. */
 const AGENT = 'mail-queue-selftest';
@@ -505,6 +521,9 @@ function removeMail(): void
 function removeWorld(): void
 {
     removeMail();
+    // R1's organisation (#1006). Its send-log lines are removed by removeMail() first (by address).
+    q('DELETE FROM tblSettings WHERE siteID = ?', 'i', [SITE_R1]);
+    q('DELETE FROM tblSites WHERE siteID = ?', 'i', [SITE_R1]);
     q('DELETE FROM tblErasureAudit WHERE requestID IN (?, ?, ?)', 'iii', [REQUEST_ID, REQUEST_RACE, REQUEST_LOCKED]);
     q('DELETE FROM tblErasureRequest WHERE requestID IN (?, ?, ?)', 'iii', [REQUEST_ID, REQUEST_RACE, REQUEST_LOCKED]);
     q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 931000 AND 931999 OR visitorIP LIKE '198.51.100.%' OR userAgent = ?", 's', [AGENT]);
@@ -529,6 +548,7 @@ function removeWorld(): void
 $state = [
     'proc' => null, 'mailProc' => null, 'mailPipe' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'settings' => [],
     'started' => false, 'cleaned' => false, 'read' => [], 'ports' => [], 'haystack' => '', 'kids' => [], 'baseline' => [],
+    'https' => [],
 ];
 
 function portAnswers(int $port): bool
@@ -587,6 +607,10 @@ function cleanup(): void
         fclose($state['mailPipe']);
     }
     stopServer($state['mailProc']);
+    // The HTTPS stand-in (#1006), by its own handle.
+    if ($state['https'] !== []) {
+        httpsStandinStop($state['https']);
+    }
     try {
         // A lock or a transaction this test still holds would outlive it otherwise.
         $db->query('ROLLBACK');
@@ -1455,6 +1479,16 @@ return true;
 ROUTER;
 file_put_contents($child . $sep . 'router.php', str_replace('__TOKEN__', $state['token'], $router));
 
+// 🎭 The HTTPS stand-in (#1006): Microsoft 365's and Google's names, answered by
+//    this run itself; every other name refused. The portal's server trusts its
+//    authority AND the stand-in mail servers' (one file holds both).
+$state['https'] = httpsStandinStart(
+    $child . $sep . 'https',
+    ['login.microsoftonline.com', 'graph.microsoft.com', 'oauth2.googleapis.com', 'gmail.googleapis.com'],
+    [$standinDir . $sep . 'certs' . $sep . 'ca.pem'],
+    'refuse'
+);
+
 // The servers: each command as a LIST (no shell in between), ONE process each.
 $env = getenv();
 unset($env['PHP_CLI_SERVER_WORKERS']);
@@ -1468,17 +1502,22 @@ $state['mailProc'] = proc_open(
 );
 $state['mailPipe'] = $mailPipes[0] ?? null;
 // 🌐 The portal. `openssl.cafile` is PHP's own setting for "the authorities
-//    this machine trusts": this run's made-up authority is trusted without a
-//    line of the portal being changed. `max_execution_time` is raised because
-//    a busy machine must not decide a test.
+//    this machine trusts": this run's made-up authorities are trusted without
+//    a line of the portal being changed (the stand-in mail servers', and since
+//    #1006 the HTTPS stand-in's, through httpsStandinServerArgs(), which also
+//    sets `curl.cainfo` and makes the HTTPS stand-in the server's proxy).
+//    `max_execution_time` is raised because a busy machine must not decide a test.
 $state['proc'] = proc_open(
-    [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        '-d', 'display_errors=0', '-d', 'max_execution_time=180', '-d', 'openssl.cafile=' . $standinDir . $sep . 'certs' . $sep . 'ca.pem',
-        '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+    array_merge(
+        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
+            '-d', 'display_errors=0', '-d', 'max_execution_time=180'],
+        httpsStandinServerArgs($state['https']),
+        ['-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php']
+    ),
     $quiet,
     $pipes,
     $child,
-    $env
+    httpsStandinServerEnv($state['https'], $env)
 );
 if (is_resource($state['proc']) === false || is_resource($state['mailProc']) === false) {
     refuse('a server could not be started');
@@ -3953,6 +3992,122 @@ if (part('F10', 'An erasure that cannot have the run lock still takes the person
         $second['threw'] === '' && ($second['result']['failed'] ?? -1) === 0 && ($request['status'] ?? '') === 'completed' && str_contains($kept, mailOf('locked')) === false,
         json_encode($second['result'] ?? $second['threw']) . '; the request is ' . json_encode($request['status'] ?? null) . '; the address is still stored: ' . json_encode(str_contains($kept, mailOf('locked')))
     );
+}
+
+// =============================================================================
+if (part('R1', 'A message the job sends later through Microsoft 365 or Google is recorded under the message\'s own organisation (#1006)') === true) {
+// =============================================================================
+    // WHAT WAS WRONG. Those two routes write their own line in the send log,
+    // and wrote it under Site::id() - in the job, whichever organisation the
+    // job's own request resolved to. So a message kept for one organisation
+    // and sent later was recorded under another, and an erasure that finds
+    // send-log lines by organisation (#964's request for an e-mail address)
+    // missed it. SMTP never had the fault: the queue writes its line.
+    //
+    // WHY A WRONG ANSWER CANNOT PASS HERE. R1's organisation has no address,
+    // so no request can resolve to it on its own: the job's request, at
+    // 127.0.0.1, resolves to another. A line under SITE_R1 can only have come
+    // from the queue row. (Measured by putting the fault back: every check
+    // below that expects SITE_R1 goes red - see the notes of #1006.)
+    q("INSERT INTO tblSites (siteID, siteName, siteKey, timezone, isActive) VALUES (?, 'Selftest queue R1 organisation', 'selftest-mailqueue-r1', 'UTC', 1)", 'i', [SITE_R1]);
+    $errorsBeforeR1 = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS n FROM tblErrors')['n']);
+    foreach (['auth.ms365.tenantID' => 'selftest-r1-tenant', 'auth.ms365.appwide.clientID' => 'selftest-r1-client', 'auth.ms365.appwide.clientSecret' => 'selftest-r1-secret',
+        'mail.ms365.sharedMailbox' => '', 'mail.google.delegateUser' => SENDER, 'mail.google.serviceAccountKeyFile' => 'selftest-r1-google.json'] as $key => $value) {
+        setting($key, $value);
+    }
+    // A Google service-account key made for this run: a real private key (the
+    // portal signs its sign-in with it) for an account that exists nowhere.
+    $googleKey = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_RSA, 'private_key_bits' => 2048]);
+    openssl_pkey_export($googleKey, $googlePem);
+    $googleFile = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-r1-google.json';
+    file_put_contents($googleFile, (string) json_encode(['private_key' => $googlePem, 'client_email' => 'r1@' . DOMAIN]));
+    $tokens = [
+        'login.microsoftonline.com' => [['path' => '/', 'status' => 200, 'json' => ['access_token' => 'r1-made-up-token', 'expires_in' => 3600]]],
+        'oauth2.googleapis.com'     => [['path' => '/token', 'status' => 200, 'json' => ['access_token' => 'r1-made-up-token', 'expires_in' => 3600]]],
+    ];
+    /**
+     * One message kept for `$site` and sent by ONE run of the job, as a
+     * scheduler calls it, with the two services answering as given. What the
+     * send log then holds for it, what the services were asked, and the job's answer.
+     */
+    $r1Send = static function (string $subject, ?int $site, array $graph, array $gmail) use ($job, $state, $tokens): array {
+        child(['task' => 'add', 'messages' => [row([mailOf('other')], $subject, ['siteId' => $site])]]);
+        httpsStandinAnswers($state['https'], $tokens + ['graph.microsoft.com' => $graph, 'gmail.googleapis.com' => $gmail]);
+        httpsStandinRequests($state['https']);
+        $answer = $job('right');
+
+        return [
+            'job'   => $answer,
+            'asked' => array_map(static fn (array $r): string => $r['host'] . ' ' . $r['method'] . ' ' . $r['status'], httpsStandinRequests($state['https'])),
+            'lines' => q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]),
+            'left'  => count(queued("subject = '" . addslashes($subject) . "'")),
+        ];
+    };
+    $line  = static fn (string $provider, string $status, ?int $site): array => ['provider' => $provider, 'status' => $status, 'siteID' => $site];
+    $graphOk     = [['path' => '/v1.0/users/', 'status' => 202, 'body' => '']];
+    $graphNo     = [['path' => '/v1.0/users/', 'status' => 403, 'json' => ['error' => ['code' => 'ErrorAccessDenied', 'message' => 'Access is denied.']]]];
+    $graphBroken = [['path' => '/v1.0/users/', 'status' => 500, 'json' => ['error' => ['code' => 'InternalServerError', 'message' => 'Made-up fault.']]]];
+    $gmailOk     = [['path' => '/gmail/v1/users/', 'status' => 200, 'json' => ['id' => 'r1-made-up-id']]];
+    $gmailNo     = [['path' => '/gmail/v1/users/', 'status' => 400, 'json' => ['error' => ['code' => 400, 'message' => 'Made-up refusal.']]]];
+
+    setting('mail.provider', 'ms365');
+    $sent = $r1Send('R1 through Microsoft 365, accepted', SITE_R1, $graphOk, $gmailOk);
+    ok(
+        'Microsoft 365 ACCEPTS a waiting message for another organisation: the job really sent it through the route (a sign-in, then the send, both answered by the stand-in), it left the queue, and its ONE line in the send log is under the message\'s own organisation (#1006)',
+        ($sent['job']['json']['sent'] ?? 0) === 1 && $sent['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 202']
+            && $sent['left'] === 0 && $sent['lines'] === [$line('ms365', 'sent', SITE_R1)],
+        json_encode($sent['job']['json']) . '; asked ' . json_encode($sent['asked']) . '; lines ' . json_encode($sent['lines'])
+    );
+    $refused = $r1Send('R1 through Microsoft 365, refused', SITE_R1, $graphNo, $gmailOk);
+    ok(
+        'Microsoft 365 REFUSES one: the message waits to be tried again, and the route\'s line saying it failed is under the message\'s own organisation too, not the job\'s (#1006)',
+        $refused['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 403'] && $refused['left'] === 1
+            && $refused['lines'] === [$line('ms365', 'failed', SITE_R1)],
+        'asked ' . json_encode($refused['asked']) . '; waiting ' . $refused['left'] . '; lines ' . json_encode($refused['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Microsoft 365, refused'");
+    setting('mail.fallbackProvider', 'google');
+    $fellBack = $r1Send('R1 through Microsoft 365, then Google', SITE_R1, $graphBroken, $gmailOk);
+    setting('mail.fallbackProvider', '');
+    ok(
+        'Microsoft 365 FAILS and the chosen fallback, Google, sends it: BOTH lines - Microsoft\'s failure and Google\'s send - are under the message\'s own organisation, because the fallback is handed the organisation too (#1006)',
+        ($fellBack['job']['json']['sent'] ?? 0) === 1 && $fellBack['left'] === 0
+            && $fellBack['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 500', 'oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 200']
+            && $fellBack['lines'] === [$line('ms365', 'failed', SITE_R1), $line('google', 'sent', SITE_R1)],
+        json_encode($fellBack['job']['json']) . '; asked ' . json_encode($fellBack['asked']) . '; lines ' . json_encode($fellBack['lines'])
+    );
+
+    setting('mail.provider', 'google');
+    $gSent = $r1Send('R1 through Google, accepted', SITE_R1, $graphOk, $gmailOk);
+    ok(
+        'Google ACCEPTS a waiting message for another organisation: sent through the route, gone from the queue, and its ONE line is under the message\'s own organisation (#1006)',
+        ($gSent['job']['json']['sent'] ?? 0) === 1 && $gSent['asked'] === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 200']
+            && $gSent['left'] === 0 && $gSent['lines'] === [$line('google', 'sent', SITE_R1)],
+        json_encode($gSent['job']['json']) . '; asked ' . json_encode($gSent['asked']) . '; lines ' . json_encode($gSent['lines'])
+    );
+    $gRefused = $r1Send('R1 through Google, refused', SITE_R1, $graphOk, $gmailNo);
+    ok(
+        'Google REFUSES one: it waits, and the route\'s failure line is under the message\'s own organisation (#1006)',
+        $gRefused['asked'] === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 400'] && $gRefused['left'] === 1
+            && $gRefused['lines'] === [$line('google', 'failed', SITE_R1)],
+        'asked ' . json_encode($gRefused['asked']) . '; waiting ' . $gRefused['left'] . '; lines ' . json_encode($gRefused['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Google, refused'");
+    $nobody = $r1Send('R1 through Google, for no organisation', null, $graphOk, $gmailOk);
+    ok(
+        'a waiting message kept for NO organisation is recorded under none, as the queue\'s own lines always were - not under the organisation the job\'s request happened to resolve to (#1006)',
+        ($nobody['job']['json']['sent'] ?? 0) === 1 && $nobody['left'] === 0 && $nobody['lines'] === [$line('google', 'sent', null)],
+        json_encode($nobody['job']['json']) . '; lines ' . json_encode($nobody['lines'])
+    );
+
+    // Put back: the route's settings, the key file, and the error lines the two
+    // refusals wrote on purpose (LAST allows only the SMTP failures it knows).
+    foreach (['auth.ms365.tenantID', 'auth.ms365.appwide.clientID', 'auth.ms365.appwide.clientSecret', 'mail.google.delegateUser', 'mail.google.serviceAccountKeyFile'] as $key) {
+        setting($key, '');
+    }
+    @unlink($googleFile);
+    q("DELETE FROM tblErrors WHERE errorID > ? AND errorPlatform IN ('Graph', 'Gmail')", 'i', [$errorsBeforeR1]);
+    httpsStandinAnswers($state['https'], []);
 }
 
 // =============================================================================
