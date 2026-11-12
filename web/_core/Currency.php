@@ -883,12 +883,13 @@ final class Currency
                 // ownMarkerAtStart() too could never change the answer
                 // (round 15 removed it, as round 11 removed `|| isKnown()`).
                 if (self::anyMarkerAtStart($text) !== '') {
-                    // Where no negative is allowed, parseAmount() adds "Amounts
-                    // here cannot be negative." to this when the cell may be
-                    // written as a negative (round 19). Round 17 replaced the
-                    // sentence with "The amount cannot be negative." for any
-                    // cell with a hyphen, which was untrue of "££12-15" and
-                    // "£$12 TOP-UP".
+                    // parseAmount() ends this, like every file refusal, with
+                    // "Amounts here cannot be negative." where no negative is
+                    // allowed, and asks for a minus sign in front of money
+                    // paid out where negatives are (round 20) — whatever the
+                    // cell looks like. Round 17 replaced the sentence with
+                    // "The amount cannot be negative." for any cell with a
+                    // hyphen, which was untrue of "££12-15" and "£$12 TOP-UP".
                     return self::manyMarkersWords($code, $allowNegative);
                 }
             }
