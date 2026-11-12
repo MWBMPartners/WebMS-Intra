@@ -209,7 +209,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endif; ?>
                     </div>
                     <div class="col-md-1 text-end"><?php // 💷 One line per currency the donor gave in (D-139). ?><?php echo implode('<br>', array_map(static fn (string $line): string => htmlspecialchars($line, ENT_QUOTES, 'UTF-8'), \Portal\Core\Currency::totalsLines($r['totals'], $currency))); ?></div>
-                    <div class="col-md-2 text-end text-muted"><?php // 🎁 Pounds only (#999): Gift Aid is claimed in pounds, so a donor who gave in no other currency shows £0.00, never "€0.00". ?>Gift Aid: <?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($r['giftAidTotals'], Giving::GIFT_AID_CURRENCY), ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="col-md-2 text-end text-muted"><?php // 🎁 Pounds only (#999): Gift Aid is claimed in pounds, so a donor who gave no pounds shows £0.00, never "€0.00". ?>Gift Aid: <?php echo htmlspecialchars(\Portal\Core\Currency::totalsWords($r['giftAidTotals'], Giving::GIFT_AID_CURRENCY), ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-md-2">
                         <?php if ($r['optedOut'] === true): ?><span class="badge bg-secondary">opted out</span><?php endif; ?>
                         <?php if ($r['errorMsg'] === Giving::MAIL_WAITING): ?>

@@ -137,7 +137,7 @@ class Giving
     }
 
     /** What a statement says beside a total in any currency but pounds (#999). */
-    public const GIFT_AID_NOT_THIS_CURRENCY = 'Gift Aid applies only to gifts in pounds sterling';
+    public const GIFT_AID_NOT_THIS_CURRENCY = 'Gift Aid applies only to gifts recorded in pounds sterling';
 
     /**
      * 🎁 "Is this gift one a Gift Aid claim can include?", as SQL over the
@@ -234,7 +234,7 @@ class Giving
         //    is left out, never converted and never written as if it were
         //    pounds; hmrcLeftOutCount() says how many, for the page to show.
         $rows = array_values(array_filter(self::hmrcRows($siteId, $fromDate, $toDate),
-            static fn (array $r): bool => (string) $r['currency'] === self::GIFT_AID_CURRENCY));
+            static fn (array $r): bool => self::isGiftAidCurrency((string) $r['currency'])));
 
         return self::hmrcCsvFrom($rows);
     }
@@ -252,6 +252,20 @@ class Giving
     public const GIFT_AID_CURRENCY = 'GBP';
 
     /**
+     * 💷 Is a gift's stored currency the one Gift Aid is claimed in? The SQL
+     * rule (giftAidEligibleSql()) compares `currency = 'GBP'` under the
+     * table's case-insensitive collation, which also ignores trailing spaces
+     * in a CHAR column, so "gbp" or "GBP " counts there. The claim file's PHP
+     * filter compared with `===` and would have left such a gift out of the
+     * file while the statement called it eligible (round 2 of #999's check).
+     * This asks the same question the SQL asks, so the two cannot disagree.
+     */
+    private static function isGiftAidCurrency(string $code): bool
+    {
+        return strtoupper(trim($code)) === self::GIFT_AID_CURRENCY;
+    }
+
+    /**
      * 💷 How many gifts a claim file for this range would hold but for their
      * currency: gifts by a donor with a Gift Aid declaration, in another
      * currency than pounds (or none recorded). Shown beside the file's link,
@@ -260,7 +274,7 @@ class Giving
     public static function hmrcLeftOutCount(int $siteId, string $fromDate, string $toDate): int
     {
         return count(array_filter(self::hmrcRows($siteId, $fromDate, $toDate),
-            static fn (array $r): bool => (string) $r['currency'] !== self::GIFT_AID_CURRENCY));
+            static fn (array $r): bool => self::isGiftAidCurrency((string) $r['currency']) === false));
     }
 
     /**
@@ -514,7 +528,7 @@ class Giving
             . 'This statement is for your records. Please retain a copy for tax purposes. '
             . 'The "Gift Aid eligible" figure is the portion of your giving in pounds sterling covered by an active '
             . 'Gift Aid declaration on file — it is not the amount reclaimed, which is calculated and claimed by the '
-            . 'charity. Gift Aid applies only to gifts in pounds sterling.'
+            . 'charity. Gift Aid applies only to gifts recorded in pounds sterling.'
             . '</p></body></html>';
 
         // 📁 Namespaced by siteID + periodKey — the old flat

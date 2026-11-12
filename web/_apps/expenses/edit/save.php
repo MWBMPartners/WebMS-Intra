@@ -277,16 +277,16 @@ foreach ($rawLines as $raw) {
 }
 // 🧮 Added up in whole hundredths, and refused when the claim's total would
 //    not fit its DECIMAL(10,2) column (#1013), by the same rule as the form
-//    and the API. `$total` is the column's text, bound as 's', never a float.
+//    and the API — and refused when it comes to nothing, which covers a
+//    claim with no lines too (the total of no lines is 0). That used to be
+//    tested here, in this page's own words; claimTotal() is now the ONE
+//    place, so the API cannot be the door that forgot (round 2).
+//    `$total` is the column's text, bound as 's', never a float.
 $totalHundredths = ExpenseRules::claimTotal($items, $claimCurrency);
 if (is_string($totalHundredths) === true) {
     $refuse($totalHundredths . ' Nothing has been changed.', $claimID);
 }
 $total = \Portal\Core\Currency::hundredthsToDecimal($totalHundredths);
-
-if (count($items) === 0 || $totalHundredths <= 0) {
-    $refuse('A claim needs at least one line, and a total of more than zero. Nothing has been changed.', $claimID);
-}
 
 // -----------------------------------------------------------------------------
 // 💾 The change itself, with the claim held still

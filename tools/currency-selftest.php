@@ -973,13 +973,14 @@ check('H2d the statements page gives this donor a Gift Aid figure of £30.00 —
 // ship, so its words are read from the method that writes them (private, so by
 // reflection: the real method, never a copy of it — #647).
 $totalsHtml = new ReflectionMethod(\Portal\Core\Giving::class, 'statementTotalsHtml');
-$docWords   = (string) $totalsHtml->invoke(null, ['EUR' => 12000, 'GBP' => 3000], ['GBP' => 3000], 'EUR',
+$docWords   = (string) $totalsHtml->invoke(null, ['EUR' => 12000, 'GBP' => 3000, '' => 4100], ['GBP' => 3000], 'EUR',
     static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'));
 $docWords = html_entity_decode(strip_tags(str_replace('</p>', "\n", $docWords)), ENT_QUOTES, 'UTF-8');
-check('H2e the statement document names a Gift Aid figure only beside the POUNDS total, and says beside the euro total that Gift Aid does not apply',
+check('H2e the statement document names a Gift Aid figure only beside the POUNDS total, and says beside the euro total, and beside gifts with NO currency recorded, that Gift Aid applies only to gifts recorded in pounds sterling',
     str_contains($docWords, 'Total given: £30.00 · of which Gift Aid eligible: £30.00') === true
-    && str_contains($docWords, 'Total given: €120.00 · ' . \Portal\Core\Giving::GIFT_AID_NOT_THIS_CURRENCY) === true
-    && preg_match('/eligible: €/u', $docWords) !== 1,
+    && str_contains($docWords, 'Total given: €120.00 · Gift Aid applies only to gifts recorded in pounds sterling') === true
+    && str_contains($docWords, 'Total given: 41.00 · Gift Aid applies only to gifts recorded in pounds sterling') === true
+    && preg_match('/eligible: (€|41\.00)/u', $docWords) !== 1,
     $docWords);
 // The ONE eligibility rule itself (Giving::giftAidEligibleSql(), private, so by
 // reflection), asked of the real database over this donor's real gifts: it
@@ -993,6 +994,60 @@ $eligible    = rows($db, 'SELECT COALESCE(SUM(CASE WHEN ' . (string) $eligibleSq
     . 'COUNT(*) AS `n` FROM `tblGivingEntry` `e` WHERE `e`.`siteID` = ? AND `e`.`donorID` = ?', 'ii', [$site, CU_ADMIN]);
 check('H2f the one eligibility rule counts only this donor\'s gift in POUNDS (3000 hundredths) of their ' . (int) ($eligible[0]['n'] ?? 0) . ' gifts, though two declarations cover them all',
     (int) ($eligible[0]['p'] ?? -1) === 3000 && (int) ($eligible[0]['n'] ?? 0) >= 4, json_encode($eligible));
+// ⚠️ H2f proves the RULE; nothing proved its two USERS ask it. Round 2 of #999's
+//    check put the statement's per-gift query and the preview's SUM(CASE …)
+//    back to the old EXISTS with no pounds condition, one at a time, and every
+//    check above stayed green while a euro gift showed "Yes" on the statement
+//    and a euro-only donor's giftAidPence was stored non-zero. So the CALLS are
+//    pinned here, counted with PHP's own tokeniser over each function's body
+//    (comments and strings are their own tokens, so a comment naming the rule
+//    cannot stand in for calling it), and H11b drives the preview's stored
+//    figure for a euro-only donor.
+$callsIn = static function (string $file, string $function, string $callee): int {
+    $tokens = array_values(array_filter(token_get_all((string) file_get_contents($file)),
+        static fn ($t): bool => is_array($t) === false || in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true) === false));
+    $count = 0;
+    for ($i = 0; $i < count($tokens) - 2; $i++) {
+        if (is_array($tokens[$i]) === false || $tokens[$i][0] !== T_FUNCTION
+            || is_array($tokens[$i + 1]) === false || $tokens[$i + 1][1] !== $function) {
+            continue;
+        }
+        $depth = 0;
+        $open  = false;
+        for ($j = $i + 2; $j < count($tokens); $j++) {
+            $t = $tokens[$j];
+            $text = is_array($t) === true ? $t[1] : $t;
+            if ($text === '{' || (is_array($t) === true && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true) === true)) {
+                $depth++;
+                $open = true;
+            } elseif ($text === '}') {
+                $depth--;
+                if ($open === true && $depth === 0) {
+                    break;
+                }
+            }
+            if ($open === true && is_array($t) === true && $t[0] === T_STRING && $t[1] === 'self'
+                && ($tokens[$j + 1][0] ?? null) === T_DOUBLE_COLON
+                && is_array($tokens[$j + 2] ?? null) === true && $tokens[$j + 2][1] === $callee
+                && ($tokens[$j + 3] ?? null) === '(') {
+                $count++;
+            }
+        }
+    }
+
+    return $count;
+};
+// The claim file's PHP filter must answer as the SQL rule does: the table's
+// collation compares `currency = 'GBP'` without regard to capitals, and a CHAR
+// column ignores trailing spaces, so "gbp" and "GBP " count there (round 2).
+$isGbp = new ReflectionMethod(\Portal\Core\Giving::class, 'isGiftAidCurrency');
+check('H2h the claim file\'s pounds test counts "GBP", "gbp" and "GBP " as pounds, as the SQL rule does, and "EUR" and "" as not',
+    [$isGbp->invoke(null, 'GBP'), $isGbp->invoke(null, 'gbp'), $isGbp->invoke(null, 'GBP '), $isGbp->invoke(null, 'EUR'), $isGbp->invoke(null, '')]
+        === [true, true, true, false, false]);
+$givingFile = $repo . $sep . 'web' . $sep . '_core' . $sep . 'Giving.php';
+check('H2g the statement document (renderStatementPdf) and the statements preview (statementsPreview) each CALL the one eligibility rule, Giving::giftAidEligibleSql(), exactly once',
+    [$callsIn($givingFile, 'renderStatementPdf', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')] === [1, 1],
+    json_encode([$callsIn($givingFile, 'renderStatementPdf', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')]));
 
 // Reconciliation: a statement in EUR, a closed count in USD and one in EUR.
 run($db, "INSERT INTO `tblBankImports` (`siteID`, `filename`, `currency`, `fileHash`) VALUES (?, 'selftest.csv', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(32))]);
@@ -1768,6 +1823,25 @@ check('L3 a THROW inside the work — a failing statement, then a plain exceptio
 
 // A giving statement for a donor who gave in several currencies (EUR, USD and GBP here,
 // and one gift with none). The unrecorded GIFT is unlabelled; the statement must not be.
+// #999 round 2: a donor who gave ONLY in euros, with an active Gift Aid
+// declaration covering the gift. The statements preview's SUM(CASE …) writes
+// `giftAidPence` onto their statement's log row; it must be 0 (H11b).
+run($db, "INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`) VALUES ('Currency selftest euro donor', 'cu-euro-donor-999@selftest.invalid', 1)");
+$euroDonor = (int) $db->insert_id;
+register_shutdown_function(static function () use ($db, $euroDonor): void {
+    try {
+        run($db, 'DELETE FROM `tblGivingStatementLog` WHERE `donorID` = ?', 'i', [$euroDonor]);
+        run($db, 'DELETE FROM `tblGivingEntry` WHERE `donorID` = ?', 'i', [$euroDonor]);
+        run($db, 'DELETE FROM `tblGiftAidDeclaration` WHERE `donorID` = ?', 'i', [$euroDonor]);
+        run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [$euroDonor]);
+    } catch (Throwable $e) {
+        echo "  ! the euro donor clean-up could not finish ({$e->getMessage()}).\n";
+    }
+});
+run($db, "INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `status`, `validFrom`, `address`, `postcode`) VALUES (?, ?, 'active', DATE_SUB(CURDATE(), INTERVAL 1 YEAR), '5 Euro Way', 'AB5 5EU')",
+    'ii', [$site, $euroDonor]);
+run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 5000, 'EUR', CURDATE(), 'cash')",
+    'iii', [$site, $euroDonor, $category]);
 $unlabelledBefore = Currency::unlabelledCount($db, $site);
 $http('POST', '/giving/statements-generate', ['csrf_token' => $freshToken('/giving/statements'), 'from' => date('Y-01-01'), 'to' => date('Y-12-31')]);
 $logRow = rows($db, 'SELECT `currency`, `totalPence`, `giftAidPence` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN]);
@@ -1775,6 +1849,17 @@ check('H11 a statement covering several currencies is logged as "*" with totals 
     count($logRow) === 1 && $logRow[0]['currency'] === '*' && (int) $logRow[0]['totalPence'] === 0 && Currency::unlabelledCount($db, $site) === $unlabelledBefore
     && Currency::labelUnlabelled($db, $site, 'EUR') === $unlabelledBefore && rows($db, 'SELECT `currency` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN])[0]['currency'] === '*',
     json_encode($logRow) . '; unlabelled before ' . var_export($unlabelledBefore, true) . ', now ' . var_export(Currency::unlabelledCount($db, $site), true));
+$euroLog = rows($db, 'SELECT `currency`, `totalPence`, `giftAidPence` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, $euroDonor]);
+check('H11b a donor who gave ONLY in euros, with an active Gift Aid declaration, has a statement logged in EUR for 50.00 with a Gift Aid figure of 0 (#999: Gift Aid is claimed in pounds)',
+    count($euroLog) === 1 && $euroLog[0]['currency'] === 'EUR' && (int) $euroLog[0]['totalPence'] === 5000 && (int) $euroLog[0]['giftAidPence'] === 0,
+    json_encode($euroLog));
+// Removed now, not only at shutdown: the main clean-up removes the giving
+// category first, and this donor's gift points at it (a foreign key), so a
+// shutdown-only removal ran too late and stopped the main clean-up part way.
+foreach (['tblGivingStatementLog', 'tblGivingEntry', 'tblGiftAidDeclaration'] as $euroTable) {
+    run($db, 'DELETE FROM `' . $euroTable . '` WHERE `donorID` = ?', 'i', [$euroDonor]);
+}
+run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [$euroDonor]);
 run($db, 'DELETE FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN]);
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";

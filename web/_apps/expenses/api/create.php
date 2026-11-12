@@ -205,7 +205,10 @@ foreach ($itemsRaw as $idx => $itemRaw) {
     ];
 }
 // 🧮 Added up in whole hundredths and refused when it would not fit the
-//    claim's DECIMAL(10,2) column (#1013); bound as text, never a float.
+//    claim's DECIMAL(10,2) column (#1013), or when it comes to nothing:
+//    this door had no zero test at all, so unitCost 0 × 1 answered 201 and
+//    stored a Pending claim of 0.00 (round 2 of #1013's check). Bound as
+//    text, never a float.
 $totalHundredths = ExpenseRules::claimTotal($items, $claimCurrency);
 if (is_string($totalHundredths) === true) {
     ApiResponse::error($totalHundredths, 400);

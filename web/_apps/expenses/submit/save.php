@@ -185,11 +185,10 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
     $claimLines[] = $line;
 }
 $totalHundredths = ExpenseRules::claimTotal($claimLines, $claimCurrency);
+// claimTotal() refuses a total too large for its column AND a total of zero
+// (ExpenseRules::MSG_TOTAL_NOT_ABOVE_ZERO), for all three doors alike.
 if (is_string($totalHundredths) === true) {
     $sendBack($totalHundredths, true);
-}
-if ($totalHundredths <= 0) {
-    $sendBack('Total must be greater than zero.', true);
 }
 // The DECIMAL text `totalAmount` takes, bound as text ('s'), never a float.
 $totalAmt = \Portal\Core\Currency::hundredthsToDecimal($totalHundredths);

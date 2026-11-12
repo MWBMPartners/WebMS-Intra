@@ -1964,6 +1964,20 @@ check('J23 an ordinary API claim (12.5 as a JSON number, quantity 3) IS stored e
     $answer['status'] === 201 && count($viaApi) === 1 && $viaApi[0]['unitCost'] === '12.50' && $viaApi[0]['quantity'] === 3
     && $viaApi[0]['lineTotal'] === '37.50' && $viaApi[0]['totalAmount'] === '37.50',
     'HTTP ' . $answer['status'] . ' ' . $answer['message'] . '; ' . json_encode($viaApi));
+// #1013 round 2: a claim that comes to NOTHING is refused at every door, by the
+// one rule (ExpenseRules::claimTotal()). The API had no such test at all —
+// measured, unitCost 0 with quantity 1 answered 201 and stored a Pending claim
+// of 0.00. A zero LINE is still allowed (a free item); a zero CLAIM is not.
+$before = $claims();
+$answer = $postJson('/api/expenses/create', $apiBody('Money selftest claim api zero', 0, 1));
+check('J24 the API refuses a claim whose only line costs 0 with 400 and "Total must be greater than zero.", and no claim is stored',
+    $answer['status'] === 400 && $answer['message'] === 'Total must be greater than zero.' && $claims() === $before,
+    'HTTP ' . $answer['status'] . '; said: ' . $answer['message'] . '; claims: ' . json_encode($claims()));
+$before = $claims();
+$page   = $flashAfter($http('POST', '/expenses/edit/save', $editPost('0.00', '1')));
+check('J25 the edit page refuses changing a claim to a total of 0 with the same sentence, and the claim is unchanged',
+    str_contains($page, 'Total must be greater than zero. Nothing has been changed.') === true && $claims() === $before,
+    'claims: ' . json_encode($claims()) . (preg_match('/alert-[a-z]+[^>]*>\s*([^<]*)/', $page, $mm) === 1 ? '; said: ' . trim($mm[1]) : ''));
 
 echo "\n{$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

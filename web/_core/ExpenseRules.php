@@ -2017,8 +2017,8 @@ final class ExpenseRules
      *     it stands for by amountText() first, so the API is read by the same
      *     rule as the form.
      * Zero is still a valid unit cost (a free item), as the API description
-     * says; the claim as a whole must still come to more than zero, which is
-     * the callers' rule, alongside claimTotal().
+     * says; the claim as a whole must still come to more than zero, and
+     * claimTotal() is the ONE place that refuses it, for all three doors.
      *
      * Answers the line, or a sentence saying why it is refused. Money comes
      * back twice: as whole hundredths (`…Hundredths`, for adding up) and as
@@ -2241,6 +2241,15 @@ final class ExpenseRules
      * out. Added as whole numbers, so it is exact, and checked after each line
      * so it cannot pass PHP's integer range on the way.
      *
+     * 🚫 A TOTAL OF ZERO IS REFUSED HERE TOO, and this is the ONE place that
+     * refuses it (#1013 round 2). A unit cost of 0.00 is a valid LINE (a free
+     * item), but a claim that comes to nothing asks for nothing. Each door used
+     * to test this itself, and the API did not: measured, unitCost 0 with
+     * quantity 1 answered HTTP 201 and stored a Pending claim of 0.00. With no
+     * lines at all the total is 0 too, so this also refuses an empty claim.
+     * The sentence is MSG_TOTAL_NOT_ABOVE_ZERO, the claim form's long-standing
+     * wording, so all three doors say the same thing.
+     *
      * @param list<array{lineHundredths:int}> $lines
      */
     public static function claimTotal(array $lines, string $claimCurrency): int|string
@@ -2253,9 +2262,15 @@ final class ExpenseRules
                     . Currency::format(Currency::DECIMAL_10_2_MAX, $claimCurrency) . '. Split it into two claims.';
             }
         }
+        if ($total <= 0) {
+            return self::MSG_TOTAL_NOT_ABOVE_ZERO;
+        }
 
         return $total;
     }
+
+    /** What every door says about a claim that comes to nothing (#1013 round 2): the claim form's own wording. */
+    public const MSG_TOTAL_NOT_ABOVE_ZERO = 'Total must be greater than zero.';
 
     /**
      * 💱 The rate a line was converted at, worked out from its two figures

@@ -896,7 +896,7 @@ check('Q7c once that statement has gone, Giving off means nothing to do again: n
 //    WHERE clauses still matched (measured by #793's round-3 check, 78 of 78
 //    green). There is now ONE copy, Giving::STATEMENTS_THE_JOB_SENDS, which
 //    both read; what the job really TAKES is driven, against rows in every
-//    state, by section G of tools/scheduled-jobs-selftest.php, which compares
+//    state, by section K of tools/scheduled-jobs-selftest.php, which compares
 //    it with this class's count. These two only pin that both still read the
 //    one constant — Q8b by PHP's tokeniser, so a comment naming it does not count.
 check('Q8 the page counts waiting statements by the one selection the giving job uses',
