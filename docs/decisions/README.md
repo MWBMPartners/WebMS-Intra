@@ -209,7 +209,8 @@ appended with its real date and a note that it was added later.
 | [D-151](151-records-in-an-organisation-the-worker-has-left-are-counted-not-listed.md) | 2026-11-12 | A worker's download counts, and does not list, records in organisations they have left | in force |
 | [D-152](152-a-typed-money-amount-is-figures-only.md) | 2026-11-12 | A money amount typed into a box is figures only | in force |
 | [D-153](153-the-asset-import-reads-amounts-like-the-bank-import.md) | 2026-11-12 | The asset import reads amounts the way the bank-statement import does | in force |
+| [D-154](154-a-members-dbs-copy-leaves-out-who-recorded-it.md) | 2026-11-12 | A member's copy of their own DBS checks leaves out who recorded each one | in force |
 
-*153 decisions. This index is checked against the folder by
+*154 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
