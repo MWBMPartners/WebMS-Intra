@@ -4,6 +4,67 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Money boxes read amounts strictly (#1004; D-152, D-153, D-165, D-177)
+
+- **Money boxes read amounts strictly, and never wrap an absurd one (#1004).** Every typed amount — venues, giving,
+  offering counts, projects, payments, assets, resources, the AI and translation caps — goes through one converter,
+  `Currency::parseAmount()`, which never uses a float and refuses with the reason instead of storing a wrong figure (an
+  absurd "184467440737095557.12" used to be stored as 40.96). A box takes figures only (D-152). The bank-statement and
+  asset imports also read a file's thousands commas, the organisation's three-letter code, and a symbol sign its currency
+  is written with — "$" is the organisation's own dollars (D-153, D-165) — but never a letters-only sign such as "R"
+  (D-177). An import cell that cannot be read says so plainly and what IS read; in the asset import every refusal adds
+  "Amounts here cannot be negative.", and in the bank import every refusal asks for a minus sign in front of money paid out.
+  A bank debit too large to store is skipped and named instead of stopping the import. Offering counts are refused above
+  21,474,836.47 so a count can always be closed. The asset API refuses a fraction of a penny instead of dropping it.
+
+### Uploads write no deprecation; media answer byte ranges (#1003, #880)
+
+- **Fixed (#1003):** six upload handlers (poster media, the documents API, photos, venue
+  agreement files, asset resources, venue import) no longer call `finfo_close()`, which
+  PHP 8.5 deprecates; each upload had written a deprecation line into the error log. The
+  type of each upload is judged exactly as before. The seventh,
+  `venues/invoice-save.php`, was removed once the money package had landed.
+  `check_no_deprecated_php_functions.py` refuses a call to any function PHP deprecates.
+- **Fixed (#880):** poster videos on the noticeboard and the public door, and recordings,
+  can now be sent in pieces (`Range:` → 206 with `Content-Range`, 416 past the end,
+  `Accept-Ranges: bytes` always), which Safari needs to play a video.
+  `Portal\Core\ByteRange` is the one place this is done. The recordings routes' own
+  copies are replaced, fixing three faults in them: "the last N bytes" was read as the
+  first N, an end past the file was not shortened, and `/recordings/stream` answered 404
+  where it meant 416.
+
+### Settings rows and deleted assets (#1021, #1031)
+
+- **Settings: no Edit button where the save would refuse it (#1021).** An administrator of one
+  organisation was offered Edit on every portal-wide setting, every "public." setting and every
+  setting with an unusual name, and pressing Save was refused. Those rules now live in one place,
+  `Portal\Core\SettingsRowRule`, asked by the page, the save and the delete alike; the page shows
+  a short note saying why instead of the button.
+- **Assets: an asset deleted while it was being saved is no longer saved (#1031).** If somebody
+  deleted an asset while an edit or an API update was waiting to write it, the write still went
+  through and the API answered 200. Now nothing is written: the API answers 404 "Asset not
+  found", as for any missing asset, and the person is sent to the asset list, which says the asset could
+  not be found and nothing was changed.
+- **Assets: the asset list shows its messages again.** The list page never printed the message
+  another page left for it, so "Asset deleted." and similar confirmations were silently lost.
+
+### Discipleship sweep and the offline page (#824, #865)
+
+- **Fixed (#824):** the discipleship sweep no longer completes pathway steps for
+  somebody who has left the organisation. Before any of its three rules runs it
+  asks, for each enrolled person, the one rule the members-only gate uses
+  (`Site::isOwnOrganisation()` with several organisations; the account's own
+  switch with one) and completes steps only for those who still belong. Their
+  enrolment is left as it is, and a person who comes back is caught up by the
+  next sweep. Also corrected `calendar/rsvp-by-link.php`'s header, which said it
+  wrote an anonymous `tblEventRSVPs` row (the insert was removed in `83b0ae72`).
+- **Fixed (#865):** the offline page now tries again by itself once a minute, and
+  at once when the browser says it is back on line, so a screen nobody touches
+  (the noticeboard foyer screen) comes back after an outage. Its dark theme no
+  longer throws. `sw.js`'s bytes changed so installed workers fetch the new page.
+  New browser test `tools/offline-page-selftest.mjs` pins the retry AND sw.js's
+  refusal to keep anything marked `Cache-Control: private`.
+
 ### Address look-ups store only real positions, cached per country (#1034, #1035)
 
 - Geocoding (#1034): a map position from Google or OpenStreetMap that is empty, not a number, or not

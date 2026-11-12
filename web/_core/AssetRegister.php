@@ -2821,8 +2821,9 @@ class AssetRegister
                     //    exactly as self::get() says it is anywhere else, and
                     //    nothing is written. The callers then find it gone:
                     //    the API answers 404 with the words it gives any
-                    //    missing asset, and the edit page says "Asset not
-                    //    found." There is no un-delete, so the after-the-fact
+                    //    missing asset, and the edit page sends the person to the
+                    //    asset list saying it could not be found and nothing was
+                    //    changed. There is no un-delete, so the after-the-fact
                     //    look the callers make cannot mislead the other way.
                     $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? AND `isDeleted` = 0 FOR UPDATE');
                     $lockedStmt->bind_param('ii', $assetId, $siteId);

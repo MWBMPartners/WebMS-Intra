@@ -1354,6 +1354,17 @@ another repo, ever**.
 - Address look-ups: Fresh, cached and both providers' answers are built in one
 place (`Geocoder::answer()`) and must be a real position; the cache is kept per country
 (#1034, #1035). Test: `tools/geocoder-selftest.php`.
+- Typed money boxes take figures only and are read exactly, never through a float (#1004, D-152). The bank-statement and
+  asset imports read a file's own format: thousands commas, the code, and the organisation's own symbol sign (D-153,
+  D-165, D-177).
+- Poster videos and recordings stream with byte ranges (seekable, and playable in Safari).
+- Settings: each row an administrator cannot change shows why (portal-wide, public website, or
+  an unusual name) instead of an Edit button (#1021).
+- Asset Tracker: updates refuse an asset deleted in the meantime — API 404, edit page message
+  (#1031); the asset list shows confirmation and error messages.
+- Discipleship Pathways — automatic step completion: only for people who still
+  belong to the organisation (#824).
+- Offline support — the offline page retries by itself every minute (#865).
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 

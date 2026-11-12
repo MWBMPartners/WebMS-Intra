@@ -24110,3 +24110,90 @@ request's). The fallback from Microsoft to Google passes it on.
 itself (its own authority), refuses all others, never forwards. Give the portal's server BOTH
 `openssl.cafile` and `curl.cainfo` — PHP's curl reads the first and ignores the second when it is
 set (measured, PHP 8.5.12) — and `https_proxy`; `tools/https-standin-client.php` does all three.
+
+## One converter for typed money (#1004)
+
+- Never `(int) round((float) $x * 100)`: on PHP 8.5 an absurd figure wraps (measured: 4096, -8446744073709551616,
+  8809040871136690176). Call `Currency::parseAmount($text, $currency, $max, $allowNegative, $fromFile)` with `$max` the most
+  the place the value finally LANDS can hold (`INT_COLUMN_MAX`, `DECIMAL_10_2_MAX`), never lower than a limit a later check
+  states. It answers an int (hundredths) or the refusal sentence.
+- `fromFile` is for the bank and asset imports only. It reads commas between groups of three, the organisation's code
+  (followed by an amount or a sign), and the symbol signs in `Currency::SIGNS_OF` (ICU 79.1's English data) for the
+  organisation's currency; letters-only signs never. A file refusal names a reason only where it is certain; otherwise
+  "That amount could not be read." plus `fileAdvice()`. A cell with more than one marker gets ONE fixed sentence
+  (`manyMarkersWords()`); one starting with a sign or code not ours, `otherCurrencyWords()` — both name no other
+  currency. The wrapper then adds, to every file refusal, "Amounts here cannot be negative." (no negatives) or
+  `FILE_ADVICE_PAID_OUT` (negatives), with no detector of "looks negative": rounds 16-19 each found a spelling one missed.
+- A figures-only box must be PREFILLED with figures only (`number_format($x, 2, '.', '')` or `hundredthsToDecimal()`), or a
+  plain Save is refused over a figure nobody typed. Stored DECIMAL text goes through `storedDecimalToHundredths()`; an API's
+  `…Pence` field through `parseHundredths()`.
+- Lesson from 21 rounds: every sentence built from what a cell looked like was found untrue for some cell. Prefer a fixed
+  sentence that is true of every cell it can be given to, and test the cells that must NOT get it.
+- Guard: `tools/audit-checks/check_no_float_money.py` (PHP's tokeniser; reports a `* 100` statement that also casts to a
+  float or reads a request array; `ALLOWED` empty, fails both ways; its header lists its blind spots). Test:
+  `tools/money-amount-selftest.php` (section A needs no database: `MONEY_SELFTEST_UNIT_ONLY=1`).
+
+## Sending media in pieces (#880)
+
+`Portal\Core\ByteRange` is the ONE place a `Range:` request is answered; never parse
+`HTTP_RANGE` in a page. Call `ByteRange::send($path)` AFTER every access check and after
+setting your own `Content-Type`/caching headers; do NOT set `Content-Length` yourself (for a
+piece it is the piece's). It answers false having sent nothing when the file cannot be
+opened, so a 404 is still possible. Ignored (whole 200): another unit, malformed, last<first,
+several pieces, any `If-Range`. 416 carries `no-store`. Tests: section R/N/S of
+`tools/uploads-and-media-selftest.php`, C14b–C14f and P23b of `tools/public-door-selftest.php`.
+
+## A deprecated function, not a deprecated name (#1003)
+
+`check_no_curl_close.py` guarded one NAME; the same deprecation came back as
+`finfo_close()` in eight handlers. `check_no_deprecated_php_functions.py` asks PHP which
+functions are deprecated (the measured 8.5.12 list, joined with the running PHP's answer).
+It cannot see a deprecated ARGUMENT — `fgetcsv()` without `escape` is #1038 — nor the four
+shapes `check_no_curl_close.py` lists. `php -l` exits 0 on a deprecation, so the proof
+that a handler is clean is to RUN it: `tools/uploads-and-media-selftest.php` section U,
+believed only because section P puts the call back and sees it caught.
+
+## Settings row rules and deleted assets (#1021, #1031)
+
+**The general settings editor's ROW rules are one class (#1021).** Two kinds of rule decide what
+`/settings` lets an administrator change: SETTING rules (each family's
+`…lockedInGeneralEditor()`) and ROW rules (portal-wide row, "public" name, unsafe stored name —
+refused for anybody but a global administrator). #845 made the page ask the setting rules; the
+row rules stayed inline in `save.php`, copied in the delete branch, with the SQL typed in both
+files, and the page asked none of them — 584 rows on a fresh install were offered Edit and
+refused. `SettingsRowRule::whyNotChangeable()` is now asked by the drawing, the save and the
+delete; `nameRuleSql()` is the one SQL text. Do not name a method in that class
+`…lockedInGeneralEditor`: the settings-locks test treats every such method as a SETTING lock.
+Section R of `tools/settings-locks-selftest.php` presses Save on every row the page draws and
+fails where drawing and save disagree; its "accepted" side reads back what the page SAYS,
+because the UPDATE carries the rules too and a silently thrown-away save is not a refusal.
+
+**A deleted asset is refused under the lock (#1031).** `AssetRegister::updateAsset()` re-reads
+the row `FOR UPDATE` with `isDeleted = 0`. The UPDATE's own `isDeleted = 0` is only a data
+backstop: alone it writes nothing but still lets the method report success (measured: API 200
+plus an "update" audit record). Sections D and E of `tools/assets-api-update-selftest.php`
+delete the asset while the API request and the edit page's Save wait on the lock.
+
+## The discipleship sweep and the offline page (#824, #865)
+
+**The discipleship sweep asks who still belongs (#824).** `Discipleship::autoSweep()`
+first builds `peopleWhoStillBelong()` — an active enrolment, an account switched
+on, and with several organisations `Site::isOwnOrganisation()` — and every rule is
+limited to that list through ONE clause in `runSweepRule()` (`AND e.userID IN
+(…)`, 500 at a time). Do not join `tblUserSites` in the sweep's statements: that is
+a second membership rule, wrong on a one-organisation installation (nobody need
+have a row) and for a global administrator. A question that cannot be answered
+leaves that person out for the run. Tests: X18m–X18q of
+`tools/time-zones-selftest.php`.
+
+**The offline page retries by itself (#865).** It reloads its own address once a
+minute (the worker shows it AS the answer to the failed page, so the address is
+that page's) and on `online`. A probe request cannot help: the worker answers a
+failed page fetch with this page and a 200. **Changing `offline/index.php` alone
+reaches no installed worker** — the copy is stored at install, and a worker
+re-installs only when `sw.js` changes; change both. `tools/offline-page-selftest.mjs`
+drives the real `sw.js` and the PHP-rendered offline page in a real browser
+(Chromium family, plus `php` on the PATH; it refuses without either). Two traps
+it found: count page LOADS in the tab, not requests at the server (Chromium
+retries a reset connection by itself, so one navigation counted three); and the
+old `<head>` theme script threw because `<body>` did not exist yet.
