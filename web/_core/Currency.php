@@ -195,8 +195,12 @@ final class Currency
      * (the owner, D-165, which supersedes D-155 and D-157): a cell's sign is read
      * as the organisation's own currency whenever that currency is written with
      * it — "$" is US dollars in a USD organisation and Australian dollars in an
-     * AUD one — and a sign the organisation's currency is never written with is
-     * refused, saying so. The three-letter code is always read as well.
+     * AUD one — and a sign this list does not hold for the organisation's
+     * currency is refused, saying it is not read as that currency HERE. That
+     * is all the refusal claims: the list is ICU's English data, not every way
+     * a currency is written in the world ("₱" for the Cuban peso and "£" for
+     * the Egyptian pound are real and not listed; round 11). The three-letter
+     * code is always read as well.
      *
      * WHERE IT CAME FROM (sourced, not remembered — round 5's check found a
      * hand-written list naming "Mexican dollars" and a Cuban "₱" no source
@@ -602,9 +606,13 @@ final class Currency
      * untrue sentences: "GBP $12" was called another currency, GBP; "P.O. 1234"
      * was called a currency sign; "TOP-UP 20" was called the pa'anga.
      *
-     * A cell that begins with a currency SIGN or CODE this organisation does
-     * not use gets otherCurrencyWords() instead (round 10), which says so
-     * WITHOUT naming the other currency. Round 9 gave such a cell this sentence
+     * A cell that begins with a currency SIGN that is not read as this
+     * organisation's currency, or with another currency's three-letter CODE
+     * followed — after any run of SPACES — by an amount or a sign ("USD 12",
+     * "USD$5"), gets otherCurrencyWords() instead (round 10), which says so
+     * WITHOUT naming the other currency. A bare code ("USD"), a code followed
+     * by a tab ("USD\t12") or by a word ("USD PAID") is still THIS sentence:
+     * nothing in front is then certainly a currency. Round 9 gave such a cell this sentence
      * and advice to put the organisation's own code in front, which for "$12"
      * in a sterling organisation invited relabelling dollars as pounds — the
      * opposite of D-165's "refused, with the true reason".
@@ -682,16 +690,28 @@ final class Currency
      *     "Fr.") is NOT read (the owner, D-177).
      *   A file refusal gives a specific reason ONLY where the converter can know
      *   it for certain (#1004 rounds 9 and 10):
-     *     - two currency markers in front: one of this organisation's, then any
-     *       currency sign or code ("GBP £12.50", "GBP$12", "££12.50", "£$12");
-     *       where the second is not this organisation's, the sentence also says
-     *       to convert rather than relabel;
-     *     - a currency SIGN this organisation's currency is not written with,
-     *       or another currency's three-letter CODE followed by an amount, at
-     *       the start after at most one minus ("$12", "-$3", "US$12", "USD 5"
-     *       in a GBP organisation): otherCurrencyWords(), which says the
-     *       organisation does not use it and to convert the figure, never to
-     *       put its own code in front. It does NOT name the other currency;
+     *     - two currency markers in front. Exactly what is taken as the second:
+     *       after the organisation's CODE, a sign — one with a symbol in it, or
+     *       capitals joined to one ("GBP £12.50", "GBP$12", "GBP US$12"); after
+     *       one of its SIGNS, another of its own markers, any sign with a
+     *       symbol in it, capitals joined to one, or a three-letter code the
+     *       portal knows followed by an amount or a sign ("££12.50",
+     *       "£GBP 12.50", "£$12", "£USD 12"). Its code followed by ANOTHER code
+     *       ("GBP USD 12") is not taken as a code at all and could not be read.
+     *       Where the second is not read as this organisation's currency, the
+     *       sentence says so and to convert rather than relabel;
+     *     - at the start, after at most one minus, a sign with a symbol in it
+     *       that is not read as this organisation's currency here, capitals
+     *       joined to such a sign, or another three-letter code the portal
+     *       knows followed — after any run of spaces — by an amount or a sign
+     *       ("$12", "-$3", "US$12", "USD 5", "USD$5" in a GBP organisation):
+     *       otherCurrencyWords(), which says the sign or code is not read as
+     *       the organisation's currency HERE — a claim about this portal, true
+     *       by construction, where "is not used" would be untrue of "₱" for the
+     *       Cuban peso or "£" for the Egyptian pound, which ICU's English data
+     *       does not list for them — and to convert, never to put its own code
+     *       in front. It does NOT name the other currency. A bare code, or a
+     *       code followed by a tab or a word, could not be read;
      *     - more than two decimals; misplaced commas; more than one point; a
      *       minus in the wrong place, or where none is allowed; too large;
      *       nothing entered;
@@ -748,9 +768,14 @@ final class Currency
                     $text     = substr($text, 1);
                 }
                 // TWO currency markers in front: one of this organisation's,
-                // then ANY currency sign or code ("££12.50", "£GBP 12.50",
-                // "GBP £12.50", "GBP $12", "£$12", "GBP US$12"). Certain, so
-                // said; round 8 called "GBP $12" "another currency (GBP)".
+                // then a second. After its CODE the second can only be a sign
+                // (ownMarkerAtStart() takes the code only where an amount or a
+                // sign follows): "GBP £12.50", "GBP $12", "GBP US$12". After
+                // one of its SIGNS it is any marker anyMarkerAtStart() finds:
+                // "££12.50", "£GBP 12.50", "£$12", "£USD 12". "GBP USD 12" is
+                // NOT taken here: its code is followed by a word, so the cell
+                // could not be read. Certain, so said; round 8 called "GBP $12"
+                // "another currency (GBP)".
                 // Where the second is NOT this organisation's, the figure may
                 // well be in that other currency, so the sentence must not
                 // suggest simply keeping our code in front (round 10).
@@ -761,7 +786,7 @@ final class Currency
                 if ($again !== '') {
                     $twice = 'That amount has two currency markers in front (' . $taken . ' and ' . $again . ')';
                     if (self::isForeignMarker($again, $code) === true) {
-                        return $twice . ', and ' . $again . ' is not one ' . $code . ' uses. ' . self::convertWords($code);
+                        return $twice . ', and ' . $again . ' is not read as ' . $code . ' here. ' . self::convertWords($code);
                     }
 
                     return $twice . '. Put only one in front, for example ' . $code . ' 12.50.';
@@ -826,10 +851,11 @@ final class Currency
                     . 'organisation, so the portal cannot tell what money it is. Choose the organisation\'s currency in '
                     . 'Admin, Settings, Organisation, then import the file again.';
             }
-            // A currency sign or code this organisation does not use, in
-            // front: certain that it is not ours, NOT certain whose it is
-            // ("$" is a dozen currencies), so say the first and never the
-            // second, and never suggest putting our code in front (round 10).
+            // A currency sign or code that is not read as this organisation's
+            // currency here, in front: certain that THIS PORTAL does not read
+            // it as ours, NOT certain whose it is ("$" is a dozen currencies),
+            // so say the first and never the second, and never suggest putting
+            // our code in front (rounds 10 and 11).
             if ($marker !== '' && self::isForeignMarker($marker, $code) === true) {
                 return self::otherCurrencyWords($code);
             }
@@ -901,8 +927,14 @@ final class Currency
 
     /**
      * 💱 What a FILE's amount answers when it begins with a currency sign or
-     * code this organisation's currency does not use (round 10, D-165: refused
-     * "with the true reason"). The true reason is that WE do not use it; which
+     * code that is not read as this organisation's currency (round 10, D-165:
+     * refused "with the true reason"). The sentence is a claim about THIS
+     * PORTAL — "is not read as CUP here" — true by construction. Round 10
+     * said "that CUP does not use", a claim about the WORLD, and it was untrue
+     * for signs a currency really is written with that ICU's English data
+     * (SIGNS_OF) does not list for it: "₱12" for the Cuban peso, "£12" for the
+     * Egyptian pound, "C$12" for the Canadian dollar (round 11's check counted
+     * 45 such cells, and 30 more through the two-markers sentence). Which
      * currency it IS cannot be said for certain ("$" is a dozen currencies,
      * and a three-letter word can be a code by accident), so it is not said.
      * It tells the person to CONVERT, and never to put the organisation's code
@@ -912,7 +944,7 @@ final class Currency
     {
         $code = strtoupper(trim($code));
 
-        return 'That amount starts with a currency sign or code that ' . $code . ' does not use. ' . self::convertWords($code);
+        return 'That amount starts with a currency sign or code that is not read as ' . $code . ' here. ' . self::convertWords($code);
     }
 
     /** The instruction shared by otherCurrencyWords() and the two-markers refusal whose second marker is not ours. */
@@ -923,13 +955,21 @@ final class Currency
     }
 
     /**
-     * Is a marker anyMarkerAtStart() found one this organisation's currency
-     * does NOT use? Its own code and own signs are not foreign. A sign in
-     * ICU's data, or another known code, is. A sign the data does not hold as
-     * such — capital letters glued to a symbol, "US$" — is foreign only when
-     * its SYMBOL part is not one of ours: "US$" is not a sterling sign, while
-     * in a US-dollar organisation it is merely unread (could not be read),
-     * because "US$" is not in the data and "$" IS ours.
+     * Is a marker anyMarkerAtStart() found one that is NOT read as this
+     * organisation's currency here? Its own code and own signs (SIGNS_OF) are
+     * read as it. Any other sign in that data is not — "CA$" in a US-dollar
+     * organisation, although it ends in "$". Anything else anyMarkerAtStart()
+     * can return is either another three-letter code or capitals joined to a
+     * sign ("US$", "BR$"), and is judged by what follows its capitals: a code
+     * leaves nothing, which is never one of our signs, so a code that is not
+     * ours is foreign; "US$" is foreign in a sterling organisation, while in a
+     * US-dollar one it is merely unread (could not be read), because "US$" is
+     * not in the data and its "$" IS ours.
+     *
+     * Round 10 also had `|| self::isKnown($marker)` beside the data test. It
+     * could never change the answer — a known code that is not ours reaches
+     * the last line with nothing after its capitals, and is foreign there too
+     * — so round 11 removed it as dead code.
      */
     private static function isForeignMarker(string $marker, string $code): bool
     {
@@ -937,7 +977,7 @@ final class Currency
         if ($marker === $code || in_array($marker, $own, true) === true) {
             return false;
         }
-        if (in_array($marker, self::symbolSigns(), true) === true || self::isKnown($marker) === true) {
+        if (in_array($marker, self::symbolSigns(), true) === true) {
             return true;
         }
         $symbol = (string) preg_replace('/^[A-Z]+/', '', $marker);
