@@ -33,7 +33,10 @@
  *      the member switches organisation (D14-D17, the real switch page);
  *      only a CHANGE to the box is written, so an old page cannot
  *      resubscribe a member who left by a newsletter's own unsubscribe link
- *      (D20, D21), and an opted-out member is drawn unticked (D22)
+ *      (D20, D21), and an opted-out member is drawn unticked (D22); a tick
+ *      subscribes (D23), and an old unticked page cannot undo a subscription
+ *      made in another session (D24); a shown box gets plain "Preferences
+ *      saved." (D20, D21, D23, D24)
  *   E  a stored value that is valid JSON but not a set of named choices is
  *      replaced by the keys just saved, and the replacement is RECORDED — on
  *      BOTH pages
@@ -48,7 +51,7 @@
  *      shared one would let both read at once, deadlock, and lose a save
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
- *   H  THE PLANTS: eighteen faults, each put into a COPY of the code, each of
+ *   H  THE PLANTS: twenty-one faults, each put into a COPY of the code, each of
  *      which must turn the check that guards it RED, and all green again after
  *
  * NOT DRIVEN: `merge()` also checks each `execute()`'s answer, so that its
@@ -920,9 +923,11 @@ $scenarioNewsletter = static function (bool $drawnOn, bool $hadRow, bool $onAtSa
         $subs    = $db->query("SELECT COUNT(*) AS n, MIN(`optedIn`) AS lowest FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}")->fetch_assoc();
         $after   = $http('GET', '/account/notifications')['body'];
         $saved   = str_contains($after, 'Preferences saved.');
-        // The success message must not read as covering the newsletter when
-        // the newsletter choice was left alone (round 3): it says so then, and
-        // only then.
+        // The success message adds "Your newsletter choice was not changed"
+        // exactly when the newsletter is on AND the posted form did not show
+        // the choice for this organisation. A shown box (changed or left as
+        // drawn) and any save while the newsletter is off get plain
+        // "Preferences saved." - D20, D21 and D23/D24 read the shown-box case.
         $toldNot = str_contains($after, 'Your newsletter choice was not changed');
         // Drawn and unticked: the member chose to leave, so ONE row, opted out -
         // whether or not the newsletter is on when they press Save (round 3).
@@ -990,9 +995,14 @@ $scenarioStaleAfterLink = static function (bool $onWhenSaved) use (&$state, $db,
         $afterLink = $optedIn();
         $answer = $http('POST', $form['action'], $form['fields']); // the old page, box left ticked
         $final  = $optedIn();
-        $ok = $ticked === true && $link['status'] === 200 && $afterLink === 0 && $answer['status'] === 302 && $final === 0;
+        // The commonest save of all - a shown box left as drawn - must say plain
+        // "Preferences saved.", never that the choice "was not changed" because
+        // the page "did not show it" (round 5 of the check: nothing pinned it).
+        $after  = $http('GET', '/account/notifications')['body'];
+        $plain  = str_contains($after, 'Preferences saved.') && str_contains($after, 'Your newsletter choice was not changed') === false;
+        $ok = $ticked === true && $link['status'] === 200 && $afterLink === 0 && $answer['status'] === 302 && $final === 0 && $plain === true;
         return [$ok, 'box drawn ticked: ' . ($ticked ? 'yes' : 'no') . '; unsubscribe link HTTP ' . $link['status'] . ', then optedIn ' . $fmt($afterLink)
-            . '; old page saved HTTP ' . $answer['status'] . ', then optedIn ' . $fmt($final) . ' (want 0)'];
+            . '; old page saved HTTP ' . $answer['status'] . ', then optedIn ' . $fmt($final) . ' (want 0); plain "Preferences saved.": ' . ($plain ? 'yes' : 'no')];
     } finally {
         $setNewsletter('0');
         $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
@@ -1000,7 +1010,7 @@ $scenarioStaleAfterLink = static function (bool $onWhenSaved) use (&$state, $db,
     }
 };
 [$okStaleOff, $detailStaleOff] = $scenarioStaleAfterLink(false);
-check('D20 (#875, round 4) a page drawn ticked, then the newsletter switched OFF, then the member unsubscribes by the e-mail link, then Save on the old page: they stay UNSUBSCRIBED',
+check('D20 (#875, round 4) a page drawn ticked, then the newsletter switched OFF, then the member unsubscribes by the e-mail link, then Save on the old page: they stay UNSUBSCRIBED, and are told plainly "Preferences saved."',
     $okStaleOff, $detailStaleOff);
 [$okStaleOn, $detailStaleOn] = $scenarioStaleAfterLink(true);
 check('D21 ...and the same with the newsletter left ON throughout (a window older than #875): they stay UNSUBSCRIBED',
@@ -1036,6 +1046,71 @@ $scenarioDrawnUnticked = static function () use (&$state, $db, $http, $formOn, $
 [$okUnticked, $detailUnticked] = $scenarioDrawnUnticked();
 check('D22 a member who has opted out is drawn with the box UNTICKED, and the marker records it as drawn unticked',
     $okUnticked, $detailUnticked);
+
+/**
+ * D23-D24 (#875, round 5 of its check): OPTING IN, both ways round.
+ *
+ * D23: a member who has opted out sees the box drawn unticked, ticks it and
+ * saves: they are subscribed again. Nothing pinned this, so a rule that never
+ * let a tick subscribe anybody left every check green.
+ *
+ * D24, the mirror of D20: the page is drawn UNTICKED in one session; the
+ * member subscribes through the page in a SECOND session (a second browser,
+ * say: a second tab in the same session would spend the first page's form
+ * token); then presses Save on the old page, box still unticked as drawn.
+ * They must STAY subscribed - an old, unchanged box writes nothing.
+ *
+ * Both read the message too: a shown box gets plain "Preferences saved.",
+ * never the "not changed" sentence.
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioOptIn = static function (bool $staleMirror) use (&$state, $db, $http, $formOn, $signIn, $jar, $userId, $siteId, $fmt): array {
+    $state['newsletterTouched'] = true;
+    $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+    $token = bin2hex(random_bytes(20));
+    $db->query("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES ({$siteId}, {$userId}, 0, '{$token}')");
+    $optedIn = static fn (): ?int => ($r = $db->query("SELECT `optedIn` FROM `tblNewsletterSubscription` WHERE `userID` = {$userId} AND `siteID` = {$siteId}")->fetch_assoc()) === null ? null : (int) $r['optedIn'];
+    $firstJar = $jar . '.first-session';
+    try {
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $page  = $http('GET', '/account/notifications');
+        $form  = $formOn($page['body'], 'account/notifications/save');
+        $drawn = array_key_exists('newsletterOptedIn', $form['fields']) === false && str_contains($page['body'], 'name="newsletterOptedIn"');
+        if ($staleMirror === false) {
+            // D23: tick the box drawn unticked, and save.
+            $answer = $http('POST', $form['action'], $form['fields'] + ['newsletterOptedIn' => '1']);
+            $want   = 1;
+        } else {
+            // D24: subscribe in a SECOND session, then save the old page unchanged.
+            copy($jar, $firstJar);
+            $signIn(); // a fresh session in the same cookie file
+            $other = $formOn($http('GET', '/account/notifications')['body'], 'account/notifications/save');
+            $http('POST', $other['action'], $other['fields'] + ['newsletterOptedIn' => '1']);
+            $between = $optedIn();
+            copy($firstJar, $jar); // back to the first session and its old page
+            $answer = $http('POST', $form['action'], $form['fields']);
+            $want   = 1;
+        }
+        $final = $optedIn();
+        $after = $http('GET', '/account/notifications')['body'];
+        $plain = str_contains($after, 'Preferences saved.') && str_contains($after, 'Your newsletter choice was not changed') === false;
+        $ok = $drawn === true && $answer['status'] === 302 && $final === $want && $plain === true && ($staleMirror === false || ($between ?? null) === 1);
+        return [$ok, 'box drawn unticked: ' . ($drawn ? 'yes' : 'no') . ($staleMirror === true ? '; subscribed in the second session: optedIn ' . $fmt($between ?? null) : '')
+            . '; saved HTTP ' . $answer['status'] . ', then optedIn ' . $fmt($final) . ' (want ' . $want . '); plain "Preferences saved.": ' . ($plain ? 'yes' : 'no')];
+    } finally {
+        @unlink($firstJar);
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        $state['newsletterTouched'] = false;
+    }
+};
+[$okOptIn, $detailOptIn] = $scenarioOptIn(false);
+check('D23 (#875) a member who opted out, shown the box UNTICKED, ticks it and saves: they are subscribed again, and told plainly "Preferences saved."',
+    $okOptIn, $detailOptIn);
+[$okMirror, $detailMirror] = $scenarioOptIn(true);
+check('D24 (#875) the mirror of D20: a page drawn unticked, the member subscribes in a second session, then Save on the old page left unchanged: they STAY subscribed',
+    $okMirror, $detailMirror);
 
 /**
  * D14-D17 (#875, round 2 of its check): a box drawn for ONE organisation must
@@ -1705,6 +1780,25 @@ $plants['H19 the page drawing every box ticked turns D22 RED: an opted-out membe
     $scenarioDrawnUnticked
 );
 
+$plants['H20 the "not changed" sentence keyed on "nothing was written" (round 4\'s condition) turns D21 RED: a shown box left as drawn is told it was not shown'] = $plant(
+    '_apps/auth/account/notifications-save.php',
+    "&& \$newsletterShown === false)",
+    "&& \$newsletterChoice === null)",
+    static fn (): array => $scenarioStaleAfterLink(true)
+);
+$plants['H21 a tick never subscribing anybody turns D23 RED: an opted-out member who ticks the box stays out'] = $plant(
+    '_core/Newsletter.php',
+    "        return \$postedTick === \$drawnTicked ? null : \$postedTick;",
+    "        return (\$postedTick === \$drawnTicked || \$postedTick === true) ? null : false;",
+    static fn (): array => $scenarioOptIn(false)
+);
+$plants['H22 a box drawn unticked and left so writing "opted out" turns D24 RED: a subscription made elsewhere is undone by an old page'] = $plant(
+    '_core/Newsletter.php',
+    "        return \$postedTick === \$drawnTicked ? null : \$postedTick;",
+    "        return (\$postedTick === \$drawnTicked && \$postedTick === true) ? null : \$postedTick;",
+    static fn (): array => $scenarioOptIn(true)
+);
+
 foreach ($plants as $words => $g) {
     check($words, $g['applied'] === true && $g['red'] === true && $g['restored'] === true,
         ($g['applied'] ? 'applied' : 'NOT applied') . '; ' . $g['detail']);
@@ -1727,6 +1821,7 @@ check('H12 with the plants removed, every scenario they broke is green again',
     && $scenarioNewsletter(false, true)[0] === true && $scenarioNewsletter(true, true)[0] === true
     && $scenarioNewsletter(false, false, false)[0] === true && $scenarioNewsletter(true, true, false)[0] === true
     && $scenarioStaleAfterLink(false)[0] === true && $scenarioStaleAfterLink(true)[0] === true && $scenarioDrawnUnticked()[0] === true
+    && $scenarioOptIn(false)[0] === true && $scenarioOptIn(true)[0] === true
     && (static function () use ($scenarioOtherOrganisation, $signIn): bool {
         $r = $scenarioOtherOrganisation();
         $signIn();
