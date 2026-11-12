@@ -208,7 +208,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 152; // 133 until #964 added section N (sixteen: the
+const EXPECTED_CHECKS = 155; // 133 until #964 added section N (sixteen: the
                             // premise through the real form and approval, the
                             // refusals, the filing, the list page, the run and
                             // what it did and did not reach, the report, a
@@ -217,6 +217,10 @@ const EXPECTED_CHECKS = 152; // 133 until #964 added section N (sixteen: the
                             // records (N8b), and two plants - the Errors page
                             // left alone (N16) and the activity step reaching
                             // a member's record (N17). 152.
+                            // #964 round 3 added three: the real form's note
+                            // box and its warning (N3a), and two plants - the
+                            // old record's description changed alone (N19) and
+                            // the note box removed from the page (N20). 155.
                             // 117 until #977 added section M (sixteen: the
                             // premise, four saves of an erased account, the
                             // wording an ordinary administrator gets, the
@@ -3628,7 +3632,7 @@ head('N. Somebody without an account who suggested an event (#964, D-140)');
 //     to it (another subject) and one event row naming her as the suggester;
 //   - the same address in other capitals and with a trailing space, which IS
 //     the visitor's and must be emptied.
-// Then the plants (N11-N17), each in the scratch copy the server runs, each
+// Then the plants (N11-N20), each in the scratch copy the server runs, each
 // required to turn ONE named observation red, and each put back byte for byte.
 //
 // WHAT THIS CANNOT SHOW. That the administrator really checked who was asking:
@@ -3713,9 +3717,14 @@ $n964Fixtures = static function () use ($n964Clear, $approvalSubject): void {
     $logged(EL_B, ORG_B, VERA_ADDR, $approvalSubject);
     $logged(EL_MAY, ORG_A, VERA_ADDR, 'P964 your rota for Sunday');
     $logged(EL_LONG, ORG_A, VERA_LONG, $approvalSubject);
+    // Every column that ties a record to a browser is FILLED, on every one of
+    // them (#964 round 3): the one the request reaches must come back with all
+    // five empty, and the five it must not reach must come back unchanged.
     $activity = static function (int $id, int $site, ?int $user, string $type, string $text): void {
-        q('INSERT INTO `tblActivityLogs` (`logID`, `siteID`, `userID`, `activityType`, `activityDescription`) VALUES (?, ?, ?, ?, ?)',
-            'iiiss', [$id, $site, $user, $type, $text]);
+        q('INSERT INTO `tblActivityLogs` (`logID`, `siteID`, `userID`, `activityType`, `activityDescription`, '
+            . '`visitorIP`, `userAgent`, `requestHeaders`, `sessionID`, `sessionDataSnapshot`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'iiisssssss', [$id, $site, $user, $type, $text, '203.0.113.' . ($id % 250), 'P964Browser/' . $id,
+                '{"Host":"p964.invalid","X-P964":"' . $id . '"}', hash('sha256', 'p964-' . $id), 'facts-1:{"p964":' . $id . '}']);
     };
     $activity(AL_A, ORG_A, null, 'EventSubmitted', OLD_SENTENCE . VERA_TYPED);
     $activity(AL_B, ORG_B, null, 'EventSubmitted', OLD_SENTENCE . VERA_ADDR);
@@ -3817,11 +3826,86 @@ ok('N2 nothing is filed without the tick that says the administrator checked who
     'no tick: ' . $noTick['message'] . ' | no note: ' . $noNote['message'] . ' | long note: ' . $longNote['message'] . ' | not an address: ' . $notAddr['message'] . ' | a list: ' . $asArray['message']
         . ' | May list ' . $listAsMay['status'] . ', post ' . $byMay['status'] . ' | no token ' . $noToken['status'] . ' | filed ' . count($visitorRequests()));
 
+// ── N3a. The real form: the note box and its warning (#964 round 3, D-148) ─
+// Section N used to post the fields directly, so deleting the whole note box
+// and its warning from the page left every check green (the round-3 check did
+// exactly that). This reads the form an administrator really gets, from the
+// PARSED page, and files through it using the form's OWN field names: the
+// e-mail box, the text box and the tick-box are found by what they ARE, and
+// whatever name the page gives them is what is posted. Remove the note box and
+// the filing below has no note to send, so it is refused - which is the point.
+/**
+ * The visitor form on the list page: what is wrong with it, and how to fill it.
+ *
+ * @return array{problems: list<string>, fields: array<string, string>, email: string, note: string, tick: string}
+ */
+$n964Form = static function () use (&$jar): array {
+    $html = req($jar['adm'], 'GET', '/admin/erasure-requests')['body'];
+    $doc  = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $out  = ['problems' => [], 'fields' => [], 'email' => '', 'note' => '', 'tick' => ''];
+    $form = null;
+    foreach ($doc->querySelectorAll('form') as $f) {
+        if ($f->querySelector('input[name="action"][value="file_visitor"]') !== null) {
+            $form = $f;
+        }
+    }
+    if ($form === null) {
+        $out['problems'][] = 'the visitor form is missing';
+
+        return $out;
+    }
+    foreach ($form->querySelectorAll('input[type="hidden"]') as $h) {
+        $out['fields'][(string) $h->getAttribute('name')] = (string) $h->getAttribute('value');
+    }
+    $out['email'] = (string) ($form->querySelector('input[type="email"]')?->getAttribute('name') ?? '');
+    $out['tick']  = (string) ($form->querySelector('input[type="checkbox"]')?->getAttribute('name') ?? '');
+    $noteBox      = $form->querySelector('input[type="text"], textarea');
+    if ($noteBox === null) {
+        $out['problems'][] = 'the note box or its warning is missing from the real form';
+
+        return $out;
+    }
+    $out['note'] = (string) $noteBox->getAttribute('name');
+    $helpId      = (string) $noteBox->getAttribute('aria-describedby');
+    $help        = $helpId === '' ? null : $doc->getElementById($helpId);
+    $helpText    = $help === null ? '' : text($help->innerHTML);
+    if ($out['note'] !== 'howChecked' || $noteBox->hasAttribute('required') === false || $noteBox->getAttribute('maxlength') !== '300'
+        || str_contains($helpText, 'kept with the request for ever') === false
+        || str_contains($helpText, 'do not put the person') === false
+    ) {
+        $out['problems'][] = 'the note box or its warning is missing from the real form';
+    }
+
+    return $out;
+};
+/** File through the real form, as a browser would: only the fields the form has. */
+$n964FileViaForm = static function (string $email, string $note) use (&$jar, $n964Form): array {
+    $form   = $n964Form();
+    $fields = $form['fields'];
+    if ($form['email'] !== '') {
+        $fields[$form['email']] = $email;
+    }
+    if ($form['note'] !== '') {
+        $fields[$form['note']] = $note;
+    }
+    if ($form['tick'] !== '') {
+        $fields[$form['tick']] = '1';
+    }
+    $r = req($jar['adm'], 'POST', '/admin/erasure-requests/process', $fields);
+
+    return ['status' => $r['status'], 'message' => $r['status'] === 302 ? message(req($jar['adm'], 'GET', '/admin/erasure-requests')['body']) : '', 'form' => $form];
+};
+$realForm = $n964Form();
+ok('N3a the real page\'s form has the note box - named howChecked, required, at most 300 characters - with the warning beside it that it is kept for ever and must not hold the person\'s details, and the form\'s own e-mail, note and tick fields are what the filing below posts (#964 round 3, D-148)',
+    $realForm['problems'] === [] && $realForm['email'] === 'visitorEmail' && $realForm['tick'] === 'checkedOffPortal'
+        && ($realForm['fields']['action'] ?? '') === 'file_visitor' && ($realForm['fields']['csrf_token'] ?? '') !== '',
+    json_encode(['problems' => $realForm['problems'], 'email' => $realForm['email'], 'note' => $realForm['note'], 'tick' => $realForm['tick'], 'hidden' => array_keys($realForm['fields'])]));
+
 // ── N3. Filed, once ─────────────────────────────────────────────────────────
 $n964Fixtures();
 $untouchedBefore = $n964Untouched();
 $activityBefore  = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
-$filed           = $file('adm', ['visitorEmail' => '  p964.VERA@selftest.invalid ', 'checkedOffPortal' => '1', 'howChecked' => "  P964 replied\n from that address "]);
+$filed           = $n964FileViaForm('  p964.VERA@selftest.invalid ', "  P964 replied\n from that address ");
 $again           = $file('adm', ['visitorEmail' => VERA_TYPED, 'checkedOffPortal' => '1', 'howChecked' => $howNote]);
 $requests        = $visitorRequests();
 $vReq            = $requests[0] ?? [];
@@ -3915,9 +3999,11 @@ ok('N8 the approval e-mail still waiting for this organisation is deleted, and t
     (int) ($queueGone['n'] ?? -1) === 0 && $logClean === true,
     'queue rows left ' . ($queueGone['n'] ?? '?') . ' | ' . json_encode($logRows));
 
-$alA = one('SELECT `siteID`, `userID`, `activityType`, `activityDescription` FROM `tblActivityLogs` WHERE `logID` = ?', 'i', [AL_A]);
-ok('N8b the activity record the public form wrote before #963 - "Event #N submitted by anonymous" and the address, in other capitals - is KEPT with the address replaced by "[erased]", still at this organisation, naming nobody (#964)',
-    $alA === ['siteID' => ORG_A, 'userID' => null, 'activityType' => 'EventSubmitted', 'activityDescription' => OLD_SENTENCE . '[erased]'],
+$alA = one('SELECT `siteID`, `userID`, `activityType`, `activityDescription`, `visitorIP`, `userAgent`, `requestHeaders`, `sessionID`, `sessionDataSnapshot` '
+    . 'FROM `tblActivityLogs` WHERE `logID` = ?', 'i', [AL_A]);
+ok('N8b the activity record the public form wrote before #963 - "Event #N submitted by anonymous" and the address, in other capitals - is KEPT with the address replaced by "[erased]" and its network address, browser, request headers, session fingerprint and session facts ALL empty, still at this organisation, naming nobody (#964, round 3)',
+    $alA === ['siteID' => ORG_A, 'userID' => null, 'activityType' => 'EventSubmitted', 'activityDescription' => OLD_SENTENCE . '[erased]',
+        'visitorIP' => null, 'userAgent' => null, 'requestHeaders' => null, 'sessionID' => null, 'sessionDataSnapshot' => null],
     json_encode($alA));
 
 $trail     = q('SELECT `action`, `tableName`, `recordKey`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? ORDER BY `auditID`', 'i', [$vId]);
@@ -3945,14 +4031,17 @@ ok('N10 a request for an address that suggested nothing can still be cancelled b
 // applied, and must turn ONE named observation red; then the file is put back
 // byte for byte. The observation is the same question N6-N8 ask, answered on a
 // fresh set of rows and a fresh request each time.
-$n964Observe = static function () use ($n964Fixtures, $n964Untouched, $file, &$jar): array {
+$n964Observe = static function () use ($n964Fixtures, $n964Untouched, $n964FileViaForm, &$jar): array {
     $n964Fixtures();
     $before = $n964Untouched();
-    $f      = $file('adm', ['visitorEmail' => VERA_ADDR, 'checkedOffPortal' => '1', 'howChecked' => 'P964 replied from that address']);
+    $f      = $n964FileViaForm(VERA_ADDR, 'P964 replied from that address');
     $id     = (int) (one("SELECT MAX(`requestID`) AS m FROM `tblErasureRequest` WHERE `siteID` = ? AND `subjectKind` = 'visitor_address'", 'i', [ORG_A])['m'] ?? 0);
     $msg    = act($jar['adm'], $id, 'execute');
     $after  = $n964Untouched();
-    $wrong  = [];
+    $wrong  = $f['form']['problems'];
+    if (str_starts_with((string) $f['message'], '[success]') === false) {
+        $wrong[] = 'filing through the real form was refused: ' . $f['message'];
+    }
     foreach (['events', 'queue', 'log', 'account', 'activity', 'errors'] as $part) {
         if ($before[$part] !== $after[$part]) {
             $wrong[] = 'untouched ' . $part . ' changed';
@@ -3970,12 +4059,23 @@ $n964Observe = static function () use ($n964Fixtures, $n964Untouched, $file, &$j
     if ((string) (one('SELECT `activityDescription` FROM `tblActivityLogs` WHERE `logID` = ?', 'i', [AL_A])['activityDescription'] ?? '') !== OLD_SENTENCE . '[erased]') {
         $wrong[] = 'the old activity record still holds the address';
     }
+    $browser = one('SELECT `visitorIP`, `userAgent`, `requestHeaders`, `sessionID`, `sessionDataSnapshot` FROM `tblActivityLogs` WHERE `logID` = ?', 'i', [AL_A]);
+    if ($browser !== ['visitorIP' => null, 'userAgent' => null, 'requestHeaders' => null, 'sessionID' => null, 'sessionDataSnapshot' => null]) {
+        $wrong[] = 'the old activity record still holds browser details';
+    }
     if (request($id)['status'] !== 'completed') {
         $wrong[] = 'the request is not completed: ' . $msg;
     }
 
     return $wrong;
 };
+// The WHOLE note block - label, box and warning - as the page's source has it,
+// so N20 removes exactly what the round-3 check removed. Read, not typed here,
+// so a reworded warning does not stop the plant applying; an empty match makes
+// the plant report "NOT APPLIED" rather than pass.
+$n964NoteBlock = preg_match('/        <div class="col-md-7">\n.*?\n        <\/div>\n(?=        <div class="col-md-10">)/s',
+    (string) file_get_contents($child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'erasure' . $sep . 'index.php'), $nb) === 1
+    ? $nb[0] : 'NO NOTE BLOCK FOUND';
 $plantFile = static fn (string $rel): string => $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
 $plants = [
     'N11 a match that trusts the database\'s comparison (the PHP test made always true): the accented and longer addresses\' events are emptied too' => [
@@ -4001,8 +4101,17 @@ $plants = [
     'N17 the activity step no longer asks for a record naming NO account (both statements): the member\'s own record in the old sentence is changed' => [
         '_core/GdprEraser.php', [
             "AND `userID` IS NULL AND `activityDescription` LIKE ? FOR UPDATE'" => "AND `activityDescription` LIKE ? FOR UPDATE'",
-            "'UPDATE `tblActivityLogs` SET `activityDescription` = ? WHERE `logID` = ? AND `userID` IS NULL'" => "'UPDATE `tblActivityLogs` SET `activityDescription` = ? WHERE `logID` = ?'",
+            "' WHERE `logID` = ? AND `userID` IS NULL'" => "' WHERE `logID` = ?'",
         ], 'untouched activity changed'],
+    // #964 round 3: the first version rewrote the description alone, and the
+    // record still tied event #N to the visitor's network address and browser.
+    'N19 the old activity record has its description changed ALONE: its network address, browser, headers and session details stay' => [
+        '_core/GdprEraser.php', ['\'UPDATE `tblActivityLogs` SET `activityDescription` = ?, \' . $emptied . \' WHERE' => '\'UPDATE `tblActivityLogs` SET `activityDescription` = ? WHERE'],
+        'the old activity record still holds browser details'],
+    // #964 round 3: removing the whole note box and its warning from the page
+    // left every check green while section N posted its fields directly.
+    'N20 the note box and its warning taken off the real page: the form is missing them, and a filing through it is refused for want of a note' => [
+        '_apps/admin/erasure/index.php', [$n964NoteBlock => ''], 'the note box or its warning is missing from the real form'],
 ];
 foreach ($plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);
@@ -4025,7 +4134,7 @@ foreach ($plants as $label => [$rel, $swaps, $expect]) {
         ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
 }
 $cleanAgain = $n964Observe();
-ok('N18 with every plant taken out again, the same fresh run is green: every observation the plants turned red holds (#964)',
+ok('N21 with every plant taken out again, the same fresh run is green: every observation the plants turned red holds (#964)',
     $cleanAgain === [], implode('; ', $cleanAgain));
 $n964Clear();
 

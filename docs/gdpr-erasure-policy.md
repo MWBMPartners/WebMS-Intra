@@ -82,9 +82,17 @@ never automatically.**
    `submitterName` and `submitterEmail` are emptied on every event at this
    organisation suggested **without signing in** with that address (first, so
    that a suggestion approved while the run is going has no address left to
-   e-mail); an activity record written before #963 that reads exactly "Event
-   #N submitted by anonymous" and the address, at this organisation and naming
-   no account, has the address replaced by "[erased]"; the approval e-mail
+   e-mail - this narrows, and does not close, the window in which an approval
+   pressed while the run is going still e-mails the visitor: an approval that
+   read the address just before this step can still write one send-log row or
+   one waiting message afterwards, visible in Admin, Integrations, Email as a
+   "your event suggestion has been approved" row timed after the erasure; a
+   fresh request for the address clears it); an activity record written before
+   #963 that reads exactly "Event #N submitted by anonymous" and the address, at
+   this organisation and naming no account, has the address replaced by
+   "[erased]" and its network address, browser, request headers, session
+   fingerprint and session facts emptied (the treatment a member's own records
+   get), the record kept; the approval e-mail
    still waiting in `tblMailQueue` for this organisation is deleted; and the
    address is taken out of the `tblEmailLog` record of each approval e-mail to
    it recorded under this organisation **or under no organisation** (the row
@@ -99,9 +107,11 @@ organisation's suggestions, records or mail on the same installation (D-150:
 that organisation's administrator did not check who is asking, and files its
 own); any other mail to the same address (only the approval e-mail's subject
 is matched, `EventSuggestions::APPROVAL_SUBJECT`); and the Errors page, whose
-lines carry no subject. Those lines are deleted by the Errors page's own
-clear-out after `errors.retentionDays` **only where that scheduled job has
-been set up**; where it has not, they stay.
+lines carry no subject. The Errors page has no clear-out of its own: its lines
+are deleted by the retention clear-out once `errors.retentionDays` has passed,
+and that runs **only** from the scheduled job `cron/retention-sweep` or when a
+global administrator presses Run Sweep Now on Admin → Maintenance → Retention.
+Where neither happens, they stay.
 
 What it **cannot** reach today, said plainly: an approval e-mail that waited in
 the queue and was later sent by the scheduled job through Microsoft 365 or

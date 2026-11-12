@@ -3494,9 +3494,10 @@ class GdprEraser
                 . 'somebody who suggested an event without signing in (D-140). The administrator states that they '
                 . 'checked, outside the portal, that the request comes from the person who uses this address, and '
                 . 'noted how (D-148): "' . $note . '". No e-mail was sent to it (D-149). Nothing has been erased by '
-                . 'this: the request is at pending review, and an administrator still has to run it. It reaches only '
-                . 'this organisation (D-150): the name and address given with event suggestions here, activity '
-                . 'records written before #963 that quote the address, and the approval e-mails sent to it; no '
+                . 'this: the request is at pending review, and an administrator still has to run it. It reaches this '
+                . 'organisation (D-150): the name and address given with event suggestions here, activity records '
+                . 'written before #963 that quote the address, and the approval e-mails sent to it - including a '
+                . 'send-log row recorded under no organisation, which cannot be told apart from this one\'s; no '
                 . 'account is touched, even one using the same address.'
             );
 
@@ -3534,16 +3535,28 @@ class GdprEraser
      *      every event at this organisation suggested WITHOUT signing in with
      *      this address. The event itself — its name, times, place, status,
      *      who approved it — is the organisation's and is kept.
-     *      FIRST, so that a suggestion approved while the run is going finds no
-     *      address left to e-mail (EventSuggestions reads the row's address
-     *      after the approval is stored, and answers "no address" for an
-     *      empty one). With the mail steps first, an approval landing between
-     *      them and this step would queue a fresh approval e-mail that this run
-     *      had already passed.
+     *      FIRST, which NARROWS - does not close - the window in which an
+     *      approval pressed while the run is going still e-mails the visitor.
+     *      An approval that reads the row AFTER this step commits finds no
+     *      address and sends nothing. But `EventSuggestions::tellSuggesterApproved()`
+     *      reads the address with a plain read, and `Mailer::send()` can take
+     *      seconds before it writes its send-log row (or keeps the message in
+     *      the queue). So an approval that read the address just BEFORE this
+     *      step committed can still write ONE send-log row, or one waiting
+     *      message, after steps 3 and 4 have passed. An administrator sees it
+     *      as a "your event suggestion has been approved" row to the address
+     *      in Admin, Integrations, Email (Recent sends) with a time after the
+     *      erasure's report, and running a fresh request for the address
+     *      clears it. Holding the event row locked across a mail send to close
+     *      the window was rejected: a send can wait on a mail server for a long
+     *      time, and every edit of that event would wait with it.
      *   2. The activity log: a record written before #963 by the public form
      *      read "Event #N submitted by anonymous <address>". Such a record at
      *      this organisation, naming nobody's account, whose address IS this
-     *      one, has the address replaced by "[erased]"; the record stays.
+     *      one, has the address replaced by "[erased]" AND its network address,
+     *      browser, request headers, session fingerprint and session facts
+     *      emptied - the treatment a member's own records get; the record
+     *      stays.
      *   3. The mail queue: a waiting approval e-mail to this address, kept for
      *      this organisation, is deleted, so it can never be sent afterwards.
      *      BEFORE the send log, for the same reason `execute()` puts it first:
@@ -3576,10 +3589,13 @@ class GdprEraser
      *   the one message the portal sends a visitor (D-134). Any other mail to
      *   the same address is somebody's own and is left alone.
      * - It does not look at the Errors page: a mail server's refusal there has
-     *   no subject, so nothing says it was about the approval e-mail. Those
-     *   lines are deleted by the Errors page's own clear-out after
-     *   `errors.retentionDays` - ONLY where that scheduled job has been set up;
-     *   where it has not, they stay.
+     *   no subject, so nothing says it was about the approval e-mail. The
+     *   Errors page has no clear-out of its own: its lines are deleted by the
+     *   retention clear-out (`run_retention_sweep()` -> `log_sweep('errors')`,
+     *   once `errors.retentionDays` has passed), which runs only from the
+     *   scheduled job `cron/retention-sweep` or when a global administrator
+     *   presses Run Sweep Now on Admin, Maintenance, Retention. Where neither
+     *   happens, they stay.
      * - Its address match is EXACT apart from capitals and the spaces round it
      *   (the database's comparison would also let `josé@` match `jose@` under
      *   this schema's collation, so the database only finds candidates and
@@ -3759,6 +3775,14 @@ class GdprEraser
         return self::STEP_UNCHANGED;
     }
 
+    /**
+     * The columns emptied on a visitor's old activity record (#964 round 3):
+     * the same list the catalogue's tblActivityLogs instruction empties on a
+     * member's own records. Kept as its own constant because that instruction
+     * lives inside catalogue(); the coverage test fails if the two differ.
+     */
+    public const VISITOR_ACTIVITY_NULL_COLS = ['requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'];
+
     /** The ONE wording the public form used, before #963, for a visitor's suggestion. Matched exactly. */
     private const PRE_963_SUGGESTION_RECORD = '/^Event #(\d+) submitted by anonymous (.*)$/su';
 
@@ -3782,9 +3806,17 @@ class GdprEraser
      * left alone - matching free text by an address would reach records about
      * other things. The LIKE only finds candidates; the pattern decides.
      *
-     * The address is replaced by "[erased]", the word the send log uses; the
-     * record, its event number, its time and everything else stay - the
-     * organisation's record that a suggestion was made.
+     * The address is replaced by "[erased]", the word the send log uses, AND
+     * the five columns that tie the record to a browser are emptied:
+     * `requestHeaders`, `sessionID`, `visitorIP`, `userAgent`,
+     * `sessionDataSnapshot` - exactly the columns the catalogue's own
+     * `tblActivityLogs` instruction empties on a member's records (`nullCols`
+     * there; VISITOR_ACTIVITY_NULL_COLS here must stay the same list, and
+     * tools/gdpr-coverage-selftest.php compares them). A first version
+     * rewrote the description alone, which left event #N tied to the
+     * visitor's network address and browser - the independent check measured
+     * it. The record, its event number, its type, its organisation and its
+     * time stay: the organisation's record that a suggestion was made.
      *
      * Exactly one audit line, including when nothing matched; a failure is a
      * FAILED step, and the fault's own words are not recorded.
@@ -3808,8 +3840,9 @@ class GdprEraser
             $rows = $find->get_result()->fetch_all(MYSQLI_ASSOC);
             $find->close();
 
-            $write = $db->prepare(
-                'UPDATE `tblActivityLogs` SET `activityDescription` = ? WHERE `logID` = ? AND `userID` IS NULL'
+            $emptied = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = NULL', self::VISITOR_ACTIVITY_NULL_COLS));
+            $write   = $db->prepare(
+                'UPDATE `tblActivityLogs` SET `activityDescription` = ?, ' . $emptied . ' WHERE `logID` = ? AND `userID` IS NULL'
             );
             foreach ($rows as $row) {
                 if (preg_match(self::PRE_963_SUGGESTION_RECORD, (string) $row['activityDescription'], $m) !== 1
@@ -3841,7 +3874,8 @@ class GdprEraser
                 'tblActivityLogs',
                 $replaced . ' records',
                 'the address taken out of ' . $replaced . ' activity record(s) of a suggestion made without signing in, '
-                . 'written before #963 as "submitted by anonymous" and the address; the records are kept'
+                . 'written before #963 as "submitted by anonymous" and the address, and their network address, browser, '
+                . 'request headers, session fingerprint and session facts emptied; the records are kept'
             );
 
             return self::STEP_CHANGED;
@@ -7459,8 +7493,12 @@ class GdprEraser
         //    The Errors page is NOT looked at for a visitor: a mail server's
         //    refusal there carries no subject, so nothing says it was about
         //    the approval e-mail rather than a member's own mail to the same
-        //    address. Those lines expire with the Errors page's own clear-out
-        //    (`errors.retentionDays`), and the audit line says so.
+        //    address. Those lines are deleted only by the retention clear-out
+        //    (`run_retention_sweep()` -> `log_sweep('errors')`, once
+        //    `errors.retentionDays` has passed), which runs from the scheduled
+        //    job `cron/retention-sweep` or a global administrator's Run Sweep
+        //    Now on Admin, Maintenance, Retention - the Errors page itself has
+        //    no clear-out. The audit line says so.
         $visitor = $onlySubject !== null;
 
         if ($email === '') {
@@ -7574,7 +7612,7 @@ class GdprEraser
                 'tblEmailLog',
                 $affected . ' rows, ' . $errorLines . ' error lines',
                 $visitor === true
-                    ? 'the address taken out of the send log\'s record of each "your event suggestion has been approved" e-mail to it, and the reason text of those rows emptied; provider/status/subject/httpCode kept. No other row was changed, and the Errors page was not looked at: its lines expire on its own clear-out'
+                    ? 'the address taken out of the send log\'s record of each "your event suggestion has been approved" e-mail to it, and the reason text of those rows emptied; provider/status/subject/httpCode kept. No other row was changed, and the Errors page was not looked at: its lines are deleted only by the retention clear-out (the scheduled retention job, or Run Sweep Now on Admin, Maintenance, Retention)'
                     : 'recipient address taken out of the send log and the reason text of those rows emptied; the detail of mail error lines naming the address emptied; provider/status/subject/httpCode kept'
             );
 
@@ -7587,7 +7625,7 @@ class GdprEraser
             'tblEmailLog',
             null,
             $visitor === true
-                ? 'the send log holds no "your event suggestion has been approved" e-mail to this address for this organisation. The Errors page was not looked at: its lines expire on its own clear-out'
+                ? 'the send log holds no "your event suggestion has been approved" e-mail to this address for this organisation. The Errors page was not looked at: its lines are deleted only by the retention clear-out (the scheduled retention job, or Run Sweep Now on Admin, Maintenance, Retention)'
                 : 'the send log holds no message to this person\'s address, and no mail error line names it'
         );
 

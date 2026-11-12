@@ -3385,8 +3385,22 @@ if (str_contains($suggestionsSource, "public const APPROVAL_SUBJECT = 'Your even
     // e-mail sent before the change. See the constant's own docblock.
     $visitorFaults[] = 'the approval e-mail\'s subject is not the one constant, word for word as it has always been sent';
 }
+// #964 round 3: the old activity record of a visitor's suggestion gets the
+// SAME treatment as a member's own records - the five columns the catalogue's
+// tblActivityLogs instruction empties. The list is held twice (that instruction
+// lives inside catalogue()), so the two must be the same list.
+$memberActivityCols = null;
+foreach ($instructions as $instruction) {
+    if ((string) $instruction['table'] === 'tblActivityLogs' && (string) $instruction['userCol'] === 'userID') {
+        $memberActivityCols = array_map('strval', (array) ($instruction['nullCols'] ?? []));
+    }
+}
+if ($memberActivityCols === null || $memberActivityCols !== \Portal\Core\GdprEraser::VISITOR_ACTIVITY_NULL_COLS) {
+    $visitorFaults[] = 'a visitor\'s old activity record does not have the same columns emptied as a member\'s own records: '
+        . json_encode($memberActivityCols) . ' against ' . json_encode(\Portal\Core\GdprEraser::VISITOR_ACTIVITY_NULL_COLS);
+}
 check(
-    'a visitor\'s name and address on an event suggestion are emptied by a request for their address - the suggestions first - which also takes the address out of the activity records written before #963 and clears the approval e-mail in the mail queue and the send log, found by its subject; filing needs a short note on how the administrator checked (#964, D-140, D-148)',
+    'a visitor\'s name and address on an event suggestion are emptied by a request for their address - the suggestions first - which also takes the address and the browser details out of the activity records written before #963 and clears the approval e-mail in the mail queue and the send log, found by its subject; filing needs a short note on how the administrator checked (#964, D-140, D-148)',
     $visitorFaults === [],
     implode('; ', $visitorFaults)
 );

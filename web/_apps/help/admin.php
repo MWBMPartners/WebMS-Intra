@@ -924,8 +924,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         themselves are kept. Two limits: an approval e-mail that waited and was later sent by the
         scheduled job through Microsoft 365 or Google may be recorded under another organisation, and
         then keeps the address (#1006); and if a mail server&rsquo;s refusal quoted the address on the
-        Errors page, that line is deleted only by the Errors page&rsquo;s own clear-out, and only where
-        that scheduled job has been set up.
+        Errors page, that line is deleted only by the retention clear-out &mdash; the scheduled
+        retention job, or <em>Run Sweep Now</em> on Admin, Maintenance, Retention (a global
+        administrator&rsquo;s button) &mdash; once the period kept for errors has passed. If an approval
+        is pressed while the erasure is running, the approval e-mail may still go and be recorded
+        afterwards; it then shows in the record of sent mail with a later time, and filing the
+        request again clears it.
         It does <strong>not</strong> touch any account, even a member&rsquo;s using the same address
         &mdash; a member asks for their own erasure from their account &mdash; nor anything at another
         organisation on the same installation, which files its own request.
