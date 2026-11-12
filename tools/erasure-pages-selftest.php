@@ -231,7 +231,12 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 233; // #982 round 8 added M13j (a password, a passkey
+const EXPECTED_CHECKS = 237; // #982 round 9 added M13k (an organisation
+                            // administrator is told they can give a password,
+                            // and can), M13l (still linked: cannot), M13m (two
+                            // passkeys, Google with no hosted domain) and M13n
+                            // (could not be read). 237.
+                            // #982 round 8 added M13j (a password, a passkey
                             // and Microsoft, each said as a fact). 233.
                             // #982 round 7 added M13i (rehire where Google
                             // sign-in is set up). 232.
@@ -655,6 +660,13 @@ function removeWorld(): void
     // Section M (#977) offboards one live account through the real page.
     q('DELETE FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 917000 AND 917999');
+    // Section M (#982 round 9) puts a link and passkeys back with SQL. This
+    // clean-up runs with foreign-key checks OFF, so deleting tblUsers below
+    // does NOT cascade to them: left behind, an orphaned link made every
+    // later restore of a snapshot on the same database refuse (measured: the
+    // backup-page test went red on the next run).
+    q('DELETE FROM tblLinkedAccounts WHERE userID BETWEEN 917000 AND 917999');
+    q('DELETE FROM tblWebAuthnCredentials WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblEmailLog WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     // Section N (#964): the visitor's suggestion and the rows put in by hand,
     // one of them a send-log row recorded under NO organisation.
@@ -3895,6 +3907,14 @@ ok('M13d when the step log says the account was switched off but the account is 
 // It needs `proc_open`-free curl_multi and a second connection only.
 const M13_DEE = 917062; // a live member of A with a password: the deadlock, then a rehire (#982)
 const M13_FAY = 917063; // a live member of A: the read after the commit fails (#982)
+const M13_GUS = 917064; // a live member of A with NO password row: rehired by an organisation administrator (#982 round 9)
+const M13_LEN = 917065; // a live member of A with NO password row, still linked to Microsoft when rehired (#982 round 9)
+const M13_PIP = 917066; // a live member of A: two passkeys and Google with no hosted domain when rehired (#982 round 9)
+const M13_RIA = 917067; // a live member of A: the rehire's read fails (#982 round 9)
+foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail'] as $m13Id => $m13Name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, 'u' . $m13Id . '.erasure@selftest.invalid']);
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
+}
 foreach ([M13_DEE => 'Dee Deadlock', M13_FAY => 'Fay Failread'] as $m13Id => $m13Name) {
     q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, 'u' . $m13Id . '.erasure@selftest.invalid']);
     q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
@@ -4006,13 +4026,24 @@ ok('M13f when the account cannot be read AFTER the commit, the page says the off
 // signing in must be true for the kind of account: Dee has a password row
 // (emptied by offboarding), Olly has none at all (Microsoft or Google only).
 [, $deeOffSaid] = $offboardM(M13_DEE, 'Selftest #982 rehire');
-$rehireM = static function (int $uid) use ($jar, $flashOn): string {
+$rehireM = static function (int $uid, string $who = 'root') use ($jar, $flashOn): string {
     $id = (int) (one('SELECT `offboardingID` FROM `tblOffboarding` WHERE `userID` = ? AND `rehiredAt` IS NULL ORDER BY `offboardingID` DESC LIMIT 1', 'i', [$uid])['offboardingID'] ?? 0);
-    $tok  = token(req($jar['root'], 'GET', '/offboarding')['body']);
-    $sent = req($jar['root'], 'POST', '/offboarding/rehire', ['csrf_token' => $tok, 'offboardingID' => $id]);
+    $tok  = token(req($jar[$who], 'GET', '/offboarding')['body']);
+    $sent = req($jar[$who], 'POST', '/offboarding/rehire', ['csrf_token' => $tok, 'offboardingID' => $id]);
     $to   = (string) parse_url((string) $sent['location'], PHP_URL_PATH);
 
-    return $to === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $to, null, '')['body']);
+    return $to === '' ? '(no redirect)' : $flashOn(req($jar[$who], 'GET', $to, null, '')['body']);
+};
+// Give an account a password on the Users page, as the Users page posts it:
+// what the rehire page says an administrator CAN do is proved by doing it.
+$givePasswordM = static function (string $who, int $uid) use ($jar, $flashOn): string {
+    $row = one('SELECT `fullName`, `emailAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [$uid]);
+    $tok = token(req($jar[$who], 'GET', '/admin/users')['body']);
+    req($jar[$who], 'POST', '/admin/users/save', ['csrf_token' => $tok, 'action' => 'update', 'userID' => $uid,
+        'fullName' => (string) $row['fullName'], 'emailAddress' => (string) $row['emailAddress'], 'phoneNumber' => '',
+        'isActive' => '1', 'password' => 'Selftest-982-Round9-Password!x7']);
+
+    return $flashOn(req($jar[$who], 'GET', '/admin/users')['body']);
 };
 $deeRehire = $rehireM(M13_DEE);
 // The rehire page states FACTS about what the account has, and promises no
@@ -4025,10 +4056,10 @@ ok('M13g rehiring an account whose password offboarding EMPTIED, with nothing el
     && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false && str_contains($deeRehire, 'passkey') === false,
     'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
 $ollyRehire = $rehireM(OFF);
-ok('M13h rehiring an account with NO password row, no passkey, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that an administrator cannot give it a password (#982 round 8)',
+ok('M13h rehiring (as a global administrator) an account with NO password row, no passkey, no link, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that YOU can give it a password on the Users page - round 8 said nobody could, which was false (#982 round 9)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
-    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here. A global administrator sets those up on Admin, Settings; an administrator cannot give this account a password.') === true
-    && str_contains($ollyRehire, 'Forgot your password') === false,
+    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. You can give it a password on the Users page, because it has no other way to sign in.') === true
+    && str_contains($ollyRehire, 'cannot') === false && str_contains($ollyRehire, 'Forgot your password') === false,
     'rehire said: ' . $ollyRehire);
 // M13i: Google sign-in set up for the organisation, limited to a hosted domain.
 siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
@@ -4056,12 +4087,88 @@ try {
     q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.ms365.enduser.clientID']);
     q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_FAY]);
 }
-ok('M13j a password the offboarding did not remove, a passkey still registered and Microsoft sign-in set up are each said as a fact, with Microsoft\'s condition - and "Forgot your password?" is not offered (#982 round 8)',
-    str_contains($fayRehire, 'They still have a password on this portal: the offboarding step that removes it did not complete.') === true
+ok('M13j a password on the account (said as a fact, with no cause the code cannot know), a passkey still registered and Microsoft sign-in set up are each said as a fact, with Microsoft\'s condition - and "Forgot your password?" is not offered (#982 round 8)',
+    str_contains($fayRehire, 'They have a password on this portal.') === true
+    && str_contains($fayRehire, 'did not complete') === false && str_contains($fayRehire, 'still have a password') === false
     && str_contains($fayRehire, '1 passkey is still registered to the account.') === true
     && str_contains($fayRehire, 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same e-mail address in the Microsoft tenant set up here.') === true
     && str_contains($fayRehire, 'Forgot your password') === false && str_contains($fayRehire, 'Google') === false,
     'rehire said: ' . $fayRehire);
+
+// M13k: an ORGANISATION administrator rehires an account with no password row
+// and no other way in. The page says they can give it a password on the Users
+// page - and they then do, through the real save (D-018 forbids a SECOND way
+// in, not a first: step 10b refuses only when another way in exists).
+[, $gusOff] = $offboardM(M13_GUS, 'Selftest #982 round 9');
+$gusRehire  = $rehireM(M13_GUS, 'adm');
+$gusSave    = $givePasswordM('adm', M13_GUS);
+$gusRows    = (int) one("SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ? AND `passwordHash` <> ''", 'i', [M13_GUS])['n'];
+ok('M13k an organisation administrator who rehires an account with no way in is told "You can give it a password on the Users page, because it has no other way to sign in." - and the Users page really does store one when they do (#982 round 9)',
+    str_contains($gusRehire, 'User rehired: their account is switched on again.') === true
+    && str_contains($gusRehire, 'You can give it a password on the Users page, because it has no other way to sign in.') === true
+    && $gusRows === 1,
+    'offboard said: ' . $gusOff . ' | rehire said: ' . $gusRehire . ' | save said: ' . $gusSave . ' | usable password rows: ' . $gusRows);
+
+// M13l: offboarding deletes links, so the link is put back with SQL between the
+// offboarding and the rehire (a step that did not complete). Microsoft is NOT
+// set up, so the account has no way in - but step 10b counts the link and
+// refuses a password. The page says so, and the save really refuses.
+[, $lenOff] = $offboardM(M13_LEN, 'Selftest #982 round 9');
+q("INSERT INTO `tblLinkedAccounts` (`userID`, `provider`, `providerSub`) VALUES (?, 'ms365', 'selftest-982-len-sub')", 'i', [M13_LEN]);
+try {
+    $lenRehire = $rehireM(M13_LEN);
+    $lenSave   = $givePasswordM('root', M13_LEN);
+} finally {
+    q('DELETE FROM `tblLinkedAccounts` WHERE `userID` = ?', 'i', [M13_LEN]);
+}
+$lenRows   = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_LEN])['n'];
+ok('M13l an account still LINKED to Microsoft (not set up here) is said to have no way in, and that it cannot be given a password on the Users page because of the link - and the save really refuses (#982 round 9)',
+    str_contains($lenRehire, 'This account has no way to sign in yet') === true
+    && str_contains($lenRehire, 'It is still linked to a Microsoft or Google account, so it cannot be given a password on the Users page.') === true
+    && str_contains($lenRehire, 'You can give it a password') === false
+    && $lenRows === 0 && str_contains($lenSave, 'No password was set') === true,
+    'offboard said: ' . $lenOff . ' | rehire said: ' . $lenRehire . ' | save said: ' . $lenSave);
+
+// M13m: two passkeys (the plural sentence) and Google set up with NO hosted
+// domain (the sentence ends at the address, naming no domain).
+[, $pipOff] = $offboardM(M13_PIP, 'Selftest #982 round 9');
+q("INSERT INTO `tblWebAuthnCredentials` (`userID`, `credentialID`, `publicKey`) VALUES (?, 'selftest-982-pip-1', 'selftest-982-key'), (?, 'selftest-982-pip-2', 'selftest-982-key')", 'ii', [M13_PIP, M13_PIP]);
+siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
+try {
+    $pipRehire = $rehireM(M13_PIP);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.google.clientID']);
+    q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_PIP]);
+}
+ok('M13m two passkeys are said in the plural, and Google set up with no hosted domain is said with the same-address condition and no domain (#982 round 9)',
+    str_contains($pipRehire, '2 passkeys are still registered to the account.') === true
+    && str_contains($pipRehire, 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail address.') === true
+    && str_contains($pipRehire, ' domain') === false && str_contains($pipRehire, 'no way to sign in') === false,
+    'offboard said: ' . $pipOff . ' | rehire said: ' . $pipRehire);
+
+// M13n: the rehire's read of what the account has fails (a renamed column in
+// the server's copy, for one press). The rehire was committed, so the page
+// says so and that how they can sign in could not be read.
+$m13nPath     = $child . $sep . 'web' . $sep . '_apps' . $sep . 'offboarding' . $sep . 'rehire.php';
+$m13nOriginal = (string) file_get_contents($m13nPath);
+$m13nFrom     = 'SELECT COUNT(*) AS `passkeys` FROM `tblWebAuthnCredentials`';
+$m13nApplied  = substr_count($m13nOriginal, $m13nFrom) === 1;
+[, $riaOff]   = $offboardM(M13_RIA, 'Selftest #982 round 9');
+$riaRehire    = '(not run)';
+if ($m13nApplied === true) {
+    file_put_contents($m13nPath, str_replace($m13nFrom, 'SELECT COUNT(`noSuchColumn`) AS `passkeys` FROM `tblWebAuthnCredentials`', $m13nOriginal));
+    try {
+        $riaRehire = $rehireM(M13_RIA);
+    } finally {
+        file_put_contents($m13nPath, $m13nOriginal);
+    }
+}
+ok('M13n when what the account has cannot be read after the rehire, the page says the rehire happened and that how they can sign in could not be read - with no column name (#982 round 9)',
+    $m13nApplied === true && (string) file_get_contents($m13nPath) === $m13nOriginal
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_RIA])['isActive'] === 1
+    && str_contains($riaRehire, 'User rehired: their account is switched on again. How they can sign in could not be read: check their account on the Users page.') === true
+    && str_contains($riaRehire, 'noSuchColumn') === false,
+    ($m13nApplied === true ? 'applied' : 'NOT APPLIED') . ' | offboard said: ' . $riaOff . ' | rehire said: ' . $riaRehire);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

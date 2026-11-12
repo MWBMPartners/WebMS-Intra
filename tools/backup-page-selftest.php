@@ -3041,7 +3041,7 @@ brs_check(
     && str_contains($qWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished, and your password, passkeys and Microsoft or Google links are as they were when the snapshot was taken.') === true
     && str_contains($qWarning, 'Its result stays at the top of this page for seven days.') === true
     && strpos($qInspect, 'id="snapshot-sign-ins-warning"') < strpos($qInspect, 'name="action" value="restore_full"'),
-    'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out four accounts in three groups - two whose sign-in number differs (only the old password works), one switched off in the snapshot (cannot sign in until switched back on) and one not in it - and that Rae\'s is among them',
+    'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out four accounts in three groups - two whose sign-in number differs (they must sign in again, with their passwords, passkeys and Microsoft or Google links as they were when the snapshot was taken), one switched off in the snapshot (cannot sign in until switched back on) and one not in it - and that Rae\'s is among them',
     $qWarning
 );
 brs_check(

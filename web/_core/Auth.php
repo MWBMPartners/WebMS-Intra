@@ -1082,8 +1082,13 @@ class Auth
      * account's number, switch and very existence back as the snapshot held
      * them, so the administrator who ran it can be signed out by their next
      * click. The backup page asks this straight after a restore and says so
-     * in the result, in words that fit the case: a moved number can sign in
-     * again with the old password, a switched-off or missing account cannot.
+     * in the result, in words that fit the case: a moved number must sign in
+     * again, with its password, passkeys and Microsoft or Google links as they
+     * were when the snapshot was taken; a switched-off account cannot sign in
+     * until it is switched back on, and a missing account cannot sign in at
+     * all. (#922 round 9: this used to say "can sign in again with the old
+     * password", which was withdrawn from the page in round 7 and is untrue
+     * for an account that had no password in the snapshot.)
      */
     public static function signInStateNow(): ?string
     {

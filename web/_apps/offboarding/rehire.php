@@ -217,15 +217,32 @@ try {
     //    only within the tenant set up here, Google only within its hosted
     //    domain when one is set. So each part is read after the commit, in its
     //    own try, and said as what IS there, with its conditions:
-    //      - the password row: usable (the removal step did not complete),
-    //        emptied (a new one via "Forgot your password?", which needs this
+    //      - the password row: usable (said as a fact only - the removal step
+    //        may have failed, or somebody may have set one since), emptied (a new one via "Forgot your password?", which needs this
     //        portal to be able to send e-mail), or none;
     //      - passkeys still registered;
     //      - Microsoft / Google sign-in, only where set up, with its condition.
     //    With nothing at all, it says the account has no way in yet and who
-    //    can change that. An administrator may not give a password to an
-    //    account that has none (D-018). Every branch is pinned by M13g-M13j
-    //    of tools/erasure-pages-selftest.php.
+    //    can change that. Round 8 said "an administrator cannot give this
+    //    account a password", which is FALSE for exactly this account
+    //    (measured): admin/users/save.php's step 10b refuses a new sign-in
+    //    only when Auth::countLoginMethods() finds another way in (D-018 forbids
+    //    a SECOND way in, not a first), and that counts a Microsoft or Google
+    //    LINK whether or not that sign-in is set up. So the sentence asks the
+    //    same two things the save does: is the account still linked, and may
+    //    THIS administrator change it at all - AccountGuard::verdict() at
+    //    REACH_ACCOUNT, the save's own gate, which logs nothing. Once this
+    //    rehire has switched the membership back on, REACH_ACCOUNT and
+    //    REACH_REHIRE go through the same rows of AccountGuard::decide(), so
+    //    whoever could rehire gets ALLOW and is told "you can"; it is still
+    //    asked so that the sentence is never written where the save would
+    //    refuse, and anything but ALLOW says nothing about it. What the save
+    //    may still refuse with its own words (an e-mail address over 50
+    //    characters, or that sign-in name already used) is not repeated here.
+    //    A password that is still there is said as a fact only: the code
+    //    cannot tell whether the removal step failed or somebody set one
+    //    since (round 9). Every branch is pinned by M13g-M13m of
+    //    tools/erasure-pages-selftest.php.
     $facts         = null;
     $passwordState = Auth::passwordState($db, $userId);
     try {
@@ -235,9 +252,15 @@ try {
             $kind->execute();
             $passkeys = (int) ($kind->get_result()->fetch_assoc()['passkeys'] ?? 0);
             $kind->close();
+            $linkedRead = $db->prepare('SELECT COUNT(*) AS `linked` FROM `tblLinkedAccounts` WHERE `userID` = ?');
+            $linkedRead->bind_param('i', $userId);
+            $linkedRead->execute();
+            $linked = (int) ($linkedRead->get_result()->fetch_assoc()['linked'] ?? 0);
+            $linkedRead->close();
+            $mayChange = AccountGuard::verdict($userId, AccountGuard::REACH_ACCOUNT);
             $facts = [];
             if ($passwordState === Auth::PASSWORD_USABLE) {
-                $facts[] = 'They still have a password on this portal: the offboarding step that removes it did not complete.';
+                $facts[] = 'They have a password on this portal.';
             } elseif ($passwordState === Auth::PASSWORD_EMPTIED) {
                 $facts[] = 'Offboarding removed their password; they can set a new one with "Forgot your password?" on the '
                     . 'sign-in page, if this portal can send e-mail.';
@@ -264,8 +287,13 @@ try {
         $howTheySignIn = ' How they can sign in could not be read: check their account on the Users page.';
     } elseif ($facts === []) {
         $howTheySignIn = ' This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor '
-            . 'Google sign-in is set up here. A global administrator sets those up on Admin, Settings; an administrator '
-            . 'cannot give this account a password.';
+            . 'Google sign-in is set up here; a global administrator sets those up on Admin, Settings.';
+        if ($linked > 0) {
+            $howTheySignIn .= ' It is still linked to a Microsoft or Google account, so it cannot be given a password '
+                . 'on the Users page.';
+        } elseif ($mayChange === AccountGuard::ALLOW) {
+            $howTheySignIn .= ' You can give it a password on the Users page, because it has no other way to sign in.';
+        }
     } else {
         $howTheySignIn = ' ' . implode(' ', $facts);
     }

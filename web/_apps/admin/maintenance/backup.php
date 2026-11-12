@@ -923,10 +923,15 @@ if (DbBackup::isSnapshotName($inspect) === true) {
         //   restore of either kind puts them back (what an old-form snapshot
         //   leaves alone is that list: the upgrade record, the single-use
         //   sign-in codes, the settings and the kept rows). The limit, said
-        //   here rather than in every sentence: a snapshot that does not
-        //   HOLD one of those tables (hand-edited, or older than the table)
-        //   leaves it as it is today; every snapshot this portal takes holds
-        //   every tbl table;
+        //   here rather than in every sentence: a snapshot that holds tblUsers
+        //   but NOT one of those three tables (hand-edited, or older than the
+        //   table) leaves that table EMPTY, not as it is today - the restore
+        //   empties tblUsers with DELETE while foreign-key checks are on, and
+        //   all three are ON DELETE CASCADE from tblUsers, so every row goes
+        //   with its account and nothing puts one back (measured, #922 round
+        //   9; round 8's "leaves it as it is" was untrue). Every snapshot this
+        //   portal takes holds every tbl table, so only a hand-made one can
+        //   reach that;
         // - a switched-off account can sign in once switched back on, so it is
         //   never also told it cannot sign in "at all";
         // - the result is kept on THIS page, which only a global administrator
