@@ -138,7 +138,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 309; // + seven in section G and six plants in round 2 of #885 (G11-G17, PG10-PG15); + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 316; // + four in round 3 of #885 (G18-G21) and three plants (PG16-PG18); + seven in section G and six plants in round 2 of #885 (G11-G17, PG10-PG15); + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -3649,6 +3649,47 @@ $scnSubmitOwn = static function () use ($signIn, $http, $tokenOn, $db, $kOwnCat2
 };
 check('G17 the public suggestion form stores the organisation\'s own category', $scnSubmitOwn(), $kOwnCat2);
 
+// ── #885 round 3: ANOTHER organisation's event TYPE, for every writer ──────
+// Round 2 pinned the other organisation's type on the update API only, so a
+// writer that stopped passing the type to the rule (null in its place) left
+// every check green. One case per writer, each with an otherwise valid post.
+$scnCreateOtherType = static function () use ($api, $keyBase, $evByName, $kOtherType): array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K other type api'");
+    $r = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K other type api', 'typeID' => $kOtherType]);
+    return [$r['status'], $evByName('PWT K other type api')];
+};
+check('G18 the events API refuses another organisation\'s event TYPE on create with 422 and creates nothing', $scnCreateOtherType(), [422, null]);
+$scnFormOtherType = static function () use ($formPost, $base, $evByName, $kOtherType): ?array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K form other type'");
+    $formPost('orgadmin', $base + ['action' => 'create', 'eventName' => 'PWT K form other type', 'typeID' => (string) $kOtherType]);
+    return $evByName('PWT K form other type');
+};
+check('G19 the Manage Events form saves nothing for another organisation\'s event TYPE', $scnFormOtherType(), null);
+$scnBulkOtherType = static function () use ($signIn, $http, $tokenOn, $kSeries, $kSeriesEv, $kOtherType, $db): mixed {
+    $db->query("UPDATE `tblEvents` SET `typeID` = NULL WHERE `eventID` = {$kSeriesEv}");
+    $signIn('orgadmin');
+    $url   = '/calendar/manage/series-edit?seriesID=' . $kSeries;
+    $token = $tokenOn($http('GET', $url)['body']);
+    $http('POST', $url, ['csrf_token' => $token, 'seriesID' => (string) $kSeries, 'eventIDs' => [(string) $kSeriesEv], 'bulkTypeID' => (string) $kOtherType]);
+    $row = $db->query("SELECT `typeID` FROM `tblEvents` WHERE `eventID` = {$kSeriesEv}")->fetch_assoc();
+    return is_array($row) === true && array_key_exists('typeID', $row) === true ? $row['typeID'] : 'missing';
+};
+check('G20 a series\' bulk edit does not set another organisation\'s event TYPE on its dates', $scnBulkOtherType(), null);
+// The public suggestion form has NO type field and its INSERT names no type
+// column, so there is no rule call to plant against; what can be pinned is
+// that a posted type of another organisation is not stored.
+$scnSubmitOtherType = static function () use ($signIn, $http, $tokenOn, $db, $kOtherType): mixed {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K submitted other type'");
+    $signIn('member');
+    $token = $tokenOn($http('GET', '/calendar/submit')['body']);
+    $http('POST', '/calendar/submit-save', ['csrf_token' => $token, 'eventName' => 'PWT K submitted other type', 'startDateTime' => '2030-08-04T10:00',
+        'typeID' => (string) $kOtherType]);
+    $row = $db->query("SELECT `typeID` FROM `tblEvents` WHERE `eventName` = 'PWT K submitted other type'")->fetch_assoc();
+    return is_array($row) === true && array_key_exists('typeID', $row) === true ? $row['typeID'] : 'missing';
+};
+check('G21 the public suggestion form, sent another organisation\'s event TYPE, stores the suggestion with NO type (it has no type field and stores none)',
+    $scnSubmitOtherType(), null);
+
 // ── #853: the "On the public website" badge asks the website's own rule ──────
 // Under "one box per calendar" the calendar-ticked copied-in event IS on the
 // website (V2). Paused, or with its stored answer run out, the website leaves
@@ -4398,6 +4439,16 @@ $p = $plant('_core/Events.php', "        if (\$raw === null || \$raw === '' || \
     "        if (\$raw === null || \$raw === '' || \$raw === 0) {",
     static fn (): bool => $scnBulkOwn() === ['set' => [$kOwnCat2, $kOwnType], 'None' => [null, null]]);
 check('PG15 with "0" no longer read as none, the bulk edit\'s "— None —" is refused instead of clearing (G16 catches it)', [$p['applied'], $p['result']], [true, false]);
+// Round 3 of #885's check: a writer that stops passing the TYPE to the rule.
+$p = $plant('_apps/events/api/create.php', 'Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $categoryId, $typeId)',
+    'Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $categoryId, null)', static fn (): bool => $scnCreateOtherType() === [422, null]);
+check('PG16 with the events API no longer passing the type to the rule, another organisation\'s type is stored on create (G18 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/save.php', '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, Site::id(), $categoryID, $typeID)',
+    '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, Site::id(), $categoryID, null)', static fn (): bool => $scnFormOtherType() === null);
+check('PG17 with the Manage Events form no longer passing the type, another organisation\'s type is stored (G19 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/series-edit.php', '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, $siteId, $catVal, $typeVal)',
+    '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, $siteId, $catVal, null)', static fn (): bool => $scnBulkOtherType() === null);
+check('PG18 with the bulk edit no longer passing the type, another organisation\'s type is set on the series\' dates (G20 catches it)', [$p['applied'], $p['result']], [true, false]);
 
 check('P11 with every plant removed again, the unticked event is off the door\'s events feed once more', $scnUnticked(), true);
 

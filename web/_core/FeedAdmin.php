@@ -2338,11 +2338,15 @@ final class FeedAdmin
      * TWO resolves since #855 (D-180): one BEFORE any item is decided, so a
      * date is decided as it stands now, and one after, which carries the
      * decisions to other dates (part 7's sibling rule). See step 5 for what
-     * that second resolve means for the count and the message.
+     * that second resolve means for the message (never for the count).
      *
-     * The message: "Approved N." (or "Declined N."), then any that had
-     * changed ("N had changed since you opened the page; please review
-     * it/them again."), then any not done ("N could not be decided this
+     * The message: "Approved N." (or "Declined N.") — N counts ONLY rows
+     * this call claimed directly — then any that had changed and are left
+     * to review ("N had changed since you opened the page; please review
+     * it/them again."), then any that had changed and now carry this very
+     * call's decision ("N had changed since you opened the page and
+     * now follow(s) your decision on another date." — #855, step 5), then
+     * any not done ("N could not be decided this
      * time; please try again."), then — ONLY when at least one date really
      * DECIDED here is a date of a repeating event (its recurrence key is
      * not empty) — "Other dates of the same repeating event may follow
@@ -2373,6 +2377,22 @@ final class FeedAdmin
      * rule), and the list of waiting dates shows each one's state.
      * `decided`, `changed` and `notDone` are unchanged.
      *
+     * HOW STEP 5's READ (#855) DIFFERS FROM METHOD 3, which it can look like.
+     * It reads the newest row ONLY of a date the administrator NAMED whose
+     * claim failed — never of an "other date" — and it adds nothing to the
+     * decided count: it only CHOOSES BETWEEN TWO WORDINGS OF "changed". And it
+     * does not judge where the date stands from that row's status (method
+     * 3's flaw): it asks one narrower question the row can answer — does
+     * its note say it follows a row THIS call claimed ("… (approval #X)")?
+     * That note is written only by the sibling rule, in the resolve run
+     * after the claims (`FeedResolver::writePlan()`). Yes: the date now
+     * carries this decision and there is nothing left to review. Anything
+     * else — waiting again, declined, or following an EARLIER, separate
+     * decision — keeps "please review it again". Round 2 of #855's check
+     * COUNTED the first kind as decided, which contradicts D-180 ("the
+     * administrator is told it had changed"); it is reported as changed
+     * now, truthfully worded.
+     *
      * IN THIS ORDER, and why:
      *   1. Checks of the request's own shape that need NO database at all —
      *      the decision word (a wrong one throws, as part 7's
@@ -2395,11 +2415,14 @@ final class FeedAdmin
      *      for the "other dates" sentence (fix round 12). Reading them
      *      before the lock is safe: they are what the date IS — the
      *      importer finds an event by them and never rewrites either.
-     *   5. Per calendar, `inFeedLock()` — which since #855 RE-WORKS the
-     *      calendar under the rules in force BEFORE any item is decided, so
-     *      an item whose request those rules would no longer make (made
+     *   5. Per calendar, `inFeedLock()` — which since #855 (D-180) RE-WORKS
+     *      the calendar under the rules in force BEFORE any item is decided,
+     *      so an item whose request those rules would no longer make (made
      *      under the other copied-in rule, or under a rule that has since
-     *      run out) is "changed", never decided on its old request.
+     *      run out) is "changed", never decided on its old request. After
+     *      the second resolve, still inside the lock, the after-resolve step
+     *      reads each failed item's newest row to choose its "changed"
+     *      wording (see "HOW STEP 5's READ DIFFERS" above).
      *
      * ONE LOCK PER CALENDAR, SO NOT ALL-OR-NOTHING ACROSS CALENDARS (plan
      * section 4.1). If a later calendar fails — its lock times out, or the
@@ -2418,11 +2441,11 @@ final class FeedAdmin
      * followed" after all the commits, so a connection lost at exactly
      * that moment would have thrown although decisions were already
      * committed. That read later moved inside the calendar's transaction
-     * (`inFeedLock()`'s `$afterResolve`), and since fix round 12 there is
-     * no such read at all: the "other dates" sentence needs only step 4's
-     * look-up and which items this call decided. So the promise stays
-     * simple and true: this method throws only when nothing at all was
-     * committed — as far as the connection can tell.
+     * (`inFeedLock()`'s `$afterResolve`); fix round 12 removed it, and #855
+     * brought ONE read back there (step 5's, of the named dates whose claim
+     * failed) — inside the transaction, before the commit, never after. So
+     * the promise stays true: this method throws only when nothing at all
+     * was committed — as far as the connection can tell.
      * One case no client can tell apart (checker round 3): the server
      * commits the FIRST calendar but its reply is lost on the way back;
      * that looks exactly like a failed commit, so it is thrown.
@@ -2434,9 +2457,12 @@ final class FeedAdmin
      *
      * `decidedIds` (chunk P8-4) lists the approval numbers really decided,
      * so the decision handler can write one activity line per decided date
-     * (plan section 3.3) — numbers only, never a title. For a date whose old
-     * row the first resolve replaced and whose new row then carried this
-     * decision (step 5, #855), it is the NEW row's number.
+     * (plan section 3.3) — numbers only, never a title. It also lists, for a
+     * date step 5 found now carrying this call's decision, the row that
+     * carries it (the NEW row when the first resolve replaced the date's
+     * row; the same row when it was refreshed in place) — the decision this
+     * person made is recorded against the row that holds it, though the
+     * date is reported "changed" and is not in the count.
      *
      * @return array{ok:bool, status:string, message:string, decided:int, changed:int, notDone:int, failure:?\Throwable, decidedIds:list<int>}
      *
@@ -2546,25 +2572,25 @@ final class FeedAdmin
         //    decided BEFORE the second resolve, so no item is settled by
         //    another item's decision and then decided again.
         //
-        //    ⚠️ THE FIRST RESOLVE CAN REPLACE AN ITEM'S ROW. A date whose
-        //    request the rules in force would no longer make (a rule that has
-        //    run out, or the other copied-in rule) gets a NEW waiting row, so
-        //    its old row cannot be claimed. If another item of this same
-        //    request is a sibling date under that new request, the second
-        //    resolve then carries THIS decision onto the new row (part 7's
-        //    sibling rule). Reporting such an item "had changed … please
-        //    review it again" while its date ends carrying the very decision
-        //    asked for was untrue, and the count said "Approved 1" when both
-        //    dates ended approved (the independent check of #855, measured on
-        //    D20's two-rules case). So the after-resolve step below reads,
-        //    for every item NOT claimed directly, its date's NEWEST row: it
-        //    counts as decided only when that row is a different one, carries
-        //    this decision, by this person, and says it follows a row this
-        //    very call decided. Anything else is still "changed": the date
-        //    waits again, or ended some other way.
-        //    (Fix round 12's owner decision not to COUNT other dates that
+        //    ⚠️ THE FIRST RESOLVE CAN REPLACE OR REFRESH AN ITEM'S ROW, so its
+        //    claim fails and it is "changed" (D-180). If another item of this
+        //    same request is a sibling date under the request it now has, the
+        //    second resolve carries THIS decision onto it (part 7's sibling
+        //    rule) — and "please review it again" would then be untrue, with
+        //    nothing left to review. So the after-resolve step reads each such
+        //    date's newest row and picks between TWO wordings of "changed": it
+        //    "now follows your decision on another date" only when that row's
+        //    note names a row THIS call claimed; otherwise "please review it
+        //    again". The count ("Approved N") stays the rows claimed directly.
+        //    Round 2 counted the first kind as decided, which contradicted
+        //    D-180, and tested conditions that could never fail (a follower
+        //    row always carries the followed row's status and decider); the
+        //    note is the one fact that tells the two apart, and a row that was
+        //    refreshed IN PLACE (the same number) counts exactly as a replaced
+        //    one. (Fix round 12's owner decision not to count OTHER dates that
         //    followed is untouched: this reads only dates the administrator
-        //    asked to decide.)
+        //    named.)
+        $followedTotal = 0; // "changed", and now carrying this call's decision
         $decidedTotal  = 0;
         $notDone       = 0;
         $failure       = null;
@@ -2598,17 +2624,19 @@ final class FeedAdmin
                     }
 
                     return ['ok' => true, 'status' => 'saved', 'decidedIds' => $decidedIds, 'changedHere' => $changedHere];
-                }, static function (array $soFar) use ($db, $siteId, $decision, $userId, $feedItems, $eventByApproval): array {
+                }, static function (array $soFar) use ($db, $siteId, $feedItems, $eventByApproval): array {
                     // Read-only, inside the lock, after the second resolve
-                    // (see step 5). original approval number => the row now
-                    // carrying the decision.
+                    // (step 5). For each named item whose claim failed:
+                    // original approval number => the row now following a
+                    // row this call claimed. Only the NOTE decides it — see
+                    // step 5 for why status and decider are not asked.
                     $claimed  = array_map('intval', (array) ($soFar['decidedIds'] ?? []));
                     $followed = [];
                     if ($claimed === []) {
                         return ['followedIds' => $followed];
                     }
                     $newest = $db->prepare(
-                        'SELECT `approvalID`, `status`, `decidedByID`, `decisionNote` FROM `tblExternalEventApprovals` '
+                        'SELECT `approvalID`, `decisionNote` FROM `tblExternalEventApprovals` '
                         . 'WHERE `eventID` = ? AND `siteID` = ? ORDER BY `approvalID` DESC LIMIT 1'
                     );
                     foreach ($feedItems as $item) {
@@ -2620,11 +2648,7 @@ final class FeedAdmin
                         $newest->bind_param('ii', $eventId, $siteId);
                         $newest->execute();
                         $row = $newest->get_result()->fetch_assoc();
-                        if ($row === null || (int) $row['approvalID'] === $aid || (string) $row['status'] !== $decision
-                            || (int) ($row['decidedByID'] ?? 0) !== $userId) {
-                            continue;
-                        }
-                        $note = (string) ($row['decisionNote'] ?? '');
+                        $note = ($row === null) ? '' : (string) ($row['decisionNote'] ?? '');
                         foreach ($claimed as $byThisCall) {
                             if (str_ends_with($note, '(approval #' . $byThisCall . ')') === true) {
                                 $followed[$aid] = (int) $row['approvalID'];
@@ -2663,13 +2687,17 @@ final class FeedAdmin
                 $changed += count($feedItems);
                 continue;
             }
-            $committedAny  = true;
-            $followedHere  = (array) ($result['followedIds'] ?? []);
-            $decidedTotal += count($result['decidedIds']) + count($followedHere);
-            // The activity log names the row that now carries the decision.
+            $committedAny   = true;
+            $followedHere   = (array) ($result['followedIds'] ?? []);
+            $decidedTotal  += count($result['decidedIds']);
+            // The activity log ALSO names each row now carrying this decision
+            // through step 5 (the docblock's `decidedIds` note).
             array_push($decidedIds, ...$result['decidedIds'], ...array_values($followedHere));
-            $changed      += (int) $result['changedHere'] - count($followedHere);
-            foreach (array_merge($result['decidedIds'], array_keys($followedHere)) as $aid) {
+            // `changed` still counts every named date whose claim failed;
+            // the message only words the step-5 ones differently.
+            $changed       += (int) $result['changedHere'];
+            $followedTotal += count($followedHere);
+            foreach ($result['decidedIds'] as $aid) {
                 if (isset($seriesByApproval[$aid]) === true) {
                     $seriesDecided[$seriesByApproval[$aid]] = true;
                 }
@@ -2678,9 +2706,16 @@ final class FeedAdmin
 
         $verb    = ($decision === 'approved') ? 'Approved' : 'Declined';
         $message = $verb . ' ' . $decidedTotal . '.';
-        if ($changed > 0) {
-            $message .= ' ' . $changed . ' had changed since you opened the page; please review '
-                . ($changed === 1 ? 'it' : 'them') . ' again.';
+        // Two wordings of "changed" (step 5): the ones left to review, and
+        // the ones that now carry this call's decision. `changed` counts both.
+        $toReview = $changed - $followedTotal;
+        if ($toReview > 0) {
+            $message .= ' ' . $toReview . ' had changed since you opened the page; please review '
+                . ($toReview === 1 ? 'it' : 'them') . ' again.';
+        }
+        if ($followedTotal > 0) {
+            $message .= ' ' . $followedTotal . ' had changed since you opened the page and now '
+                . ($followedTotal === 1 ? 'follows' : 'follow') . ' your decision on another date.';
         }
         if ($notDone > 0) {
             $message .= ' ' . $notDone . ' could not be decided this time; please try again.';
@@ -2947,9 +2982,12 @@ final class FeedAdmin
      * and the "who can see it" answer after the save (`whoCanSee()`) in
      * `saveChoice()` and `saveRule()`. (`decide()` used it for "how many
      * other dates followed" until fix round 12, when the owner replaced
-     * that count with one always-true sentence; since #855 it uses it
-     * again, only to read whether a date the request NAMED now carries the
-     * decision — see `decide()`, step 5.)
+     * that count with one always-true sentence. Since #855 it uses it again
+     * for ONE read: for a date the request NAMED whose claim failed, does its
+     * newest row's note say it follows a row this call claimed? That only
+     * chooses between two wordings of "changed" and names the row for the
+     * activity log; it never adds to the decided count — see `decide()`,
+     * step 5.)
      *
      * ITS RULES (checker round 3, LOW 3):
      * - It must only READ. Anything it wrote would be committed WITHOUT
