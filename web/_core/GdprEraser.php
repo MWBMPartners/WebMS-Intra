@@ -4096,7 +4096,17 @@ class GdprEraser
      * page can word the row truthfully: inventoryWords() is the ONE place that
      * turns a row into the words beside it.
      *
-     * @return array<int, array{table: string, rows: int, action: string, reason: string, keepsNumber: bool}>
+     * A READ THAT FAILS IS NEVER ANSWERED AS "NONE" (#1012 check round 1).
+     * Every read here used to sit in a `catch (\Throwable)` that skipped the
+     * row, so ANY database failure - not only a missing table - made the kind
+     * of record vanish from the list, which reads exactly like "nothing held".
+     * Now only error 1146 (no such table: the app that makes those records is
+     * not installed) means none and is skipped. Any other failure gives a row
+     * of its own, made by unreadInventoryRow(): `rows` is null, `couldNotRead`
+     * is true and `note` says in words that the records could not be read.
+     * Both pages that print this list show that row as such.
+     *
+     * @return array<int, array{table: string, rows: int|null, action: string, reason: string, keepsNumber: bool, couldNotRead?: true, note?: string}>
      */
     public static function inventory(int $userId): array
     {
@@ -4119,9 +4129,13 @@ class GdprEraser
                     foreach (self::givingRows($table, $outlook[$mine], $other === null ? 0 : $outlook[$other]['keep']) as $row) {
                         $out[] = $row;
                     }
-                } catch (\Throwable $ignored) {
+                } catch (\Throwable $problem) {
                     // A giving table missing (the app not installed): nothing
-                    // to show, as for any other table below.
+                    // to show, as for any other table below. Any other
+                    // failure is said, never shown as none (#1012).
+                    if (self::isNoSuchTable($problem) === false) {
+                        $out[] = self::unreadInventoryRow($entry);
+                    }
                 }
                 continue;
             }
@@ -4149,9 +4163,12 @@ class GdprEraser
                 $count = 0;
                 // 🛡️ #1012: the DBS checks ABOUT this person are counted by
                 //    asking dbsChecksAboutYou(), the ONE place they are read,
-                //    so this number and the rows the full data copy hands over
-                //    cannot disagree. (The checks this person RECORDED, the
-                //    `recordedByID` instruction, are counted below as usual.)
+                //    so when the read works this number IS the number of rows
+                //    the full data copy hands over. When it fails, this list
+                //    shows a "could not be read" row (below) and the copy
+                //    refuses to answer, so neither says "none". (The checks
+                //    this person RECORDED, the `recordedByID` instruction, are
+                //    counted below as usual.)
                 $stmt = false;
                 if ($table === 'tblDbsChecks' && $col === 'userID' && $via === null) {
                     $count = count(self::dbsChecksAboutYou($userId));
@@ -4182,8 +4199,14 @@ class GdprEraser
                         },
                     ];
                 }
-            } catch (\Throwable $ignored) {
-                // Table missing (app not installed). Skip silently.
+            } catch (\Throwable $problem) {
+                // Table missing (app not installed): none, so skipped. Any
+                // other failure is a row of its own saying the records could
+                // not be read (#1012): it used to be skipped too, which read
+                // exactly like "nothing held".
+                if (self::isNoSuchTable($problem) === false) {
+                    $out[] = self::unreadInventoryRow($entry);
+                }
             }
         }
 
@@ -4217,12 +4240,56 @@ class GdprEraser
                     'keepsNumber' => false,
                 ];
             }
-        } catch (\Throwable $ignored) {
+        } catch (\Throwable $problem) {
             // The table is missing (a database older than the erasure
-            // feature). There is then no request to show.
+            // feature). There is then no request to show. Any other failure
+            // is said, never shown as none (#1012).
+            if (self::isNoSuchTable($problem) === false) {
+                $out[] = self::unreadInventoryRow([
+                    'table'  => 'tblErasureRequest',
+                    'action' => 'anonymise',
+                    'reason' => 'Your requests to be erased, if you have made any.',
+                ]);
+            }
         }
 
         return $out;
+    }
+
+    /** The words beside an inventory() row whose records could not be read (#1012). */
+    public const INVENTORY_COULD_NOT_READ = 'These records could not be read just now, so whether we hold any, and how many, '
+        . 'is not known. Please try again later.';
+
+    /**
+     * 🚧 An inventory() row for a kind of record that could not be read
+     *    (#1012). `rows` is null - not 0, which would be a claim - and
+     *    `couldNotRead` and `note` say so. `keepsNumber` is true for a kept or
+     *    anonymised kind, the cautious reading when the database could not be
+     *    asked (anonymiseKeepsNumber() needs it); the pages show the note
+     *    rather than inventoryWords() for such a row.
+     *
+     * @param array<string, mixed> $entry A catalogue() instruction (table, action, reason).
+     * @return array{table: string, rows: null, action: string, reason: string, keepsNumber: bool, couldNotRead: true, note: string}
+     */
+    private static function unreadInventoryRow(array $entry): array
+    {
+        $action = (string) ($entry['action'] ?? '');
+
+        return [
+            'table'        => (string) $entry['table'],
+            'rows'         => null,
+            'action'       => $action,
+            'reason'       => (string) ($entry['reason'] ?? ''),
+            'keepsNumber'  => $action !== 'delete',
+            'couldNotRead' => true,
+            'note'         => self::INVENTORY_COULD_NOT_READ,
+        ];
+    }
+
+    /** Is this failure MySQL's "no such table" (1146), the one that means nothing is held? */
+    private static function isNoSuchTable(\Throwable $problem): bool
+    {
+        return $problem instanceof \mysqli_sql_exception && $problem->getCode() === 1146;
     }
 
     /**
@@ -4361,8 +4428,9 @@ class GdprEraser
             // they recorded for themselves, is about them.
             'about'          => 'These records carry your name because you made them. They are usually about somebody '
                 . 'else - a person being cared for, a person whose DBS check was recorded, or a child - so each is '
-                . 'listed only by its kind, the day it was made and the organisation that holds it, and nothing else '
-                . 'from the record is given (decision D-142). They keep your name and account number even if you are '
+                . 'listed only by its kind, the day it was made and the organisation that holds it (a DBS check is '
+                . 'held by no organisation, so none is given for it), and nothing else from the record is given '
+                . '(decision D-142). They keep your name and account number even if you are '
                 . 'erased (decisions D-016, D-110 and D-111).',
             'records'        => [],
             'notListed'      => 0,
@@ -4480,8 +4548,10 @@ class GdprEraser
      *
      * THE ONE PLACE these rows are read, for BOTH answers: the full data copy
      * hands over what this returns, and `inventory()` counts the same rows by
-     * asking this method rather than writing its own `COUNT(*)`, so My data's
-     * number and the copy's rows cannot disagree.
+     * asking this method rather than writing its own `COUNT(*)`. So when the
+     * read works, My data's number IS the number of rows in the copy. When it
+     * fails, neither says "none": the copy refuses to answer (this throws),
+     * and My data shows the row as "could not be read".
      *
      * WHICH COLUMNS, and why. Everything about the check itself, as stored:
      *   - `dbsCheckID`: the record's own number, so the member can name it
@@ -4493,7 +4563,8 @@ class GdprEraser
      *     own reference, printed on the certificate the member holds, and
      *     already shown to them on `account/safeguarding`), `issuedDate`,
      *     `expiresAt`, `status`, `recordedAt` (when it was written into the
-     *     portal) and `notes`.
+     *     portal, handed over as `recordedAtServerTime` - see TIMES) and
+     *     `notes`.
      *   - `notes` is included because it is written about this check, so it
      *     is the member's data. No page writes it today: the one INSERT,
      *     `_apps/admin/safeguarding/dbs-save.php`, names no `notes` column, so
@@ -4506,8 +4577,8 @@ class GdprEraser
      *     The member's own safeguarding page does not show the recorder
      *     either. The worker's name stays ON the record (D-016, D-110 to
      *     D-113); it is just not handed to the person the check is about.
-     *     Whether a member should be given the recorder's name is left open
-     *     for the owner on #1012; until they decide, it is not given.
+     *     The owner's decision D-154 (12 November 2026) rules out giving the
+     *     recorder's name or number in the member's copy.
      *   - `userID`: it is the member themselves, already the copy's subject.
      *   - An organisation: `tblDbsChecks` has NO organisation column (a DBS
      *     check is about a person, not an organisation - see
@@ -4515,9 +4586,14 @@ class GdprEraser
      *
      * TIMES are handed over exactly as stored - a DATE as `YYYY-MM-DD`, the
      * DATETIME `recordedAt` as `YYYY-MM-DD HH:MM:SS` - and never turned into a
-     * moment: nothing records which clock `recordedAt` was read on, and a
-     * round trip through strtotime() moves a reading inside the hour a clock
-     * change skips (#777).
+     * moment, because a round trip through strtotime() moves a reading inside
+     * the hour a clock change skips (#777). WHICH CLOCK: the one writer,
+     * `_apps/admin/safeguarding/dbs-save.php`, does not name `recordedAt`, so
+     * the column's `DEFAULT CURRENT_TIMESTAMP` fills it - the DATABASE
+     * SERVER's own clock, in its session's time zone, which the portal does
+     * not set. Not UTC, and not the organisation's clock. So the key is
+     * `recordedAtServerTime`, as the e-mail send log's `recordedAtServerTime`
+     * in the same copy says the same thing about its own column.
      *
      * FAILURES: error 1146 (no such table - a database from before the
      * safeguarding feature) means none are held, so the answer is an empty
@@ -4525,7 +4601,7 @@ class GdprEraser
      * as every other part of the data copy does, because a copy that quietly
      * left the checks out is the fault #1012 fixes.
      *
-     * @return list<array{dbsCheckID: int, dbsType: string, referenceNumber: string|null, issuedDate: string, expiresAt: string, status: string, recordedAt: string, notes: string|null}>
+     * @return list<array{dbsCheckID: int, dbsType: string, referenceNumber: string|null, issuedDate: string, expiresAt: string, status: string, recordedAtServerTime: string, notes: string|null}>
      */
     public static function dbsChecksAboutYou(int $userId): array
     {
@@ -4562,7 +4638,7 @@ class GdprEraser
                 'issuedDate'      => (string) $row['issuedDate'],
                 'expiresAt'       => (string) $row['expiresAt'],
                 'status'          => (string) $row['status'],
-                'recordedAt'      => (string) $row['recordedAt'],
+                'recordedAtServerTime' => (string) $row['recordedAt'],
                 'notes'           => $row['notes'] === null ? null : (string) $row['notes'],
             ];
         }

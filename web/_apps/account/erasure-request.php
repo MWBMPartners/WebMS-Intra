@@ -125,6 +125,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h5">What will happen to your data:</h2>
     <ul>
         <?php foreach ($inventory as $i): ?>
+            <?php if (($i['couldNotRead'] ?? false) === true): ?>
+                <?php // 🚧 #1012: a kind of record whose read failed - said, never counted as 0 or left out. ?>
+                <li data-inventory-could-not-read>
+                    <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
+                    — <?php echo htmlspecialchars((string) $i['note'], ENT_QUOTES, 'UTF-8'); ?>
+                </li>
+                <?php continue; ?>
+            <?php endif; ?>
             <li>
                 <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
                 — <strong><?php echo (int) $i['rows']; ?></strong> row(s) will be

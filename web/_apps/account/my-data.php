@@ -74,6 +74,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php else: ?>
             <div class="portal-data-list">
                 <?php foreach ($inventory as $row): ?>
+                    <?php if (($row['couldNotRead'] ?? false) === true): ?>
+                        <?php // 🚧 #1012: a kind of record whose read FAILED (any error but "no such table").
+                              //    It used to be left off this list, which reads exactly like "nothing held".
+                              //    No count and no "would be" words: neither is known. The sentence is
+                              //    GdprEraser::INVENTORY_COULD_NOT_READ, also in the JSON download's `note`. ?>
+                        <div class="row py-2 border-bottom small" data-inventory-could-not-read>
+                            <div class="col-md-4"><code><?php echo htmlspecialchars((string) $row['table'], ENT_QUOTES, 'UTF-8'); ?></code></div>
+                            <div class="col-md-1 text-end"><strong>?</strong></div>
+                            <div class="col-md-2"><span class="badge text-wrap text-start bg-warning text-dark">could not be read just now</span></div>
+                            <div class="col-md-5 text-muted"><?php echo htmlspecialchars((string) $row['note'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        </div>
+                        <?php continue; ?>
+                    <?php endif; ?>
                     <div class="row py-2 border-bottom small">
                         <div class="col-md-4"><code><?php echo htmlspecialchars((string) $row['table'], ENT_QUOTES, 'UTF-8'); ?></code></div>
                         <div class="col-md-1 text-end"><strong><?php echo (int) $row['rows']; ?></strong></div>

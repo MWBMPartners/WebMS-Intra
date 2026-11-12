@@ -133,8 +133,10 @@
  *      who recorded them; the check she recorded for another member is not
  *      handed over as hers; My data counts exactly the rows the copy holds;
  *      a member with none gets none; and the privacy policy's "Your rights"
- *      section is pinned as rendered. Six faults planted, each turning its
- *      check red.
+ *      section is pinned as rendered. A failed read of the checks is DRIVEN
+ *      (a column renamed for the moment): the copy refuses to answer, and My
+ *      data and Request erasure say "could not be read" rather than leaving
+ *      the row out. Nine faults planted, each turning its check red.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -227,7 +229,11 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 191; // #1012 added section P (fourteen: the premise,
+const EXPECTED_CHECKS = 196; // #1012 check round 1 added five: the driven
+                            // failed read (P6b the copy refuses, P6c My data
+                            // and Request erasure say "could not be read")
+                            // and three plants (P13b, P13c, P13d). 196.
+                            // #1012 added section P (fourteen: the premise,
                             // the copy's two checks field by field, the
                             // recorder absent, another member's check absent,
                             // My data's count agreeing with the copy, a member
@@ -693,6 +699,23 @@ function putSectionOBack(): void
     }
 }
 
+/**
+ * 🔩 Put `tblDbsChecks.notes` back, if section P (#1012) left it renamed (its
+ *    driven "the checks cannot be read"). Asked in the same places as
+ *    putSectionOBack(), for the same reason: a `finally` does not run when the
+ *    SIGINT/SIGTERM handler ends the run with exit(), and nothing runs at all
+ *    after SIGKILL, so the start of the next run is the last repair. Only ever
+ *    on a selftest_ database.
+ */
+function putSectionPBack(): void
+{
+    $column = one("SELECT COUNT(*) AS `n` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+        . "AND `TABLE_NAME` = 'tblDbsChecks' AND `COLUMN_NAME` = 'notesP1012'");
+    if ((int) ($column['n'] ?? 0) > 0) {
+        q('ALTER TABLE `tblDbsChecks` RENAME COLUMN `notesP1012` TO `notes`');
+    }
+}
+
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
 function cleanup(): void
 {
@@ -717,6 +740,7 @@ function cleanup(): void
     try {
         putClaimColumnBack();
         putSectionOBack();
+        putSectionPBack();
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [(string) $key]);
@@ -996,6 +1020,7 @@ if (function_exists('pcntl_async_signals') === true) {
 }
 putClaimColumnBack();
 putSectionOBack();
+putSectionPBack();
 removeWorld();
 
 q("INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES (?, 'selftest-erasure-a', 'Selftest erasure A', 1), (?, 'selftest-erasure-b', 'Selftest erasure B', 1)", 'ii', [ORG_A, ORG_B]);
@@ -4325,7 +4350,7 @@ ok('O1 premise: Wil\'s five kinds of record, his case and visit in B, and his ca
 
 // The list D-142 asks for, written out in the test - words included - so a
 // change to any of them is a change somebody has to make here too.
-$o929About = 'These records carry your name because you made them. They are usually about somebody else - a person being cared for, a person whose DBS check was recorded, or a child - so each is listed only by its kind, the day it was made and the organisation that holds it, and nothing else from the record is given (decision D-142). They keep your name and account number even if you are erased (decisions D-016, D-110 and D-111).';
+$o929About = 'These records carry your name because you made them. They are usually about somebody else - a person being cared for, a person whose DBS check was recorded, or a child - so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is held by no organisation, so none is given for it), and nothing else from the record is given (decision D-142). They keep your name and account number even if you are erased (decisions D-016, D-110 and D-111).';
 $o929Rows = [
     'dbs-check-recorded' => ['kind' => 'dbs-check-recorded', 'what' => 'DBS (safeguarding) check', 'day' => '2026-01-20', 'organisation' => null,
         'yourPart' => 'Your name and account number are on this record as the person who recorded the check.'],
@@ -4679,9 +4704,9 @@ ok('P1 premise: Della\'s two DBS checks (one recorded by Rex, one by a recorder 
 // exactly as stored, in the record's own order.
 $p1012Expected = [
     ['dbsCheckID' => P_DBS_ONE, 'dbsType' => 'enhanced', 'referenceNumber' => 'P1012-REF-ONE', 'issuedDate' => '2024-02-29',
-        'expiresAt' => '2027-02-28', 'status' => 'valid', 'recordedAt' => '2026-03-28 23:30:00', 'notes' => 'P1012 note about Della'],
+        'expiresAt' => '2027-02-28', 'status' => 'valid', 'recordedAtServerTime' => '2026-03-28 23:30:00', 'notes' => 'P1012 note about Della'],
     ['dbsCheckID' => P_DBS_TWO, 'dbsType' => 'basic', 'referenceNumber' => null, 'issuedDate' => '2021-06-01',
-        'expiresAt' => '2024-06-01', 'status' => 'expired', 'recordedAt' => '2021-06-02 09:00:00', 'notes' => null],
+        'expiresAt' => '2024-06-01', 'status' => 'expired', 'recordedAtServerTime' => '2021-06-02 09:00:00', 'notes' => null],
 ];
 // Who recorded Della's checks, by name and by number: in NONE of what she is handed.
 // (Numbers are not searched for as text: section N's activity records are
@@ -4739,7 +4764,7 @@ $p1012Counted = static function (array $got): array {
 };
 
 /** Everything section P asserts, as the list of what was WRONG (empty when right). */
-$p1012Observe = static function () use ($p1012Fetch, $p1012Counted, $p1012Expected, $p1012Recorder, $p1012Otto, $p1012Rights, &$jar): array {
+$p1012Observe = static function () use ($p1012Fetch, $p1012Counted, $p1012Expected, $p1012Recorder, $p1012Otto, $p1012Rights, &$jar, $db): array {
     $wrong = [];
     $della  = $p1012Fetch('p1012della');
     $penny   = $p1012Fetch('p1012penny');
@@ -4774,6 +4799,53 @@ $p1012Observe = static function () use ($p1012Fetch, $p1012Counted, $p1012Expect
     if ($penny['hasKey'] === false || $penny['checks'] !== [] || $p1012Counted($penny) !== ['json' => [], 'page' => []]) {
         $wrong[] = 'penny sees something';
     }
+    // DRIVEN (#1012 check round 1): the checks cannot be read - a real
+    // database error (1054, a column renamed for the moment), NOT "no such
+    // table". The copy must refuse to answer rather than hand over an empty
+    // list; My data and Request erasure must show the DBS row as "could not
+    // be read" (no count), in the JSON too; the row for the checks Della
+    // RECORDED is read separately and must still be counted.
+    $db->query('ALTER TABLE `tblDbsChecks` RENAME COLUMN `notes` TO `notesP1012`');
+    try {
+        $broken = $p1012Fetch('p1012della');
+        $asking = req($jar['p1012della'], 'GET', '/account/erasure-request');
+    } finally {
+        $db->query('ALTER TABLE `tblDbsChecks` RENAME COLUMN `notesP1012` TO `notes`');
+        putSectionPBack();
+    }
+    if ($broken['export']['status'] === 200 || $broken['hasKey'] === true || str_contains($broken['export']['body'], 'dbsChecksAboutYou') === true) {
+        $wrong[] = 'failure answered as none';
+    }
+    $unreadJson = [];
+    foreach ((array) $broken['inventory'] as $row) {
+        if (($row['table'] ?? '') === 'tblDbsChecks') {
+            $unreadJson[] = ($row['couldNotRead'] ?? false) === true
+                ? ['unread', $row['rows'], $row['note'] ?? null]
+                : ['read', (int) $row['rows'], mb_substr((string) $row['reason'], 0, 24)];
+        }
+    }
+    $unreadPage = [];
+    $brokenDoc  = \Dom\HTMLDocument::createFromString((string) $broken['page']['body'], LIBXML_NOERROR);
+    foreach ($brokenDoc->querySelectorAll('[data-inventory-could-not-read]') as $row) {
+        $cells = [];
+        foreach ($row->children as $cell) {
+            $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
+        }
+        $unreadPage[] = $cells;
+    }
+    $unreadAsk = [];
+    $askDoc    = \Dom\HTMLDocument::createFromString((string) $asking['body'], LIBXML_NOERROR);
+    foreach ($askDoc->querySelectorAll('[data-inventory-could-not-read]') as $row) {
+        $unreadAsk[] = trim((string) preg_replace('/\s+/', ' ', (string) $row->textContent));
+    }
+    $unreadWords = 'These records could not be read just now, so whether we hold any, and how many, is not known. Please try again later.';
+    if ($broken['page']['status'] !== 200 || $asking['status'] !== 200
+        || $unreadJson !== [['unread', null, $unreadWords], ['read', 1, 'DBS checks you recorded ']]
+        || $unreadPage !== [['tblDbsChecks', '?', 'could not be read just now', $unreadWords]]
+        || $unreadAsk !== ['tblDbsChecks — ' . $unreadWords]) {
+        $wrong[] = 'inventory hid failure';
+    }
+
     $policy = req($jar['p1012della'], 'GET', '/privacy/policy');
     $rights = $p1012Rights((string) $policy['body']);
     if ($policy['status'] !== 200 || $rights === '' || $rights !== (readRenderedPins()['pins']['privacy policy, your rights'] ?? null)) {
@@ -4787,7 +4859,7 @@ $p1012First = $p1012Observe();
 $p1012Is    = static fn (string $what): bool => in_array($what, $p1012First, true) === false && in_array('a download did not answer', $p1012First, true) === false;
 ok('P2 Della\'s full data copy (account/data-export) hands over BOTH her DBS checks under "dbsChecksAboutYou" - number, type, certificate reference, issue and expiry dates, status, when recorded and notes - every value exactly as stored (the 23:30 reading inside the hour Nuuk skips is unmoved), in order, with nothing else in each entry (#1012)',
     $p1012Is('copy wrong'), implode('; ', $p1012First));
-ok('P3 who recorded Della\'s checks - Rex\'s name, the other recorder\'s stored name, and any recorder field at all (its number included) - is nowhere in her full data copy (#1012)',
+ok('P3 neither recorder\'s NAME (Rex\'s, or the other recorder\'s stored name) and no field called recordedByID or recordedByName is anywhere in Della\'s full data copy (a recorder field under any OTHER name is caught by P2, whose match of every entry is exact) (#1012, D-154)',
     $p1012Is('recorder leaked'), implode('; ', $p1012First));
 ok('P4 nothing of Otto\'s check - its reference, its notes, Otto\'s name - reaches Della in her copy, her My data page or its JSON, although she recorded it (#1012, #929)',
     $p1012Is('other member leaked'), implode('; ', $p1012First));
@@ -4795,6 +4867,10 @@ ok('P5 My data counts exactly the rows the copy hands over (2), in its JSON and 
     $p1012Is('count disagrees'), implode('; ', $p1012First));
 ok('P6 Penny, who has no DBS checks, is handed an empty "dbsChecksAboutYou" and My data shows her no DBS row (#1012)',
     $p1012Is('penny sees something'), implode('; ', $p1012First));
+ok('P6b DRIVEN: when Della\'s checks cannot be read (a real database error, not "no such table"), the full data copy refuses to answer rather than handing over an empty list (#1012)',
+    $p1012Is('failure answered as none'), implode('; ', $p1012First));
+ok('P6c DRIVEN: in the same state My data (page and JSON) and Request erasure show the DBS row as "could not be read", with no count and in exactly its words, while the checks Della recorded are still counted (1) (#1012)',
+    $p1012Is('inventory hid failure'), implode('; ', $p1012First));
 // The pin is recorded through renderedPin() ONCE, here, on the clean page, so
 // the pin file's own check counts it; the plants below compare without it.
 $p1012RightsNow = $p1012Rights((string) req($jar['p1012della'], 'GET', '/privacy/policy')['body']);
@@ -4813,12 +4889,18 @@ $p1012Plants = [
         '_core/GdprEraser.php', ['`recordedAt`, `notes` \'' => '`recordedAt`, `notes`, `recordedByName` \'',
             "'notes'           => \$row['notes'] === null ? null : (string) \$row['notes']," => "'notes'           => \$row['notes'] === null ? null : (string) \$row['notes'], 'recordedByName' => \$row['recordedByName'],"], 'recorder leaked'],
     'P11 the time turned into a moment and back on the organisation\'s clock, not handed over as stored' => [
-        '_core/GdprEraser.php', ["'recordedAt'      => (string) \$row['recordedAt']," => "'recordedAt'      => date('Y-m-d H:i:s', (int) strtotime((string) \$row['recordedAt'])),"], 'copy wrong'],
+        '_core/GdprEraser.php', ["'recordedAtServerTime' => (string) \$row['recordedAt']," => "'recordedAtServerTime' => date('Y-m-d H:i:s', (int) strtotime((string) \$row['recordedAt'])),"], 'copy wrong'],
     'P12 My data counting the checks with its own query while the copy leaves expired checks out (the two allowed to disagree)' => [
         '_core/GdprEraser.php', ["if (\$table === 'tblDbsChecks' && \$col === 'userID' && \$via === null) {" => 'if (false) {',
             'FROM `tblDbsChecks` WHERE `userID` = ? ORDER BY `dbsCheckID`' => 'FROM `tblDbsChecks` WHERE `userID` = ? AND `status` <> \'expired\' ORDER BY `dbsCheckID`'], 'count disagrees'],
+    'P13b the copy\'s "no such table" test widened to every failure, so a failed read hands over an empty list' => [
+        '_core/GdprEraser.php', ['if ($failure->getCode() === 1146) {' => 'if (true) {'], 'failure answered as none'],
+    'P13c My data\'s list skipping every failed read again, as before #1012 (any error taken as "no such table")' => [
+        '_core/GdprEraser.php', ['return $problem instanceof \\mysqli_sql_exception && $problem->getCode() === 1146;' => 'return true;'], 'inventory hid failure'],
+    'P13d My data\'s page drawing a failed read as an ordinary row (a count of 0)' => [
+        '_apps/account/my-data.php', ["<?php if ((\$row['couldNotRead'] ?? false) === true): ?>" => '<?php if (false): ?>'], 'inventory hid failure'],
     'P13 the privacy policy\'s Article 15 sentence put back as it was before #1012' => [
-        '_apps/privacy/policy.php', [' Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it, and one held by an organisation you cannot open here is only counted.</li>' => '</li>'], 'policy wrong'],
+        '_apps/privacy/policy.php', [' Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is held by no organisation, so none is given for it), and one held by an organisation you cannot open here is only counted.</li>' => '</li>'], 'policy wrong'],
 ];
 foreach ($p1012Plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);
