@@ -413,14 +413,17 @@ class Mailer
      *                              `sendNow`    false: do not try in this
      *                                           request; keep it for the job.
      *                              `siteId`     which organisation the message
-     *                                           belongs to, for the footer's
-     *                                           name and support address. A
-     *                                           SCHEDULED JOB that walks
-     *                                           several organisations must set
-     *                                           it; a web request need not,
-     *                                           because its merged settings
-     *                                           are already the right
-     *                                           organisation's (#683).
+     *                                           belongs to: the footer's name
+     *                                           and support address (#683),
+     *                                           the mail queue row it is kept
+     *                                           in, and every send-log line
+     *                                           about it (#1039). A SCHEDULED
+     *                                           JOB that walks several
+     *                                           organisations must set it; a
+     *                                           web request need not, because
+     *                                           its merged settings and
+     *                                           Site::id() are already the
+     *                                           right organisation's.
      *                              `bodyIsText` true: the body is PLAIN
      *                                           TEXT, whatever it contains.
      *                                           It is escaped and wrapped in
@@ -495,10 +498,34 @@ class Mailer
         $wanted             = MailQueue::wanted($options, ++self::$givenThisRequest);
         $urgent             = $wanted['priority'] <= MailQueue::URGENT;
         // Everything the queue needs to keep this message, should it come to that.
+        // 🏢 WHICH ORGANISATION THE MESSAGE IS FOR (#1039). The caller's
+        //    `siteId` when it named one, and only otherwise the request's.
+        //    It used to be the request's ALWAYS: the footer above already
+        //    followed the caller (#683), but the queue row was written under
+        //    Site::id(), so a scheduled job walking several organisations
+        //    kept every message it could not send at once under whichever
+        //    organisation its own request had resolved to. The job then sent
+        //    it and wrote the send-log line under THAT organisation too,
+        //    because the job reads the organisation back off the row
+        //    (queueRowSite(), #1006) - right about the row, and the row was
+        //    wrong. An erasure that finds send-log lines by organisation
+        //    (#964's request for an e-mail address) missed it, and the
+        //    organisation the message was for had no record of it.
+        //    The same choice goes to every send-log line this request writes
+        //    about the message (`logSite`): one message, one organisation, in
+        //    every record of it. `false` there means "this request's", which
+        //    is logSend()'s own default, so a caller that names nothing is
+        //    recorded exactly as before.
+        //    A `siteId` of 0 or below names NO organisation (the footer reads
+        //    it as "the installation's"), and is treated as not given rather
+        //    than stored as an organisation numbered 0.
+        $namedSite = $siteIdForFooter !== null && $siteIdForFooter > 0 ? $siteIdForFooter : null;
         $message = [
-            'siteId' => Site::id() > 0 ? Site::id() : null, 'priority' => $wanted['priority'], 'to' => array_map('strval', array_values($recipients)),
+            'siteId' => $namedSite ?? (Site::id() > 0 ? Site::id() : null), 'priority' => $wanted['priority'], 'to' => array_map('strval', array_values($recipients)),
             'subject' => $subj, 'html' => $htmlBody, 'text' => $plainBody, 'files' => $files,
             'expiresAt' => $wanted['expiresAt'], 'repeatSafe' => $wanted['repeatSafe'], 'canBeKept' => $wanted['canBeKept'], 'origin' => $wanted['origin'],
+            // Not a queue column: MailQueue::add() reads only the keys it knows.
+            'logSite' => $namedSite ?? false,
         ];
 
         if ($setUp === true) {
@@ -510,7 +537,7 @@ class Mailer
             $never = MailRoutes::neverFits(count($recipients), $urgent);
             if ($never !== '') {
                 self::$lastOutcome = self::OUTCOME_REFUSED;
-                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $never);
+                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $never, $message['logSite']);
 
                 return false;
             }
@@ -587,7 +614,8 @@ class Mailer
                     self::logSend(
                         $route, '', implode(', ', $recipients), $subj, 0, 'failed', null,
                         $refused === true ? 'message-refused' : $why['code'],
-                        $refused === true ? self::$keepRefusal : self::notKept($why['words'])
+                        $refused === true ? self::$keepRefusal : self::notKept($why['words']),
+                        $message['logSite']
                     );
 
                     return false;
@@ -602,7 +630,7 @@ class Mailer
             //    and sending would make the limit a promise quietly not kept.
             $over = MailRoutes::overLimit(count($recipients), $urgent);
             if ($over !== '') {
-                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $over);
+                self::logSend($route, '', implode(', ', $recipients), $subj, 0, 'failed', null, MailRoutes::OVER_LIMIT, $over, $message['logSite']);
 
                 return false;
             }
@@ -626,9 +654,9 @@ class Mailer
         }
 
         $sent = $route === self::ROUTE_GOOGLE
-            ? MailerGoogle::send($recipients, $subj, $htmlBody, $files)
+            ? MailerGoogle::send($recipients, $subj, $htmlBody, $files, $message['logSite'])
             // 📧 Default: Microsoft Graph (MS365)
-            : self::sendViaGraph($recipients, $subj, $htmlBody, $files);
+            : self::sendViaGraph($recipients, $subj, $htmlBody, $files, $message['logSite']);
         self::$lastOutcome = $sent === true ? self::OUTCOME_SENT : self::OUTCOME_NOT_SENT;
 
         return $sent;
@@ -651,7 +679,7 @@ class Mailer
 
         if ($next === MailRoutes::NEXT_SENT) {
             self::$lastOutcome = self::OUTCOME_SENT;
-            self::logSmtp($answer, $to, $message['subject'], 'sent');
+            self::logSmtp($answer, $to, $message['subject'], 'sent', true, $message['logSite']);
 
             return true;
         }
@@ -659,7 +687,7 @@ class Mailer
             // Nothing to keep: a setting is missing, or the mail server said
             // no to THIS message and would say it again.
             self::$lastOutcome = $next === MailRoutes::NEXT_REFUSED ? self::OUTCOME_REFUSED : self::OUTCOME_NOT_SET_UP;
-            self::logSmtp($answer, $to, $message['subject'], 'failed');
+            self::logSmtp($answer, $to, $message['subject'], 'failed', true, $message['logSite']);
 
             return false;
         }
@@ -682,7 +710,7 @@ class Mailer
         if ($kept === false) {
             $answer['words'] = self::notKept((string) $answer['words']);
         }
-        self::logSmtp($answer, $to, $message['subject'], $kept === true ? $why['status'] : 'failed');
+        self::logSmtp($answer, $to, $message['subject'], $kept === true ? $why['status'] : 'failed', true, $message['logSite']);
 
         return $kept;
     }
@@ -735,7 +763,7 @@ class Mailer
         self::$lastOutcome = $why['status'] === 'held' ? self::OUTCOME_HELD : self::OUTCOME_QUEUED;
         self::$keptThisRequest++;
         if (($why['logged'] ?? false) === false) {
-            self::logSend($route, '', implode(', ', $message['to']), $message['subject'], count($message['files']), $why['status'], null, $why['code'], $why['words']);
+            self::logSend($route, '', implode(', ', $message['to']), $message['subject'], count($message['files']), $why['status'], null, $why['code'], $why['words'], $message['logSite']);
         }
 
         return true;

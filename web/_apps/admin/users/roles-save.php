@@ -30,6 +30,16 @@
  * a hidden field, so an ordinary save of the person's OTHER roles never reads
  * as taking this one away (a disabled box is not submitted, #667).
  *
+ * THE RULE IS ASKED TWICE (#866). Once before anything is opened, which is the
+ * refusal an ordinary administrator normally meets; and again INSIDE the
+ * transaction, before the first write, under the lock the Roles page takes
+ * when it changes which roles open the permission
+ * (`PublicWebsiteSetup::whyRoleChangeRefusedUnderLock()`). The first answer
+ * alone was judged on the mapping as this request first read it: a global
+ * administrator pointing the permission at role R in the same second let an
+ * ordinary administrator give themselves R, both committed, and the ordinary
+ * administrator held the job.
+ *
  * WHAT THIS PAGE CANNOT DO: it cannot grant a role belonging to a
  * DIFFERENT organisation — a posted `roleID` that is not in
  * `Roles::forSite()`'s list for the organisation open right now is simply
@@ -134,31 +144,57 @@ if ($handOutRefused !== '') {
 $given   = 0;
 $removed = 0;
 $sawNotFound = false;
+// D-093's second answer (#866), set inside the transaction. '' means it was
+// asked and allowed the save; anything else is the refusal, said and recorded
+// AFTER the rollback (Logger writes on this same connection, so a refusal
+// recorded inside the transaction would be rolled back with it).
+$handOutRefusedUnderLock = '';
 
 $mysqli->begin_transaction();
 try {
-    foreach ($toGrant as $roleId) {
-        $result = Roles::grant($mysqli, $userId, $roleId, $siteId, $actorId);
-        if ($result === 'ok') {
-            $given++;
-        } elseif ($result === 'not_found') {
-            // 🏁 The membership vanished between the AccountGuard check
-            //    above and this write (a second admin removed them a
-            //    moment ago) — not a fault, just a race. Reported below.
-            $sawNotFound = true;
+    // 🔒 #866: the lock FIRST, then the mapping read fresh under it, then the
+    //    judgement, then the writes. A global administrator changing which
+    //    roles open "Set up the public website" takes this same lock
+    //    (Capabilities::save() and forget()), so that change cannot land
+    //    between this judgement and the writes below.
+    $handOutRefusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock($mysqli, (int) ($actorId ?? 0), $siteId, $touched);
+    if ($handOutRefusedUnderLock === '') {
+        foreach ($toGrant as $roleId) {
+            $result = Roles::grant($mysqli, $userId, $roleId, $siteId, $actorId);
+            if ($result === 'ok') {
+                $given++;
+            } elseif ($result === 'not_found') {
+                // 🏁 The membership vanished between the AccountGuard check
+                //    above and this write (a second admin removed them a
+                //    moment ago) — not a fault, just a race. Reported below.
+                $sawNotFound = true;
+            }
         }
-    }
-    foreach ($toRevoke as $roleId) {
-        $result = Roles::revoke($mysqli, $userId, $roleId, $siteId, $actorId);
-        if ($result === 'ok') {
-            $removed++;
+        foreach ($toRevoke as $roleId) {
+            $result = Roles::revoke($mysqli, $userId, $roleId, $siteId, $actorId);
+            if ($result === 'ok') {
+                $removed++;
+            }
         }
+        $mysqli->commit();
+    } else {
+        // Nothing has been written; this only lets the lock go.
+        $mysqli->rollback();
     }
-    $mysqli->commit();
 } catch (\Throwable $e) {
     $mysqli->rollback();
     Logger::errorPlatform('Roles', 'Error', 'ROLES_SAVE_FAILED', 'Failed to update roles for account #' . $userId, $e->getMessage());
     $_SESSION['flash_msg']  = t('error.database');
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/users'), true, 302);
+    exit();
+}
+
+if ($handOutRefusedUnderLock !== '') {
+    // Said and recorded exactly as the first answer's refusal is, with the
+    // place telling the two apart in the activity log.
+    PublicWebsiteSetup::recordHandOutRefused($actorId, $siteId, 'Users page, roles of account #' . $userId . ', judged again inside the save');
+    $_SESSION['flash_msg']  = $handOutRefusedUnderLock;
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/users'), true, 302);
     exit();

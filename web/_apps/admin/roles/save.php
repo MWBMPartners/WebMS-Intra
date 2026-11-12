@@ -36,6 +36,10 @@
  * set). Asked of `PublicWebsiteSetup`, the ONE place the rule is; refused with
  * the reason and recorded. Every other action, and every other capability, is
  * untouched: an ordinary administrator keeps the rest of this page.
+ * The delete asks it a SECOND time inside its own transaction, under the lock
+ * `Capabilities::save()` and `forget()` take (#866), so a global
+ * administrator's change to the set at the same moment is judged against,
+ * never slipped past.
  *
  * WHY A ROLE'S KEY IS NEVER READ FROM AN UPDATE POST: keys are fixed for
  * life once a role exists, standard or not, because workflow steps,
@@ -302,19 +306,50 @@ if ($action === 'delete') {
         exit();
     }
 
-    $stmt = $mysqli->prepare('DELETE FROM tblRoles WHERE roleID = ? AND siteID = ? AND isStandard = 0');
-    if ($stmt !== false) {
-        $stmt->bind_param('ii', $roleId, $siteId);
-        $stmt->execute();
-        $stmt->close();
+    // 🔒 #866: D-093 asked AGAIN, inside the transaction that deletes, under
+    //    the lock `Capabilities::save()` takes when a global administrator
+    //    points "Set up the public website" at a role. Without it, an
+    //    ordinary administrator deleting role R in the same second as that
+    //    change was judged on the set WITHOUT R, the delete's cascade then
+    //    took R back out of the set the global administrator had just
+    //    chosen, and both said they had succeeded. The first ask above stays:
+    //    it is the refusal an ordinary administrator normally meets.
+    //    The refusal is recorded AFTER the rollback, because Logger writes on
+    //    this same connection.
+    $refusedUnderLock = '';
+    $mysqli->begin_transaction();
+    try {
+        $refusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock($mysqli, (int) ($actorId ?? 0), $siteId, [(string) $roleKeyRow['roleKey']]);
+        if ($refusedUnderLock === '') {
+            $stmt = $mysqli->prepare('DELETE FROM tblRoles WHERE roleID = ? AND siteID = ? AND isStandard = 0');
+            if ($stmt !== false) {
+                $stmt->bind_param('ii', $roleId, $siteId);
+                $stmt->execute();
+                $stmt->close();
+            }
+            $mysqli->commit();
+            // 🗒️ The storage's own `ON DELETE CASCADE` has just taken this
+            //    role out of every capability's set, and `Capabilities`
+            //    remembers "which roles open this door" for the rest of the
+            //    request. It is not told, because the delete happened here
+            //    rather than through one of its own writers — so this is the
+            //    one place outside the class that has to say so.
+            Capabilities::forgetMemo();
+        } else {
+            // Nothing has been deleted; this only lets the lock go.
+            $mysqli->rollback();
+        }
+    } catch (\Throwable $e) {
+        $mysqli->rollback();
+        Logger::errorPlatform('Roles', 'Error', 'ROLE_DELETE_FAILED', 'Failed to delete role #' . $roleId, $e->getMessage());
+        $_SESSION['flash_msg']  = 'The database refused the change, so nothing was deleted.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/roles'), true, 302);
+        exit();
     }
-
-    // 🗒️ The storage's own `ON DELETE CASCADE` has just taken this role out of
-    //    every capability's set, and `Capabilities` remembers "which roles open
-    //    this door" for the rest of the request. It is not told, because the
-    //    delete happened here rather than through one of its own writers — so
-    //    this is the one place outside the class that has to say so.
-    Capabilities::forgetMemo();
+    if ($refusedUnderLock !== '') {
+        $refuseHandOut('Roles page, deleting role #' . $roleId . ', judged again inside the delete');
+    }
 
     Logger::audit('tblRoles', $roleId, 'delete', ['roleName' => (string) $found['roleName']], null, $actorId);
     Logger::activity('RoleDelete', 'Deleted role #' . $roleId . ' (' . $found['roleName'] . ')', $actorId);

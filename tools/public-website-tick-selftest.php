@@ -86,13 +86,23 @@
  *      lock; "Check my set-up" (POST only, the form token, its limit, nothing
  *      ticked when nothing is set, a loopback main website unreachable, the
  *      door row never a tick); D-093 on the Roles and Users pages; and the
- *      menu link and the dashboard tile following the gate.
+ *      menu link and the dashboard tile following the gate. #866 (W14b-W14e):
+ *      D-093 asked AGAIN inside the transaction that writes — a global
+ *      administrator's change to the set, committed while an ordinary
+ *      administrator's save or delete waits at the organisation's-row lock,
+ *      is judged against (the over-reach half too), and the mapping's two
+ *      writers wait at that same lock. The order is made by the database's
+ *      own lock, and the wait is read from INNODB_TRX, never slept for.
  *   P  the plants: each guard taken out of a COPY of the portal, and the
  *      scenario that should catch it re-run and required to go red.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - Nothing here judges whether a page's words are TRUE; it pins what the
  *     database holds and which controls a page draws.
+ *   - #866's race is driven with this test's own connection as the second
+ *     party (one web worker cannot serve two requests at once), and only
+ *     under REPEATABLE READ; the lock's meaning under READ COMMITTED is
+ *     reasoned, not run.
  *   - It runs ONE engine at a time and one web worker, so two people changing
  *     the switch at once is not exercised (only CHANGED values are written,
  *     so the last change wins; a non-publisher's unchanged value is never
@@ -145,7 +155,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 337; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 295, then round 4's E31 and P141-P142 (3); before that 294, then #1020 round 3's P140 (1); before that 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 349; // #866's twelve (W14b-W14e, P83b, P85b, P143-P148) on top of: 337, then #885's thirty-nine (G1-G21, PG1-PG18) on top of: 295, then round 4's E31 and P141-P142 (3); before that 294, then #1020 round 3's P140 (1); before that 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -3246,6 +3256,237 @@ check('W14 (D-093) on the Users page an ordinary administrator cannot give or ta
         'refusals recorded' => true, 'locked box not drawn for the organisation\'s global administrator' => false,
         'organisation global administrator gives it' => true, 'and takes it away' => false, 'holder put back as they were' => [true, false]]);
 
+// W14b-W14e: #866. D-093 is asked AGAIN inside the transaction that writes,
+//      under the lock the mapping's writers take. The race the issue names:
+//      an ordinary administrator gives somebody role R while a global
+//      administrator points "Set up the public website" at R. Before #866
+//      the Users page judged on the mapping as it first read it, so both
+//      committed and the ordinary administrator had handed out the job.
+//
+//      HOW THE TWO ARE PUT IN THE RIGHT ORDER, with no sleep doing the work.
+//      This test's own connection plays the global administrator: it opens a
+//      transaction and takes the organisation's row FOR UPDATE — the lock
+//      `Capabilities::save()` takes first. The ordinary administrator's save
+//      is then sent WITHOUT waiting for its answer (curl_multi), so its first
+//      ask runs and passes (the set does not include R yet), it opens its
+//      transaction, and it WAITS at the same lock. Only once the database
+//      itself says the save is waiting at THAT statement
+//      (information_schema.INNODB_TRX, `LOCK WAIT`, the lock's own text) does
+//      this side change the mapping and commit — so the change lands strictly
+//      between the save's first ask and its second, which is the window the
+//      issue describes. The premise is asserted, never assumed: a save that
+//      never waits, or waits on some other statement, makes the check red
+//      rather than letting it pass on a race that never happened.
+//
+//      WHAT IT CANNOT SHOW: the wider window #866 leaves open on purpose — a
+//      global administrator acting on a page drawn before the other change
+//      committed. And it runs under REPEATABLE READ only (MySQL's default);
+//      the lock is on the organisation's ROW so that it means the same under
+//      READ COMMITTED, but that is reasoned, not run here.
+/** A POST sent without waiting for its answer, on the signed-in cookie jar. */
+$httpStart = static function (string $path, array $post) use ($port, $jar): array {
+    $handle = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($post),
+    ]);
+    $multi = curl_multi_init();
+    curl_multi_add_handle($multi, $handle);
+    $running = 0;
+    curl_multi_exec($multi, $running);
+    return ['multi' => $multi, 'handle' => $handle];
+};
+/** Let a started request run for up to $seconds. True once it has its answer. */
+$httpPump = static function (array $req, float $seconds): bool {
+    $until = microtime(true) + $seconds;
+    do {
+        $running = 0;
+        curl_multi_exec($req['multi'], $running);
+        if ($running === 0) {
+            return true;
+        }
+        curl_multi_select($req['multi'], 0.05);
+    } while (microtime(true) < $until);
+    return false;
+};
+/** Wait for a started request's answer: its status. */
+$httpFinish = static function (array $req) use ($httpPump): int {
+    $httpPump($req, 90);
+    $status = (int) curl_getinfo($req['handle'], CURLINFO_HTTP_CODE);
+    curl_multi_remove_handle($req['multi'], $req['handle']);
+    // No `curl_close()` (#1003): PHP 8.5 deprecates it, and the handle is
+    // freed when it goes out of scope. `curl_multi_close()` is not deprecated.
+    curl_multi_close($req['multi']);
+    return $status;
+};
+/**
+ * Is that request now WAITING at the organisation's-row lock (#866)? Asked of
+ * the database, while the request is pumped. False when it answered without
+ * ever waiting, or waited on some other statement for fifteen seconds.
+ */
+$waitsAtOrganisationLock = static function (array $req) use ($db, $httpPump): bool {
+    $until = microtime(true) + 15;
+    while (microtime(true) < $until) {
+        if ($httpPump($req, 0.1) === true) {
+            return false;
+        }
+        $n = (int) ($db->query(
+            "SELECT COUNT(*) AS `n` FROM `information_schema`.`INNODB_TRX` WHERE `trx_state` = 'LOCK WAIT' "
+            . "AND `trx_query` LIKE '%FROM `tblSites` WHERE `siteID` = % FOR UPDATE%'"
+        )->fetch_assoc()['n'] ?? 0);
+        if ($n === 1) {
+            return true;
+        }
+    }
+    return false;
+};
+/** Point a capability of organisation 1 at these roles, straight into the tables, as `Capabilities::save()` writes them. */
+$pointAt = static function (string $cap, array $keys) use ($db, $siteOne): void {
+    $db->query("INSERT INTO `tblCapabilityMap` (`siteID`, `capabilityKey`, `decidedAtUtc`, `decidedByID`) VALUES ({$siteOne}, '{$cap}', UTC_TIMESTAMP(), NULL) "
+        . 'ON DUPLICATE KEY UPDATE `decidedAtUtc` = UTC_TIMESTAMP()');
+    $mapId = (int) ($db->query("SELECT `mapID` FROM `tblCapabilityMap` WHERE `siteID` = {$siteOne} AND `capabilityKey` = '{$cap}'")->fetch_assoc()['mapID'] ?? 0);
+    $db->query("DELETE FROM `tblCapabilityMapRole` WHERE `mapID` = {$mapId}");
+    foreach ($keys as $key) {
+        $db->query("INSERT INTO `tblCapabilityMapRole` (`mapID`, `siteID`, `roleKey`) VALUES ({$mapId}, {$siteOne}, '{$key}')");
+    }
+};
+/**
+ * This side's change — the global administrator's — committed while the
+ * started request waits, then the request's answer. [answer, how it went].
+ *
+ * Only a PLANTED fault reaches the other two branches, and each is a real
+ * outcome rather than a test fault, so the scenario carries on instead of
+ * stopping the whole run:
+ *   'deadlock' — with the second ask's lock taken out (P145), the request no
+ *     longer waits at the organisation's row before it reads the mapping: it
+ *     takes its own row locks, then waits on this side's row lock to give the
+ *     role, while this side waits on its locks to write the mapping. MySQL
+ *     ends this side; the global administrator then saves again once the
+ *     request is done, as a person pressing Save again would.
+ *   'refused' — with the delete's second ask taken out (P146), the role is
+ *     already deleted, and the database refuses to point anything at it.
+ */
+$globalAdminChange = static function (array $req, callable $change) use ($db, $httpFinish): array {
+    try {
+        $change();
+        $db->commit();
+        $how = 'committed';
+    } catch (mysqli_sql_exception $e) {
+        $db->rollback();
+        $how = $e->getCode() === 1213 ? 'deadlock' : 'refused';
+    }
+    $status = $httpFinish($req);
+    if ($how === 'deadlock') {
+        $db->begin_transaction();
+        $change();
+        $db->commit();
+    }
+    return [$status, $how];
+};
+$roleOpens = static function (string $cap) use ($db, $siteOne): ?string {
+    $row = $db->query("SELECT GROUP_CONCAT(r.`roleKey` ORDER BY r.`roleKey`) AS `k`, COUNT(m.`mapID`) AS `n` FROM `tblCapabilityMap` m "
+        . "LEFT JOIN `tblCapabilityMapRole` r ON r.`mapID` = m.`mapID` WHERE m.`siteID` = {$siteOne} AND m.`capabilityKey` = '{$cap}'")->fetch_assoc();
+    return (int) ($row['n'] ?? 0) === 0 ? null : (string) ($row['k'] ?? '');
+};
+/**
+ * The Users page's race. The ordinary administrator gives the plain member the
+ * Volunteer role; while that save waits at the lock, this side (the global
+ * administrator) points `$changeCap` at Volunteer as well, and commits.
+ */
+$scnPwUsersRace = static function (string $changeCap = 'website.setup') use ($db, $siteOne, $signIn, $freshToken, $people, $pwClean, $httpStart, $globalAdminChange, $waitsAtOrganisationLock, $pointAt, $logged): array {
+    $pwClean();
+    $volunteer = (int) ($db->query("SELECT `roleID` FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'volunteer'")->fetch_assoc()['roleID'] ?? 0);
+    $member    = $people['member']['id'];
+    $db->query("DELETE FROM `tblUserRoles` WHERE `userID` = {$member} AND `roleID` = {$volunteer}");
+    $before = $logged('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'judged again inside the save');
+    $signIn('orgadmin');
+    $token = $freshToken();
+    $db->begin_transaction();
+    $db->query("SELECT `siteID` FROM `tblSites` WHERE `siteID` = {$siteOne} FOR UPDATE");
+    $req   = $httpStart('/admin/users/roles/save', ['csrf_token' => $token, 'userID' => (string) $member, 'roles' => [(string) $volunteer]]);
+    $waits = $waitsAtOrganisationLock($req);
+    [$status] = $globalAdminChange($req, static fn () => $pointAt($changeCap, $changeCap === 'website.setup' ? ['volunteer', 'website_setup'] : ['volunteer', 'website_editor']));
+    $out = [
+        'the save waited at the lock'      => $waits,
+        'answered'                         => $status,
+        'member given the role'            => (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblUserRoles` WHERE `userID` = {$member} AND `roleID` = {$volunteer} AND `siteID` = {$siteOne}")->fetch_assoc()['n'] ?? 0) === 1,
+        'refused inside the save, recorded' => $logged('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'judged again inside the save') - $before,
+    ];
+    $db->query("DELETE FROM `tblUserRoles` WHERE `userID` = {$member} AND `roleID` = {$volunteer}");
+    $pwClean();
+    return $out;
+};
+check('W14b (#866) a global administrator points "Set up the public website" at a role WHILE an ordinary administrator\'s save giving that role waits at the lock: the save, which passed its first ask, is refused by the second, nothing is given, and the refusal is recorded as the inside-the-save one',
+    $scnPwUsersRace(), ['the save waited at the lock' => true, 'answered' => 302, 'member given the role' => false, 'refused inside the save, recorded' => 1]);
+check('W14c (#866, the over-reach half) the same race where the global administrator changes ANOTHER permission: the save waits, then goes ahead, and nothing is refused — the second ask refuses only a role that really opens the job',
+    $scnPwUsersRace('website.publish'), ['the save waited at the lock' => true, 'answered' => 302, 'member given the role' => true, 'refused inside the save, recorded' => 0]);
+
+/**
+ * The Roles page's delete, in the same race: the ordinary administrator
+ * deletes an unused role while the global administrator points the job at it.
+ */
+$scnPwDeleteRace = static function () use ($db, $siteOne, $signIn, $freshToken, $people, $pwClean, $httpStart, $globalAdminChange, $waitsAtOrganisationLock, $pointAt, $roleOpens, $logged): array {
+    $pwClean();
+    $db->query("DELETE FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'pwt_race'");
+    $db->query("INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `isStandard`) VALUES ({$siteOne}, 'pwt_race', 'PWT race', 0)");
+    $raceId = (int) $db->insert_id;
+    $before = $logged('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'judged again inside the delete');
+    $signIn('orgadmin');
+    $token = $freshToken();
+    $db->begin_transaction();
+    $db->query("SELECT `siteID` FROM `tblSites` WHERE `siteID` = {$siteOne} FOR UPDATE");
+    $req   = $httpStart('/admin/roles/save', ['csrf_token' => $token, 'action' => 'delete', 'roleID' => (string) $raceId]);
+    $waits = $waitsAtOrganisationLock($req);
+    [$status] = $globalAdminChange($req, static fn () => $pointAt('website.setup', ['pwt_race', 'website_setup']));
+    $out = [
+        'the delete waited at the lock'     => $waits,
+        'answered'                          => $status,
+        'role still there'                  => (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblRoles` WHERE `roleID` = {$raceId}")->fetch_assoc()['n'] ?? 0) === 1,
+        'the job still opened by it'        => $roleOpens('website.setup'),
+        'refused inside the delete, recorded' => $logged('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'judged again inside the delete') - $before,
+    ];
+    $pwClean();
+    $db->query("DELETE FROM `tblRoles` WHERE `roleID` = {$raceId}");
+    return $out;
+};
+check('W14d (#866) the same race on the Roles page: an ordinary administrator deleting an unused role while the global administrator points the job at it is refused by the second ask, and the global administrator\'s choice survives',
+    $scnPwDeleteRace(), ['the delete waited at the lock' => true, 'answered' => 302, 'role still there' => true, 'the job still opened by it' => 'pwt_race,website_setup',
+        'refused inside the delete, recorded' => 1]);
+
+/**
+ * The other half of the lock: the mapping's writers TAKE it. This side plays
+ * the Users page mid-save (holding the organisation's row); the global
+ * administrator's real "which roles open it" save, and then its real "back to
+ * the role it came with", must each wait at that lock and then go through.
+ * (Some of the writers' statements would ALSO wait on a foreign key's shared
+ * lock on the same row — the waiting statement is read so the check is about
+ * the explicit lock, which is what holds whether or not a mapping row exists.)
+ */
+$scnPwWritersWait = static function () use ($db, $siteOne, $signIn, $freshToken, $pwClean, $httpStart, $httpFinish, $waitsAtOrganisationLock, $roleOpens): array {
+    $pwClean();
+    $out = [];
+    $signIn('siteroot');
+    foreach ([
+        'save'   => ['action' => 'capability', 'capability' => 'website.setup', 'roleKeys' => ['volunteer', 'website_setup']],
+        'forget' => ['action' => 'capability_reset', 'capability' => 'website.setup'],
+    ] as $which => $post) {
+        $token = $freshToken();
+        $db->begin_transaction();
+        $db->query("SELECT `siteID` FROM `tblSites` WHERE `siteID` = {$siteOne} FOR UPDATE");
+        $req = $httpStart('/admin/roles/save', ['csrf_token' => $token] + $post);
+        $out[$which . ' waited at the lock'] = $waitsAtOrganisationLock($req);
+        $db->commit();
+        $out[$which . ' answered'] = $httpFinish($req);
+        $out['after ' . $which] = $roleOpens('website.setup');
+    }
+    $pwClean();
+    return $out;
+};
+check('W14e (#866) the mapping\'s two writers — "which roles open it" and "back to the role it came with" — each wait at the organisation\'s-row lock a save in flight holds, then go through',
+    $scnPwWritersWait(), ['save waited at the lock' => true, 'save answered' => 302, 'after save' => 'volunteer,website_setup',
+        'forget waited at the lock' => true, 'forget answered' => 302, 'after forget' => null]);
+
 // W15: the menu entry and the admin dashboard's tile follow the same gate.
 $scnPwMenu = static function () use ($signIn, $http): array {
     $out = [];
@@ -4533,16 +4774,53 @@ check('P81 with the page no longer asking for the installation\'s global adminis
 $p = $plant('_core/PublicWebsiteSetup.php', "return self::mayHandOut(\$db, \$actorId, \$siteId) === true ? '' : self::HAND_OUT_REFUSED;", "return '';", $scnPwRolesPage);
 check('P82 (D-093) with the Roles page\'s rule gone, an ordinary administrator re-points "Set up the public website" at a role they could hold',
     [$p['applied'], $p['result']['administrator re-points it'] ?? null], [true, 'volunteer']);
+// #866: the delete asks TWICE now (before its transaction, and inside it under
+// the lock), so "the rule gone" means both asks gone; P83b takes out the first
+// alone and shows the second still refuses.
+$p = $plant('_apps/admin/roles/save.php', ["if (PublicWebsiteSetup::whyRoleChangeRefused(\$mysqli, (int) (\$actorId ?? 0), \$siteId, [(string) \$roleKeyRow['roleKey']]) !== '') {",
+    "\$refusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock(\$mysqli, (int) (\$actorId ?? 0), \$siteId, [(string) \$roleKeyRow['roleKey']]);"],
+    ['if (false) {', "\$refusedUnderLock = '';"], $scnPwRolesPage);
+check('P83 (D-093) with the delete branch\'s rule gone (both asks), an ordinary administrator deletes a role that opens it', [$p['applied'], $p['result']['administrator deletes a role that opens it'] ?? null], [true, 0]);
 $p = $plant('_apps/admin/roles/save.php', "if (PublicWebsiteSetup::whyRoleChangeRefused(\$mysqli, (int) (\$actorId ?? 0), \$siteId, [(string) \$roleKeyRow['roleKey']]) !== '') {",
     'if (false) {', $scnPwRolesPage);
-check('P83 (D-093) with the delete branch\'s rule gone, an ordinary administrator deletes a role that opens it', [$p['applied'], $p['result']['administrator deletes a role that opens it'] ?? null], [true, 0]);
+check('P83b (#866, measured, expected to stay GREEN) with only the delete\'s FIRST ask gone, the ask inside the transaction still refuses it', [$p['applied'], $p['result']['administrator deletes a role that opens it'] ?? null], [true, 1]);
 $p = $plant('_apps/admin/roles/save.php', "if (PublicWebsiteSetup::whyMappingChangeRefused(\$mysqli, (int) (\$actorId ?? 0), \$siteId, \$capability) !== '') {\n        \$refuseHandOut('Roles page, back to the role it came with');",
     "if (false) {\n        \$refuseHandOut('Roles page, back to the role it came with');", $scnPwRolesPage);
 check('P84 (D-093) with "back to the role it came with" no longer asking, an ordinary administrator forgets the global administrator\'s choice',
     [$p['applied'], $p['result']['administrator forgets the choice'] ?? null], [true, null]);
-$p = $plant('_apps/admin/users/roles-save.php', "if (\$handOutRefused !== '') {", 'if (false) {', $scnPwUsersPage);
-check('P85 (D-093) with the Users page\'s rule gone, an ordinary administrator gives somebody Website Set-up',
+// #866: the Users page asks TWICE now, so "the rule gone" means both asks.
+$p = $plant('_apps/admin/users/roles-save.php', ["if (\$handOutRefused !== '') {",
+    "\$handOutRefusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock(\$mysqli, (int) (\$actorId ?? 0), \$siteId, \$touched);"],
+    ['if (false) {', "\$handOutRefusedUnderLock = '';"], $scnPwUsersPage);
+check('P85 (D-093) with the Users page\'s rule gone (both asks), an ordinary administrator gives somebody Website Set-up',
     [$p['applied'], $p['result']['administrator gives it (whole save refused)'] ?? null], [true, [true, true]]);
+$p = $plant('_apps/admin/users/roles-save.php', "if (\$handOutRefused !== '') {", 'if (false) {', $scnPwUsersPage);
+check('P85b (#866, measured, expected to stay GREEN) with only the Users page\'s FIRST ask gone, the ask inside the transaction still refuses the whole save',
+    [$p['applied'], $p['result']['administrator gives it (whole save refused)'] ?? null], [true, [false, false]]);
+// #866's own plants: each part of the second ask taken out ALONE, and the race
+// (W14b, W14d, W14e) required to go red.
+$p = $plant('_apps/admin/users/roles-save.php', "\$handOutRefusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock(\$mysqli, (int) (\$actorId ?? 0), \$siteId, \$touched);",
+    "\$handOutRefusedUnderLock = '';", $scnPwUsersRace);
+check('P143 (#866) with the Users page\'s second ask gone, the race hands the job out: the member is given the role the global administrator has just pointed it at',
+    [$p['applied'], $p['result']['member given the role'] ?? null], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', '? Capabilities::roleKeysInForceLocked($db, $siteId, Capabilities::WEBSITE_SETUP)', '? self::rolesThatOpenSetUp($db, $siteId)', $scnPwUsersRace);
+check('P144 (#866) with the second ask judging on the set the FIRST ask remembered (the request\'s memo) rather than reading it again under the lock, the save still waits but hands the job out',
+    [$p['applied'], $p['result']['the save waited at the lock'] ?? null, $p['result']['member given the role'] ?? null], [true, true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "            Capabilities::lockMappingOf(\$db, \$siteId);\n", '', $scnPwUsersRace);
+check('P145 (#866) with the second ask taking no lock, the save does not wait at it, judges too early, and hands the job out',
+    [$p['applied'], $p['result']['the save waited at the lock'] ?? null, $p['result']['member given the role'] ?? null], [true, false, true]);
+$p = $plant('_apps/admin/roles/save.php', "\$refusedUnderLock = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock(\$mysqli, (int) (\$actorId ?? 0), \$siteId, [(string) \$roleKeyRow['roleKey']]);",
+    "\$refusedUnderLock = '';", $scnPwDeleteRace);
+check('P146 (#866) with the delete\'s second ask gone, the delete no longer waits for the global administrator\'s change: the role is deleted, and the change pointing the job at it is then refused by the database',
+    [$p['applied'], $p['result']['the delete waited at the lock'] ?? null, $p['result']['role still there'] ?? null, $p['result']['the job still opened by it'] ?? null],
+    [true, false, false, null]);
+$p = $plant('_core/Capabilities.php', "            //    or wholly after it — never on the set as it was a moment ago.\n            self::lockMappingOf(\$db, \$siteId);\n",
+    "            //    or wholly after it — never on the set as it was a moment ago.\n", $scnPwWritersWait);
+check('P147 (#866) with Capabilities::save() taking no lock, a change to the set does not wait at the lock a save in flight holds',
+    [$p['applied'], $p['result']['save waited at the lock'] ?? null], [true, false]);
+$p = $plant('_core/Capabilities.php', "        try {\n            self::lockMappingOf(\$db, \$siteId);\n            // The role rows go with it", "        try {\n            // The role rows go with it", $scnPwWritersWait);
+check('P148 (#866) with Capabilities::forget() taking no lock, "back to the role it came with" does not wait at the lock a save in flight holds',
+    [$p['applied'], $p['result']['forget waited at the lock'] ?? null], [true, false]);
 $p = $plant('_apps/admin/users/index.php', "        carry.disabled = held.indexOf(carry.value) === -1;\n", '', $scnPwUsersPage);
 check('P86 (measured, expected to stay GREEN) with the locked box\'s carrier never switched on, the browser would send no answer for it — nothing here runs the page\'s script, so only the handler\'s refusal is proved',
     [$p['applied'], $p['result']['administrator changes a holder\'s other roles'] ?? null], [true, [true, true]]);

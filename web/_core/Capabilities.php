@@ -1519,15 +1519,36 @@ final class Capabilities
      */
     public static function chosenRoleKeys(mysqli $db, int $siteId, string $capability): ?array
     {
+        return self::readChosenRoleKeys($db, $siteId, $capability, false);
+    }
+
+    /**
+     * `chosenRoleKeys()`, optionally as a LOCKING read (#866). The one body
+     * both readings share, so that "what has this organisation chosen" can
+     * never be answered two ways.
+     *
+     * With `$locking` true both statements end `FOR UPDATE`, which reads the
+     * newest COMMITTED rows whatever the transaction's snapshot says, and
+     * holds them until the transaction ends. Only `roleKeysInForceLocked()`
+     * asks for that, inside a writer's transaction, after
+     * `lockMappingOf()`.
+     *
+     * @return list<string>|null
+     */
+    private static function readChosenRoleKeys(mysqli $db, int $siteId, string $capability, bool $locking): ?array
+    {
         if (self::isKnown($capability) === false) {
             return null;
         }
         if (self::storageExists($db) === false) {
             return null;
         }
+        // `FOR UPDATE` and not `FOR SHARE`: MariaDB has no `FOR SHARE`, and
+        // the convention here is SQL both engines run (.claude/rules/database.md).
+        $lock = $locking === true ? ' FOR UPDATE' : '';
 
         $mapStmt = $db->prepare(
-            'SELECT `mapID` FROM `' . self::MAP_TABLE . '` WHERE `siteID` = ? AND `capabilityKey` = ? LIMIT 1'
+            'SELECT `mapID` FROM `' . self::MAP_TABLE . '` WHERE `siteID` = ? AND `capabilityKey` = ? LIMIT 1' . $lock
         );
         if ($mapStmt === false) {
             return null;
@@ -1543,7 +1564,7 @@ final class Capabilities
 
         $keys = [];
         $roleStmt = $db->prepare(
-            'SELECT `roleKey` FROM `' . self::MAP_ROLE_TABLE . '` WHERE `mapID` = ? ORDER BY `roleKey`'
+            'SELECT `roleKey` FROM `' . self::MAP_ROLE_TABLE . '` WHERE `mapID` = ? ORDER BY `roleKey`' . $lock
         );
         if ($roleStmt === false) {
             return null;
@@ -1589,6 +1610,81 @@ final class Capabilities
         self::$inForceMemo[$memoKey] = $answer;
 
         return $answer;
+    }
+
+    /**
+     * 🔒 The role keys that open this capability here, read FRESH and LOCKED,
+     * for a writer that is about to act on the answer (#866).
+     *
+     * Call it only inside a transaction, after `lockMappingOf()`. It is
+     * `roleKeysInForce()` with two differences, and both are the point:
+     *
+     *   - it NEVER uses the request's memo. The memo is what the page asked
+     *     before the transaction began; answering from it would judge the
+     *     write on exactly the stale facts this method exists to replace.
+     *   - it reads with `FOR UPDATE`, so it sees the newest committed mapping
+     *     even when something earlier in the transaction fixed a snapshot.
+     *
+     * It does not write the memo either: what it saw is held only while the
+     * lock is, and a later plain read in the same request should not inherit
+     * it as if it were still true afterwards.
+     *
+     * @return list<string>
+     */
+    public static function roleKeysInForceLocked(mysqli $db, int $siteId, string $capability): array
+    {
+        // `standardRoleKeys()` first, so an unknown capability THROWS here
+        // exactly as it does in `roleKeysInForce()`.
+        $shipped = self::standardRoleKeys($capability);
+        $chosen  = self::readChosenRoleKeys($db, $siteId, $capability, true);
+
+        return $chosen !== null ? $chosen : $shipped;
+    }
+
+    /**
+     * 🔒 THE ONE LOCK under which an organisation's mapping is changed, and
+     * under which a role change is judged AGAINST that mapping (#866, D-093).
+     *
+     * It locks the organisation's own `tblSites` row, FOR UPDATE. Every
+     * writer of the mapping (`save()`, `forget()`) takes it first inside its
+     * transaction, and so does anybody who decides a write by asking which
+     * roles open a capability (`PublicWebsiteSetup::whyRoleChangeRefusedUnderLock()`).
+     * So the two cannot overlap: whoever is second waits, and then reads what
+     * the first committed.
+     *
+     * WHY THE ORGANISATION'S ROW, and not the mapping's own rows: an
+     * organisation that has never chosen anything for a capability HAS no
+     * mapping row (that absence is how "as shipped" is stored), and a lock on
+     * a row that does not exist is only a gap lock — which MySQL takes under
+     * REPEATABLE READ and does NOT take under READ COMMITTED, and which two
+     * transactions can both hold at once. The parent row always exists, and a
+     * lock on it means the same thing on every isolation level and on both
+     * engines. That is the same choice `Auth::storeHash()` makes for #728: lock
+     * the PARENT, because the row being guarded against may not exist yet.
+     *
+     * ⚠️ A LOCK OUTSIDE A TRANSACTION IS DECORATION (#697): under autocommit
+     *    it is released the moment this statement ends. Call it only after
+     *    `begin_transaction()`. It cannot check that for you: MySQL offers no
+     *    variable saying whether a transaction is open (MariaDB's
+     *    `@@in_transaction` is not in MySQL).
+     *
+     * @throws \RuntimeException When the organisation's row is not there: there
+     *         is nothing to lock, and a change judged without the lock is
+     *         exactly what this exists to stop.
+     */
+    public static function lockMappingOf(mysqli $db, int $siteId): void
+    {
+        $stmt = $db->prepare('SELECT `siteID` FROM `tblSites` WHERE `siteID` = ? FOR UPDATE');
+        if ($stmt === false) {
+            throw new \RuntimeException('The organisation\'s permissions could not be locked.');
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $found = $stmt->get_result()->fetch_row();
+        $stmt->close();
+        if ($found === null) {
+            throw new \RuntimeException('The organisation could not be found, so its permissions could not be locked.');
+        }
     }
 
     /**
@@ -1821,6 +1917,12 @@ final class Capabilities
 
         $db->begin_transaction();
         try {
+            // 🔒 #866: the organisation's row FIRST, so a role being given or
+            //    taken away at this same moment, and judged against this
+            //    mapping (D-093), is judged either wholly before this change
+            //    or wholly after it — never on the set as it was a moment ago.
+            self::lockMappingOf($db, $siteId);
+
             $mapStmt = $db->prepare(
                 'INSERT INTO `' . self::MAP_TABLE . '` (`siteID`, `capabilityKey`, `decidedAtUtc`, `decidedByID`) '
                 . 'VALUES (?, ?, UTC_TIMESTAMP(), ?) '
@@ -2021,7 +2123,15 @@ final class Capabilities
             return 'unchanged';
         }
 
+        // 🔒 #866: forgetting a choice CHANGES which roles open the door —
+        //    back to the shipped one — so it takes the same lock as `save()`,
+        //    inside a transaction (it used to be one bare statement, which
+        //    took no lock anybody else could wait on). Without it, somebody
+        //    giving themselves the shipped role at this same moment was
+        //    judged on the chosen set, which did not include it.
+        $db->begin_transaction();
         try {
+            self::lockMappingOf($db, $siteId);
             // The role rows go with it through `ON DELETE CASCADE`.
             $stmt = $db->prepare(
                 'DELETE FROM `' . self::MAP_TABLE . '` WHERE `siteID` = ? AND `capabilityKey` = ?'
@@ -2029,7 +2139,10 @@ final class Capabilities
             $stmt->bind_param('is', $siteId, $capability);
             $stmt->execute();
             $stmt->close();
+            $db->commit();
         } catch (\Throwable $e) {
+            $db->rollback();
+
             return 'failed';
         }
 

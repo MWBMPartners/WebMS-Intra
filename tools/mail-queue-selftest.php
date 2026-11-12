@@ -114,6 +114,11 @@
  *        to giving up; Google's sign-in unanswered (the queue's line);
  *        Microsoft 365 unanswered; and Microsoft falling back to Google with
  *        neither answering (one line per route tried).
+ *   R2   A message a caller names for another organisation (`siteId`) is
+ *        KEPT in the queue under that organisation, not the one the request
+ *        resolved to, and every send-log line about it - kept, sent later by
+ *        the job, sent at once - is under it too; a caller naming none is
+ *        still kept under its request's organisation (#1039).
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
  *   minutes themselves, twelve pages at once, and the other scheduled jobs
@@ -190,7 +195,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 177; // #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3). #1043 added six, in R1.
+const EXPECTED_CHECKS = 181; // #1039 added four: part R2. #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -236,6 +241,9 @@ if (($argv[1] ?? '') === '--child') {
                     $sent          = \Portal\Core\Mailer::send($m['to'], (string) $m['subject'], (string) $m['body'], (array) ($m['files'] ?? []), (array) ($m['options'] ?? []));
                     $out['each'][] = [$sent, \Portal\Core\Mailer::lastOutcome(), \Portal\Core\Mailer::lastQueueId()];
                 }
+                // Which organisation this child's own request resolved to, so
+                // R2 (#1039) can show a message was kept under ANOTHER one.
+                $out['requestSite'] = \Portal\Core\Site::id();
                 break;
             case 'add': // rows straight into the queue
                 foreach ((array) $job['messages'] as $m) {
@@ -4291,6 +4299,71 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
     @unlink($googleFile);
     q("DELETE FROM tblErrors WHERE errorID > ? AND errorPlatform IN ('Graph', 'Gmail')", 'i', [$errorsBeforeR1]);
     httpsStandinAnswers($state['https'], []);
+}
+
+// =============================================================================
+if (part('R2', 'A message a caller names for another organisation is KEPT under that organisation, and every line about it is recorded there (#1039)') === true) {
+// =============================================================================
+    // WHAT WAS WRONG. Mailer::send() took the caller's `siteId` for the
+    // footer (#683) but wrote the queue row under Site::id() - the REQUEST's
+    // organisation. A scheduled job walking several organisations therefore
+    // kept every message it could not send at once under the organisation
+    // its own request resolved to, and when the job later sent it, the
+    // send-log line followed the row (#1006) - right about the row, and the
+    // row was wrong. The lines the REQUEST wrote about the message (kept,
+    // sent at once, refused) were under the request's organisation too.
+    //
+    // WHY A WRONG ANSWER CANNOT PASS HERE: the same as R1. R1's organisation
+    // has no address, so the child's request resolves to another one (the
+    // child reports which, and the first check requires the two to differ);
+    // a row or a line under SITE_R1 can only have come from the caller's
+    // `siteId`. The third check is the over-reach half: a caller who names
+    // nothing is still kept, and recorded, under its request's organisation.
+    q("INSERT IGNORE INTO tblSites (siteID, siteName, siteKey, timezone, isActive) VALUES (?, 'Selftest queue R1 organisation', 'selftest-mailqueue-r1', 'UTC', 1)", 'i', [SITE_R1]);
+    $line   = static fn (string $status, ?int $site): array => ['provider' => 'smtp', 'status' => $status, 'siteID' => $site];
+    $linesOf = static fn (string $subject): array => q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]);
+
+    // 1. Kept, because the caller asked it not to be sent inside the request.
+    $kept    = child(['task' => 'send', 'messages' => [msg(mailOf('other'), 'R2 kept for another organisation', 'A message.', ['siteId' => SITE_R1, 'sendNow' => false])]]);
+    $asked   = (int) ($kept['requestSite'] ?? 0);
+    $row     = rowOf('R2 kept for another organisation');
+    ok(
+        'a message a caller names for ANOTHER organisation is kept in the queue under THAT organisation, not the one the request resolved to, and the line saying it was kept is under it too (#1039)',
+        ($kept['each'][0][1] ?? '') === 'queued' && $asked > 0 && $asked !== SITE_R1
+            && ($row['siteID'] ?? null) === SITE_R1 && $linesOf('R2 kept for another organisation') === [$line('queued', SITE_R1)],
+        'outcome ' . json_encode($kept['each'] ?? $kept['threw']) . '; the request resolved to ' . $asked . '; the row is under ' . json_encode($row['siteID'] ?? null)
+            . '; lines ' . json_encode($linesOf('R2 kept for another organisation'))
+    );
+
+    // 2. The job sends it later, and records the sending under the row's organisation.
+    $ran  = $job('right');
+    $mail = mailSince('accept');
+    ok(
+        'the job then sends it (the stand-in mail server took it) and the line for the sending is under the organisation the caller named, as is the line for its keeping (#1039, with #1006)',
+        ($ran['json']['sent'] ?? 0) === 1 && count($mail['messages']) === 1 && count(queued("subject = 'R2 kept for another organisation'")) === 0
+            && $linesOf('R2 kept for another organisation') === [$line('queued', SITE_R1), $line('sent', SITE_R1)],
+        json_encode($ran['json']) . '; lines ' . json_encode($linesOf('R2 kept for another organisation'))
+    );
+
+    // 3. The over-reach half: naming nothing keeps the request's organisation.
+    $plain    = child(['task' => 'send', 'messages' => [msg(mailOf('other'), 'R2 kept, no organisation named', 'A message.', ['sendNow' => false])]]);
+    $plainAt  = (int) ($plain['requestSite'] ?? 0);
+    $plainRow = rowOf('R2 kept, no organisation named');
+    ok(
+        'a caller that names NO organisation is still kept, and recorded, under its own request\'s organisation, exactly as before (#1039)',
+        $plainAt > 0 && ($plainRow['siteID'] ?? null) === $plainAt && $linesOf('R2 kept, no organisation named') === [$line('queued', $plainAt)],
+        'the request resolved to ' . $plainAt . '; the row is under ' . json_encode($plainRow['siteID'] ?? null) . '; lines ' . json_encode($linesOf('R2 kept, no organisation named'))
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R2 kept, no organisation named'");
+
+    // 4. Sent at once, inside the request: the line the request writes.
+    $now = child(['task' => 'send', 'messages' => [msg(mailOf('other'), 'R2 sent at once for another organisation', 'A message.', ['siteId' => SITE_R1])]]);
+    ok(
+        'a message named for another organisation and sent at once, inside the request, is recorded under that organisation and kept nowhere (#1039)',
+        ($now['each'][0][1] ?? '') === 'sent' && count(queued("subject = 'R2 sent at once for another organisation'")) === 0
+            && $linesOf('R2 sent at once for another organisation') === [$line('sent', SITE_R1)],
+        'outcome ' . json_encode($now['each'] ?? $now['threw']) . '; lines ' . json_encode($linesOf('R2 sent at once for another organisation'))
+    );
 }
 
 // =============================================================================

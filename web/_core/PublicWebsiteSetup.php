@@ -20,6 +20,11 @@
  *      installation — may change which roles open "Set up the public
  *      website", or give or take away a role that currently opens it. The
  *      Roles page and the Users page both ask here; neither keeps a copy.
+ *      A page that writes asks TWICE (#866): `whyRoleChangeRefused()` before
+ *      its transaction, and `whyRoleChangeRefusedUnderLock()` inside it,
+ *      under `Capabilities::lockMappingOf()` — the lock the mapping's own
+ *      writers take — so a change to the mapping at the same moment cannot
+ *      slip between the judgement and the write.
  *   3. WHAT IS STORED, and reading it back CHECKED AGAIN every time:
  *        public.website.address  the organisation's MAIN website (D-095),
  *                                for example https://www.ourchurch.org. The
@@ -325,10 +330,68 @@ final class PublicWebsiteSetup
      */
     public static function whyRoleChangeRefused(\mysqli $db, int $actorId, int $siteId, array $roleKeysTouched): string
     {
+        return self::roleChangeVerdict($db, $actorId, $siteId, $roleKeysTouched, false);
+    }
+
+    /**
+     * D-093 asked AGAIN, INSIDE the transaction that writes (#866), on facts
+     * read under the lock the mapping's writers take. The Users page and the
+     * Roles page's delete ask this after `begin_transaction()` and before
+     * their first write; `whyRoleChangeRefused()` above is their cheap first
+     * answer, asked before anything is opened.
+     *
+     * WHY BOTH. The first ask reads the mapping as it stood when the request
+     * began. If a global administrator pointed "Set up the public website"
+     * at role R between that read and this save, an ordinary administrator
+     * giving themselves R was judged on the set WITHOUT R, both changes
+     * committed, and the ordinary administrator then held the job D-093 says
+     * only a global administrator may hand out. This answer takes
+     * `Capabilities::lockMappingOf()` FIRST — the lock `Capabilities::save()`
+     * and `forget()` take too — so whichever is second waits, and then this
+     * reads the mapping fresh (`roleKeysInForceLocked()`: no memo, a locking
+     * read), never the set the first ask remembered (#647's rule: ask on
+     * facts read inside the transaction that writes, under a lock).
+     *
+     * WHAT IT CANNOT CLOSE, and the issue says so: a global administrator
+     * who points the permission at R AFTER the ordinary administrator's
+     * change has committed, having read the page's holder count before it.
+     * No lock reaches back to what a person saw on a page.
+     *
+     * ⚠️ Call it only inside a transaction (a lock outside one is
+     *    decoration, #697), and if it refuses, ROLL BACK BEFORE recording the
+     *    refusal: `Logger` writes on the same connection, so a refusal
+     *    recorded first would be rolled back with everything else.
+     *
+     * @param list<string> $roleKeysTouched Role keys given or taken away.
+     *
+     * @throws \RuntimeException From the lock, when the organisation's row is not there.
+     */
+    public static function whyRoleChangeRefusedUnderLock(\mysqli $db, int $actorId, int $siteId, array $roleKeysTouched): string
+    {
+        return self::roleChangeVerdict($db, $actorId, $siteId, $roleKeysTouched, true);
+    }
+
+    /**
+     * The ONE body of D-093's role rule, so the first ask and the second can
+     * never disagree about what the rule IS — only about when the facts were
+     * read.
+     *
+     * @param list<string> $roleKeysTouched
+     */
+    private static function roleChangeVerdict(\mysqli $db, int $actorId, int $siteId, array $roleKeysTouched, bool $underLock): string
+    {
+        if ($underLock === true) {
+            // Taken before anything is read, whoever is asking: a global
+            // administrator's change is not refused, but it still waits its
+            // turn behind a mapping change in flight.
+            Capabilities::lockMappingOf($db, $siteId);
+        }
         if (self::mayHandOut($db, $actorId, $siteId) === true) {
             return '';
         }
-        $opens = self::rolesThatOpenSetUp($db, $siteId);
+        $opens = $underLock === true
+            ? Capabilities::roleKeysInForceLocked($db, $siteId, Capabilities::WEBSITE_SETUP)
+            : self::rolesThatOpenSetUp($db, $siteId);
         foreach ($roleKeysTouched as $key) {
             if (in_array(Roles::normaliseKey((string) $key), $opens, true) === true) {
                 return self::HAND_OUT_REFUSED;
