@@ -59,7 +59,7 @@ table named in this document exists; it cannot check what is said about it.
 6. Per-request report at `/admin/erasure-requests/report?id=N` shows every action
    taken and verifies the **sealed audit chain**.
 
-### Somebody without an account: an event suggestion or an anonymous prayer request (#964, D-140; #1009, D-176)
+### An e-mail address: event suggestions and anonymous-form prayer requests sent with it (#964, D-140; #1009, D-176)
 
 A visitor can suggest an event without signing in, giving a name and an e-mail
 address (`tblEvents.submitterName`, `submitterEmail`), and is e-mailed if it is
@@ -69,8 +69,8 @@ never automatically.**
 
 1. The visitor asks the organisation by some other route. An administrator
    checks, **outside the portal**, that it really is the person who uses that
-   address, then files the request on `/admin/erasure-requests` ("Somebody
-   without an account"), ticking a box that says so
+   address, then files the request on `/admin/erasure-requests` ("An e-mail
+   address"), ticking a box that says so
    and writing a short note (at most 300 characters) on how they checked
    (D-148). Nothing is filed without both. The sealed audit chain records the
    statement, the note and the administrator's account number. The note is

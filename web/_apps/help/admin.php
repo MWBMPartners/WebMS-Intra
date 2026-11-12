@@ -899,7 +899,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         note somebody types a name into will not be caught by it.
     </p>
 
-    <h3 class="h6 mt-3">Somebody without an account: an event suggestion or an anonymous prayer request</h3>
+    <h3 class="h6 mt-3">An e-mail address: event suggestions and anonymous-form prayer requests sent with it</h3>
     <p>
         Anybody can suggest an event without signing in. They give a name and an e-mail address,
         and are e-mailed if it is approved. They have no account, so they cannot ask for erasure
@@ -916,7 +916,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         If such a person asks you to erase them, <strong>first check, outside the portal, that it
         really is the person who uses that address</strong> &mdash; for example by replying to that
         address and waiting for an answer. Then open <em>Erasure requests</em>, fill in their address
-        under &ldquo;Somebody without an account&rdquo;, write a short note on
+        under &ldquo;An e-mail address&rdquo;, write a short note on
         how you checked, tick the box that says you checked, and file it. The request&rsquo;s report
         records the note and that you said so. <strong>That note is kept for ever, so do not put the
         person&rsquo;s details in it.</strong> Nothing is erased until you press

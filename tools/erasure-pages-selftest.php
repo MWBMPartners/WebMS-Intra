@@ -3749,7 +3749,7 @@ ok('M15 AFTER EVERYTHING: the erased account\'s row is byte for byte what the er
     json_encode([$zedRowM(), $claimLineM(), $previewShowsZed()]));
 
 // =============================================================================
-head('N. Somebody without an account who suggested an event (#964, D-140)');
+head('N. An e-mail address: event suggestions and anonymous-form prayer requests sent with it (#964, D-140; #1009, D-176)');
 // =============================================================================
 // A visitor who suggests an event gives a name and an e-mail address; approving
 // it e-mails that address (D-134), which leaves it in the send log. They have no
@@ -4587,7 +4587,7 @@ $n988Card = renderedRegion((string) req($jar['adm'], 'GET', '/admin/erasure-requ
     // which carries this page's form token and so differs on every run.
     $found = [];
     foreach ($doc->querySelectorAll('h2') as $h) {
-        if (trim((string) preg_replace('/\s+/', ' ', (string) $h->textContent)) === 'Somebody without an account: an event suggestion or an anonymous prayer request') {
+        if (trim((string) preg_replace('/\s+/', ' ', (string) $h->textContent)) === 'An e-mail address: event suggestions and anonymous-form prayer requests sent with it') {
             $found[] = $h;
         }
     }

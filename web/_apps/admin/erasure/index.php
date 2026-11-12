@@ -82,7 +82,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    in it (see GdprEraser::fileVisitorAddressRequest()).
 ?>
 <div class="card mb-3"><div class="card-body">
-    <h2 class="h6">Somebody without an account: an event suggestion or an anonymous prayer request</h2>
+    <h2 class="h6">An e-mail address: event suggestions and anonymous-form prayer requests sent with it</h2>
     <p class="small text-secondary mb-2">
         A person who suggested an event without signing in gave a name and an e-mail address, and was e-mailed if it
         was approved. A person who sent an anonymous prayer request may have given a name and an e-mail address too,
