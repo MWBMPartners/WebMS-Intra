@@ -2121,6 +2121,13 @@ $countryRowId = (int) (rows($db, "SELECT `settingID` FROM `tblSettings` WHERE `s
 $http('POST', '/settings/save', ['csrf_token' => $freshToken('/settings'), 'settingID' => (string) $countryRowId, 'settingKey' => 'org.address.countryCode', 'settingValue' => 'GBR']);
 check('N15 the general Settings editor refuses to change the installation\'s country (it used to store "GBR" there, which then meant no country)',
     $installRow('org.address.countryCode') === '');
+// The help page says the general Settings page changes NEITHER, so the currency half is checked too.
+$currencyRowId = (int) (rows($db, "SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = 'org.currency' AND `siteID` IS NULL")[0]['settingID'] ?? 0);
+$currencyBeforeEditor = $installRow('org.currency');
+$http('POST', '/settings/save', ['csrf_token' => $freshToken('/settings'), 'settingID' => (string) $currencyRowId, 'settingKey' => 'org.currency', 'settingValue' => 'USX']);
+check('N15b ...and refuses to change the installation\'s currency (the help page says it changes neither)',
+    $currencyRowId > 0 && $currencyBeforeEditor === 'CHF' && $installRow('org.currency') === 'CHF',
+    'row ' . $currencyRowId . '; before ' . var_export($currencyBeforeEditor, true) . ', after ' . var_export($installRow('org.currency'), true));
 
 // An administrator of THIS organisation only is not shown the card and cannot post it.
 $orgPassword = 'Cu' . bin2hex(random_bytes(8)) . '!9y';
@@ -2167,7 +2174,7 @@ $helpPage = $http('GET', '/help/admin');
 $helpText = preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) (preg_match('#<div[^>]*id="installation-country-currency"[^>]*>(.*?)</div>#s', $helpPage['body'], $hm) === 1 ? $hm[1] : '')), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 $helpMissing = [];
 foreach ([
-    'follows the installation’s own country and currency: set when the portal was installed, and changeable afterwards by a global administrator on that same page', // N2, N3
+    'follows the installation’s own country and currency: set when the portal was installed, or left unchosen, and changeable afterwards by a global administrator on that same page', // N2, N3, N14
     'Every organisation set to “Same as the installation” follows the change; an organisation that chose its own does not', // N3
     'Changing a currency affects new records only. Every amount already recorded keeps the currency it was recorded in, and nothing is converted', // N4, N7
     'saving it without touching that box leaves their change in place, and the page says so', // N8, N9

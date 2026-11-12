@@ -1024,9 +1024,11 @@ final class OutsideServices
      *
      * A WITHDRAWAL OF CONSENT IS NEVER LOST (the owner's stronger reading of
      * D-058, round 4 of the independent check). A press is not all-or-nothing
-     * any more: every "off" and every "follow" is applied, and only the "on"
-     * changes that are above the ceiling are refused — those services are left
-     * exactly as they were. The message says both what was saved and what was
+     * any more: every "off" and every CHANGED "follow" is applied, and only the
+     * "on" changes that are above the ceiling are refused — those services are
+     * left exactly as they were. (Since #815, also not written: a control sent
+     * back exactly as the page drew it, and, in a post with no drawn value, an
+     * "on" or a "follow" over a stored "off" — see "AN OLDER TAB" below.) The message says both what was saved and what was
      * refused and why. It used to refuse the whole press, so a real "on" made
      * stale by an organisation tightening while the page was open took an "off"
      * beside it down with it.

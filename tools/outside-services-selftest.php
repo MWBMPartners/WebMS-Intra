@@ -1352,6 +1352,16 @@ check('O12 ...but with no drawn value, "follow" over a stored "off" under a defa
     choiceOf(M, 'gravatar') === 'off'
     && str_contains(req($jarM2, 'GET', '/account/outside-services')['body'], 'was not changed, because the page you saved was out of date') === true,
     var_export(choiceOf(M, 'gravatar'), true));
+// O13 (round 3): the same, with the default OFF. Today the "follow" would share
+// nothing, but it would delete the member's "off", so the day an organisation's
+// default becomes "on" their picture would start going out — the rule judges by
+// the stored choice for exactly that, and this check is what pins it.
+setAt(K_GRAV, null, 'off');
+setChoice(M, 'gravatar', 'off');
+$plain = req($jarM2, 'GET', '/account/outside-services')['body'];
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'follow', 'csrf_token' => token($plain)]);
+check('O13 ...and HELD BACK too with the default OFF, where it would share nothing today: it deletes the "off" that keeps the picture back once a default becomes "on"',
+    choiceOf(M, 'gravatar') === 'off', var_export(choiceOf(M, 'gravatar'), true));
 setChoice(M, 'gravatar', null);
 setAt(K_GRAV, null, 'off');
 

@@ -17,9 +17,13 @@
  * "keep", which the writer reads as "leave this service alone".
  *
  * A MIXED PRESS (round 4; the owner's stronger reading of D-058, a withdrawal
- * of consent is never lost): every "off" and every "follow" is APPLIED; only a
- * real change to "on" above what is allowed — or with the settings unreadable —
- * is refused, and that service is left exactly as it was. An "on" equal to the
+ * of consent is never lost): every "off", and every CHANGED "follow", is
+ * APPLIED; only a real change to "on" above what is allowed — or with the
+ * settings unreadable — is refused, and that service is left exactly as it was.
+ * (Since #815 two more are not written: a control sent back exactly as the page
+ * drew it, and, in a post with no drawn value, anything that could turn sharing
+ * on — an "on", or a "follow" over a stored "off". See
+ * OutsideServices::saveMemberChoice() for the whole rule.) An "on" equal to the
  * stored choice is not a change and is neither refused nor written. The message
  * says what was saved AND what was refused and why. So switching OFF is never
  * refused, by anything posted beside it.
@@ -82,7 +86,10 @@ foreach (array_keys(OutsideServices::SERVICES) as $service) {
 //    switch back on a service the member switched off in another tab since.
 //    Always an array here (never null): this handler serves the member page,
 //    so a post with no drawn value is a stale or hand-made one, and the writer
-//    then applies an "off" only. Anything that is not text counts as absent.
+//    then judges each value by its EFFECT: it applies what can only make less
+//    shared (an "off", or a "follow" over a stored "on") and holds back what
+//    could turn sharing on (an "on", or a "follow" over a stored "off").
+//    Anything that is not text counts as absent.
 $drawn = [];
 foreach (array_keys(OutsideServices::SERVICES) as $service) {
     $marker = OutsideServices::drawnMarkerName($service);
