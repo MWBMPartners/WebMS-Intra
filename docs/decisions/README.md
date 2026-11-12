@@ -213,7 +213,11 @@ appended with its real date and a note that it was added later.
 | [D-155](155-a-shared-currency-sign-in-an-imported-file-is-refused.md) | 2026-11-12 | A currency sign shared by several currencies is refused in an imported file, with the true reason | in force |
 | [D-156](156-later-issues-are-triaged-before-the-first-install.md) | 2026-11-12 | Issues raised after 5 November are triaged: only the risky ones are fixed before the first install | in force |
 | [D-157](157-the-pound-sign-in-a-file-is-read-only-for-pounds-sterling.md) | 2026-11-12 | "£" in an imported file is read only for an organisation using pounds sterling | in force |
+| [D-158](158-outside-services-are-named-now-and-gated-later.md) | 2026-11-12 | Outside services not yet under D-058 are named on the privacy page now and gated later | in force |
+| [D-159](159-a-series-website-window-is-fixed-dates-said-plainly.md) | 2026-11-12 | A series' public-website window is one set of fixed dates, said plainly on the form | in force |
+| [D-160](160-the-api-pages-website-link-follows-a-setting.md) | 2026-11-12 | The API page's publisher "Website" link follows a setting | in force |
+| [D-161](161-the-language-switch-return-goes-through-the-redirect-judge.md) | 2026-11-12 | The language switch's return address goes through the redirect judge, and the judge looks only at the path | in force |
 
-*157 decisions. This index is checked against the folder by
+*161 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
