@@ -121,13 +121,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             //    first option (#763), and an untouched Save must not
                             //    quietly change somebody's recorded choice.
                             ?>
+                            <?php
+                            // 🪟 #815: the value this control is drawn with goes back
+                            //    beside it, so a Save from an older tab that left it
+                            //    untouched writes nothing for it (see the handler).
+                            //    Only where a control is drawn; "keep" when the
+                            //    control's selected option is "keep".
+                            ?>
                             <?php if ($decision['ceiling'] === 0 && $stored !== null): ?>
+                                <input type="hidden" name="<?php echo $e(OutsideServices::drawnMarkerName($service)); ?>" value="<?php echo $e(OutsideServices::KEEP); ?>">
                                 <select class="form-select form-select-sm" id="choice-<?php echo $e($service); ?>" name="choice_<?php echo $e($service); ?>">
                                     <option value="<?php echo $e(OutsideServices::KEEP); ?>" selected>Keep my earlier choice: <?php echo $e($stored); ?> (the service is not allowed for you at the moment)</option>
                                     <option value="<?php echo $e(OutsideServices::FOLLOW); ?>">Follow my organisations</option>
                                     <option value="<?php echo $e(OutsideServices::OFF); ?>">Off</option>
                                 </select>
                             <?php elseif ($decision['ceiling'] > 0): ?>
+                                <input type="hidden" name="<?php echo $e(OutsideServices::drawnMarkerName($service)); ?>" value="<?php echo $e($selected); ?>">
                                 <select class="form-select form-select-sm" id="choice-<?php echo $e($service); ?>" name="choice_<?php echo $e($service); ?>">
                                     <option value="<?php echo $e(OutsideServices::FOLLOW); ?>"<?php echo $selected === OutsideServices::FOLLOW ? ' selected' : ''; ?>>Follow my organisations (<?php echo $decision['ceiling'] >= 2 ? 'on' : 'off'; ?>)</option>
                                     <option value="<?php echo $e(OutsideServices::ON); ?>"<?php echo $selected === OutsideServices::ON ? ' selected' : ''; ?>>On</option>

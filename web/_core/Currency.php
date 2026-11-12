@@ -1380,6 +1380,21 @@ final class Currency
     }
 
     /**
+     * 🏢 What the INSTALLATION's own row HOLDS, trimmed ('' when it has no row
+     * or an empty one), for the installation card of the organisation settings
+     * page and its save handler only (#991). Three letters in any case come
+     * back in capitals; anything else as stored, so the card can SAY that the
+     * portal is ignoring it rather than show "No currency chosen" over it —
+     * which the next untouched Save would then have acted on.
+     */
+    public static function installationStoredText(): string
+    {
+        $text = self::readRows(null)['installationText'];
+
+        return preg_match('/^[A-Za-z]{3}$/', $text) === 1 ? strtoupper($text) : $text;
+    }
+
+    /**
      * 💷 The currency an organisation IS in: its own when it has chosen one,
      * else the installation's, else '' (none known: amounts are plain numbers).
      * The ONE answer for every reader that needs "this organisation's money".
@@ -1542,8 +1557,12 @@ final class Currency
      * 🔒 Does the general Settings editor refuse this key? Yes for the currency:
      * that editor would store any text at all, where the organisation settings
      * page accepts only a currency the portal can store, and offers to label
-     * old unlabelled amounts. That page is the ONE place it is changed.
-     * Capitals are ignored, as a key's are everywhere.
+     * old unlabelled amounts. That page is the ONE place it is changed — an
+     * organisation's own by any of its administrators, and since #991 the
+     * INSTALLATION's by a global administrator, on the same page's
+     * installation card (before #991 no page could change the installation's
+     * at all once the installer had set it). Capitals are ignored, as a key's
+     * are everywhere.
      */
     public static function lockedInGeneralEditor(string $key): bool
     {
@@ -1558,11 +1577,11 @@ final class Currency
      * Both rows in one query. A read that fails is "nothing known" (''),
      * never a made-up currency.
      *
-     * @return array{own: string, installation: string, ownText: string}
+     * @return array{own: string, installation: string, ownText: string, installationText: string}
      */
     private static function readRows(?int $siteId): array
     {
-        $answer = ['own' => '', 'installation' => '', 'ownText' => ''];
+        $answer = ['own' => '', 'installation' => '', 'ownText' => '', 'installationText' => ''];
         try {
             $db   = App::db();
             $site = $siteId ?? 0;
@@ -1581,13 +1600,13 @@ final class Currency
                 $code  = strtoupper(trim((string) ($row['settingValue'] ?? '')));
                 $which = $row['siteID'] === null ? 'installation' : 'own';
                 $answer[$which] = self::isChoosable($code) === true ? $code : '';
-                if ($which === 'own') {
-                    $answer['ownText'] = trim((string) ($row['settingValue'] ?? ''));
-                }
+                // The raw text as well, for the one page that has to SAY when it
+                // is not a currency (ownStoredText(), installationStoredText()).
+                $answer[$which . 'Text'] = trim((string) ($row['settingValue'] ?? ''));
             }
             $stmt->close();
         } catch (\Throwable $e) {
-            return ['own' => '', 'installation' => '', 'ownText' => ''];
+            return ['own' => '', 'installation' => '', 'ownText' => '', 'installationText' => ''];
         }
 
         return $answer;

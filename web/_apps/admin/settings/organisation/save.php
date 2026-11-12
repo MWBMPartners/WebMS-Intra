@@ -53,8 +53,11 @@
  *     organisation's own data and nobody else's.
  *
  *   THE INSTALLATION'S ROW (siteID NULL)
- *     site.url alone — the portal's own web address, which decides where
- *     every e-mailed link points (#500). A global administrator only.
+ *     site.url — the portal's own web address, which decides where every
+ *     e-mailed link points (#500); and, from the installation card (#967,
+ *     #991), org.address.countryCode and org.currency — the country and
+ *     currency every organisation that has not chosen its own follows.
+ *     A global administrator only.
  *
  * WHAT IT USED TO DO, because the reasoning is worth keeping. Every setting
  * here was written with nothing in siteID, so one organisation's postal
@@ -151,9 +154,19 @@ $reject = static function (string $message) use ($redirect): never {
 //
 //    The dashboard's one-press "use this address" button sends `portalAddress`
 //    alone, so it is correctly treated as an installation-wide change.
-$installationWideFieldWasSent = static function (): bool {
-    return ($_POST['form'] ?? '') === 'web-addresses'
-        && array_key_exists('portalAddress', $_POST) === true;
+//
+//    THE INSTALLATION CARD (#967, #991) is the other installation-wide form:
+//    the installation's own country and currency. That card is drawn only for
+//    a global administrator, so for it the FORM is the signal, whatever fields
+//    came with it: nobody else is ever sent a page carrying it, and a post of
+//    it from anybody else is refused whole.
+$installationCardWasSent      = static function (): bool {
+    return ($_POST['form'] ?? '') === 'installation';
+};
+$installationWideFieldWasSent = static function () use ($installationCardWasSent): bool {
+    return (($_POST['form'] ?? '') === 'web-addresses'
+        && array_key_exists('portalAddress', $_POST) === true)
+        || $installationCardWasSent() === true;
 };
 
 // 🚧 Installation-wide settings are for a global administrator only — see "WHO
@@ -177,10 +190,14 @@ if (App::isRootAdmin() === false && $installationWideFieldWasSent() === true) {
         $_SESSION['user_id'] ?? null
     );
     $reject(
-        'The address of the portal is one setting for the whole installation: it applies to every '
-            . 'organisation on this installation, not only yours, so only a global '
-            . 'administrator can change it. Nothing was saved. Everything else on '
-            . 'this page — your postal address, map position, what3words address '
+        ($installationCardWasSent() === true
+            ? 'The installation\'s country and currency apply to every organisation on this installation that '
+                . 'has not chosen its own, not only yours, so only a global administrator can change them. '
+            : 'The address of the portal is one setting for the whole installation: it applies to every '
+                . 'organisation on this installation, not only yours, so only a global '
+                . 'administrator can change it. ')
+            . 'Nothing was saved. Everything else on '
+            . 'this page — your postal address, country, currency, map position, what3words address '
             . 'and support e-mail address — belongs to your own organisation and '
             . 'you can change it here.'
     );
@@ -262,6 +279,158 @@ if (($_POST['form'] ?? '') === 'label-currency') {
     $_SESSION['flash_msg']  = $labelled . ' amount' . ($labelled === 1 ? ' was' : 's were') . ' labelled ' . $labelCode . '.';
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . $redirect, true, 302);
+    exit();
+}
+
+// -----------------------------------------------------------------------------
+// 🏢 The INSTALLATION card (#967, #991): the installation's own country and
+//    currency, the ones every organisation that chose "Same as the
+//    installation" follows. A global administrator's only — the gate above
+//    has already refused anybody else. Handled here and stops, so none of the
+//    organisation's own fields below are touched by it.
+//
+//    WHY THIS EXISTS. The installer asks for both (D-133). After that, before
+//    #967/#991, no checked page could change either: this page wrote only the
+//    open organisation's own rows, the general Settings editor refused the
+//    currency outright, and it took the country as free text — so "GBR" typed
+//    there became "no country" for every organisation following the
+//    installation, silently. Both keys are now refused by that editor
+//    (Countries::lockedInGeneralEditor(), Currency::lockedInGeneralEditor())
+//    and this card is the one place the installation's values change.
+//
+//    WRITTEN ONLY WHEN THE BOX WAS CHANGED FROM WHAT THE PAGE DREW (#875's
+//    shape, the newsletter choice). The card carries, beside each box, the
+//    value it was drawn with (`…Drawn`). A box sent back as drawn writes
+//    NOTHING, even when the stored value has changed since — so an older tab
+//    saved untouched cannot put back a country or currency that another
+//    global administrator (or this one, in another tab) changed in between;
+//    the message says so instead. A box the administrator CHANGED is saved,
+//    because that is a decision made on this page. A post with no drawn value
+//    (a page from before this change, or a hand-made request) is compared
+//    with what is stored now, which is the most the handler can know.
+//
+//    THE RULES ARE THE SAME AS AN ORGANISATION'S (D-139): only a country on
+//    the portal's list (Countries::fromPosted()) and only a currency the
+//    portal can use (Currency::fromPosted()); "none chosen" is allowed, as the
+//    installer allows it, and stored as an empty value, as the install script
+//    seeds it. A changed currency applies to NEW records only: every amount
+//    already recorded keeps the currency stored beside it, so nothing is
+//    relabelled and no amount is converted — which is why no money table is
+//    touched here. Text the row already holds that is not usable (say "GBR")
+//    is drawn selected with a warning, and sent back unchanged it is left
+//    alone rather than refused, so a Save that touched nothing never fails on
+//    it.
+//
+//    The level of every write is NULL — the installation's row — and is said
+//    at each call, as $upsert() requires.
+// -----------------------------------------------------------------------------
+if ($installationCardWasSent() === true) {
+    // What one box asks for: ['skip' => why] to leave it alone,
+    // ['write' => value] to store it, or ['refuse' => true].
+    $judgeBox = static function (string $field, string $storedText, callable $tidy): array {
+        if (array_key_exists($field, $_POST) === false) {
+            return ['skip' => 'not sent'];
+        }
+        $posted = $_POST[$field];
+        if (is_string($posted) === false) {
+            return ['refuse' => true];
+        }
+        $posted = trim($posted);
+        $drawn  = $_POST[$field . 'Drawn'] ?? null;
+        if (is_string($drawn) === true && $posted === trim($drawn)) {
+            // Left as drawn: nothing to write. Was it changed elsewhere since?
+            return ['skip' => $storedText === trim($drawn) ? 'unchanged' : 'changed elsewhere'];
+        }
+        $code = $tidy($posted);
+        if ($code === null) {
+            // Not usable — unless it is exactly the unusable text the row
+            // already holds, sent back unchanged (no drawn value came with it).
+            return ($storedText !== '' && $posted === $storedText) ? ['skip' => 'unchanged'] : ['refuse' => true];
+        }
+        if ($code === $storedText) {
+            return ['skip' => 'unchanged'];
+        }
+
+        return ['write' => $code];
+    };
+
+    // 🔒 One transaction, the two installation rows locked FIRST (a lock outside
+    //    a transaction is decoration, #697), then what they hold read fresh
+    //    with an ordinary read — InnoDB takes a transaction's snapshot at its
+    //    first ordinary read, which is after the lock. Two global
+    //    administrators saving at once are therefore taken one after the
+    //    other, and the second compares against what the first stored.
+    $countryWord  = static fn (string $code): string => $code === '' ? 'no country' : Countries::name($code);
+    $currencyWord = static fn (string $code): string => $code === '' ? 'no currency' : $code;
+    $db->begin_transaction();
+    try {
+        $countryKey  = Countries::SETTING;
+        $currencyKey = Currency::SETTING;
+        $lock = $db->prepare('SELECT `settingID` FROM `tblSettings` WHERE `settingKey` IN (?, ?) AND `siteID` IS NULL FOR UPDATE');
+        $lock->bind_param('ss', $countryKey, $currencyKey);
+        $lock->execute();
+        $lock->get_result();
+        $lock->close();
+
+        $countryBefore  = Countries::installationStoredText();
+        $currencyBefore = Currency::installationStoredText();
+        $country  = $judgeBox('installationCountryCode', $countryBefore, static fn (string $t): ?string => Countries::fromPosted($t));
+        $currency = $judgeBox('installationCurrency', $currencyBefore, static fn (string $t): ?string => Currency::fromPosted($t));
+        if (isset($country['refuse']) === true || isset($currency['refuse']) === true) {
+            // Both boxes are judged before either is written: a refusal changes nothing.
+            $db->rollback();
+            $reject(trim('Nothing was saved. '
+                . (isset($country['refuse']) === true ? 'The installation\'s country chosen is not one the portal knows: choose one from the list, or "No country chosen". ' : '')
+                . (isset($currency['refuse']) === true ? 'The installation\'s currency chosen is not one the portal can use: choose one from the list, or "No currency chosen".' : '')));
+        }
+        if (isset($country['write']) === true) {
+            $upsert($db, Countries::SETTING, $country['write'], null);
+        }
+        if (isset($currency['write']) === true) {
+            $upsert($db, Currency::SETTING, $currency['write'], null);
+        }
+        $db->commit();
+    } catch (\Throwable $installationFault) {
+        $db->rollback();
+        throw $installationFault;
+    }
+
+    $said   = [];
+    $logged = [];
+    $type   = 'success';
+    if (isset($country['write']) === true) {
+        $said[]   = 'The installation\'s country is now ' . $countryWord($country['write']) . '.';
+        $logged[] = 'country ' . ($countryBefore === '' ? 'none' : $countryBefore) . ' to ' . ($country['write'] === '' ? 'none' : $country['write']);
+    }
+    if (isset($currency['write']) === true) {
+        // D-139, said where the change is made: nothing already recorded moves.
+        // And the one place it DOES show (#993): spending with outside providers
+        // is still kept as a bare number shown in the installation's currency.
+        $said[]   = 'The installation\'s currency is now ' . $currencyWord($currency['write']) . '. Every amount already '
+            . 'recorded keeps the currency it was recorded in; organisations that follow the installation record new '
+            . 'amounts in the new one. Spending with outside providers, and its monthly limits, are shown in the '
+            . 'installation\'s currency and are not converted.';
+        $logged[] = 'currency ' . ($currencyBefore === '' ? 'none' : $currencyBefore) . ' to ' . ($currency['write'] === '' ? 'none' : $currency['write']);
+    }
+    foreach ([['country', $country, $countryBefore, $countryWord], ['currency', $currency, $currencyBefore, $currencyWord]] as [$what, $answer, $now, $word]) {
+        if (($answer['skip'] ?? '') === 'changed elsewhere') {
+            // 🪟 An older tab: say so, and say what is in force now, so nobody
+            //    believes their untouched Save put back what they saw.
+            $said[] = 'The installation\'s ' . $what . ' was changed after this page was opened, so it was left as it is now: '
+                . $word($now) . '.';
+            $type   = 'warning';
+        }
+    }
+    if ($logged !== []) {
+        Logger::activity(
+            'InstallationPlaceSaved',
+            'The installation\'s own settings changed: ' . implode('; ', $logged) . '.',
+            isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null
+        );
+    }
+    $_SESSION['flash_msg']  = $said === [] ? 'Saved. Nothing was different, so nothing was changed.' : implode(' ', $said);
+    $_SESSION['flash_type'] = $said === [] ? 'info' : $type;
+    header('Location: ' . $redirect . '#installation', true, 302);
     exit();
 }
 

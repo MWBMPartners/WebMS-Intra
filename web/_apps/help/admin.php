@@ -1172,6 +1172,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 </div>
 
+<!-- Section: The installation's country and currency (#967, #991).
+     Held true by section N of tools/currency-selftest.php. If the "whole
+     installation" card at Admin, Settings, Organisation changes, change this
+     with it. -->
+<div class="portal-card p-4 mb-4" id="installation-country-currency">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-building me-2 text-primary"></i>Country and Currency</h2>
+
+    <p>Each organisation has a country and a currency, at <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Organisation</a>. An organisation can choose its own, or &ldquo;Same as the installation&rdquo;, which follows the country and currency chosen for the whole installation when it was installed.</p>
+    <ul class="mb-3">
+        <li class="mb-2">A global administrator sees a second card on that page, <strong>The whole installation</strong>, and can change the installation&rsquo;s own country and currency there. Every organisation set to &ldquo;Same as the installation&rdquo; follows the change; an organisation that chose its own does not.</li>
+        <li class="mb-2">Changing a currency affects new records only. Every amount already recorded keeps the currency it was recorded in, and nothing is converted. Spending with outside providers, and its monthly limits, are shown in the installation&rsquo;s currency and are not converted either.</li>
+        <li class="mb-2">If the page was opened before somebody else changed one of them, saving it without touching that box leaves their change in place, and the page says so.</li>
+        <li class="mb-2">The general Settings page does not change either setting: it would accept any text, and text that is not a country or currency is ignored by the portal.</li>
+    </ul>
+</div>
+
 <!-- Section: Setting up the public website (#493 P3, P4a, P4b and P4c; D-082, D-085,
      D-093, D-094, D-095, D-097). Every statement here is held true by section
      W of tools/public-website-tick-selftest.php and by

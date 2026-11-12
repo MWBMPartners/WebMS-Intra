@@ -38,6 +38,14 @@
  *      provider step, recorded on the pending payment row; a currency no
  *      provider is sent, and no currency at all, are refused before any row;
  *   F  no currency at all: amounts are plain numbers, still never "£".
+ *   N  the INSTALLATION's own country and currency (#967, #991): a global
+ *      administrator changes both on the organisation page's installation
+ *      card, the installation's rows change and no money row is relabelled;
+ *      an older page saved untouched puts nothing back; a country or currency
+ *      the portal cannot use is refused whole; text stored before (#967's
+ *      "GBR") is shown and kept; the general Settings editor refuses the
+ *      country; and an administrator of one organisation is neither shown
+ *      the card nor allowed to post it.
  *
  * WHAT IT CANNOT SHOW, said plainly:
  *   - no request reaches Stripe or PayPal. Their addresses are written into
@@ -79,6 +87,8 @@ declare(strict_types=1);
 const CU_ADMIN = 966901;
 /** A second made-up member (section L), removed at the end with the first. */
 const CU_HELPER = 966902;
+/** An administrator of the test's organisation ONLY (section N), removed at the end with the others. */
+const CU_ORGADMIN = 966903;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -523,6 +533,9 @@ $removeAll = static function () use ($db, &$made, $site): void {
     run($db, 'DELETE FROM `tblAssetMaintenance` WHERE `performedByUserID` = ?', 'i', [CU_HELPER]);
     run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [CU_HELPER]);
     run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [CU_HELPER]);
+    run($db, 'DELETE FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [CU_ORGADMIN]);
+    run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [CU_ORGADMIN]);
+    run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [CU_ORGADMIN]);
     run($db, "DELETE FROM `tblErrors` WHERE `errorTitle` = 'Currency selftest marker'");
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
 };
@@ -1968,6 +1981,184 @@ foreach (['tblGivingStatementLog', 'tblGivingEntry', 'tblGiftAidDeclaration'] as
 }
 run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [$euroDonor]);
 run($db, 'DELETE FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [$site, CU_ADMIN]);
+
+// =============================================================================
+// N. The installation's OWN country and currency (#967, #991)
+// =============================================================================
+// Before #967/#991 no checked page could change either after installation: the
+// organisation page wrote only the open organisation's own rows, and the general
+// Settings editor refused the currency and took the country as free text. The
+// organisation page now has a card, for a global administrator only, that
+// changes the installation's two rows (`siteID IS NULL`) with the same rules as
+// an organisation's: a known country, a usable currency, "none" allowed, and a
+// currency change relabelling nothing (D-139).
+head('Section N — the installation\'s own country and currency (#967, #991)');
+$installRow = static function (string $key) use ($db): ?string {
+    $r = rows($db, 'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
+
+    return $r === [] ? null : (string) $r[0]['settingValue'];
+};
+$ownRow = static function (string $key) use ($db, $site): ?string {
+    $r = rows($db, 'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$key, $site]);
+
+    return $r === [] ? null : (string) $r[0]['settingValue'];
+};
+/** Every money row's currency, table by table, so "nothing was relabelled" is checked over ALL of them. */
+$moneyLabels = static function () use ($db): string {
+    $out = [];
+    foreach (array_merge(Currency::OWN_TABLES, array_keys(Currency::CHILD_TABLES)) as $table) {
+        foreach (rows($db, 'SELECT `currency`, COUNT(*) AS `n` FROM `' . $table . '` GROUP BY `currency` ORDER BY `currency`') as $r) {
+            $out[] = $table . ':' . $r['currency'] . '=' . $r['n'];
+        }
+    }
+
+    return implode(' ', $out);
+};
+/** The value of one hidden or selected control in a form, as drawn. */
+$selectedOn = static function (string $html, string $name): string {
+    if (preg_match('#<select[^>]*name="' . preg_quote($name, '#') . '"[^>]*>(.*?)</select>#s', $html, $m) !== 1) {
+        return '(no such select)';
+    }
+
+    return preg_match('#<option value="([^"]*)"[^>]*\bselected\b#', $m[1], $o) === 1 ? html_entity_decode($o[1], ENT_QUOTES, 'UTF-8') : '(none selected)';
+};
+$hiddenOn = static function (string $html, string $name): ?string {
+    return preg_match('#<input type="hidden" name="' . preg_quote($name, '#') . '" value="([^"]*)">#', $html, $m) === 1
+        ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : null;
+};
+/** The installation card's fields exactly as a browser would send them untouched. */
+$cardAsDrawn = static function (string $html) use ($tokenOn, $selectedOn, $hiddenOn): array {
+    return [
+        'csrf_token'                   => $tokenOn($html),
+        'form'                         => 'installation',
+        'installationCountryCode'      => $selectedOn($html, 'installationCountryCode'),
+        'installationCountryCodeDrawn' => (string) $hiddenOn($html, 'installationCountryCodeDrawn'),
+        'installationCurrency'         => $selectedOn($html, 'installationCurrency'),
+        'installationCurrencyDrawn'    => (string) $hiddenOn($html, 'installationCurrencyDrawn'),
+    ];
+};
+
+// The organisation FOLLOWS the installation for both, so a change reaches it.
+$setting('org.address.countryCode', 'FR', null);
+$setting('org.currency', 'EUR', null);
+run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` IN (\'org.address.countryCode\', \'org.currency\') AND `siteID` = ?', 'i', [$site]);
+$cardPage = $http('GET', '/admin/settings/organisation');
+check('N1 a global administrator is shown the "whole installation" card, its boxes holding the INSTALLATION\'s country and currency (France, EUR), each with the value it was drawn with beside it',
+    $cardPage['status'] === 200 && str_contains($cardPage['body'], 'id="installation"') === true
+    && $selectedOn($cardPage['body'], 'installationCountryCode') === 'FR' && $selectedOn($cardPage['body'], 'installationCurrency') === 'EUR'
+    && $hiddenOn($cardPage['body'], 'installationCountryCodeDrawn') === 'FR' && $hiddenOn($cardPage['body'], 'installationCurrencyDrawn') === 'EUR',
+    'HTTP ' . $cardPage['status'] . '; country ' . $selectedOn($cardPage['body'], 'installationCountryCode') . ', currency ' . $selectedOn($cardPage['body'], 'installationCurrency'));
+
+$labelsBefore = $moneyLabels();
+$placeLogsSql    = "SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` = 'InstallationPlaceSaved' AND `activityDescription` LIKE '%country FR to DE%currency EUR to CHF%'";
+$placeLogsBefore = (int) (rows($db, $placeLogsSql)[0]['n'] ?? 0);
+$changedCard = $http('POST', '/admin/settings/organisation/save',
+    ['installationCountryCode' => 'DE', 'installationCurrency' => 'CHF'] + $cardAsDrawn($cardPage['body']));
+check('N2 changing them there stores Germany and CHF in the INSTALLATION\'s rows, and gives the organisation no row of its own',
+    $changedCard['status'] === 302 && $installRow('org.address.countryCode') === 'DE' && $installRow('org.currency') === 'CHF'
+    && $ownRow('org.address.countryCode') === null && $ownRow('org.currency') === null,
+    'HTTP ' . $changedCard['status'] . '; installation ' . var_export($installRow('org.address.countryCode'), true) . '/' . var_export($installRow('org.currency'), true)
+    . '; own ' . var_export($ownRow('org.address.countryCode'), true) . '/' . var_export($ownRow('org.currency'), true));
+// Asked of the PAGE, not of the classes: in this process the classes have no
+// connection (App::db() has none to give, and their reads then answer '' —
+// which is also why C2's "Currency::ofInstallation() === ''" cannot fail).
+// (The same page answer carries the save's message, read by N5: a page is drawn
+// with the message once, so N3 and N5 share this one GET.)
+$followPage = $http('GET', '/admin/settings/organisation')['body'];
+check('N3 ...so the organisation, which follows the installation, now reads Germany and CHF as "Same as the installation"',
+    str_contains($followPage, 'Same as the installation: Germany') === true && str_contains($followPage, 'Same as the installation: CHF') === true);
+check('N4 ...and NOT ONE money row anywhere was relabelled: every table\'s currencies are exactly as before (D-139)',
+    $moneyLabels() === $labelsBefore, "before: {$labelsBefore}\nafter:  " . $moneyLabels());
+$saidAfter = $followPage;
+check('N5 ...the administrator is told the new currency applies to new records only, and that outside-provider spending is not converted',
+    str_contains($saidAfter, 'The installation&#039;s currency is now CHF. Every amount already recorded keeps the currency it was recorded in') === true
+    && str_contains($saidAfter, 'are not converted') === true);
+check('N6 ...and the change is in the activity log, old and new', (int) (rows($db, $placeLogsSql)[0]['n'] ?? 0) === $placeLogsBefore + 1);
+$before_n7 = (int) (rows($db, 'SELECT COALESCE(MAX(`projectID`), 0) AS `m` FROM `tblProject`')[0]['m']);
+$http('POST', '/projects/manage-save', ['csrf_token' => $freshToken('/projects/manage'), 'title' => 'Currency selftest installation roof', 'targetAmount' => '10.00', 'status' => 'active', 'isPublic' => '0', 'description' => 'x']);
+$newProj = rows($db, 'SELECT `projectID`, `currency` FROM `tblProject` WHERE `projectID` > ? AND `siteID` = ?', 'ii', [$before_n7, $site]);
+foreach ($newProj as $p) {
+    $made['projects'][] = (int) $p['projectID'];
+}
+check('N7 a NEW record made after the change is in the installation\'s new currency, CHF (the organisation follows it)',
+    count($newProj) === 1 && $newProj[0]['currency'] === 'CHF', json_encode($newProj));
+
+// An untouched Save from a page opened BEFORE another change writes nothing (#875's shape).
+$olderCard = $http('GET', '/admin/settings/organisation')['body'];
+$setting('org.address.countryCode', 'IT', null);   // another global administrator, meanwhile
+$untouched = $http('POST', '/admin/settings/organisation/save', $cardAsDrawn($olderCard));
+check('N8 a page opened before another change, saved UNTOUCHED, does not put its old value back: the country stays Italy, the currency CHF',
+    $untouched['status'] === 302 && $installRow('org.address.countryCode') === 'IT' && $installRow('org.currency') === 'CHF',
+    var_export($installRow('org.address.countryCode'), true) . '/' . var_export($installRow('org.currency'), true));
+check('N9 ...and says the country was changed after the page was opened, naming what is in force',
+    str_contains($http('GET', '/admin/settings/organisation')['body'], 'The installation&#039;s country was changed after this page was opened, so it was left as it is now: Italy.') === true);
+
+// A country that is not on the list is refused, and so is the WHOLE save.
+$refusedPage = $http('GET', '/admin/settings/organisation')['body'];
+$refusedSave = $http('POST', '/admin/settings/organisation/save',
+    ['installationCountryCode' => 'GBR', 'installationCurrency' => 'USD'] + $cardAsDrawn($refusedPage));
+check('N10 a country that is not on the portal\'s list ("GBR") is refused, and the currency posted beside it is NOT saved either',
+    $installRow('org.address.countryCode') === 'IT' && $installRow('org.currency') === 'CHF'
+    && str_contains($http('GET', '/admin/settings/organisation')['body'], 'country chosen is not one the portal knows') === true);
+$refusedSave = $http('POST', '/admin/settings/organisation/save',
+    ['installationCurrency' => 'JPY'] + $cardAsDrawn($http('GET', '/admin/settings/organisation')['body']));
+check('N11 a currency the portal cannot use (JPY, not counted in hundredths) is refused too', $installRow('org.currency') === 'CHF');
+
+// Text stored before #967 that is not a country is SHOWN, and an untouched Save keeps it rather than failing.
+$setting('org.address.countryCode', 'GBR', null);
+$gbrPage = $http('GET', '/admin/settings/organisation')['body'];
+check('N12 a stored "GBR" is shown selected, with a warning that the portal ignores it (it used to be invisible)',
+    $selectedOn($gbrPage, 'installationCountryCode') === 'GBR' && str_contains($gbrPage, 'data-installation-country-unusable') === true
+    && str_contains($gbrPage, 'Same as the installation (none chosen yet)') === true);
+$http('POST', '/admin/settings/organisation/save', $cardAsDrawn($gbrPage));
+check('N13 ...and an untouched Save keeps it as it is: not refused, not cleared', $installRow('org.address.countryCode') === 'GBR'
+    && str_contains($http('GET', '/admin/settings/organisation')['body'], 'Nothing was different') === true);
+$http('POST', '/admin/settings/organisation/save', ['installationCountryCode' => ''] + $cardAsDrawn($http('GET', '/admin/settings/organisation')['body']));
+check('N14 "No country chosen" is allowed, as the installer allows it: the row is emptied, as the install script seeds it', $installRow('org.address.countryCode') === '');
+
+// The general Settings editor now refuses the country, at the installation's level.
+$countryRowId = (int) (rows($db, "SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL")[0]['settingID'] ?? 0);
+$http('POST', '/settings/save', ['csrf_token' => $freshToken('/settings'), 'settingID' => (string) $countryRowId, 'settingKey' => 'org.address.countryCode', 'settingValue' => 'GBR']);
+check('N15 the general Settings editor refuses to change the installation\'s country (it used to store "GBR" there, which then meant no country)',
+    $installRow('org.address.countryCode') === '');
+
+// An administrator of THIS organisation only is not shown the card and cannot post it.
+$orgPassword = 'Cu' . bin2hex(random_bytes(8)) . '!9y';
+run($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`, `createdAt`) VALUES (?, ?, ?, 1, 0, 0, NOW())',
+    'iss', [CU_ORGADMIN, 'Selftest currency organisation administrator', 'currency-orgadmin@selftest.invalid']);
+run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`) VALUES (?, ?, 1, 1)', 'ii', [$site, CU_ORGADMIN]);
+run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
+    'iss', [CU_ORGADMIN, 'selftest-currency-orgadmin', password_hash($orgPassword, PASSWORD_DEFAULT)]);
+$orgJar  = $child . $sep . 'cookies-orgadmin.txt';
+$httpOrg = static function (string $method, string $path, array $post = []) use ($port, $orgJar): array {
+    $handle = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 60, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $orgJar, CURLOPT_COOKIEFILE => $orgJar,
+    ]);
+    if ($method === 'POST') {
+        curl_setopt($handle, CURLOPT_POST, true);
+        curl_setopt($handle, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $raw      = (string) curl_exec($handle);
+    $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'body' => substr($raw, $headSize)];
+};
+$httpOrg('POST', '/login', ['csrf_token' => $tokenOn($httpOrg('GET', '/login')['body']), 'username' => 'selftest-currency-orgadmin', 'password' => $orgPassword]);
+$orgView = $httpOrg('GET', '/admin/settings/organisation');
+check('N16 an administrator of this organisation only opens the page (premise) and is NOT shown the installation card',
+    $orgView['status'] === 200 && str_contains($orgView['body'], 'id="currency"') === true && str_contains($orgView['body'], 'id="installation"') === false,
+    'HTTP ' . $orgView['status']);
+$refusedBefore = (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'SettingsGroupSaveRefused'", 'i', [CU_ORGADMIN])[0]['n'] ?? 0);
+$httpOrg('POST', '/admin/settings/organisation/save', ['csrf_token' => $tokenOn($orgView['body']), 'form' => 'installation',
+    'installationCountryCode' => 'ES', 'installationCurrency' => 'USD']);
+check('N17 ...and a post of it is REFUSED: the installation\'s rows are unchanged, and the refusal is recorded',
+    $installRow('org.address.countryCode') === '' && $installRow('org.currency') === 'CHF'
+    && (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'SettingsGroupSaveRefused'", 'i', [CU_ORGADMIN])[0]['n'] ?? 0) === $refusedBefore + 1,
+    var_export($installRow('org.address.countryCode'), true) . '/' . var_export($installRow('org.currency'), true));
+check('N18 ...with words that say why', str_contains($httpOrg('GET', '/admin/settings/organisation')['body'], 'only a global administrator can change them') === true);
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

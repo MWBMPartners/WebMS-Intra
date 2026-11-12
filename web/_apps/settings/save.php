@@ -253,8 +253,12 @@ if ($settingId > 0) {
         exit();
     }
     // 💷 The currency (#966) is changed only on the organisation settings
-    //    page, which refuses a change under money already recorded. This
-    //    editor has no such check, so it refuses the key outright.
+    //    page (an organisation's own; the installation's on its installation
+    //    card since #991), which accepts only a currency the portal can use.
+    //    This editor would store any text, so it refuses the key outright.
+    //    (This comment used to say that page "refuses a change under money
+    //    already recorded": that lock was removed by D-139, and every amount
+    //    keeps its own currency instead.)
     if (\Portal\Core\Currency::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -262,6 +266,21 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    // 🌍 The country (#967), the same: the organisation settings page accepts
+    //    only a country on the portal's list, at either level. This editor
+    //    stored any text, and "GBR" there silently became "no country" for
+    //    every organisation following the installation.
+    if (\Portal\Core\Countries::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is the country and can only be changed on the organisation settings page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Countries::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
@@ -856,6 +875,19 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    // 🌍 Nor the country (#967): adding a row for it here would skip the
+    //    organisation page's check that it is a country on the portal's list.
+    if (\Portal\Core\Countries::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is the country and can only be set on the organisation settings page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Countries::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

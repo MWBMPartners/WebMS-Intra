@@ -397,6 +397,22 @@ $pages = [
         'secrets' => ['portal.qr.cuercode.api_key'],
         'probe'   => ['set' => ['endpoint' => 'https://probe.example.invalid/v1'], 'key' => 'portal.qr.cuercode.api_endpoint', 'expect' => 'https://probe.example.invalid/v1'],
     ],
+    // 🏢 #967, #991: the organisation page's "whole installation" card. Organisation
+    //    A has a country and currency of its own (an ordinary, legitimate state —
+    //    the card above it sets them), and the installation another; the card must
+    //    show and send back the installation's, and its untouched Save must change
+    //    neither level. The hidden "…Drawn" fields are read off the page and sent
+    //    like every other control, as a browser sends them.
+    'organisation-installation' => [
+        'path'  => '/admin/settings/organisation',
+        'match' => ['form', 'installation'],
+        'seed'  => [
+            ['org.address.countryCode', 'installationCountryCode', 'FR',  'DE',  'FR'],
+            ['org.currency',            'installationCurrency',    'EUR', 'CHF', 'EUR'],
+        ],
+        'secrets' => [],
+        'probe'   => ['set' => ['installationCountryCode' => 'ES'], 'key' => 'org.address.countryCode', 'expect' => 'ES'],
+    ],
 ];
 
 /** Every key this run may touch installation-wide, so the clean-up can put each back. */
@@ -1170,8 +1186,8 @@ ok(
 // The count of pages is pinned so a page deleted from the list above is noticed
 // (#697: iterating a list cannot see an entry that is no longer in it).
 ok(
-    'Z03 all fifteen forms (on thirteen pages) were driven',
-    count($pages) === 15,
+    'Z03 all sixteen forms (on fourteen pages) were driven',
+    count($pages) === 16,
     'the list holds ' . count($pages)
 );
 

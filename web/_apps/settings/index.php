@@ -225,7 +225,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             exit();
         }
         // 💷 The currency (#966): deleting an organisation's row here would switch
-        //    it to the installation's currency with no check for money recorded.
+        //    it to the installation's currency, and deleting the installation's
+        //    would leave every organisation following it with none, with nobody
+        //    told. Changed only at Admin, Settings, Organisation (#991: the
+        //    installation's on that page's installation card). (This comment
+        //    used to speak of a "check for money recorded"; D-139 replaced that
+        //    lock with a currency kept on every record.)
         if ($lockedKey !== null && \Portal\Core\Currency::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
@@ -233,6 +238,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                 $_SESSION['user_id'] ?? null
             );
             $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+        // 🌍 The country (#967): deleting the installation's row here would leave
+        //    every organisation following it with no country, and an
+        //    organisation's own with no check at all. Changed only at Admin,
+        //    Settings, Organisation (Countries::lockedInGeneralEditor()).
+        if ($lockedKey !== null && \Portal\Core\Countries::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is the country and can only be changed on the organisation settings page',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\Countries::LOCKED_MESSAGE;
             $_SESSION['flash_type'] = 'danger';
             header('Location: ' . Site::url('settings'));
             exit();
@@ -807,6 +827,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    administrator, a Delete button) that could only be refused.
                                     $transcriptLocked = \Portal\Core\TranscriptRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     $currencyLocked   = \Portal\Core\Currency::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And the country (#967), changed on the same page as the currency.
+                                    $countryLocked    = \Portal\Core\Countries::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 #845: ONE answer each to "is Edit offered" and "is Delete
                                     //    offered", built from the methods' answers above and nothing
                                     //    else. They used to be two separate chains — the Edit chain
@@ -838,7 +860,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         || $versionLocked === true || $capabilityLocksLocked === true || $zoneLocked === true
                                         || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
                                         || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
-                                        || $transcriptLocked === true || $currencyLocked === true || $rowRefusal !== null;
+                                        || $transcriptLocked === true || $currencyLocked === true || $countryLocked === true || $rowRefusal !== null;
                                     $deleteLocked = $editLocked === true || $isGivingRule === true;
                                     ?>
                                     <?php if ($editLocked === true): ?>
@@ -896,6 +918,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php elseif ($transcriptLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/transcription'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Transcript retention</a>
                                     <?php elseif ($currencyLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Organisation</a>
+                                    <?php elseif ($countryLocked === true): ?>
+                                        <?php /* #967: an organisation's own country by any of its administrators,
+                                                 the installation's on that page's installation card by a global
+                                                 administrator. Its own branch, one per family, so section D of
+                                                 tools/settings-locks-selftest.php can take it out on its own. */ ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Organisation</a>
                                     <?php elseif ($rowRefusal !== null): ?>
                                         <?php /* #1021: no link — there is no page where this person could change it either. */ ?>

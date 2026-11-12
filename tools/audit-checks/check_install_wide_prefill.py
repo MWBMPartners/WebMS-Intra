@@ -237,10 +237,14 @@ WRITES_LEVEL_AT_RUN_TIME = re.compile(
 LEVEL_CHOSEN_AT_RUN_TIME = {
     "web/_apps/admin/settings/organisation/save.php":
         "#677 — one $upsert() helper, with the level as its last argument and no default. "
-        "Nine org.* keys and portal.support.email go to the organisation's own row; `site.url` "
-        "alone goes installation-wide. Its sibling page cannot have the fault this check looks "
-        "for, because it does not read `site.url` from the merged array at all: it reads it "
-        "through PortalAddress, which queries `siteID IS NULL` directly (#500).",
+        "The org.* keys, org.currency and portal.support.email go to the organisation's own row; "
+        "`site.url`, and from the installation card (#967, #991) org.address.countryCode and "
+        "org.currency, go installation-wide. Its sibling page cannot have the fault this check "
+        "looks for, because it reads none of those three from the merged array: `site.url` "
+        "through PortalAddress, and the installation's country and currency through "
+        "Countries::installationStoredText() and Currency::installationStoredText(), all of "
+        "which query `siteID IS NULL` directly (#500). Driven over HTTP by the "
+        "'organisation-installation' page in tools/install-wide-prefill-selftest.php.",
     "web/_apps/admin/settings/repeats/save.php":
         "#668 — writes a per-organisation limit that the installation's value caps. Both it and "
         "its sibling page read `InstallationSettings::layer()`, so `reads_layer()` would skip "

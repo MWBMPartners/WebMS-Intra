@@ -20,6 +20,14 @@
  * (The postal address form above it still shows its button to everybody;
  * that is older and was left alone.)
  *
+ * THE "WHOLE INSTALLATION" CARD (#967, #991) is drawn only for a global
+ * administrator: the installation's OWN country and currency, which every
+ * organisation that chose "Same as the installation" follows. Before it, no
+ * checked page could change either after installation. Its boxes are filled
+ * from the installation's own rows, never the merged settings (#674), and
+ * carry the value they were drawn with so an older tab saved untouched writes
+ * nothing (#875's shape). The general Settings editor refuses both keys.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -167,6 +175,40 @@ if ($currencyCountryUses !== '' && $currencySuggested === '') {
 } elseif ($currencySuggested !== '' && $currencyInForce !== '' && $currencyInForce !== $currencySuggested) {
     $currencyAdvice = 'This organisation\'s currency is ' . $currencyInForce . ', and '
         . Countries::name($countryInForce) . ' uses ' . $currencySuggested . '.';
+}
+
+// 🏢 THE INSTALLATION CARD (#967, #991): the installation's OWN country and
+//    currency — what every organisation that chose "Same as the installation"
+//    follows. Drawn ONLY for a global administrator, who alone may change them
+//    (the save handler refuses anybody else); an organisation's own
+//    administrator sees the installation's values in the "Same as the
+//    installation: …" options above and nothing they cannot use.
+//
+//    PREFILLED FROM THE INSTALLATION'S OWN ROWS, never the merged settings
+//    (#674): the merged value is the open organisation's own where it has one,
+//    so a global administrator opening this page inside such an organisation
+//    would see THAT in the box, press Save untouched, and make it everyone's.
+//    Countries::installationStoredText() and Currency::installationStoredText()
+//    read the row with no organisation (`siteID IS NULL`) directly — the same
+//    rows InstallationSettings::layer() holds, asked of the two classes that
+//    decide what a stored country or currency MEANS, so this card and every
+//    reader of the installation's value cannot disagree.
+//
+//    Text the row holds that is not usable (say "GBR", which the general
+//    Settings editor could store before #967) is offered back, selected, with
+//    a warning. Without it NO option would be selected, and a select with
+//    none selected is a vote for its first option (#763) — "No country
+//    chosen" — so an untouched Save would quietly have cleared it.
+$mayChangeInstallation = App::isRootAdmin();
+$installCountryText    = $mayChangeInstallation === true ? Countries::installationStoredText() : '';
+$installCurrencyText   = $mayChangeInstallation === true ? Currency::installationStoredText() : '';
+$installCountryChoices = Countries::choices();
+if ($installCountryText !== '' && isset($installCountryChoices[$installCountryText]) === false) {
+    $installCountryChoices = [$installCountryText => $installCountryText . ' (not on the portal\'s list)'] + $installCountryChoices;
+}
+$installCurrencyChoices = Currency::choices();
+if ($installCurrencyText !== '' && isset($installCurrencyChoices[$installCurrencyText]) === false) {
+    $installCurrencyChoices = [$installCurrencyText => $installCurrencyText . ' (not a currency the portal can use)'] + $installCurrencyChoices;
 }
 
 // 🌐 The "Web addresses" card. Everything about the portal's address comes
@@ -387,6 +429,84 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($mayChangeInstallation === true): ?>
+<!-- 🏢 The installation's own country and currency (#967, #991). Global administrators only. -->
+<div class="card mb-4" id="installation">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-building me-2"></i>The whole installation</h2>
+        <p class="text-secondary small">
+            Every organisation on this installation that has chosen &ldquo;Same as the installation&rdquo; for its
+            country or currency follows these two. An organisation that has chosen its own is not changed by them.
+            Only a global administrator sees this card and can change them.
+        </p>
+        <?php
+        // 🏢 The ONE notice (#943) when the organisation this page is open in
+        //    has its own value for either: the boxes below show the
+        //    installation's, which is not what this organisation is using.
+        //    Names only, never values.
+        $installWideDiffering = InstallationSettings::differsHere(\Portal\Core\Countries::SETTING, \Portal\Core\Currency::SETTING);
+        require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php';
+        ?>
+        <form method="post" action="<?php echo $e(Site::url('admin/settings/organisation/save')); ?>">
+            <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+            <input type="hidden" name="form" value="installation">
+            <?php /* #875's shape: the value each box was DRAWN with goes back beside it,
+                     so the handler writes a box only when it was changed here. An older
+                     tab saved untouched then cannot put back a value changed since. */ ?>
+            <input type="hidden" name="installationCountryCodeDrawn" value="<?php echo $e($installCountryText); ?>">
+            <input type="hidden" name="installationCurrencyDrawn" value="<?php echo $e($installCurrencyText); ?>">
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="installationCountryCode">The installation&rsquo;s country</label>
+                    <select class="form-select" id="installationCountryCode" name="installationCountryCode" aria-describedby="installationCountryHelp">
+                        <option value=""<?php echo $installCountryText === '' ? ' selected' : ''; ?>>No country chosen</option>
+                        <?php foreach ($installCountryChoices as $code => $countryName): ?>
+                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $installCountryText ? ' selected' : ''; ?>><?php echo $e($countryName); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="installationCountryHelp">
+                        The country new organisations start from, and the one organisations following the installation are in.
+                        With no country chosen, new venues of those organisations need one typed in.
+                    </div>
+                    <?php if ($installCountryText !== '' && $countryInstallation === ''): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note" data-installation-country-unusable><?php echo $e(
+                            'The installation\'s country is stored as "' . $installCountryText . '", which is not a two-letter country code, '
+                            . 'so the portal ignores it: organisations following the installation have no country. Choose a country from '
+                            . 'the list and save to put it right. Saving with it unchanged keeps it as it is.'
+                        ); ?></div>
+                    <?php endif; ?>
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="installationCurrency">The installation&rsquo;s currency</label>
+                    <select class="form-select" id="installationCurrency" name="installationCurrency" aria-describedby="installationCurrencyHelp">
+                        <option value=""<?php echo $installCurrencyText === '' ? ' selected' : ''; ?>>No currency chosen</option>
+                        <?php foreach ($installCurrencyChoices as $code => $currencyName): ?>
+                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $installCurrencyText ? ' selected' : ''; ?>><?php echo $e($currencyName); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="installationCurrencyHelp">
+                        The currency new records take in organisations that follow the installation. Changing it affects new
+                        records only: every amount already recorded keeps the currency it was recorded in. Spending with
+                        outside providers (AI assistant, translation, text messages, transcription) and its monthly limits
+                        are shown in this currency and are not converted if it changes.
+                    </div>
+                    <?php if ($installCurrencyText !== '' && $currencyInstallation === ''): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note" data-installation-currency-unusable><?php echo $e(
+                            'The installation\'s currency is stored as "' . $installCurrencyText . '", which is not a currency the portal '
+                            . 'can use, so organisations following the installation have no currency. Choose one from the list and save '
+                            . 'to put it right. Saving with it unchanged keeps it as it is.'
+                        ); ?></div>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="mt-3">
+                <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save the installation&rsquo;s country and currency</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($hasCoords === true): ?>
     <div class="card mb-4">

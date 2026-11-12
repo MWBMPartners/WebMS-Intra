@@ -94,7 +94,7 @@
  *      transcription call taken out of the delete and replaced by a string
  *      holding the call's text, and taken out of the DRAWING (P4c); and, for
  *      section D, the drawing's transcription ask switched off (P8) and the
- *      currency's note taken away (P9); and for #1021 the drawing's row-rule
+ *      currency's note taken away (P9) and the country's (P9b, #967); and for #1021 the drawing's row-rule
  *      ask switched off (P11), asked as if every viewer were a global
  *      administrator (P12), the save handler's row refusal taken out (P13),
  *      and, in memory, the drawing's ask replaced by another call (P4d). Each
@@ -1512,6 +1512,13 @@ $p9 = $plant($copyOf('index.php'), [
 check('P9 with the currency\'s note branch taken out, the plant applied AND section D names a row with no note',
     $p9['applied'] === true && count(array_filter($p9['result'] ?? [], static fn (string $l): bool => str_contains($l, 'no note naming'))) > 0,
     'applied: ' . var_export($p9['applied'], true) . '; D reported: ' . implode('; ', $p9['result'] ?? []));
+// #967: the same for the country's note, its own branch since the country joined the locks.
+$p9b = $plant($copyOf('index.php'), [
+    "<?php elseif (\$countryLocked === true): ?>" => "<?php elseif (false): ?>",
+], static fn (): array => $drawnWrong($drawn()));
+check('P9b with the country\'s note branch taken out, the plant applied AND section D names org.address.countryCode with no note',
+    $p9b['applied'] === true && count(array_filter($p9b['result'] ?? [], static fn (string $l): bool => str_starts_with($l, 'org.address.countryCode ') && str_contains($l, 'no note naming'))) > 0,
+    'applied: ' . var_export($p9b['applied'], true) . '; D reported: ' . implode('; ', $p9b['result'] ?? []));
 
 // #845 round 2: the drawing asking the giving-records method as if every viewer
 // were a global administrator — the hold row then offers Edit to an
@@ -1620,9 +1627,9 @@ $cleanUp();
 
 // S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
 // per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5;
-// #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d.
+// #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d; #967: P9b.
 $expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
-    + 1 + 10 + 3 + 1;
+    + 1 + 10 + 3 + 1 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

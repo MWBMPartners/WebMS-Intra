@@ -617,12 +617,52 @@ function token(string $html): string
     return preg_match('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
 }
 
-/** POST a form with a fresh token read from $formPage, as a browser would. */
+/**
+ * 🪟 #815: the hidden "drawn" markers a page carries (`drawn_<service>`, the
+ * value each control of the member page was drawn with), as a browser sends
+ * them. Only those: other hidden fields belong to forms this helper does not
+ * describe.
+ *
+ * @return array<string,string>
+ */
+function drawnMarkers(string $html): array
+{
+    $found = [];
+    if (preg_match_all('#<input type="hidden" name="(drawn_[A-Za-z]+)" value="([^"]*)">#', $html, $mm, PREG_SET_ORDER) > 0) {
+        foreach ($mm as $m) {
+            $found[$m[1]] = html_entity_decode($m[2], ENT_QUOTES, 'UTF-8');
+        }
+    }
+
+    return $found;
+}
+
+/**
+ * POST a form with a fresh token read from $formPage, as a browser would —
+ * and, as a browser would, with the page's hidden "drawn" markers (#815) unless
+ * the caller sends its own. A browser always sends a form's hidden fields, so a
+ * post WITHOUT them is a hand-made request, which the tests ask for explicitly.
+ */
 function post(string $jar, string $formPage, string $to, array $fields, string $host = ''): array
 {
-    $fields['csrf_token'] = token(req($jar, 'GET', $formPage, null, $host)['body']);
+    $page = req($jar, 'GET', $formPage, null, $host)['body'];
+    $fields['csrf_token'] = token($page);
+    $fields += drawnMarkers($page);
 
     return req($jar, 'POST', $to, $fields, $host);
+}
+
+/** Every control of the member page exactly as drawn: each select's selected value, the markers, the token. */
+function memberFormAsDrawn(string $html): array
+{
+    $fields = [];
+    foreach (['gravatar', 'providerPhoto', 'memberMap'] as $svc) {
+        if (selectedIn($html, 'choice_' . $svc) !== '(no such select)') {
+            $fields['choice_' . $svc] = selectedIn($html, 'choice_' . $svc);
+        }
+    }
+
+    return $fields + drawnMarkers($html) + ['csrf_token' => token($html)];
 }
 
 /** The page rule's img-src directive. */
@@ -1109,7 +1149,7 @@ foreach (['gravatar', 'providerPhoto', 'memberMap'] as $svc) {
     }
 }
 $beforeRefused = logged(M, 'OutsideServicePrefsRefused');
-req($jarM, 'POST', '/account/outside-services-save', $fields + ['csrf_token' => token($page['body'])]);
+req($jarM, 'POST', '/account/outside-services-save', $fields + drawnMarkers($page['body']) + ['csrf_token' => token($page['body'])]);
 check('H16 an untouched Save leaves the recorded choice alone, and is not refused', choiceOf(M, 'gravatar') === 'on'
     && logged(M, 'OutsideServicePrefsRefused') === $beforeRefused);
 post($jarM, '/account/outside-services', '/account/outside-services-save', ['choice_gravatar' => 'off']);
@@ -1140,7 +1180,7 @@ foreach (['gravatar', 'providerPhoto', 'memberMap'] as $svc) {
 $fields['choice_providerPhoto'] = 'off';
 setAt(K_GRAV, ORG_B, 'no'); // B tightens while the page is open
 $beforeRefused = logged(M, 'OutsideServicePrefsRefused');
-req($jarM, 'POST', '/account/outside-services-save', $fields + ['csrf_token' => token($page['body'])]);
+req($jarM, 'POST', '/account/outside-services-save', $fields + drawnMarkers($page['body']) + ['csrf_token' => token($page['body'])]);
 check('H21 the photo switched OFF is saved, though the untouched Gravatar box re-posted "on" under B\'s "no"',
     choiceOf(M, 'providerPhoto') === 'off' && logged(M, 'OutsideServicePrefsRefused') === $beforeRefused);
 check('H22 ...and the re-posted "on" was neither refused nor rewritten: the stored choice is as it was', choiceOf(M, 'gravatar') === 'on');
@@ -1234,6 +1274,63 @@ setChoice(M, 'gravatar', null);
 setChoice(M, 'providerPhoto', null);
 setAt(K_GRAV, null, 'off');
 setAt(K_PHOTO, null, 'off');
+
+// =============================================================================
+// O. #815: AN OLDER PAGE CANNOT SWITCH A SERVICE BACK ON
+// =============================================================================
+// The member page sends, beside each control, the value it was DRAWN with, and
+// the writer leaves a control sent back as drawn ALONE. Two sessions of the one
+// member, because that is where this really happens: within ONE browser session
+// the form token is replaced on every accepted save, so an older tab of the same
+// session is already refused by the token check (measured: Auth::verifyCsrf()
+// rotates on acceptance). A phone and a laptop are two sessions, each with its
+// own token, and nothing but this stops the older page.
+head('O. #815: a page opened before a change cannot undo it');
+setAt(K_GRAV, null, 'on');
+setAt(K_GRAV, ORG_B, null);
+setChoice(M, 'gravatar', null);
+$jarM2 = signIn('m', ORG_A);
+$older = req($jarM2, 'GET', '/account/outside-services')['body'];
+check('O00 premise: the older page (a second session of M) draws Gravatar as "follow", with the value it was drawn with beside it',
+    selectedIn($older, 'choice_gravatar') === 'follow' && (drawnMarkers($older)['drawn_gravatar'] ?? '') === 'follow',
+    selectedIn($older, 'choice_gravatar') . ' / ' . json_encode(drawnMarkers($older)));
+post($jarM, '/account/outside-services', '/account/outside-services-save', ['choice_gravatar' => 'off']);
+check('O01 premise: M switches Gravatar OFF in the other session', choiceOf(M, 'gravatar') === 'off');
+$updatesBefore = logged(M, 'OutsideServicePrefsUpdated');
+req($jarM2, 'POST', '/account/outside-services-save', memberFormAsDrawn($older));
+check('O02 the older page saved UNTOUCHED leaves the withdrawal in place: Gravatar is still OFF (it used to write "follow" over it, switching it back on)',
+    choiceOf(M, 'gravatar') === 'off', var_export(choiceOf(M, 'gravatar'), true));
+$told = req($jarM2, 'GET', '/account/outside-services')['body'];
+check('O03 ...and the member is TOLD it was changed after the page was opened, and what is in force now, as a warning',
+    str_contains($told, '&quot;Profile pictures from Gravatar&quot; was changed after this page was opened, so it was left as it is now: off.') === true
+    && str_contains($told, 'alert alert-warning') === true);
+$lastUpdate = (string) (one("SELECT `activityDescription` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'OutsideServicePrefsUpdated' ORDER BY `logID` DESC LIMIT 1", 'i', [M])['activityDescription'] ?? '');
+check('O04 ...and the record of that press holds no change to Gravatar (no consent record for something the member did not do)',
+    logged(M, 'OutsideServicePrefsUpdated') === $updatesBefore + 1 && str_contains($lastUpdate, 'Gravatar') === false, $lastUpdate);
+
+// A control the member CHANGED on an older page is a decision made on that page.
+$older = req($jarM2, 'GET', '/account/outside-services')['body'];
+post($jarM, '/account/outside-services', '/account/outside-services-save', ['choice_gravatar' => 'follow']);
+check('O05 premise: drawn as "off" in the older page, then set back to "follow" elsewhere', (drawnMarkers($older)['drawn_gravatar'] ?? '') === 'off'
+    && choiceOf(M, 'gravatar') === null);
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'on'] + memberFormAsDrawn($older));
+check('O06 a control CHANGED on the older page IS saved: "on" was chosen there, and is stored', choiceOf(M, 'gravatar') === 'on',
+    var_export(choiceOf(M, 'gravatar'), true));
+
+// A post with NO drawn values: a page from before #815, or made by hand.
+setChoice(M, 'gravatar', 'off');
+$plain = req($jarM2, 'GET', '/account/outside-services')['body'];
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'on', 'csrf_token' => token($plain)]);
+check('O07 with no drawn value beside it, an "on" that would change something is LEFT ALONE (it cannot be told from an older page\'s)',
+    choiceOf(M, 'gravatar') === 'off', var_export(choiceOf(M, 'gravatar'), true));
+check('O08 ...and the member is told to open the page again',
+    str_contains(req($jarM2, 'GET', '/account/outside-services')['body'], 'was not changed, because the page you saved was out of date') === true);
+setChoice(M, 'gravatar', 'on');
+$plain = req($jarM2, 'GET', '/account/outside-services')['body'];
+req($jarM2, 'POST', '/account/outside-services-save', ['choice_gravatar' => 'off', 'csrf_token' => token($plain)]);
+check('O09 ...but an "off" with no drawn value IS applied: a withdrawal of consent is never lost', choiceOf(M, 'gravatar') === 'off');
+setChoice(M, 'gravatar', null);
+setAt(K_GRAV, null, 'off');
 
 // =============================================================================
 // T. TWO SAVES AT ONCE (round 5) — two REAL processes, because one process cannot

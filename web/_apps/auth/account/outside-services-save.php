@@ -29,6 +29,11 @@
  * "on" is in neither, because it is not a change: recording it would be a
  * consent record for something the member did not do.
  *
+ * AN OLDER TAB (#815). Each control comes with the value it was drawn with,
+ * and a control sent back as drawn is not written at all — so a second, older
+ * tab saved untouched cannot switch back on a service the member has switched
+ * off since. The message says so. See OutsideServices::saveMemberChoice().
+ *
  * @package   Portal\Auth
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -72,7 +77,21 @@ foreach (array_keys(OutsideServices::SERVICES) as $service) {
     }
 }
 
-$outcome = OutsideServices::saveMemberChoice($mysqli, $userId, Site::id(), $posted);
+// 🪟 And the value each control was DRAWN with (#815). A control sent back as
+//    drawn is left alone by the writer, so an older tab saved untouched cannot
+//    switch back on a service the member switched off in another tab since.
+//    Always an array here (never null): this handler serves the member page,
+//    so a post with no drawn value is a stale or hand-made one, and the writer
+//    then applies an "off" only. Anything that is not text counts as absent.
+$drawn = [];
+foreach (array_keys(OutsideServices::SERVICES) as $service) {
+    $marker = OutsideServices::drawnMarkerName($service);
+    if (array_key_exists($marker, $_POST) === true && is_string($_POST[$marker]) === true) {
+        $drawn[$service] = $_POST[$marker];
+    }
+}
+
+$outcome = OutsideServices::saveMemberChoice($mysqli, $userId, Site::id(), $posted, $drawn);
 
 $refused = $outcome['refused'] ?? [];
 if ($outcome['changes'] !== [] || ($outcome['saved'] === true && $refused === [])) {

@@ -21,6 +21,11 @@
  *   ofInstallation(), ownOf(),    the installation's country, an organisation's
  *   ofOrganisation()              OWN country, and the country an organisation
  *                                 is in (its own, else the installation's).
+ *   installationStoredText(),     what the installation's and an organisation's
+ *   ownStoredText()               rows HOLD, for the one page that changes them.
+ *   lockedInGeneralEditor()       the general Settings editor refuses the key
+ *                                 (#967): Admin, Settings, Organisation is the
+ *                                 ONE place a country is changed, at either level.
  *
  * WHERE THE LIST COMES FROM, AND WHY IT IS WRITTEN OUT HERE
  *
@@ -38,8 +43,9 @@
  * The installer has NO autoloader (#728): it requires every class by hand.
  * Everything here except the three "of…" methods that read the database uses
  * nothing but PHP itself, so `require_once` of this one file is enough. The
- * installer must never call ofInstallation(), ownOf() or ofOrganisation():
- * they reach `App`, which the installer does not load.
+ * installer must never call ofInstallation(), ownOf(), ofOrganisation() or
+ * the two "…StoredText()" methods: they reach `App`, which the installer does
+ * not load.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -460,6 +466,50 @@ final class Countries
     }
 
     /**
+     * 🏢 What the INSTALLATION's own row HOLDS, trimmed ('' when it has no row
+     * or an empty one), for the installation card of the organisation settings
+     * page and its save handler only (#967).
+     *
+     * Same rule as ownStoredText(): two letters in any case come back in
+     * CAPITALS, because ofInstallation() reads them that way; anything else
+     * comes back as stored. WHY THE PAGE NEEDS THE RAW TEXT: before #967 the
+     * general Settings editor could store text that is not a country code
+     * (say "GBR") as the installation's country, and ofInstallation() then
+     * answers '' — no country — with nothing anywhere to say why (round 3 of
+     * #942's check). The card has to SHOW that text, offer it back selected
+     * (a select with no selected option is a vote for its first option, #763,
+     * here "No country chosen"), and say plainly that the portal ignores it.
+     */
+    public static function installationStoredText(): string
+    {
+        $text = self::readRows(null)['installationText'];
+
+        return preg_match('/^[A-Za-z]{2}$/', $text) === 1 ? strtoupper($text) : $text;
+    }
+
+    /**
+     * 🔒 Does the general Settings editor refuse this key? Yes for the country
+     * (#967). That editor stores ANY text, at either level, where the
+     * organisation settings page accepts only a country on the portal's list
+     * (fromPosted()). Before this, the editor was the only way to change the
+     * INSTALLATION's country after installation, so a typo there ("GBR",
+     * "United Kingdom") quietly became "no country" for every organisation
+     * following the installation, with nothing on any page to say so. The
+     * organisation settings page is now the ONE place a country is changed:
+     * an organisation's own by any of its administrators, the installation's
+     * by a global administrator. Capitals are ignored, as a key's are
+     * everywhere (the database compares names that way).
+     */
+    public static function lockedInGeneralEditor(string $key): bool
+    {
+        return strcasecmp($key, self::SETTING) === 0;
+    }
+
+    /** What the general settings editor says when it refuses the country. */
+    public const LOCKED_MESSAGE = 'The country is changed at Admin, Settings, Organisation, which accepts only a country '
+        . 'on the portal\'s list. Nothing was changed.';
+
+    /**
      * 🌍 The country an organisation IS in: its own when it has chosen one,
      * else the installation's, else '' (none known). The ONE answer for every
      * reader that needs "this organisation's country": a new venue
@@ -484,11 +534,11 @@ final class Countries
      * Both rows in one query. A read that fails is "nothing known" (''),
      * never a made-up country.
      *
-     * @return array{own: string, installation: string, ownText: string}
+     * @return array{own: string, installation: string, ownText: string, installationText: string}
      */
     private static function readRows(?int $siteId): array
     {
-        $answer = ['own' => '', 'installation' => '', 'ownText' => ''];
+        $answer = ['own' => '', 'installation' => '', 'ownText' => '', 'installationText' => ''];
         try {
             $db   = App::db();
             $site = $siteId ?? 0;
@@ -507,13 +557,13 @@ final class Countries
                 $code  = strtoupper(trim((string) ($row['settingValue'] ?? '')));
                 $which = $row['siteID'] === null ? 'installation' : 'own';
                 $answer[$which] = preg_match('/^[A-Z]{2}$/', $code) === 1 ? $code : '';
-                if ($which === 'own') {
-                    $answer['ownText'] = trim((string) ($row['settingValue'] ?? ''));
-                }
+                // The raw text as well, for the one page that has to SAY when it
+                // is not a country (ownStoredText(), installationStoredText()).
+                $answer[$which . 'Text'] = trim((string) ($row['settingValue'] ?? ''));
             }
             $stmt->close();
         } catch (\Throwable $e) {
-            return ['own' => '', 'installation' => '', 'ownText' => ''];
+            return ['own' => '', 'installation' => '', 'ownText' => '', 'installationText' => ''];
         }
 
         return $answer;

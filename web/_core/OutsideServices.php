@@ -1048,11 +1048,37 @@ final class OutsideServices
      * plainly ("another change to your account was being saved at the same
      * moment").
      *
-     * @param array<string,string> $posted service => value
+     * AN OLDER TAB CANNOT UNDO A CHANGE MADE SINCE (#815; #875's shape, the
+     * newsletter choice). The member page draws, beside each control, the value
+     * it was DRAWN with (`drawnMarkerName()`), and the handler passes those in
+     * `$drawn`. A control sent back exactly as drawn was not touched, so it is
+     * left ALONE — even when the stored choice has changed since the page was
+     * drawn. Before this, a member who switched a service OFF in one tab and
+     * then pressed Save in an older tab still showing "On" wrote "on" again,
+     * re-granting consent they had just withdrawn, with nothing to tell them.
+     * Now the older tab writes nothing for that service and the message SAYS
+     * it was changed after the page was opened and what is in force now. A
+     * control the member CHANGED is saved as before — that is a decision made
+     * on the page they are looking at.
+     *   A value posted with NO drawn value beside it (a page drawn before this
+     *   change, or a hand-made request) cannot be told apart from a stale one,
+     *   so: an "off" is still applied, because a withdrawal of consent is
+     *   never lost (round 4's rule), and an "on" or "follow" that would change
+     *   anything is left alone and the member is told to open the page again —
+     *   "follow" can switch a service back on as surely as "on" can. An "on"
+     *   above the ceiling is still REFUSED with its reason, as before: the page
+     *   draws no control there, so only a hand-made request sends one.
+     * `$drawn` = null means "no page was involved" (a caller with no form, such
+     * as a test or a future API): every posted value is treated as a change, as
+     * it always was. The member page's handler always passes an array.
+     *
+     * @param array<string,string>      $posted service => value
+     * @param array<string,string>|null $drawn  service => the value its control
+     *                                          was drawn with; null = no page
      *
      * @return array{saved:bool, type:string, message:string, changes:list<string>, refused:list<string>}
      */
-    public static function saveMemberChoice(\mysqli $db, int $userId, int $openSiteId, array $posted): array
+    public static function saveMemberChoice(\mysqli $db, int $userId, int $openSiteId, array $posted, ?array $drawn = null): array
     {
         if ($userId <= 0) {
             return self::refusal('You are not signed in. Nothing was saved.') + ['refused' => []];
@@ -1063,7 +1089,34 @@ final class OutsideServices
         if ($wanted === null) {
             return self::refusal('Each choice has to be "follow my organisations", "on" or "off". Nothing was saved.') + ['refused' => []];
         }
-        if ($wanted === []) {
+        // 🪟 #815: which posted values were left exactly as the page drew them
+        //    ($untouched, service => the value drawn) — taken out here and never
+        //    written — and which came from a page with NO drawn value beside them
+        //    ($unmarked, service => true). An unmarked "off" is applied as ever;
+        //    an unmarked "on" or "follow" stays in the press so that one ABOVE the
+        //    ceiling is still refused with its reason (the page draws no control
+        //    there, so only a hand-made request sends one, and the refusal is the
+        //    honest answer), but one that WOULD change something is left alone
+        //    in step 3. The sentences are worked out under the lock, from what is
+        //    stored THEN.
+        $untouched = [];
+        $unmarked  = [];
+        if ($drawn !== null) {
+            foreach ($wanted as $service => $value) {
+                $was = $drawn[$service] ?? null;
+                if (is_string($was) === true && in_array($was, [self::FOLLOW, self::ON, self::OFF, self::KEEP], true) === true) {
+                    if ($was === $value) {
+                        $untouched[$service] = $was;
+                        unset($wanted[$service]);
+                    }
+                    continue;
+                }
+                if ($value !== self::OFF) {
+                    $unmarked[$service] = true;
+                }
+            }
+        }
+        if ($wanted === [] && $untouched === []) {
             return ['saved' => true, 'type' => 'info', 'message' => 'Nothing was sent to save, so nothing changed.', 'changes' => [], 'refused' => []];
         }
 
@@ -1114,6 +1167,22 @@ final class OutsideServices
             $stage  = 'stored';
             $stored = self::memberChoices($db, $userId);
 
+            // 🪟 #815: a control left as drawn whose stored choice has changed
+            //    since the page was drawn — in another tab, or by anything else.
+            //    Nothing is written for it; the member is told what is in force,
+            //    so nobody believes the Save put back what the old page showed.
+            //    "follow" was drawn for "nothing stored"; "keep" never comes
+            //    here (it is filtered out above).
+            $notes = [];
+            foreach ($untouched as $service => $was) {
+                $wasStored = $was === self::FOLLOW ? null : $was;
+                $nowStored = $stored[$service] ?? null;
+                if ($wasStored !== $nowStored) {
+                    $notes[] = '"' . self::SERVICES[$service]['name'] . '" was changed after this page was opened, so it '
+                        . 'was left as it is now: ' . ($nowStored === null ? 'follow my organisations' : $nowStored) . '.';
+                }
+            }
+
             // 2. The ceiling. A failed read counts as "not allowed": withdrawals
             //    need no ceiling; a real "on" cannot be granted on a failed read.
             $stage = 'ceiling';
@@ -1137,6 +1206,19 @@ final class OutsideServices
                             . self::refusalReason($decision);
                         continue; // left exactly as it was
                     }
+                }
+                // 🪟 #815: an "on" or "follow" from a page that drew no value
+                //    beside it cannot be told from an older tab's, so it is left
+                //    alone — when it would change anything — and the member is
+                //    told to open the page again. ("follow" over nothing stored
+                //    changes nothing, so it needs no sentence.)
+                if (isset($unmarked[$service]) === true) {
+                    if ($value === self::FOLLOW && $old === null) {
+                        continue;
+                    }
+                    $notes[] = '"' . self::SERVICES[$service]['name'] . '" was not changed, because the page you saved '
+                        . 'was out of date. Open it again and choose once more.';
+                    continue;
                 }
                 $apply[$service] = $value;
             }
@@ -1202,11 +1284,15 @@ final class OutsideServices
         }
         self::forget();
 
+        // 🪟 #815's sentences go at the end of whichever message is given, and
+        //    make it a warning: something the member may have expected to
+        //    happen did not.
+        $noteWords = $notes === [] ? '' : ' ' . implode(' ', $notes);
         if ($refused === []) {
             return [
                 'saved'   => true,
-                'type'    => 'success',
-                'message' => $changes === [] ? 'Saved. Nothing was different.' : 'Your choices are saved.',
+                'type'    => $notes === [] ? 'success' : 'warning',
+                'message' => ($changes === [] ? 'Saved. Nothing was different.' : 'Your choices are saved.') . $noteWords,
                 'changes' => $changes,
                 'refused' => [],
             ];
@@ -1219,10 +1305,20 @@ final class OutsideServices
         return [
             'saved'   => $changes !== [],
             'type'    => 'warning',
-            'message' => $savedPart . ' ' . implode(' ', $refused),
+            'message' => $savedPart . ' ' . implode(' ', $refused) . $noteWords,
             'changes' => $changes,
             'refused' => $refused,
         ];
+    }
+
+    /**
+     * 🪟 The name of the hidden field carrying the value a member-page control
+     * was DRAWN with (#815). The page writes it and the handler reads it from
+     * this one name, so the two cannot drift apart.
+     */
+    public static function drawnMarkerName(string $service): string
+    {
+        return 'drawn_' . $service;
     }
 
     /**
