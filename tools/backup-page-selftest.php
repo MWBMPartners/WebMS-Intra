@@ -3034,10 +3034,11 @@ $qWarning = $qWarningOf($qInspect);
 brs_check(
     str_contains($qWarning, 'Putting this snapshot back whole signs out 4 accounts on their next page.') === true
     && str_contains($qWarning, '2 accounts have a sign-in number that differs from the snapshot\'s') === true
-    && str_contains($qWarning, 'only a password each had when the snapshot was taken will work; a Microsoft or Google sign-in is unaffected.') === true
+    && str_contains($qWarning, 'they must sign in again, and each can sign in only the way it could when the snapshot was taken.') === true
+    && str_contains($qWarning, 'Microsoft') === false && str_contains($qWarning, 'only a password') === false
     && str_contains($qWarning, '1 account is switched off in this snapshot; it cannot sign in until an administrator switches it back on.') === true
     && str_contains($qWarning, '1 account is not in this snapshot, and cannot be used to sign in afterwards.') === true
-    && str_contains($qWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
+    && str_contains($qWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished, and you can sign in only the way your account could when the snapshot was taken.') === true
     && str_contains($qWarning, 'Its result stays at the top of this page for seven days.') === true
     && strpos($qInspect, 'id="snapshot-sign-ins-warning"') < strpos($qInspect, 'name="action" value="restore_full"'),
     'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out four accounts in three groups - two whose sign-in number differs (only the old password works), one switched off in the snapshot (cannot sign in until switched back on) and one not in it - and that Rae\'s is among them',
@@ -3052,7 +3053,8 @@ $qSaid   = bps_message($qAnswer['body']);
 brs_check(
     str_starts_with($qSaid, '[warning] Snapshot put back in full:') === true
     && str_contains($qSaid, 'Your own sign-in is not current in the restored database') === true
-    && str_contains($qSaid, 'only a password your account had when the snapshot was taken will work') === true
+    && str_contains($qSaid, 'The next page you open will ask you to sign in again, and you can sign in only the way your account could when the snapshot was taken.') === true
+    && str_contains($qSaid, 'Microsoft') === false && str_contains($qSaid, 'only a password') === false
     && str_contains($qSaid, 'This result stays at the top of this page for seven days.') === true,
     'Q5 DURING: the restore\'s own answer says it worked AND that Rae\'s next page will ask her to sign in again',
     $qSaid
@@ -3070,8 +3072,8 @@ brs_check(
     && str_contains($qNotice, 'restored from a backup') === true
     // #922 round 6: the notice's last sentence is pinned whole - it said "use
     // the password you had", untrue for an account that had none then.
-    && str_contains($qNotice, 'After a restore, only a password your account had when that backup was taken will work; a Microsoft or Google sign-in is unaffected.') === true
-    && str_contains($qNotice, 'use the password you had') === false,
+    && str_contains($qNotice, 'After a restore, an account can sign in only the way it could when that backup was taken.') === true
+    && str_contains($qNotice, 'password you had') === false && str_contains($qNotice, 'Microsoft') === false,
     'Q7 AFTER: the sign-in page says why she was signed out, naming a restore as one of the two reasons',
     $qNotice
 );
@@ -3253,7 +3255,9 @@ $qSpoilt    = is_file($qUsersFile) === true && file_put_contents($qUsersFile, "t
 $qBadInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap4)['body'];
 $qBadWarning = $qWarningOf($qBadInspect);
 brs_check(
-    $qSpoilt === true && str_contains($qBadWarning, 'could not be worked out') === true && str_contains($qBadWarning, 'Yours may be one of them.') === true,
+    $qSpoilt === true && str_contains($qBadWarning, 'could not be worked out') === true
+    && str_contains($qBadWarning, 'such an account must sign in again, and can sign in only the way it could when the snapshot was taken. Yours may be one of them.') === true
+    && str_contains($qBadWarning, 'Microsoft') === false,
     'Q26 a snapshot whose account list cannot be read: the warning says how many could not be worked out, in the general sentence',
     $qBadWarning
 );
@@ -3298,7 +3302,9 @@ brs_check($qGwenIn === 1 && count($qNew5) === 1 && $qSignIn($qJar, 'root') === 1
 $qNgInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap5)['body'];
 $qNgWarning = $qWarningOf($qNgInspect);
 brs_check(
-    str_contains($qNgWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
+    str_contains($qNgWarning, '1 account has a sign-in number that differs from the snapshot\'s') === true
+    && str_contains($qNgWarning, 'it must sign in again, and can sign in only the way it could when the snapshot was taken.') === true
+    && str_contains($qNgWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
     && str_contains($qNgWarning, 'Your account is not a global administrator in this snapshot, so you will not be able to open this page afterwards') === true
     && str_contains($qNgWarning, 'Its result stays at the top of this page') === false,
     'Q29 BEFORE: Rae is told that in this snapshot she is not a global administrator, so she will not be able to open this page afterwards - never that its result "stays at the top of this page" for her',

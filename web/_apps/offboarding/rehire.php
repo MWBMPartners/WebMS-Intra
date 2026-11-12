@@ -208,37 +208,60 @@ try {
     }
 
     $db->commit();
-    // 🔑 What the person can sign in with now depends on what KIND of account
-    //    it is (#982 rounds 5-6), so it is read, after the commit, in its own
-    //    try. Offboarding emptied any password and deleted every passkey and
-    //    Microsoft/Google link; switching the account on gives none of them
-    //    back. An account WITH a password row signs in by setting a new one
-    //    ("Forgot your password?" on the sign-in page, which works for an
-    //    emptied password); an account with NO password row never had one here
-    //    - that page does nothing for it - and signs in with Microsoft or
-    //    Google, which matches a switched-on account by its e-mail address.
-    //    Earlier wording promised a password reset to everybody, which was
-    //    untrue for the second kind. If the row cannot be read, both are said.
-    $passwordRow = null;
+    // 🔑 HOW THEY CAN SIGN IN NOW IS READ, not assumed (#982 rounds 5-7).
+    //    Switching the account on gives back nothing offboarding removed, and
+    //    a step of the offboarding may have failed, so each route is asked of
+    //    what is really there, after the commit, in its own try:
+    //      - a password row with a password still in it: they can use it (the
+    //        removal step failed); an emptied one: "Forgot your password?" on
+    //        the sign-in page sets a new one; NO password row: that page does
+    //        nothing for them, and an administrator may not give them a
+    //        password (D-018);
+    //      - a passkey still registered;
+    //      - Microsoft or Google sign-in, only where it is SET UP here
+    //        (Auth::isMS365Configured() / isGoogleConfigured()): it matches a
+    //        switched-on account by its e-mail address.
+    //    With none of them the account has no way in at all, and the page
+    //    says so and what can be done, instead of naming a route that does
+    //    not exist (round 6's "where this portal offers that" was untrue for
+    //    every account here with neither set up).
+    $ways          = null;
+    $passwordState = Auth::passwordState($db, $userId);
     try {
-        $kind = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?');
-        if ($kind !== false) {
+        $kind = $db->prepare('SELECT COUNT(*) AS `passkeys` FROM `tblWebAuthnCredentials` WHERE `userID` = ?');
+        if ($passwordState !== null && $kind !== false) {
             $kind->bind_param('i', $userId);
             $kind->execute();
-            $passwordRow = (int) ($kind->get_result()->fetch_assoc()['n'] ?? 0) > 0;
+            $have = $kind->get_result()->fetch_assoc();
             $kind->close();
+            $ways = [];
+            if ($passwordState === Auth::PASSWORD_USABLE) {
+                $ways[] = 'with their password, which the offboarding did not remove';
+            } elseif ($passwordState === Auth::PASSWORD_EMPTIED) {
+                $ways[] = 'by choosing "Forgot your password?" on the sign-in page and setting a new password';
+            }
+            if ((int) ($have['passkeys'] ?? 0) > 0) {
+                $ways[] = 'with a passkey still registered to the account';
+            }
+            if (Auth::isMS365Configured() === true) {
+                $ways[] = 'with Microsoft';
+            }
+            if (Auth::isGoogleConfigured() === true) {
+                $ways[] = 'with Google';
+            }
         }
     } catch (\Throwable $kindUnread) {
-        $passwordRow = null;
+        $ways = null;
     }
-    $howTheySignIn = match ($passwordRow) {
-        true  => ' Offboarding removed their password and passkeys, so they sign in by choosing "Forgot your password?" '
-            . 'on the sign-in page and setting a new one, or with Microsoft or Google where this portal offers that.',
-        false => ' This account has no password on this portal, and offboarding removed any passkeys, so they sign in with '
-            . 'Microsoft or Google where this portal offers that.',
-        default => ' They sign in by choosing "Forgot your password?" on the sign-in page if they had a password here, or '
-            . 'with Microsoft or Google where this portal offers that.',
-    };
+    if ($ways === null) {
+        $howTheySignIn = ' How they can sign in could not be read: check their account on the Users page.';
+    } elseif ($ways === []) {
+        $howTheySignIn = ' But they have no way to sign in yet: this account has no password on this portal and no passkey, '
+            . 'and neither Microsoft nor Google sign-in is set up here. A global administrator can set up Microsoft or '
+            . 'Google sign-in on Admin, Integrations; an administrator cannot give this account a password.';
+    } else {
+        $howTheySignIn = ' They can sign in ' . implode(', or ', $ways) . '.';
+    }
     $_SESSION['flash_msg']  = 'User rehired: their account is switched on again.' . $howTheySignIn
         . ($cancelledRequests > 0
             ? ' A waiting request to erase their personal details has been cancelled.'

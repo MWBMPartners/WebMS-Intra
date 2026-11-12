@@ -3358,6 +3358,54 @@ class Auth
         return self::storeHash($db, $userId, password_hash($plain, PASSWORD_DEFAULT), $signName, $verified);
     }
 
+    /** passwordState(): a password row with a password in it. */
+    public const PASSWORD_USABLE = 'usable';
+
+    /** passwordState(): a password row with the unusable empty marker (offboarding writes it). */
+    public const PASSWORD_EMPTIED = 'emptied';
+
+    /** passwordState(): no password row at all (Microsoft, Google or passkey only). */
+    public const PASSWORD_NONE = 'none';
+
+    /**
+     * 🔑 What an account's password rows say, for words that must be true
+     * about how somebody can sign in (#982 round 7, the rehire page). Reads
+     * only; it is here, beside the one writer, because this file is the one
+     * place that may name the hash column in a statement next to the table
+     * (`check_one_password_writer.py`), and a page asking the same question
+     * would have to repeat what "unusable" means - the empty string, which
+     * loginLocal() refuses before any comparison.
+     *
+     * An emptied row can be given a new password by its owner through
+     * "Forgot your password?"; an account with NO row cannot, and an
+     * administrator may not give it one (D-018).
+     *
+     * @return string|null One of the PASSWORD_* words, or null when the rows
+     *                     could not be read.
+     */
+    public static function passwordState(\mysqli $db, int $userId): ?string
+    {
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS `rows`, SUM(`passwordHash` <> \'\') AS `usable` FROM `tblLocalAccounts` WHERE `userID` = ?'
+            );
+            if ($stmt === false) {
+                return null;
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable) {
+            return null;
+        }
+        if ((int) ($row['rows'] ?? 0) === 0) {
+            return self::PASSWORD_NONE;
+        }
+
+        return (int) ($row['usable'] ?? 0) > 0 ? self::PASSWORD_USABLE : self::PASSWORD_EMPTIED;
+    }
+
     /**
      * 🚫 Give an account a password NOBODY CAN USE.
      *

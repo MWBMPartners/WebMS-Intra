@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 231; // #982 round 6 added M13e (a real deadlock),
+const EXPECTED_CHECKS = 232; // #982 round 7 added M13i (rehire where Google
+                            // sign-in is set up). 232.
+                            // #982 round 6 added M13e (a real deadlock),
                             // M13f (a failed read after the commit) and
                             // M13g/M13h (rehire, by kind of account). 231.
                             // #982 round 5 added M13d (the account is read,
@@ -3927,16 +3929,25 @@ curl_setopt_array($m13Curl, [
 ]);
 $m13Multi = curl_multi_init();
 curl_multi_add_handle($m13Multi, $m13Curl);
-$m13Until = microtime(true) + 2.0; // long enough for the offboarding to switch Dee off and reach her password row
+// Wait until the offboarding is REALLY waiting on Dee's password row, asked
+// of performance_schema.data_lock_waits rather than guessed with a fixed
+// sleep (#982 round 7); ten seconds at most, after which the outcome below
+// says no deadlock happened rather than claiming one.
+$m13Until   = microtime(true) + 10.0;
+$m13Waiting = false;
 do {
     curl_multi_exec($m13Multi, $m13Running);
     curl_multi_select($m13Multi, 0.05);
-} while ($m13Running > 0 && microtime(true) < $m13Until);
-$m13Victim = 'the offboarding';
+    // The waiting lock's table is on data_locks; data_lock_waits names the lock.
+    $m13Waiting = (int) (one('SELECT COUNT(*) AS `n` FROM `performance_schema`.`data_lock_waits` `w` '
+        . 'JOIN `performance_schema`.`data_locks` `l` ON `l`.`ENGINE_LOCK_ID` = `w`.`REQUESTING_ENGINE_LOCK_ID` '
+        . "WHERE `l`.`OBJECT_NAME` = 'tblLocalAccounts'")['n'] ?? 0) > 0;
+} while ($m13Running > 0 && $m13Waiting === false && microtime(true) < $m13Until);
+$m13Lost = null;
 try {
     $m13Second->query('UPDATE `tblUsers` SET `isActive` = `isActive` WHERE `userID` = ' . M13_DEE);
-} catch (\mysqli_sql_exception $m13Lost) {
-    $m13Victim = 'THE TEST\'S OWN CONNECTION (' . $m13Lost->getCode() . ')';
+} catch (\mysqli_sql_exception $m13Thrown) {
+    $m13Lost = $m13Thrown;
 }
 $m13Second->rollback();
 do {
@@ -3952,11 +3963,16 @@ $m13To   = preg_match('/^Location:\s*(\S+)\s*$/mi', $m13Raw, $m13Loc) === 1 ? (s
 $m13Said = $m13To === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $m13To, null, '')['body']);
 $deeAfter = $m13State(M13_DEE);
 $m13Deadlock = one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'OFFBOARD_FAIL' AND `errorTitle` LIKE '%Deadlock%'");
+// Who MySQL stopped, said truly: the test's own connection, the offboarding
+// (its deadlock is on record), or nobody - no deadlock happened at all.
+$m13Victim = $m13Lost !== null
+    ? 'THE TEST\'S OWN CONNECTION (' . $m13Lost->getCode() . ')'
+    : ((int) ($m13Deadlock['n'] ?? 0) >= 1 ? 'the offboarding' : 'no deadlock happened');
 ok('M13e A REAL DEADLOCK in the middle of an offboarding (MySQL chose the offboarding as the victim, measured): the whole offboarding is rolled back - Dee still on, her membership and password untouched, no offboarding record, no erasure request - and the page says it failed and nothing was changed (#982 round 6)',
-    $m13Victim === 'the offboarding' && (int) ($m13Deadlock['n'] ?? 0) >= 1
+    $m13Waiting === true && $m13Victim === 'the offboarding'
     && $deeAfter === $deeBefore && $deeAfter['on'] === 1 && $deeAfter['record'] === 0 && $deeAfter['erasure'] === 0
     && str_contains($m13Said, 'Offboarding failed, and nothing was changed.') === true,
-    'victim: ' . $m13Victim . ' | deadlock recorded: ' . json_encode($m13Deadlock) . ' | before ' . json_encode($deeBefore)
+    'waited on the lock: ' . var_export($m13Waiting, true) . ' | victim: ' . $m13Victim . ' | deadlock recorded: ' . json_encode($m13Deadlock) . ' | before ' . json_encode($deeBefore)
         . ' | after ' . json_encode($deeAfter) . ' | said: ' . $m13Said);
 
 // M13f: the read AFTER the commit fails (a renamed column in the server's
@@ -3979,6 +3995,7 @@ $fayAfter = $m13State(M13_FAY);
 ok('M13f when the account cannot be read AFTER the commit, the page says the offboarding was recorded and that whether the account is switched off could not be read - never "nothing was changed" - and it really was recorded (#982 round 6)',
     $m13fApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
     && $fayAfter['on'] === 0 && $fayAfter['record'] === 1
+    && (int) one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'OFFBOARD_READ_FAILED'")['n'] >= 1
     && str_contains($m13fSaid, 'The offboarding was recorded, but whether their account is switched off could not be read') === true
     && str_contains($m13fSaid, 'nothing was changed') === false && str_contains($m13fSaid, 'isActiveNoSuchColumn') === false,
     ($m13fApplied === true ? 'applied' : 'NOT APPLIED') . ' | after ' . json_encode($fayAfter) . ' | said: ' . $m13fSaid);
@@ -4000,14 +4017,29 @@ ok('M13g rehiring an account WITH a password row (emptied by offboarding) switch
     str_contains($deeOffSaid, 'Offboarded. Their account is switched off') === true
     && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_DEE])['isActive'] === 1
     && str_contains($deeRehire, 'User rehired: their account is switched on again.') === true
-    && str_contains($deeRehire, 'they sign in by choosing "Forgot your password?" on the sign-in page') === true,
+    && str_contains($deeRehire, 'They can sign in by choosing "Forgot your password?" on the sign-in page and setting a new password.') === true
+    && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false,
     'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
 $ollyRehire = $rehireM(OFF);
-ok('M13h rehiring an account with NO password row says it has no password here and signs in with Microsoft or Google - never "Forgot your password?", which does nothing for it (#982 round 6)',
+ok('M13h rehiring an account with NO password row, no passkey, and neither Microsoft nor Google set up says plainly it has no way to sign in yet and what can be done - never "Forgot your password?" or a route that is not there (#982 round 7)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
-    && str_contains($ollyRehire, 'This account has no password on this portal') === true
-    && str_contains($ollyRehire, 'Forgot your password') === false,
+    && str_contains($ollyRehire, 'But they have no way to sign in yet') === true
+    && str_contains($ollyRehire, 'neither Microsoft nor Google sign-in is set up here') === true
+    && str_contains($ollyRehire, 'Forgot your password') === false && str_contains($ollyRehire, 'They can sign in') === false,
     'rehire said: ' . $ollyRehire);
+// M13i: the same kind of account where Google sign-in IS set up for the
+// organisation: the page names Google, and only Google.
+siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
+try {
+    $unaRehire = $rehireM(UNP);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.google.clientID']);
+}
+ok('M13i rehiring an account with no password where Google sign-in IS set up says they can sign in with Google - and names no route that is not there (#982 round 7)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [UNP])['n'] === 0
+    && str_contains($unaRehire, 'They can sign in with Google.') === true
+    && str_contains($unaRehire, 'Microsoft') === false && str_contains($unaRehire, 'Forgot your password') === false,
+    'rehire said: ' . $unaRehire);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The
