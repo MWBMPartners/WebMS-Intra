@@ -3345,22 +3345,27 @@ class GdprEraser
     public const KIND_ACCOUNT = 'account';
 
     /**
-     * A request filed by an administrator for an e-mail ADDRESS that has no
-     * account: somebody who suggested an event without signing in (#964,
-     * D-140), or who sent a prayer request through the anonymous form -
-     * signed in or not, since that form links no account (#1009, D-176, #988).
-     * Stored in `tblErasureRequest.subjectKind`.
+     * A request filed by an administrator for an e-mail ADDRESS, to reach the
+     * event suggestions made without signing in (#964, D-140) and the prayer
+     * requests sent through the anonymous form (#1009, D-176) with that
+     * address. Neither is linked to any account, so nothing found through an
+     * account can reach them; the address itself MAY belong to an account (a
+     * member who used the anonymous form while signed in has one, #988), and
+     * nothing here checks. Stored in `tblErasureRequest.subjectKind`; the
+     * value is still called `visitor_address` because changing it would change
+     * the stored data, not because every such address is a visitor's.
      */
     public const KIND_VISITOR_ADDRESS = 'visitor_address';
 
     /**
-     * 🧾 File an erasure request for a VISITOR's e-mail address (#964, D-140).
+     * 🧾 File an erasure request for an e-mail address (#964, D-140; #1009, D-176).
      *
      * -------------------------------------------------------------------------
      * WHO THIS IS FOR
      * -------------------------------------------------------------------------
      * Somebody who is not signed in can suggest an event, giving a name and an
-     * e-mail address (`calendar/submit-save.php`). They have no account, so an
+     * e-mail address (`calendar/submit-save.php`). The suggestion is not
+     * linked to any account (whether or not the person has one), so an
      * ordinary erasure — which finds a person through their account number —
      * can never reach those two columns, nor the approval e-mail D-134 sends to
      * that address. The same is true of a prayer request sent through the
@@ -3531,7 +3536,7 @@ class GdprEraser
     public const VISITOR_NOTE_MAX = 300;
 
     /**
-     * 🗑️ Carry out a request filed for a VISITOR's e-mail address (#964, D-140).
+     * 🗑️ Carry out a request filed for an e-mail address (#964, D-140; #1009, D-176).
      *
      * The caller must have moved the request to `processing` first, exactly as
      * for `execute()` (process.php's claim). This refuses — changing nothing —
@@ -3560,8 +3565,8 @@ class GdprEraser
      *      the window was rejected: a send can wait on a mail server for a long
      *      time, and every edit of that event would wait with it.
      *   2. The anonymous prayer requests (#1009, D-176): every prayer request
-     *      at this organisation sent through the anonymous form (no account,
-     *      `submitterID IS NULL`) whose `submitterEmail` IS this address has
+     *      at this organisation sent through the anonymous form (linked to no
+     *      account, `submitterID IS NULL`) whose `submitterEmail` IS this address has
      *      the name, the address and the network address it was sent from
      *      emptied, AND the visitor's own words (`subject`, `body`) and a
      *      prayer partner's note about them (`partnerNote`) - exactly what a
@@ -3905,7 +3910,7 @@ class GdprEraser
                 'tblPrayerRequests',
                 $emptied . ' requests',
                 'the name, e-mail address, network address, own words and any prayer partner\'s note emptied on '
-                . $emptied . ' anonymous prayer request(s) sent to this organisation without an account; the requests '
+                . $emptied . ' prayer request(s) sent to this organisation through the anonymous form, which links no account; the requests '
                 . 'themselves are kept (D-176, D-016)'
             );
 
@@ -7930,8 +7935,9 @@ class GdprEraser
     {
         $db = App::db();
 
-        // 🎯 #964 (D-140): for a VISITOR's address, only the approval e-mail
-        //    for an event suggestion, kept for this organisation. See
+        // 🎯 #964 (D-140): for a request filed by e-mail address (D-176: not
+        //    always a visitor's), only the approval e-mail for an event
+        //    suggestion, kept for this organisation. See
         //    executeVisitorAddress() for why, and MailQueue::eraseAddress().
         $visitor = $onlySubject !== null;
 
@@ -8067,14 +8073,15 @@ class GdprEraser
         // (The list of names is MAIL_ERROR_PLATFORMS, declared just below this method.)
         $db = App::db();
 
-        // 🎯 #964 (D-140): for a VISITOR's address, only the send-log rows of
-        //    the approval e-mail for an event suggestion. A row is this
+        // 🎯 #964 (D-140): for a request filed by e-mail address (D-176: not
+        //    always a visitor's), only the send-log rows of the approval e-mail
+        //    for an event suggestion. A row is this
         //    organisation's when its `siteID` says so, OR when it names no
         //    organisation at all - Mailer writes NULL for a message sent
         //    outside any organisation, and that cannot be told apart from
         //    "this one". A row naming ANOTHER organisation is left alone: that
         //    organisation's administrator did not check who is asking.
-        //    The Errors page is NOT looked at for a visitor: a mail server's
+        //    The Errors page is NOT looked at for such a request: a mail server's
         //    refusal there carries no subject, so nothing says it was about
         //    the approval e-mail rather than a member's own mail to the same
         //    address. Those lines are deleted only by the retention clear-out

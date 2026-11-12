@@ -63,8 +63,8 @@ table named in this document exists; it cannot check what is said about it.
 
 A visitor can suggest an event without signing in, giving a name and an e-mail
 address (`tblEvents.submitterName`, `submitterEmail`), and is e-mailed if it is
-approved (D-134). They have no account, so the workflow above cannot reach
-them. The owner's decision (D-140, 11 November 2026): **erase on request only,
+approved (D-134). The suggestion is not linked to any account (whether or not
+the person has one), so the workflow above cannot reach it. The owner's decision (D-140, 11 November 2026): **erase on request only,
 never automatically.**
 
 1. The visitor asks the organisation by some other route. An administrator
@@ -77,7 +77,8 @@ never automatically.**
    kept for ever, so the page tells the administrator not to put the person's
    details in it. No e-mail is sent to the address (D-149).
 2. The request is filed already at `pending_review`, of kind `visitor_address`
-   (`tblErasureRequest.subjectKind`), with no account.
+   (`tblErasureRequest.subjectKind`), with no account number on the request:
+   nothing checks whether the address also belongs to an account.
 3. **Execute** runs five steps, each with its own audit line, in this order:
    `submitterName` and `submitterEmail` are emptied on every event at this
    organisation suggested **without signing in** with that address (first, so
@@ -89,7 +90,8 @@ never automatically.**
    last ten sends, so such a row is easily pushed off that list: if an approval
    may have been pressed while the request ran, file a fresh request for the
    address afterwards, which clears it); every **anonymous prayer request**
-   sent to this organisation without an account (`submitterID` empty) whose
+   sent to this organisation through the anonymous form, which links no
+   account (`submitterID` empty), whose
    `submitterEmail` is that address has `submitterName`, `submitterEmail`,
    `submitterIP`, `subject`, `body` and `partnerNote` emptied - the same
    columns a member's own erasure empties on their requests (D-016, #715) -

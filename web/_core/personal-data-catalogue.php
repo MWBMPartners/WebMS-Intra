@@ -983,7 +983,7 @@ return [
         // 🙏 #1009, D-176. A request sent through the ANONYMOUS form has no
         //    account (`submitterID` is empty, even for a member who was signed
         //    in: #988), so the instruction above can never reach it. A request
-        //    filed by the visitor's e-mail address does instead
+        //    filed by the e-mail address given with it does instead
         //    (GdprEraser::executeVisitorAddress(), its prayer step), and
         //    empties the SAME columns (GdprEraser::VISITOR_PRAYER_NULL_COLS;
         //    tools/gdpr-coverage-selftest.php fails if the two lists differ).
@@ -1752,14 +1752,15 @@ return [
                     . ' goes',
         'columns'  => ['createdByID', 'updatedByID', 'moderatedByID', 'submittedByID', 'statusChangedByID', 'submitterName', 'submitterEmail', 'locationAddress', 'locationPhone', 'locationEmail'],
             'notEmptiedHere' => [
-            // 🧾 #964, D-140. These two belong to somebody with NO account,
-            //    so no instruction here can reach them: an instruction matches
-            //    a person by account number. A request filed by an
-            //    administrator for the visitor's e-mail address does, through
+            // 🧾 #964, D-140. These two are on a suggestion made without
+            //    signing in, which is linked to no account, so no instruction
+            //    here can reach them: an instruction matches a person by account
+            //    number. A request filed by an administrator for the e-mail
+            //    address given with it does, through
             //    a step of its own. "Emptied elsewhere" is the avatarPath
             //    precedent for a column a dedicated step empties.
             'submitterName' => 'Emptied elsewhere, on purpose: the name somebody gave when they suggested an event without '
-                . 'signing in. They have no account, so an ordinary erasure cannot find it. On their request, an '
+                . 'signing in. The suggestion is not linked to any account, so an ordinary erasure cannot find it. On their request, an '
                 . 'administrator files an erasure request for the e-mail address they gave, after checking outside '
                 . 'the portal that it is really them, and GdprEraser::executeVisitorAddress() empties this and the '
                 . 'address beside it on every such suggestion at that organisation (D-140, #964). The event itself is '

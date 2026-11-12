@@ -109,7 +109,9 @@ if ($action === 'file_visitor') {
             . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
             . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
             . 'address (their name, address, network address and words), the old activity records of such a '
-            . 'suggestion that quote the address, and the e-mails telling that address a suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'suggestion that quote the address (the address replaced with "[erased]" and the network address, browser, '
+            . 'request details and session details emptied), and the e-mails telling that address a suggestion was '
+            . 'approved, waiting or sent, including a sent one recorded under no organisation. It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
             . 'prayer form, which only a request filed here can reach.';
         $_SESSION['flash_type'] = 'success';

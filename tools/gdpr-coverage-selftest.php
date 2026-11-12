@@ -3314,8 +3314,8 @@ check(
 // 24. A VISITOR WHO SUGGESTED AN EVENT IS REACHED BY A REQUEST FOR THEIR
 //     ADDRESS, AND THAT REQUEST REACHES NOTHING ELSE (#964, D-140).
 // -----------------------------------------------------------------------------
-// A visitor has no account, so no catalogue instruction can find their name or
-// address on an event suggestion. The owner (D-140): erase them on request, by
+// A suggestion made without signing in is linked to no account, so no catalogue
+// instruction can find the name or address on it. The owner (D-140): erase them on request, by
 // e-mail address, filed by an administrator who has checked who is asking; that
 // request also clears the approval e-mail's send-log and mail-queue rows.
 //
@@ -3457,7 +3457,7 @@ if (str_contains($fileVisitorText, '(`siteID`, `userID`, `subjectEmail`, ') === 
     $accountFaults[] = 'a visitor request is no longer filed with an EMPTY account number';
 }
 check(
-    'a request for a visitor\'s address can never reach an account: it names none, empties only suggestions and anonymous prayer requests made WITHOUT an account, matches the address exactly apart from capitals and the spaces round it, and runs none of an account erasure\'s steps (#964, D-140; #1009)',
+    'a request filed by e-mail address can never reach an account: it names none, empties only suggestions and anonymous prayer requests made WITHOUT an account, matches the address exactly apart from capitals and the spaces round it, and runs none of an account erasure\'s steps (#964, D-140; #1009)',
     $accountFaults === [],
     implode('; ', $accountFaults)
 );

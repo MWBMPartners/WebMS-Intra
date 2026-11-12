@@ -5486,7 +5486,7 @@ CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
     `claimedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, not a time on the server clock: when a run of this request was started, refreshed while the run is still going. Written and compared with UTC_TIMESTAMP() only. Empty means no run is going.',
     `reasonRetained`   TEXT         DEFAULT NULL,
     `notes`            TEXT         DEFAULT NULL,
-    `subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT 'Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address with NO account, filed by an administrator for somebody who suggested an event or sent an anonymous prayer request without signing in (#964, D-140; #1009, D-176); it reaches only this organisation''s event suggestions, anonymous prayer requests and approval e-mails for that address, and never an account',
+    `subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT 'Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address, filed by an administrator to reach the event suggestions and anonymous-form prayer requests sent with it, whether or not the address also belongs to an account (#964, D-140; #1009, D-176); it reaches only this organisation''s event suggestions, anonymous-form prayer requests and approval e-mails for that address, and nothing found through an account',
     PRIMARY KEY (`requestID`),
     KEY `idx_er_status` (`status`),
     KEY `idx_er_due`    (`dueBy`),

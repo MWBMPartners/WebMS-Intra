@@ -206,7 +206,7 @@ if ($ok === false) {
     //
     //    #933: never the visitor's network address in the words. It is kept
     //    in ONE place, the request's own row (`submitterIP`, D-176), and an
-    //    erasure request filed by the visitor's e-mail address empties it
+    //    erasure request filed by the e-mail address given with it empties it
     //    there (GdprEraser::executeVisitorAddress(), #1009).
     Logger::activityNamingNobody('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
 

@@ -325,14 +325,14 @@ try {
 $newId = (int) $stmt->insert_id;
 $stmt->close();
 
-// 🔒 THE RECORD OF A SUGGESTION NAMES NOBODY WHO HAS NO ACCOUNT (#963).
+// 🔒 THE RECORD OF A SUGGESTION MADE WITHOUT SIGNING IN NAMES NOBODY (#963).
 //
 //    A member who suggests an event is named the way every activity record
 //    names its person: by account number, and Logger::activity() fills
 //    `userID` from the session.
 //
-//    A visitor who is not signed in has no account, so there is nobody for
-//    the record to name. This line used to write their e-mail address into
+//    A suggestion made without signing in is linked to no account (whether or
+//    not the person has one), so there is nobody for the record to name. This line used to write their e-mail address into
 //    the description ("submitted by anonymous <address>"). D-134 says the
 //    address is used for ONE thing — telling them their suggestion was
 //    approved — and the activity log is kept for a year by default and for
@@ -341,7 +341,7 @@ $stmt->close();
 //    request to remove it. The record now says what happened and which event
 //    it was; who sent it is on the event's own row, which only the moderation
 //    page shows. Records written before #963 still hold addresses. An erasure
-//    request filed for the visitor's address (#964, D-140) takes the address
+//    request filed for the address (#964, D-140) takes the address
 //    out of such a record at the organisation that filed it - but only the
 //    exact sentence this line used to write, "Event #N submitted by anonymous
 //    <address>", on a record naming no account (GdprEraser::

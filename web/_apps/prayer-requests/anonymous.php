@@ -67,8 +67,9 @@ $keptText = static fn (string $field): string => (is_array($kept) === true && is
 //    requests by `submitterID`) cannot reach it, and only a request filed by
 //    the e-mail address given with it can (D-176, #1009) - said BEFORE they
 //    send, because after is too late to add an address. A visitor without an
-//    account is told the same thing about erasure, in its own sentence: they
-//    have no account to be linked to. Both are pinned as rendered by section N
+//    account is told the same thing about erasure, in its own sentence. (A
+//    visitor who is not signed in may still have an account; the request is
+//    not linked to it either way.) Both are pinned as rendered by section N
 //    of tools/erasure-pages-selftest.php.
 $signedIn = Auth::check();
 ?>

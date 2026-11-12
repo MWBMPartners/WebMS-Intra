@@ -105,7 +105,9 @@
  *      claim file still naming the giver from the kept record and the
  *      statements list still leaving them out; each page still works for a
  *      live account; every refusal is recorded.
- *   N. (#964, D-140.) Somebody WITHOUT an account who suggested an event: a
+ *   N. (#964, D-140; #1009, D-176.) A request by e-mail address, for an event
+ *      suggestion and an anonymous-form prayer request (the address may also
+ *      be a member's - N42): a
  *      visitor suggests one through the real form and an administrator
  *      approves it; filing a request for the address is refused without the
  *      "I checked who is asking" tick, for something that is not an address,
@@ -229,7 +231,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 216; // #988/#1009 check round 3 added one: the
+const EXPECTED_CHECKS = 223; // #988/#1009 check round 4 added seven: the
+                            // GdprErasureExecuted record of N5's run read back
+                            // whole (N5b); the four records of a run - executed,
+                            // incomplete, stopped and refused - driven and read
+                            // back (N44); a plant per record (N45-N48); and the
+                            // clean run after them (N49). 223.
+                            // #988/#1009 check round 3 added one: the
                             // administrators' help section on this request,
                             // its heading and its quote of the card's, pinned
                             // as rendered (N43). 216.
@@ -624,6 +632,10 @@ function removeWorld(): void
     // run was interrupted while it was in place.
     $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_kept`');
     $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_line`');
+    // Section N (#1009 round 4) plants these to make a run fail, stop or be refused.
+    $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_prayer`');
+    $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_audit`');
+    $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_kind`');
     // Section M (#977) offboards one live account through the real page.
     q('DELETE FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 917000 AND 917999');
@@ -4137,7 +4149,9 @@ ok('N3 an administrator who ticks the box and notes how they checked files ONE r
             . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
             . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '
             . 'address (their name, address, network address and words), the old activity records of such a '
-            . 'suggestion that quote the address, and the e-mails telling that address a suggestion was approved. It does not touch any account, even a member\'s using the same address: a member asks '
+            . 'suggestion that quote the address (the address replaced with "[erased]" and the network address, browser, '
+            . 'request details and session details emptied), and the e-mails telling that address a suggestion was '
+            . 'approved, waiting or sent, including a sent one recorded under no organisation. It does not touch any account, even a member\'s using the same address: a member asks '
             . 'for their own erasure from their account, and that does not reach a request they sent through the anonymous '
             . 'prayer form, which only a request filed here can reach.'
         && str_starts_with($again['message'], '[info] Nothing new was filed: erasure request #' . $vId . ' for that address') === true
@@ -4216,6 +4230,10 @@ ok('N5 Execute completes the request, and the request then holds no address: its
         && $vReqAfter['status'] === 'completed' && $vReqAfter['subjectEmail'] === 'deleted-' . $vId . '@example.invalid'
         && $vReqAfter['userID'] === null && (int) $vReqAfter['processedByID'] === ADM && $vReqAfter['subjectKind'] === 'visitor_address',
     $runMsg . ' | ' . json_encode($vReqAfter));
+$n5Executed = q("SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `logID` > ? AND `activityType` = 'GdprErasureExecuted'", 'i', [$activityBefore]);
+ok('N5b that run\'s activity record is read back whole: by this administrator, "Executed erasure request #N for an e-mail address" - never "a visitor\'s", since the address can be a member\'s (N42) (#1009 round 4, D-176)',
+    $n5Executed === [['userID' => ADM, 'activityDescription' => 'Executed erasure request #' . $vId . ' for an e-mail address']],
+    json_encode($n5Executed));
 
 $veraAfter = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [$veraId]);
 $caseAfter = one('SELECT * FROM `tblEvents` WHERE `eventID` = ?', 'i', [EV_CASE]);
@@ -4577,7 +4595,7 @@ $n988Notice = renderedRegion((string) req($jar['may'], 'GET', '/prayer-requests/
 ok('N37 the anonymous form tells a SIGNED-IN member, before she sends, that the request is not linked to her account, that its network address is kept and could be compared with the one stored at each of her sign-ins by anyone with access to the portal\'s records, that erasing her account does not reach it and only asking the organisation does - and only with an e-mail address - exactly as pinned (#988, #1009)',
     renderedPin('anonymous prayer form, signed-in notice', $n988Notice), mb_substr($n988Notice, 0, 900));
 $n988Note = renderedRegion((string) req($veraJar, 'GET', '/prayer-requests/anonymous')['body'], oneMarked('data-anonymous-erasure-note'));
-ok('N38 the anonymous form tells a VISITOR with no account that the network address is kept and how to have the request erased - ask the organisation, which can find it only by an e-mail address given with it - exactly as pinned (#1009, D-176)',
+ok('N38 the anonymous form tells a visitor who is NOT SIGNED IN that the network address is kept and how to have the request erased - ask the organisation, which can find it only by an e-mail address given with it - exactly as pinned (#1009, D-176)',
     renderedPin('anonymous prayer form, visitor note', $n988Note), mb_substr($n988Note, 0, 900));
 $n988Help     = (string) req($jar['adm'], 'GET', '/help/prayer-requests')['body'];
 $n988HelpAnon = renderedRegion($n988Help, $sectionAfter('Anonymous Submissions'));
@@ -4611,6 +4629,134 @@ ok('N43 the administrators\' help section on this request - its heading, which i
     renderedPin('help admin, e-mail address requests', $n988AdminHelp), mb_substr($n988AdminHelp, 0, 900));
 ok('N40 the erasure page\'s visitor card says what the request reaches, that an anonymous prayer request sent without an e-mail address cannot be found, and that a member\'s own erasure does not reach a request they sent through the anonymous form - exactly as pinned (#1009, D-176)',
     renderedPin('erasure page, visitor card', $n988Card), mb_substr($n988Card, 0, 900));
+
+// ── N44-N49. The four records of a run, each read back whole (#1009 round 4) ─
+// A run for an e-mail address ends one of four ways, and each writes its own
+// words: completed (GdprErasureExecuted), a step failed (GdprErasureIncomplete),
+// stopped part way (GdprErasureStopped), or refused by executeVisitorAddress()
+// because the request is not one it can run (the refusal's own message, which
+// the page records on the Errors page through Logger::exception()). Rounds 2-4
+// each found one of these still calling the address "a visitor's", which D-176
+// makes untrue - so all four are DRIVEN here and read back word for word, and
+// each is planted back to its old wording below and must go red.
+//
+// How each is reached, with nothing the portal does not really do:
+//   failed:  a trigger refuses the UPDATE of one anonymous prayer request, so
+//            the prayer step fails and the run comes back incomplete;
+//   stopped: a trigger refuses the prayer step's AUDIT LINE, which the step
+//            cannot catch, so the run stops and is put back;
+//   refused: a trigger turns the request into an account's request at the
+//            moment the page claims it - the one race the refusal exists for,
+//            which no page can produce on purpose.
+$n1009Records = static function () use ($n964Fixtures, $n964FileViaForm, &$jar): array {
+    global $db;
+    $wrong = [];
+    $n964Fixtures();
+    $before = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+    $latest = static fn (): int => (int) (one("SELECT MAX(`requestID`) AS m FROM `tblErasureRequest` WHERE `siteID` = ? AND `subjectKind` = 'visitor_address'", 'i', [ORG_A])['m'] ?? 0);
+    $record = static fn (string $type): array => q('SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `logID` > ? AND `activityType` = ?', 'is', [$before, $type]);
+
+    // 1. Completed.
+    $n964FileViaForm(VERA_ADDR, 'P1009 replied from that address');
+    $one = $latest();
+    act($jar['adm'], $one, 'execute');
+    if ($record('GdprErasureExecuted') !== [['userID' => ADM, 'activityDescription' => 'Executed erasure request #' . $one . ' for an e-mail address']]) {
+        $wrong[] = 'the executed record is worded otherwise';
+    }
+
+    // 2. A step fails.
+    $n964Fixtures();
+    $n964FileViaForm(VERA_ADDR, 'P1009 replied from that address');
+    $two = $latest();
+    try {
+        $db->query('CREATE TRIGGER `selftest_erasure_pages_stop_prayer` BEFORE UPDATE ON `tblPrayerRequests` FOR EACH ROW BEGIN '
+            . 'IF OLD.requestID = ' . PR_CASE . " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'planted by the self-test'; END IF; END");
+        $failedMsg = act($jar['adm'], $two, 'execute');
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_prayer`');
+    }
+    if ($record('GdprErasureIncomplete') !== [['userID' => ADM, 'activityDescription' => 'Erasure request #' . $two
+            . ' for an e-mail address: 1 of 5 steps failed; request back at pending review']]
+        || str_starts_with($failedMsg, '[warning] Erasure request #' . $two . ' is not complete: 1 of 5 steps') === false
+        || request($two)['status'] !== 'pending_review'
+    ) {
+        $wrong[] = 'the incomplete record is worded otherwise';
+    }
+
+    // 3. The run stops part way (the same request, back at pending review).
+    try {
+        $db->query('CREATE TRIGGER `selftest_erasure_pages_stop_audit` BEFORE INSERT ON `tblErasureAudit` FOR EACH ROW BEGIN '
+            . "IF NEW.tableName = 'tblPrayerRequests' AND NEW.requestID = " . $two . " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'planted by the self-test'; END IF; END");
+        $stoppedMsg = act($jar['adm'], $two, 'execute');
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_audit`');
+    }
+    if ($record('GdprErasureStopped') !== [['userID' => ADM, 'activityDescription' => 'Erasure request #' . $two
+            . ' for an e-mail address stopped before it finished']]
+        || str_starts_with($stoppedMsg, '[danger] Erasure request #' . $two . ' stopped before it finished.') === false
+        || request($two)['status'] !== 'pending_review'
+    ) {
+        $wrong[] = 'the stopped record is worded otherwise';
+    }
+
+    // 4. Refused: the request stops being one for an e-mail address as it is claimed.
+    $errorsBefore = (int) (one('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')['m'] ?? 0);
+    try {
+        $db->query('CREATE TRIGGER `selftest_erasure_pages_stop_kind` BEFORE UPDATE ON `tblErasureRequest` FOR EACH ROW BEGIN '
+            . 'IF NEW.requestID = ' . $two . " AND OLD.status = 'pending_review' AND NEW.status = 'processing' THEN SET NEW.subjectKind = 'account'; END IF; END");
+        act($jar['adm'], $two, 'execute');
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `selftest_erasure_pages_stop_kind`');
+    }
+    $refusal = q('SELECT `errorTitle` FROM `tblErrors` WHERE `errorID` > ? AND `errorTitle` LIKE ?', 'is', [$errorsBefore, 'Erasure request #' . $two . ' is not %']);
+    if ($refusal !== [['errorTitle' => 'Erasure request #' . $two . ' is not a request for an e-mail address that is being carried out, so nothing was changed.']]) {
+        $wrong[] = 'the refusal is worded otherwise';
+    }
+    // The refused request is put back as one for an e-mail address, and closed.
+    q("UPDATE `tblErasureRequest` SET `subjectKind` = 'visitor_address', `status` = 'cancelled' WHERE `requestID` = ?", 'i', [$two]);
+
+    return $wrong;
+};
+$n1009First = $n1009Records();
+ok('N44 THE FOUR WAYS A RUN ENDS, DRIVEN: a completed run, a run in which a step fails, a run that stops part way and a run refused because the request is not one for an e-mail address each write their own record, read back whole, saying "an e-mail address" and never "a visitor\'s" (#1009 round 4, D-176)',
+    $n1009First === [], implode('; ', $n1009First));
+$n1009Plants = [
+    'N45 the executed record says "a visitor\'s e-mail address" again' => [
+        '_apps/admin/erasure/process.php', [" . ' for an e-mail address', \$adminId);" => " . ' for a visitor\\'s e-mail address', \$adminId);"],
+        'the executed record is worded otherwise'],
+    'N46 the incomplete record says "a visitor\'s e-mail address" again' => [
+        '_apps/admin/erasure/process.php', [" . ' for an e-mail address: '" => " . ' for a visitor\\'s e-mail address: '"],
+        'the incomplete record is worded otherwise'],
+    'N47 the stopped record says "a visitor\'s e-mail address" again' => [
+        '_apps/admin/erasure/process.php', [" . ' for an e-mail address stopped before it finished'" => " . ' for a visitor\\'s e-mail address stopped before it finished'"],
+        'the stopped record is worded otherwise'],
+    'N48 executeVisitorAddress()\'s refusal says "a visitor\'s e-mail address" again' => [
+        '_core/GdprEraser.php', [" is not a request for an e-mail address that is being '" => " is not a request for a visitor\\'s e-mail address that is being '"],
+        'the refusal is worded otherwise'],
+];
+foreach ($n1009Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $n1009Records();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1009 round 4)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$n1009Clean = $n1009Records();
+ok('N49 with every round-4 plant taken out again, the same four runs are green (#1009 round 4)', $n1009Clean === [], implode('; ', $n1009Clean));
+$n964Clear();
 
 // =============================================================================
 head('O. A worker\'s own data download lists the records carrying their name, and nothing else from them (#929; D-142, D-151)');

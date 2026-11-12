@@ -70,9 +70,9 @@ final class EventSuggestions
      *
      * It is also how an erasure finds this e-mail again (#964, D-140). The
      * send log and the mail queue keep no note of WHY a message was sent, so
-     * `GdprEraser` asks for messages to the visitor's address carrying exactly
-     * this subject: the one message the portal sends somebody who suggested an
-     * event without an account (D-134). A member's own mail to the same address
+     * `GdprEraser` asks for messages to the address carrying exactly this
+     * subject: the one message the portal sends to the address given with an
+     * event suggested without signing in (D-134). A member's own mail to the same address
      * has other subjects and is left alone.
      *
      * ⚠️ CHANGE IT AND THE ERASURE STOPS FINDING EVERY APPROVAL E-MAIL SENT

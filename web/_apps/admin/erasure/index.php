@@ -90,8 +90,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         request here by the address they gave. It reaches only, at this organisation: the name and address given with
         event suggestions; the anonymous prayer requests sent with that address, whose name, address, network address
         and words are emptied; the old activity records of such a suggestion that quote the address, written before the
-        portal stopped putting addresses there, whose address and browser details are emptied; and the e-mails telling
-        that address a suggestion was approved. The events and the
+        portal stopped putting addresses there, in which the e-mail address is replaced with &ldquo;[erased]&rdquo; and the
+        network address, browser, request details and session details are emptied; and the e-mails telling that address
+        a suggestion was approved, waiting or sent, including a sent one recorded under no organisation, which cannot be
+        told apart from this organisation&rsquo;s. The events and the
         prayer requests themselves are kept. An anonymous prayer request sent without an e-mail address cannot be
         found this way. It does not touch any account, even a member&rsquo;s using the same address. A member who sent
         a request through the anonymous form while signed in is in the same position as a visitor: that request is not
@@ -145,7 +147,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 };
                 $days = (int) ($r['daysLeft'] ?? 0);
                 $slaCls = $days < 0 ? 'text-danger' : ($days < 7 ? 'text-warning' : 'text-muted');
-                // 🧾 #964: a request for a visitor's address. It has no free
+                // 🧾 #964: a request for an e-mail address. It has no free
                 //    text to review and nothing that can be left for doing by
                 //    hand, so neither of those two buttons is drawn for it -
                 //    decided by the request's KIND, not by working out whether

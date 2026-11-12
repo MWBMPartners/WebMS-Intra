@@ -924,9 +924,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
     <p>
         It empties the name and address on every event suggested at <em>your</em> organisation with
-        that address, takes the address out of the activity log&rsquo;s record of each such suggestion
-        made before the portal stopped writing addresses there (#963), and clears the e-mails telling that address a suggestion was
-        approved, from the mail waiting to be sent and from the record of sent mail. It also empties
+        that address; in the activity log&rsquo;s record of each such suggestion made before the portal
+        stopped writing addresses there (#963) it replaces the address with &ldquo;[erased]&rdquo; and empties
+        the network address, browser, request details and session details; and it clears the e-mails
+        telling that address a suggestion was approved, from the mail waiting to be sent and from the
+        record of sent mail &mdash; including a sent one recorded under no organisation, which cannot be told
+        apart from yours, so it is cleared too. It also empties
         the name, the address, the network address and the words of every anonymous prayer request
         sent to <em>your</em> organisation with that address, and a prayer partner&rsquo;s note on it.
         The events and the prayer requests themselves are kept. An anonymous prayer request sent

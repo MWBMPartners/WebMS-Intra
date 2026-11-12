@@ -2485,9 +2485,9 @@ final class MailQueue
 
         $found = [];
         foreach ($rows as $row) {
-            // 🎯 #964 (D-140): an erasure filed for a VISITOR's address asks
-            //    only about the one kind of message the portal ever sends a
-            //    visitor, at the one organisation that filed it. Compared here,
+            // 🎯 #964 (D-140): an erasure filed by e-mail address (D-176: the
+            //    address may be a member's too) asks only about the one kind of
+            //    message the portal sends to the address given with a suggestion, at the one organisation that filed it. Compared here,
             //    exactly and with capitals counting, rather than in the LIKE
             //    above: the database's comparison ignores capitals and, under
             //    this schema's collation, some accents too, and "only this
@@ -2543,11 +2543,12 @@ final class MailQueue
      * or keep out a message sent inside an ordinary request, which is not
      * under the lock (see the file header).
      *
-     * NARROWED, FOR A VISITOR (#964, D-140). `$onlySubject` and `$onlySiteId`
-     * limit it to messages with exactly that subject, kept for exactly that
-     * organisation. GdprEraser passes both for an erasure filed by e-mail
-     * address for somebody who suggested an event without an account: the
-     * only message the portal sends such a person is the approval e-mail
+     * NARROWED, FOR A REQUEST BY E-MAIL ADDRESS (#964, D-140; D-176).
+     * `$onlySubject` and `$onlySiteId` limit it to messages with exactly that
+     * subject, kept for exactly that organisation. GdprEraser passes both for
+     * an erasure filed by e-mail address (which may also be a member's own
+     * address, D-176): the only message the portal sends to the address given
+     * with an event suggestion made without signing in is the approval e-mail
      * (D-134), so nothing else waiting for the same address is theirs to
      * take, and a MEMBER who happens to use the same address keeps every
      * message of their own. Both null (an account's erasure) means every
