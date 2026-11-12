@@ -23747,3 +23747,36 @@ still read under the lock, and only an administrator with the form token can sen
 - Traps met: `ReportRegistry` expressions are unquoted `alias.column` by its own shape rule; a fixture that inserts
   a claim must name its currency or a display check sees a plain number; a pound sign in a page's script is
   `'\u00a3'`, which a search for "£" never finds.
+
+### Why an event is cancelled or postponed (#998), and hidden dates (#1000)
+
+- `Portal\Core\EventCancelReason` is the ONE rule and the ONE writer of `tblEvents.cancelReason`.
+  `write()` decides from the status the ROW holds (`CASE WHEN status IN (...) THEN ... ELSE NULL END`),
+  never from the status the caller meant. It never touches a hidden or imported row (U36f pins the hidden
+  half: a bulk post naming a hidden date). It returns `cleared` and `took`, counted under the same lock as
+  the write; a page builds each sentence from its own count, never from the status UPDATE's
+  affected-row count. Every caller runs it inside its own transaction (the events API too, since round 2).
+- The create form's INSERT names the column through `toStore()` so the dates a repeat copies from that row
+  carry the reason with the status.
+- "Did it ARRIVE" (#677): the form always sends the box (empty = remove); a post without the field keeps a
+  kept reason; the bulk box's empty means "no change".
+- `HiddenSeriesDates::editRefusalWords()` is the one sentence for editing a hidden date. `save.php` asks
+  twice: once before the uploads are stored (so a refusal leaves no file — only visible by posting a
+  picture, check U36c), and again inside a transaction with `SELECT … FOR UPDATE` (U39-U41b drive the race:
+  the test holds the row's lock while the real save waits, hides the date, commits). The second refusal
+  deletes any picture the save already stored (U41b). The UPDATE also says `isDeleted = 0`.
+- The events API does the same since round 3: a second, locked read inside its transaction (404 for a
+  hidden or missing event) and `isDeleted = 0` on its UPDATE. U42-U44 drive that race. Removing only the
+  locked read leaves the row unchanged (the UPDATE's own test) and turns only U44 (the 404) red; removing
+  both turns U43 red too — measured.
+- A status UPDATE's affected-row count is NOT "did the status change": it also writes `updatedByID`, so it
+  is 0 when the date already had that status AND its `updatedByID` already named this administrator —
+  not the same as "they made the last edit", because the events API never writes `updatedByID`.
+- The race checks' premise (U39, U42) asks the DATABASE, not the clock: `performance_schema.data_lock_waits`
+  joined to `data_locks` must show the request waiting on `tblEvents` PRIMARY for that event's number,
+  blocked by the test's own thread; the test refuses the run if performance_schema is off. "Still running
+  after two seconds" passed with both API fixes removed and a `sleep(3)` in the handler (round 4).
+- **Measured, not assumed:** removing the FIRST ask leaves every row and message check green — only U36c
+  (the picture) goes red; removing the SECOND ask leaves the row unchanged (the UPDATE's `isDeleted = 0`)
+  and only U41 (the message) goes red.
+- `empty()` hides the string "0": test a text column for `!== ''`.

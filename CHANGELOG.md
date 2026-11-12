@@ -4,6 +4,29 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An event's cancellation reason can be set, and a hidden date cannot be edited (#998, #1000)
+
+- **An event's cancellation reason can be set now (#998).** Manage Events' event form and a series'
+  bulk-edit page each have a "Reason for cancelling or postponing" box. Members see the reason under the
+  "This event has been cancelled" or "postponed" banner on the event's page. Until now nothing in the
+  portal wrote it. It is optional, at most 1,000 characters, kept only while the status is Cancelled or
+  Postponed, and removed (with a message saying so) when the status becomes Draft or Published — including
+  when the events API changes the status. One writer: `Portal\Core\EventCancelReason`.
+- **A reason of "0" is shown.** The event page tested the reason with `empty()`, which hides the text "0".
+- **The bulk-edit message counts what happened.** It counts the dates that matched and the dates that took
+  the reason, not the database's changed rows (which said "0 event(s) updated" when a reason was added to
+  dates already cancelled).
+- **A hidden event date can no longer be edited (#1000).** Opening `calendar/manage?edit=<id>` for a hidden
+  date shows why instead of the form, and posting the form anyway changes nothing and says to bring the
+  date back first from its series' "Hidden dates" card. Checked again under a row lock at the moment of
+  saving; a picture already stored by a save refused at that point is deleted again. The events API
+  re-checks the same way, under a lock, and answers 404 for a date hidden while its call was waiting. Another
+  organisation's event number is "not found", as before.
+- **Saving an event number that is not this organisation's no longer says "updated successfully".**
+- **A picture saved with an event no longer writes a PHP 8.5 deprecation notice** (`finfo_close()`); the
+  same call in seven other upload handlers is #1003.
+- The API description now says a new status may empty `cancelReason`, and that a hidden date answers 404. Follow-ups #1002, #1003, #1005. Codex has not reviewed this.
+
 ### No currency is built in, and every amount keeps its own (#966; D-133, D-139; migrations 282, 283)
 
 - Each organisation chooses its currency (`org.currency`), suggested from its country; nothing writes a pound sign

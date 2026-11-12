@@ -497,6 +497,9 @@ Events, series, RSVP, exports, and seven view modes.
   the website box too (D-089, #850). `Portal\Core\PublicWebsite`, migration 258, test
   `tools/public-website-tick-selftest.php`.
 - Event series with bulk edit (#75).
+  - Cancelled or postponed events can carry a reason, set on the event form or for many dates at once on a
+    series' bulk-edit page, and shown to members on the event's page (#998).
+  - A hidden date of a series is changed only by bringing it back; its edit address explains this (#1000).
   - **Hidden dates** (#691; D-143 to D-147): the bulk edit page lists every hidden date of the series —
     including those deleted by hand — with a button to bring each back. It returns as a draft, or still
     cancelled / still postponed (with its reason, if it had one) if it was so before it was hidden. If the

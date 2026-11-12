@@ -1556,7 +1556,10 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     still CANCELLED / still POSTPONED, with its reason if it had one, if it was so (`KEEPS_STATUS`,
     `statusOnReturn()`). Every hidden date is offered. Onto a day already in use, the first press is
     refused and "Bring it back anyway" (`confirmSameDay=1`) is judged under the lock. The SERIES ROW is
-    the lock both `restore()` and the pattern page take first. Never say "it can be put back" unqualified.** Tests:
+    the lock both `restore()` and the pattern page take first. Never say "it can be put back" unqualified.**
+    **A cancellation reason has ONE writer, `Portal\Core\EventCancelReason` (#998)**, deciding from the
+    status the row holds; a hidden date is changed only by being brought back — the edit page, `save.php`
+    and the events API refuse it under a lock (#1000, `HiddenSeriesDates::editRefusalWords()`). Tests:
     `tools/series-repattern-selftest.php` (72, no database) and sections R
     and S of `tools/event-repeat-pages-selftest.php` (247 over HTTP; it
     needed a third, non-administrator account because both existing ones are

@@ -2124,7 +2124,8 @@
           "Events",
           "Legacy Alias"
         ],
-        "summary": "Update event fields (PATCH-style; only present fields are touched)",
+        "summary": "Update event fields (PATCH-style; only present fields are touched, except that a new status may empty cancelReason)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **One field can change without being sent: `cancelReason`** (the reason members read under the \"This event has been cancelled\" or \"postponed\" banner on the event's page). When `status` is sent and is anything other than `cancelled` or `postponed`, the event's `cancelReason` is emptied, so an out-of-date reason cannot reappear if the event is cancelled again later (#998). Sending `cancelled` or `postponed`, or not sending `status` at all, leaves the reason as it is. This endpoint cannot set a reason: that is done on the Manage Events page (#1002). A hidden (deleted) date answers 404 as if it did not exist, including one hidden while the request was waiting.",
         "parameters": [
           {
             "name": "id",
@@ -4819,8 +4820,8 @@
         "tags": [
           "Events"
         ],
-        "summary": "Update event fields (v1; PATCH-style — only present fields are touched)",
-        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`.",
+        "summary": "Update event fields (v1; PATCH-style — only present fields are touched, except that a new status may empty cancelReason)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`. **One field can change without being sent: `cancelReason`** (the reason members read under the \"This event has been cancelled\" or \"postponed\" banner on the event's page). When `status` is sent and is anything other than `cancelled` or `postponed`, the event's `cancelReason` is emptied, so an out-of-date reason cannot reappear if the event is cancelled again later (#998). Sending `cancelled` or `postponed`, or not sending `status` at all, leaves the reason as it is. This endpoint cannot set a reason: that is done on the Manage Events page (#1002). A hidden (deleted) date answers 404 as if it did not exist, including one hidden while the request was waiting.",
         "security": [
           {
             "bearerAuth": []
@@ -4950,8 +4951,8 @@
         "tags": [
           "Events"
         ],
-        "summary": "Update event fields (v1; PATCH-style — only present fields are touched)",
-        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`.",
+        "summary": "Update event fields (v1; PATCH-style — only present fields are touched, except that a new status may empty cancelReason)",
+        "description": "Requires scope `events:write` (bearer) or an admin session. **Legacy alias:** `POST /api/events/update?id={id}`. **One field can change without being sent: `cancelReason`** (the reason members read under the \"This event has been cancelled\" or \"postponed\" banner on the event's page). When `status` is sent and is anything other than `cancelled` or `postponed`, the event's `cancelReason` is emptied, so an out-of-date reason cannot reappear if the event is cancelled again later (#998). Sending `cancelled` or `postponed`, or not sending `status` at all, leaves the reason as it is. This endpoint cannot set a reason: that is done on the Manage Events page (#1002). A hidden (deleted) date answers 404 as if it did not exist, including one hidden while the request was waiting.",
         "security": [
           {
             "bearerAuth": []
