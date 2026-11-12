@@ -2681,12 +2681,42 @@ class AssetRegister
      * Same caller contract as createAsset(): $data must already be
      * validated/coerced by the caller (`_apps/assets/save.php`).
      *
+     * 🧩 TWO KINDS OF CALLER, chosen by $onlyFields (#1001):
+     *
+     *   - `null` (the edit page, `_apps/assets/save.php`): a FULL write. The
+     *     form always posts every field, so every column is written from
+     *     $data, and a key absent from $data means NULL/0/false, exactly as
+     *     before.
+     *   - a list of field names (the REST API, `_apps/assets/api/update.php`,
+     *     documented as "only fields present in the body are touched"): a
+     *     PARTIAL write. Only the named columns are taken from $data; every
+     *     other column is written back with the value read UNDER THE ASSET'S
+     *     LOCK, in the same transaction as the write.
+     *
+     * Why the partial write reads under the lock rather than trusting the
+     * caller: the API used to fill every field it was NOT sent from a row it
+     * read BEFORE this method took the lock, and pass those values in as if
+     * they had been posted. A change somebody else made in between — the
+     * edit page moving the asset to another room, a stocktake setting its
+     * status — was then silently put back by an API call that never
+     * mentioned that field. Reading the row again with `FOR UPDATE` inside
+     * the transaction means the value written back is the one in the row at
+     * the moment of the write, so the other change survives. (Writing ONLY
+     * the named columns would also work, but needs a second, narrower UPDATE
+     * statement and a second audit shape; writing every column, the unsent
+     * ones from the locked row, keeps ONE statement and ONE audit diff.)
+     * `currency` is not affected by $onlyFields: it already follows
+     * Currency::onEdit() under the lock (NULL ⇒ keep the locked currency),
+     * and `licenseKey` already means "blank ⇒ leave the stored key alone".
+     *
      * @param array<string, mixed> $data
+     * @param list<string>|null    $onlyFields Field names the caller was
+     *        actually SENT (partial write), or null for a full write.
      *
      * @return bool True on success, false if the asset doesn't exist (or
      *              isn't on this site) or the update failed
      */
-    public static function updateAsset(int $assetId, array $data, int $actorUserId): bool
+    public static function updateAsset(int $assetId, array $data, int $actorUserId, ?array $onlyFields = null): bool
     {
         $db     = App::db();
         $siteId = Site::id();
@@ -2752,9 +2782,54 @@ class AssetRegister
         $postedCurrency = isset($data['currency']) === true ? (string) $data['currency'] : null;
         try {
             $ok = Currency::withParentLocked($db, 'tblAssets', $assetId, $siteId,
-                static function (?string $lockedCurrency) use ($db, $assetId, $siteId, $postedCurrency, &$fields, &$old): bool {
+                static function (?string $lockedCurrency) use ($db, $assetId, $siteId, $postedCurrency, $onlyFields, &$fields, &$old): bool {
                     if ($lockedCurrency === null) {
                         return false;
+                    }
+                    // 🔒 The whole row AS IT IS NOW (#1001). withParentLocked()
+                    //    has already begun the transaction and locked this row;
+                    //    asking again with FOR UPDATE (a lock we already hold)
+                    //    is a LOCKING read, so it sees the latest committed
+                    //    row, never an older snapshot of it. It becomes the
+                    //    audit's "before" for both kinds of caller (the row
+                    //    this write really replaced, not one read before
+                    //    somebody else's change), and the source of every
+                    //    field a partial write was not sent. (A plain SELECT
+                    //    here would give the same answer TODAY, only because
+                    //    it would be this transaction's first plain read and
+                    //    so take its snapshot after the lock — measured:
+                    //    tools/assets-api-update-selftest.php cannot tell the
+                    //    two apart. FOR UPDATE does not depend on that order.)
+                    $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? FOR UPDATE');
+                    $lockedStmt->bind_param('ii', $assetId, $siteId);
+                    $lockedStmt->execute();
+                    $lockedRow = $lockedStmt->get_result()->fetch_assoc();
+                    $lockedStmt->close();
+                    if (is_array($lockedRow) === false) {
+                        // Cannot happen once $lockedCurrency was read from this
+                        // same row under this same lock; refused rather than
+                        // writing from nothing. (A row soft-deleted while the
+                        // request waited is still updated, as it always was;
+                        // changing that is outside #1001.)
+                        return false;
+                    }
+                    $old = $lockedRow;
+                    if ($onlyFields !== null) {
+                        // 🧩 Partial write: a field the caller was NOT sent is
+                        //    written back exactly as the locked row holds it,
+                        //    so a change made by somebody else between the
+                        //    caller's own read and this lock survives.
+                        //    `currency` has its own rule just below
+                        //    (Currency::onEdit()); `licenseKey` is only in
+                        //    $fields when a new key was actually given.
+                        foreach (array_keys($fields) as $col) {
+                            if ($col === 'currency' || $col === 'licenseKey') {
+                                continue;
+                            }
+                            if (in_array($col, $onlyFields, true) === false) {
+                                $fields[$col][0] = $lockedRow[$col];
+                            }
+                        }
                     }
                     $old['currency'] = $lockedCurrency;
                     if ($postedCurrency !== null && self::whyCurrencyCannotChange($assetId, $postedCurrency) !== '') {

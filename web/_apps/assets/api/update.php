@@ -7,9 +7,13 @@
  * PATCH-style — only fields PRESENT in the JSON body are touched; anything
  * omitted keeps its current value. (Note this is a stronger guarantee than
  * `_apps/assets/save.php`'s own HTML form, which always re-posts every
- * field — see `_coerce.php`'s file header for exactly how that's made safe
- * on top of `AssetRegister::updateAsset()`, which was itself built for the
- * "always-full-post" model.)
+ * field.) "Current" means the value in the row at the moment of the write,
+ * read UNDER the asset's lock (#1001): this handler tells
+ * `AssetRegister::updateAsset()` which fields it was sent, and that method
+ * writes every other column back as the locked row holds it — so a change
+ * somebody else made after this handler's own read survives. Until #1001
+ * the omitted fields were filled from that earlier read and written as if
+ * posted, which silently put such a change back.
  *
  *   POST /api/assets/update?id=N        (or {"assetID": N} in body)
  *   PUT/PATCH /api/v1/assets/{id}
@@ -53,11 +57,24 @@ if ($existing === null) {
     ApiResponse::error('Asset not found', 404);
 }
 
-// 🧮 PATCH-safe field coercion — see file header + _coerce.php.
+// 🧮 PATCH-safe field coercion — see file header + _coerce.php. It also
+// fills every field the body left OUT from $existing, read above, BEFORE the
+// asset's lock; those filled-in values are NOT what gets written (#1001,
+// next comment) — they only keep $data's shape the one updateAsset() expects.
 $data = assets_api_build_data($body, $existing);
 
+// 🧩 Which fields this request was actually SENT (#1001). Handed to
+// updateAsset() so it takes ONLY these from $data and writes every other
+// column back as the row holds it UNDER THE LOCK. Without this, a change
+// somebody else made between the read above and the lock (the edit page
+// moving the asset, a stocktake setting its status) was silently put back
+// by an API call that never mentioned that field. A key the body sent that
+// is not an asset field (`assetID`, `csrf_token`) is not in $data and so
+// drops out here.
+$sentFields = array_keys(array_intersect_key($data, $body));
+
 $actorUserId = ApiAuth::actorUserId() ?? 0;
-$ok = AssetRegister::updateAsset($assetId, $data, $actorUserId);
+$ok = AssetRegister::updateAsset($assetId, $data, $actorUserId, $sentFields);
 if ($ok === false) {
     // 💷 A refusal UNDER the asset's lock (a repair recorded in another
     //    currency a moment ago, #966 round 6) is said as such, not blamed on
