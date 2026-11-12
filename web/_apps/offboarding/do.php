@@ -127,6 +127,17 @@ $run = function (string $label, string $sql, array $params, string $types) use (
         $stepsLog[] = ['step' => $label, 'ok' => true, 'affected' => $affected];
         return $affected;
     } catch (\Throwable $e) {
+        // 🔁 A DEADLOCK (1213) ROLLS THE WHOLE TRANSACTION BACK - every
+        //    earlier step logged ok here included - and every statement after
+        //    it then runs on its own and is kept (#982 round 5, measured:
+        //    deactivate_user logged ok, isActive = 1 after the "commit"). A
+        //    lock-wait timeout (1205) leaves the transaction half-done the same
+        //    way. Neither can be recorded as one failed step and carried on
+        //    from, so both end the offboarding: thrown to the catch below,
+        //    which rolls back and says nothing was done.
+        if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
+            throw $e;
+        }
         $stepsLog[] = ['step' => $label, 'ok' => false, 'error' => $e->getMessage()];
         return 0;
     }
@@ -315,13 +326,14 @@ try {
 
     $db->commit();
 
-    // 🧾 What to tell the administrator is decided from what each step DID
-    //    (#982 round 3). A step that fails is caught by $run(), written into
-    //    the step log as ok:false, and the transaction still commits - so
-    //    "switched off" was said even when switching the account off had
-    //    failed (measured with a planted unknown column; a lock-wait timeout
-    //    does the same), and the person could still sign in while the page
-    //    said they could not. Only a step that really succeeded is claimed.
+    // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after
+    //    the commit, and from nothing else (#982 round 5). Rounds 2-4 decided
+    //    it from the step log, and the step log can be wrong about what the
+    //    database kept: a failed step is caught and the transaction still
+    //    commits, and a deadlock rolls back steps that were already logged
+    //    ok. So the page says "switched off" only when tblUsers says so now.
+    //    The failed steps are still named, in plain words; the database's own
+    //    words go to Admin, Errors (OFFBOARD_STEP_FAILED), never the page.
     $stepWords = [
         'deactivate_user'             => 'switching the account off',
         'delete_webauthn'             => 'removing passkeys',
@@ -337,22 +349,21 @@ try {
         'delete_push_subscriptions'   => 'removing notification subscriptions',
     ];
     $failedSteps = [];
-    $switchedOff = false;
     foreach ($stepsLog as $step) {
         if (($step['ok'] ?? false) !== true) {
             $failedSteps[] = $stepWords[(string) ($step['step'] ?? '')] ?? (string) ($step['step'] ?? 'a step');
-        } elseif (($step['step'] ?? '') === 'deactivate_user') {
-            $switchedOff = true;
         }
     }
-    if ($failedSteps === [] && $switchedOff === true) {
-        // Plain words (#982 round 2): this used to read "Audit row +
-        // per-step outcomes recorded".
-        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
-        $_SESSION['flash_type'] = 'success';
-    } else {
-        // The database's own words for each failure are kept in the step
-        // log and on Admin, Errors - never on the page.
+    $isActiveNow = null;
+    $check       = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+    if ($check !== false) {
+        $check->bind_param('i', $userId);
+        $check->execute();
+        $checkRow    = $check->get_result()->fetch_assoc();
+        $isActiveNow = $checkRow === null ? null : (int) $checkRow['isActive'];
+        $check->close();
+    }
+    if ($failedSteps !== []) {
         \Portal\Core\Logger::errorPlatform(
             'Offboarding',
             'Error',
@@ -360,12 +371,24 @@ try {
             'Offboarding account #' . $userId . ' left ' . count($failedSteps) . ' step(s) undone',
             (string) json_encode(array_values(array_filter($stepsLog, static fn (array $step): bool => ($step['ok'] ?? false) !== true)))
         );
-        $_SESSION['flash_msg']  = ($switchedOff === true
-                ? 'The offboarding was recorded and their account is switched off, but these steps failed: '
-                : 'The offboarding was recorded, but their account was NOT switched off, so they may still be able to '
-                  . 'sign in: switch it off on the Users page. These steps failed: ')
-            . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.'
-            . $erasureNote;
+    }
+    $failedWords = $failedSteps === []
+        ? ''
+        : ' These steps failed: ' . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.';
+    if ($isActiveNow === 0 && $failedSteps === []) {
+        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
+        $_SESSION['flash_type'] = 'success';
+    } elseif ($isActiveNow === 0) {
+        $_SESSION['flash_msg']  = 'The offboarding was recorded and their account is switched off, but not everything was done.'
+            . $failedWords . $erasureNote;
+        $_SESSION['flash_type'] = 'danger';
+    } else {
+        $_SESSION['flash_msg']  = ($isActiveNow === null
+                ? 'The offboarding was recorded, but whether their account is switched off could not be read, so they may '
+                  . 'still be able to sign in: check it, and switch it off, on the Users page.'
+                : 'The offboarding was recorded, but their account is NOT switched off, so they may still be able to sign '
+                  . 'in: switch it off on the Users page.')
+            . $failedWords . $erasureNote;
         $_SESSION['flash_type'] = 'danger';
     }
 } catch (\Throwable $e) {

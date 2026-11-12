@@ -208,7 +208,12 @@ try {
     }
 
     $db->commit();
-    $_SESSION['flash_msg']  = 'User rehired. They must reset their password to sign in.'
+    // #982 round 5: "They must reset their password to sign in" was untrue
+    // where Microsoft or Google sign-in is set up - an active account is
+    // matched by its e-mail address there. Offboarding removed the password
+    // and the sign-in links; switching the account on gives neither back.
+    $_SESSION['flash_msg']  = 'User rehired: their account is switched on again. Offboarding removed their password, so they '
+        . 'sign in by resetting it with "Forgot password", or with Microsoft or Google where this portal offers that.'
         . ($cancelledRequests > 0
             ? ' A waiting request to erase their personal details has been cancelled.'
             : '');

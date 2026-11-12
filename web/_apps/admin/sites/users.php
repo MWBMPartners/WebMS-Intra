@@ -318,7 +318,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="toggle_admin">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">
                         <button type="submit" class="btn btn-sm <?php echo $isSA ? 'btn-success' : 'btn-outline-secondary'; ?>"
-                                title="<?php echo $isSA ? 'Stop being this organisation\'s administrator' : 'Make this organisation\'s administrator'; ?>">
+                                title="<?php echo ($isSA ? 'Remove ' : 'Make ') . $auName . ($isSA ? ' as this organisation&#039;s administrator' : ' this organisation&#039;s administrator'); ?>">
                             <i class="fa-solid <?php echo $isSA ? 'fa-check' : 'fa-minus'; ?>"></i>
                         </button>
                     </form>
@@ -329,7 +329,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="toggle_root_admin">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">
                         <button type="submit" class="btn btn-sm <?php echo $isSRA ? 'btn-warning' : 'btn-outline-secondary'; ?>"
-                                title="<?php echo $isSRA ? 'Stop being this organisation\'s root administrator' : 'Make this organisation\'s root administrator'; ?>">
+                                title="<?php echo ($isSRA ? 'Remove ' : 'Make ') . $auName . ($isSRA ? ' as this organisation&#039;s root administrator' : ' this organisation&#039;s root administrator'); ?>">
                             <i class="fa-solid <?php echo $isSRA ? 'fa-check' : 'fa-minus'; ?>"></i>
                         </button>
                     </form>

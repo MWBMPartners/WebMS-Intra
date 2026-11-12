@@ -530,9 +530,14 @@ class Logger
      * `sessionID`, `visitorIP`, `userAgent` and `sessionDataSnapshot` EMPTY,
      * whoever is signed in or not.
      *
-     * The words must name nobody either: they are the caller's, and
-     * `check_activity_descriptions_personal.py` reads this method's calls as
-     * it reads `activity()`'s.
+     * The words must name nobody either, with ONE exception: for an account
+     * that is not in the database (#922) they carry that account's NUMBER and
+     * nothing else ("It was run by account #N, which is not in the restored
+     * database ..."), because that number is then the only thing left saying
+     * who pressed the button - never a name, address or anything typed. For
+     * anonymity (#988) they carry no number at all. They are the caller's,
+     * and `check_activity_descriptions_personal.py` reads this method's calls
+     * as it reads `activity()`'s.
      *
      * WHAT IT CANNOT DO. It cannot make the thing being recorded anonymous.
      * The anonymous prayer request keeps the network address it came from in

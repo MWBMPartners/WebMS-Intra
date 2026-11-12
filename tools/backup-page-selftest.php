@@ -2976,18 +2976,31 @@ echo "\nQ. A whole restore that signs out the person who ran it (#922)\n";
 // surviving only in the activity log. This drives the whole journey, twice.
 //
 // Part one: Ada is switched OFF while the snapshot is taken (so it holds her
-// switched off), Luke is made AFTER it (so it does not hold him), and Rae and
-// Mel "change their password" after it (the number moves; the password itself
-// is left alone so the test can sign in again). Four accounts the restore will
-// sign out, in two groups that can do different things next - which is why
-// the warning is checked to the number in each group: counting Ada among the
-// passwords-changed (the switch ignored) gives a different sentence.
+// switched off), Luke is made AFTER it (so it does not hold him), and Rae, Mel
+// and Ada "change their password" after it (the number moves; the password
+// itself is left alone so the test can sign in again). Four accounts the
+// restore will sign out, in THREE groups that can do different things next -
+// a number that differs, switched off in the snapshot, not in it - which is
+// why the warning is checked to the number in each group: counting Ada among
+// the numbers-moved (her switch ignored, or checked after her number) gives a
+// different sentence. Q12: a switched-off account is told nothing.
 //
-// Part two: Gil, a global administrator made AFTER a second snapshot, restores
-// it - so the person who pressed the button is not in the restored database.
-// His line in the activity log cannot name him (the column is linked to
-// tblUsers) and used to reach only PHP's error log; it must be written naming
-// nobody, and the box must show it to another administrator.
+// Part two (Q13-Q19): Gil, a global administrator made AFTER a second
+// snapshot, restores it - so the person who pressed the button is not in the
+// restored database. His line in the activity log cannot name him (the column
+// is linked to tblUsers) and used to reach only PHP's error log; it must be
+// written naming nobody, and the box must show it to another administrator. A
+// failed ONE-table restore afterwards must not take the box's place, and the
+// box lasts seven days.
+//
+// Part three (Q20-Q25): Xena, switched off in a third snapshot, restores it:
+// told before and after, the line NAMES her (her account exists), signed out
+// with no notice, cannot sign in. Q26-Q27b: a snapshot whose account list
+// cannot be read - "could not be worked out", the restore fails, the red box
+// says nobody was signed out, and the failed line names who pressed it.
+// Q28-Q29: Rae restores a snapshot in which she is NOT a global
+// administrator - told before and after that she will not be able to open
+// this page again.
 Brs::$writer->query('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ' . BPS_ADMIN);
 $qBefore    = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
 $qTaken     = bps_message(bps_press($jar['root'], ['action' => 'snapshot_now'])['body']);
@@ -2999,7 +3012,11 @@ Brs::$writer->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isA
     ->execute([BPS_LATE, 'Luke Late', 'u' . BPS_LATE . '.backup@selftest.invalid']);
 // A password changed for Rae and for Mel after the snapshot: what a change
 // does to the number (Auth::passwordChangeCommitted() adds to it).
-Brs::$writer->query('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 7 WHERE `userID` IN (' . BPS_ROOT . ', ' . BPS_MEMBER . ')');
+// Ada's number moves too (#922 round 5): an account switched off in the
+// snapshot whose number ALSO moved is switched off, and must be counted so -
+// a check of the number before the switch would tell her she "must sign in
+// again".
+Brs::$writer->query('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 7 WHERE `userID` IN (' . BPS_ROOT . ', ' . BPS_MEMBER . ', ' . BPS_ADMIN . ')');
 // Rae's browser signed in AFTER the change, so it carries the new number -
 // the browser that made a change is the one left signed in.
 $qSignIn = static function (string $jarFile, string $who) use ($password): int {
@@ -3181,7 +3198,7 @@ $qXenaInspect = bps_request($qXenaJar, 'GET', '/admin/maintenance/backup?inspect
 $qXenaWarning = $qWarningOf($qXenaInspect);
 brs_check(
     str_contains($qXenaWarning, '1 account is switched off in this snapshot; it cannot sign in until an administrator switches it back on.') === true
-    && str_contains($qXenaWarning, 'your account is switched off in this snapshot, so once it is put back you cannot sign in until another global administrator switches it back on') === true
+    && str_contains($qXenaWarning, 'your account is switched off in this snapshot, so once it is put back you cannot sign in until an administrator switches it back on') === true
     && str_contains($qXenaWarning, 'at all') === false && str_contains($qXenaWarning, 'asked to sign in') === false,
     'Q21 BEFORE: Xena is told her account is switched off in the snapshot and she cannot sign in until it is switched back on - never "at all", never "asked to sign in"',
     $qXenaWarning
@@ -3243,8 +3260,54 @@ brs_check(
     'Q27 the restore fails, and the box shows the FAILED restore in red with "nobody was signed out" - never the sentence about signing accounts out',
     $qBadSaid . ' | box: ' . $qBadBox
 );
+$qBadLine = Brs::$writer->query("SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = 'BackupRestoreFailed' AND `logID` > "
+    . (int) $bps['logMark'] . ' ORDER BY `logID` DESC LIMIT 1')->fetch_assoc();
+brs_check(
+    (int) ($qBadLine['userID'] ?? 0) === BPS_ROOT && str_contains((string) ($qBadLine['activityDescription'] ?? ''), 'names no account') === false,
+    'Q27b a FAILED restore changed nothing, so its line NAMES Rae, who pressed it, and never says it names nobody',
+    json_encode($qBadLine)
+);
 bps_settle();
 brs_removeFolder($backups . '/' . $qSnap4);
+
+// Rae restores a snapshot in which she is NOT a global administrator. Gwen, a
+// second global administrator, takes it while Rae's flag is off; then Rae is
+// made a global administrator again and "changes her password" (so she is
+// signed out by the restore), and signs in.
+Brs::$writer->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 1)')
+    ->execute([BPS_GONE, 'Gwen Global', 'u' . BPS_GONE . '.backup@selftest.invalid']);
+Brs::$writer->prepare('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 0, 0)')->execute([BPS_GONE]);
+Brs::$writer->prepare('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)')->execute([BPS_GONE, 'selftest-backup-gone', $hash]);
+$qGwenJar = $child . '/jar-gwen-q.txt';
+$qGwenIn  = $qSignIn($qGwenJar, 'gone');
+Brs::$writer->query('UPDATE `tblUsers` SET `isRootAdmin` = 0 WHERE `userID` = ' . BPS_ROOT);
+$qBefore5 = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
+bps_press($qGwenJar, ['action' => 'snapshot_now']);
+$qNew5  = array_values(array_diff(array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []), $qBefore5));
+$qSnap5 = (string) ($qNew5[0] ?? '');
+Brs::$writer->query('UPDATE `tblUsers` SET `isRootAdmin` = 1, `signInVersion` = `signInVersion` + 7 WHERE `userID` = ' . BPS_ROOT);
+brs_check($qGwenIn === 1 && count($qNew5) === 1 && $qSignIn($qJar, 'root') === 1,
+    'Q28 the premise: Gwen takes a snapshot in which Rae is not a global administrator; Rae is one again now, with a new number, and signs in',
+    implode(', ', $qNew5));
+$qNgInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap5)['body'];
+$qNgWarning = $qWarningOf($qNgInspect);
+brs_check(
+    str_contains($qNgWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
+    && str_contains($qNgWarning, 'Your account is not a global administrator in this snapshot, so you will not be able to open this page afterwards') === true
+    && str_contains($qNgWarning, 'Its result stays at the top of this page') === false,
+    'Q29 BEFORE: Rae is told that in this snapshot she is not a global administrator, so she will not be able to open this page afterwards - never that its result "stays at the top of this page" for her',
+    $qNgWarning
+);
+$qNgSaid = bps_message(bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qNgInspect), 'action' => 'restore_full', 'name' => $qSnap5])['body']);
+brs_check(
+    str_contains($qNgSaid, 'Your own sign-in is not current in the restored database') === true
+    && str_contains($qNgSaid, 'Your account is not a global administrator in the restored database, so you will not be able to open this page again') === true
+    && str_contains($qNgSaid, 'This result stays at the top of this page for seven days.') === false,
+    'Q30 DURING: the restore\'s answer tells her she is not a global administrator in the restored database and will not be able to open this page again',
+    $qNgSaid
+);
+bps_settle();
+brs_removeFolder($backups . '/' . $qSnap5);
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

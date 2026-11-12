@@ -676,11 +676,14 @@ $drawn = $drawList();
 ok(
     'E2a the list is drawn WHOLE (HTTP 200, the list closed — not merely </html>, which the error handler prints after a fault too) with "No name recorded" for the member with no name AND for the person offered in the add list, and nothing in the error log',
     $drawn['status'] === 200 && str_contains($drawn['body'], '</table>') === true
-        && substr_count($drawn['body'], 'No name recorded') === 2
+        // Counted in the TEXT a person reads (tags and their attributes
+        // removed): since #982 round 5 the page's toggle buttons name the
+        // row's person in their title, which is not a third placeholder.
+        && substr_count(strip_tags($drawn['body']), 'No name recorded') === 2
         && str_contains($drawn['body'], 'nameless.in933@selftest.invalid') === true
         && trim($drawn['log']) === '',
     'HTTP ' . $drawn['status'] . ', list closed (</table>): ' . var_export(str_contains($drawn['body'], '</table>'), true)
-        . ', placeholders: ' . substr_count($drawn['body'], 'No name recorded') . ', log: ' . mb_substr(trim($drawn['log']), 0, 300)
+        . ', placeholders: ' . substr_count(strip_tags($drawn['body']), 'No name recorded') . ', log: ' . mb_substr(trim($drawn['log']), 0, 300)
 );
 // The plant: the old line put back in the COPY the server runs, then restored.
 $usersCopy = $child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'sites' . $sep . 'users.php';

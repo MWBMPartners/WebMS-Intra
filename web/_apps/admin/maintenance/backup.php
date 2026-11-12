@@ -597,9 +597,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                               . 'able to open this page again; this result is kept here for seven days for any global '
                               . 'administrator.'),
                     Auth::SIGN_IN_SWITCHED_OFF => ' Your own account is switched off in the restored database, so the next page '
-                        . 'you open will sign you out, and you cannot sign in until another global administrator switches it '
-                        . 'back on. This result is kept at the top of this page for seven days for any global administrator '
-                        . 'who signs in.',
+                        . 'you open will sign you out, and you cannot sign in until an administrator switches it back on. '
+                        . 'This result is kept at the top of this page for seven days for any global administrator who '
+                        . 'signs in.',
                     Auth::SIGN_IN_NO_ACCOUNT   => ' Your own account is not in the restored database, so the next page you open '
                         . 'will sign you out and you cannot sign in with it again. This result has been recorded in the '
                         . 'activity log naming no account, because yours is not there, and is kept at the top of this page '
@@ -959,8 +959,8 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                 'changed'      => ' Yours is one of them: you will be asked to sign in as soon as the restore has '
                     . 'finished, and only a password your account had when the snapshot was taken will work.' . $keptForYou,
                 'switched_off' => ' Yours is one of them: your account is switched off in this snapshot, so once it is '
-                    . 'put back you cannot sign in until another global administrator switches it back on. Its result is '
-                    . 'kept at the top of this page for seven days for any global administrator who signs in.',
+                    . 'put back you cannot sign in until an administrator switches it back on. Its result is kept at the '
+                    . 'top of this page for seven days for any global administrator who signs in.',
                 'missing'      => ' Yours is one of them: your account is not in this snapshot, so once it is put back '
                     . 'you cannot sign in with it. Its result is kept at the top of this page for seven days for any '
                     . 'global administrator who signs in.',

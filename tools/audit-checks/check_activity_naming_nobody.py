@@ -32,9 +32,12 @@ cannot start keeping what it promises to leave out.
 
 WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 -----------------------------------------------------
-- Whether a listed call is really on the anonymous path: that is behaviour,
-  and `tools/erasure-pages-selftest.php` (section N, #988) drives the form
-  over HTTP as a signed-in member and reads the records back.
+- Whether a listed call is really on the path it is listed for: that is
+  behaviour. `tools/erasure-pages-selftest.php` (section N, #988) drives the
+  anonymous form over HTTP as a signed-in member and reads the records back;
+  `tools/backup-page-selftest.php` checks Q16 (a restorer who is NOT in the
+  restored database: the line names nobody) and Q23 (a restorer who IS there,
+  switched off: the line names her) drive the backup page's one call (#922).
 - A call written through a variable class name or a wrapper.
 - Whether the words passed name somebody: `check_activity_descriptions_personal.py`
   reads this method's calls by the same rules as `activity()`'s.
@@ -134,9 +137,9 @@ def problems(web: str) -> list[str]:
         got = found.get(rel, 0)
         if got != expected:
             wrong.append(
-                f"{rel} calls Logger::{METHOD}() {got} time(s); ON_PURPOSE says {expected}. Either a record of an "
-                "anonymous action now names somebody again, or a new one was added without a decision: change "
-                "the list only on purpose."
+                f"{rel} calls Logger::{METHOD}() {got} time(s); ON_PURPOSE says {expected}. Either a record that "
+                "should name nobody (anonymity, #988, or an account not in the database, #922) now names somebody "
+                "again, or a new one was added without a decision: change the list only on purpose."
             )
 
     logger = os.path.join(web, LOGGER)
@@ -238,6 +241,20 @@ def self_test() -> int:
     got = with_copy(keeps_address)
     ok("the method keeping the network address is reported",
        applied2["v"] is True and any("literal NULLs" in g for g in got), "; ".join(got))
+
+    # 5. The backup page's restore line goes back to Logger::activity(): the
+    #    line for a restorer who is not in the database would be refused again.
+    applied3 = {"v": False}
+
+    def backup_back(w: str) -> None:
+        applied3["v"] = replace(
+            w, "_apps/admin/maintenance/backup.php",
+            "Logger::activityNamingNobody($type, $what);",
+            "Logger::activity($type, $what);",
+        )
+    got = with_copy(backup_back)
+    ok("the backup page's restore line going back to Logger::activity() is reported",
+       applied3["v"] is True and any("maintenance/backup.php" in g for g in got), "; ".join(got))
 
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1

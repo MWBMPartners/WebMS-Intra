@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 226; // #982 round 3 added M13c (a failed step is not
+const EXPECTED_CHECKS = 227; // #982 round 5 added M13d (the account is read,
+                            // not the step log). 227.
+                            // #982 round 3 added M13c (a failed step is not
                             // called a success). 226.
                             // #982 added M13b (an offboarding post with no
                             // reason is refused in words) and #926 added B4b
@@ -3836,10 +3838,39 @@ if ($m13cApplied === true) {
 ok('M13c when switching the account off FAILS, the offboarding page does not say it is switched off: it says it was NOT, that they may still be able to sign in, and names the failed step - and the account really is still on (#982 round 3)',
     $m13cApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
     && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [LIV])['isActive'] === 1
-    && str_contains($m13cSaid, 'their account was NOT switched off, so they may still be able to sign in') === true
+    && str_contains($m13cSaid, 'their account is NOT switched off, so they may still be able to sign in') === true
     && str_contains($m13cSaid, 'These steps failed: switching the account off.') === true
     && str_contains($m13cSaid, 'Their account is switched off') === false && str_contains($m13cSaid, 'isActiveNoSuchColumn') === false,
     ($m13cApplied === true ? 'applied' : 'NOT APPLIED') . ' | said: ' . $m13cSaid);
+
+// #982 round 5: the sentence is decided by READING the account after the
+// commit, never from the step log, which can say ok about a change the
+// database did not keep (a deadlock rolls back steps already logged ok). A
+// deadlock cannot be produced on demand here, so the shape it leaves is made
+// directly: switching the account off is replaced, in the server's copy, by a
+// statement that SUCCEEDS and changes nothing - the step log says ok while the
+// row stays switched on. Una (a live account nobody offboards elsewhere).
+$m13dFrom    = "'UPDATE tblUsers SET isActive = 0 WHERE userID = ?'";
+$m13dApplied = substr_count($m13cOriginal, $m13dFrom) === 1;
+$m13dSaid    = '(not run)';
+if ($m13dApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13dFrom, "'UPDATE tblUsers SET isActive = isActive WHERE userID = ?'", $m13cOriginal));
+    try {
+        [, $m13dSaid] = $offboardM(UNP, 'Selftest #982 round 5');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+// Decoded rather than searched: a JSON column is stored re-spaced by MySQL.
+$m13dSteps = json_decode((string) (one('SELECT `stepsLog` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [UNP])['stepsLog'] ?? ''), true);
+$m13dLogOk = is_array($m13dSteps) === true && array_filter($m13dSteps, static fn ($step): bool => is_array($step) === true
+    && ($step['step'] ?? '') === 'deactivate_user' && ($step['ok'] ?? false) === true) !== [];
+ok('M13d when the step log says the account was switched off but the account is still on (what a deadlock leaves), the page reads the ACCOUNT: it says it is NOT switched off, and never "Their account is switched off" (#982 round 5)',
+    $m13dApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal && $m13dLogOk === true
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [UNP])['isActive'] === 1
+    && str_contains($m13dSaid, 'their account is NOT switched off, so they may still be able to sign in') === true
+    && str_contains($m13dSaid, 'Their account is switched off') === false,
+    ($m13dApplied === true ? 'applied' : 'NOT APPLIED') . ' | step log said ok: ' . var_export($m13dLogOk, true) . ' | said: ' . $m13dSaid);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The
