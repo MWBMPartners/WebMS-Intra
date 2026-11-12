@@ -146,21 +146,28 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //    row keeps the token it already has, so unsubscribe links already sent out
 //    in earlier newsletters keep working.
 //
-//    Only touched when the Newsletter app is switched on for this site AND
-//    the form that was posted DREW the choice (#875). Asking only whether the
-//    newsletter is on NOW was not enough: a page opened while it was off has
-//    no tick box, and saved after it was switched on that read as "unticked",
-//    so a member was unsubscribed from a list they were never shown a choice
-//    about. The page draws Newsletter::choiceShownMarker() beside the box,
-//    and Newsletter::choiceFromPost() answers null when it did not arrive.
-//    The marker also names the organisation the box was drawn for, and a
-//    marker for any other organisation changes nothing (round 2 of #875's
-//    check): this request writes the subscription of the organisation it is
-//    in NOW, which a switch in another tab can have changed.
+//    Touched ONLY when the form that was posted DREW the choice, for THIS
+//    organisation (#875), and then ALWAYS. The page draws
+//    Newsletter::choiceShownMarker() beside the box, and
+//    Newsletter::choiceFromPost() answers null when it did not arrive.
+//    - Asking whether the newsletter is on NOW decided the wrong thing both
+//      ways. A page opened while it was off has no tick box, and saved after
+//      it was switched on that read as "unticked", so a member was
+//      unsubscribed from a list they were never shown a choice about.
+//    - And the other way round (round 3 of the check): a member who saw the
+//      box, unticked it and saved after the newsletter had been switched off
+//      was told "Preferences saved." while nothing was written, so when the
+//      newsletter came back on they were still subscribed after asking to
+//      leave. A choice the page really showed is the member's own, so it is
+//      saved whether or not the newsletter is on at that moment.
+//    - The marker also names the organisation the box was drawn for, and a
+//      marker for any other organisation changes nothing (round 2 of #875's
+//      check): this request writes the subscription of the organisation it
+//      is in NOW, which a switch in another tab can have changed.
 $newsletterOn     = (string) (App::settings()['newsletter']['enabled'] ?? '0');
 $siteId           = Site::id();
 $newsletterChoice = Newsletter::choiceFromPost($_POST, $siteId);
-if (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice !== null) {
+if ($newsletterChoice !== null) {
     $optedIn      = $newsletterChoice === true ? 1 : 0;
     $freshToken   = bin2hex(random_bytes(20));
     $nlStmt = $mysqli->prepare(
@@ -181,10 +188,13 @@ if (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice !==
 
 Logger::activity('NotificationPrefsUpdated', 'User updated notification preferences');
 // 📰 "Preferences saved." must not read as covering the newsletter when the
-//    newsletter choice was left alone (#875): it is on, and this form did not
-//    show the choice for this organisation. One plain line says so.
+//    newsletter choice was left alone (#875): it is on, so the page this
+//    answer returns to shows the choice, but the form that was posted did not
+//    show it for this organisation. One plain line says so. While the
+//    newsletter is off there is no choice on the page to speak of, and none
+//    is added.
 $_SESSION['notifications_flash']      = (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice === null)
-    ? 'Preferences saved. Your newsletter choice was not changed: the page you saved did not show it for this organisation. Open this page again to change it.'
+    ? 'Preferences saved. Your newsletter choice was not changed, because the page you saved did not show it for this organisation. You can change it below.'
     : 'Preferences saved.';
 $_SESSION['notifications_flash_type'] = 'success';
 header('Location: ' . Site::url('account/notifications'), true, 302);

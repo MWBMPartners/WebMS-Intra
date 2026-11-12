@@ -145,7 +145,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 334; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 294, then #1020 round 3's P140 (1); before that 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 337; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 295, then round 4's E31 and P141-P142 (3); before that 294, then #1020 round 3's P140 (1); before that 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2215,6 +2215,22 @@ $bytesWantEv = 'PWT E bytes ?( end';
 $scnBytes = static fn (): array => $scnTyped("PWT E bytes \xC3\x28 end", "Pat \xE2\x80", 'broken.bytes@selftest.invalid', $bytesWantEv, 'Pat ?');
 check('E30 a visitor\'s text that is not UTF-8 has each broken byte sequence stored as "?", and is e-mailed so',
     $scnBytes(), ['stored' => [$bytesWantEv, 'Pat ?'], 'e-mail says' => true]);
+// ...and the "?" is oneLine()'s OWN choice, not the server's (round 3 of the
+// check: the server's default is already "?", so taking oneLine()'s two lines
+// out left E30 green). Asked of the real method in the copy, in a PHP of its
+// own whose replacement character is set to "*" (42) first: the answer must
+// still say "?", and the setting must be 42 again afterwards.
+$scnSubstitute = static function () use ($child, $sep): mixed {
+    $probe = $child . $sep . 'e31-substitute.php';
+    file_put_contents($probe, '<?php declare(strict_types=1);'
+        . 'require ' . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'EventSuggestions.php', true) . ';'
+        . 'mb_substitute_character(42);'
+        . '$out = \\Portal\\Core\\EventSuggestions::oneLine("Pat \\xE2\\x80 x");'
+        . 'echo json_encode([$out, mb_substitute_character()]);');
+    return json_decode((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1'), true);
+};
+check('E31 oneLine() writes "?" for a broken byte sequence even where the server would write something else, and puts the server\'s own setting back',
+    $scnSubstitute(), ['Pat ? x', 42]);
 
 // The mail rows go back as they were. The words-watching line stays in the
 // copy's Mailer until the end of this section's plants (they read the HTML).
@@ -4327,6 +4343,10 @@ $p = $plant('_core/EventSuggestions.php', "preg_replace('/[\\x{202A}-\\x{202E}\\
     "preg_replace('/[\\x{202A}-\\x{202C}\\x{202E}\\x{2066}-\\x{2069}\\x{200E}\\x{061C}]+/u', '', \$valid);", $scnDirection);
 check('P140 with the removal range keeping U+202D and taking U+200E and U+061C instead (the plant round 3 of the check found green), both halves of E29 go red',
     [$p['applied'], ($p['result']['stored'][0] ?? null) === $dirWantEv, ($p['result']['stored'][1] ?? null) === $dirName], [true, false, false]);
+$p = $plant('_core/EventSuggestions.php', ['        mb_substitute_character(0x3F);', '            mb_substitute_character($was);'], ['', ''], $scnSubstitute);
+check('P141 with oneLine() no longer setting "?" itself, the server\'s "*" is used (E31 goes red)', [$p['applied'], $p['result']], [true, ['Pat * x', 42]]);
+$p = $plant('_core/EventSuggestions.php', '            mb_substitute_character($was);', '', $scnSubstitute);
+check('P142 with oneLine() no longer putting the setting back, the server is left on "?" (E31 goes red)', [$p['applied'], $p['result']], [true, ['Pat ? x', 63]]);
 // The words-watching line comes out of the copy's Mailer now, and every mail
 // row goes back as it was.
 file_put_contents($mailerPath, $mailerWas);

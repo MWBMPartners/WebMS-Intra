@@ -45,7 +45,7 @@
  *      shared one would let both read at once, deadlock, and lose a save
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
- *   H  THE PLANTS: fourteen faults, each put into a COPY of the code, each of
+ *   H  THE PLANTS: sixteen faults, each put into a COPY of the code, each of
  *      which must turn the check that guards it RED, and all green again after
  *
  * NOT DRIVEN: `merge()` also checks each `execute()`'s answer, so that its
@@ -893,7 +893,7 @@ check('D9 a post whose markers name ONLY keys nobody may set changes nothing, do
  *
  * @return array{0:bool, 1:string, 2:array{drawn:bool, markers:int}}  ok, detail, premise (box and marker on the page)
  */
-$scenarioNewsletter = static function (bool $drawnOn, bool $hadRow) use (&$state, $db, $http, $formOn, $userId, $siteId, $fmt): array {
+$scenarioNewsletter = static function (bool $drawnOn, bool $hadRow, bool $onAtSave = true) use (&$state, $db, $http, $formOn, $userId, $siteId, $fmt): array {
     $setNewsletter = static function (string $on) use ($db): void {
         $db->query("UPDATE `tblSettings` SET `settingValue` = '{$on}' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
     };
@@ -912,7 +912,7 @@ $scenarioNewsletter = static function (bool $drawnOn, bool $hadRow) use (&$state
         $form    = $formOn($page['body'], 'account/notifications/save');
         $fields  = $form['fields'];
         unset($fields['newsletterOptedIn']); // unticked (and, when it was not drawn, simply absent)
-        $setNewsletter('1');                 // ON at the moment of saving, either way
+        $setNewsletter($onAtSave === true ? '1' : '0'); // on or off at the moment of saving
         $answer  = $http('POST', $form['action'], $fields);
         $subs    = $db->query("SELECT COUNT(*) AS n, MIN(`optedIn`) AS lowest FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}")->fetch_assoc();
         $after   = $http('GET', '/account/notifications')['body'];
@@ -921,11 +921,14 @@ $scenarioNewsletter = static function (bool $drawnOn, bool $hadRow) use (&$state
         // the newsletter choice was left alone (round 3): it says so then, and
         // only then.
         $toldNot = str_contains($after, 'Your newsletter choice was not changed');
-        // Drawn and unticked: the member chose to leave, so ONE row, opted out.
+        // Drawn and unticked: the member chose to leave, so ONE row, opted out -
+        // whether or not the newsletter is on when they press Save (round 3).
         // Not drawn: nothing about the newsletter changes, row or no row.
         $want    = $drawnOn === true ? [1, 0] : ($hadRow === true ? [1, 1] : [0, null]);
         $now     = [(int) $subs['n'], $subs['lowest'] === null ? null : (int) $subs['lowest']];
-        $ok      = $answer['status'] === 302 && $saved === true && $now === $want && $toldNot === ($drawnOn === false);
+        // "Not changed" is said exactly when the newsletter is on at save time
+        // and the page did not show the choice; never while it is off.
+        $ok      = $answer['status'] === 302 && $saved === true && $now === $want && $toldNot === ($drawnOn === false && $onAtSave === true);
         return [$ok, 'save HTTP ' . $answer['status'] . '; newsletter rows/lowest optedIn ' . $fmt($now) . ' (want ' . $fmt($want) . '); "Preferences saved." ' . ($saved ? 'shown' : 'NOT shown')
             . '; "newsletter choice was not changed" ' . ($toldNot ? 'said' : 'not said'), $premise];
     } finally {
@@ -945,6 +948,12 @@ check('D12 (#875) ...and writes no "opted out" row for a member who had never ch
     $okNotDrawnNone, $detailNotDrawnNone);
 check('D13 a page that DREW the box, saved with it unticked, does unsubscribe (the choice still works)',
     $okDrawn, $detailDrawn);
+[$okOffOff, $detailOffOff] = $scenarioNewsletter(false, false, false);
+check('D18 with the newsletter OFF, drawn and saved, the page says only "Preferences saved." - nothing about a newsletter choice the page never offered - and writes no row',
+    $okOffOff, $detailOffOff);
+[$okOnOff, $detailOnOff] = $scenarioNewsletter(true, true, false);
+check('D19 (#875, round 3) a member who saw the box and unticked it is unsubscribed even when the newsletter was switched OFF before they pressed Save, so switching it back on does not resubscribe them',
+    $okOnOff, $detailOnOff);
 
 /**
  * D14-D17 (#875, round 2 of its check): a box drawn for ONE organisation must
@@ -1553,7 +1562,7 @@ $plants['H11 the lock made SHARED instead of exclusive turns F5 RED (a deadlock 
 // #875: the newsletter choice saved only from a form that drew it.
 $plants['H13 the handler no longer asking whether the newsletter box was DRAWN (the old isset) turns D11 RED'] = $plant(
     '_apps/auth/account/notifications-save.php',
-    "if ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice !== null) {\n    \$optedIn      = \$newsletterChoice === true ? 1 : 0;",
+    "if (\$newsletterChoice !== null) {\n    \$optedIn      = \$newsletterChoice === true ? 1 : 0;",
     "if (\$newsletterOn === '1' || \$newsletterOn === 'true') {\n    \$optedIn      = isset(\$_POST['newsletterOptedIn']) === true ? 1 : 0;",
     static function () use ($scenarioNewsletter): array {
         $r = $scenarioNewsletter(false, true);
@@ -1582,6 +1591,25 @@ $plants['H15 the newsletter marker no longer naming the organisation (any marker
     }
 );
 
+$plants['H16 the save asking again whether the newsletter is on NOW turns D19 RED: an unsubscribe the page showed is dropped'] = $plant(
+    '_apps/auth/account/notifications-save.php',
+    "if (\$newsletterChoice !== null) {\n    \$optedIn",
+    "if ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice !== null) {\n    \$optedIn",
+    static function () use ($scenarioNewsletter): array {
+        $r = $scenarioNewsletter(true, true, false);
+        return [$r[0], $r[1]];
+    }
+);
+$plants['H17 the "not changed" sentence no longer asking whether the newsletter is on turns D18 RED: it is said about a choice the page never offered'] = $plant(
+    '_apps/auth/account/notifications-save.php',
+    "\$_SESSION['notifications_flash']      = ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice === null)",
+    "\$_SESSION['notifications_flash']      = (\$newsletterChoice === null)",
+    static function () use ($scenarioNewsletter): array {
+        $r = $scenarioNewsletter(false, false, false);
+        return [$r[0], $r[1]];
+    }
+);
+
 foreach ($plants as $words => $g) {
     check($words, $g['applied'] === true && $g['red'] === true && $g['restored'] === true,
         ($g['applied'] ? 'applied' : 'NOT applied') . '; ' . $g['detail']);
@@ -1602,6 +1630,7 @@ check('H12 with the plants removed, every scenario they broke is green again',
     && $scenarioEFull()[0] === true && $scenarioECard()[0] === true && $scenarioRefused()[0] === true && $scenarioTick()[0] === true
     && $scenarioOnlyUnsettable()[0] === true
     && $scenarioNewsletter(false, true)[0] === true && $scenarioNewsletter(true, true)[0] === true
+    && $scenarioNewsletter(false, false, false)[0] === true && $scenarioNewsletter(true, true, false)[0] === true
     && (static function () use ($scenarioOtherOrganisation, $signIn): bool {
         $r = $scenarioOtherOrganisation();
         $signIn();

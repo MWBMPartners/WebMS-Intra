@@ -122,9 +122,13 @@ final class EventSuggestions
      *      CAN reorder things inside the visitor's own text - groups of digits
      *      and right-to-left words (round 2 of the check measured
      *      "Meeting<U+200F> 12 34 end" shown as "Meeting34 12  end" in Edge) -
-     *      but it never reverses the letters of a word, and in this e-mail it
-     *      cannot reach the surrounding sentence, because the fixed words that
-     *      follow each value begin with a letter (measured in the same check).
+     *      but it never reverses the letters of a word. In this e-mail what
+     *      comes after each value is punctuation (`,` after the name, `", on `
+     *      after the event's name) and then either a left-to-right letter or the
+     *      end of the paragraph, which takes the paragraph's left-to-right
+     *      direction; so a mark inside the value did not reach the fixed words
+     *      around it. That was measured for the example in round 2 of the
+     *      check, not proven for every possible value.
      *      People writing in right-to-left scripts type marks on purpose, so
      *      they stay, and this does NOT remove every "format" character
      *      (\p{Cf}).
