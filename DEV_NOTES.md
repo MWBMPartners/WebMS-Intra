@@ -23947,3 +23947,87 @@ methods on 12 November 2026 — count them from the test, not from here).
 - The PHP built-in server writes its error-log lines as a request ENDS, which can be after
   the answer reaches the test; read at once, "nothing in the error log" can pass on broken
   code. E2 waits half a second.
+
+## A record that names nobody, on purpose (#988)
+
+- `Logger::activity($type, $words, null)` does NOT mean "nobody": null means
+  "I did not say", and #626 then fills `userID` from the session. The explicit
+  path is `Logger::activityNamingNobody()`.
+- Leaving out the account alone would not anonymise the record: the session
+  FINGERPRINT is the same as on the member's own sign-in record, so the two
+  join; the session facts hold the account number; the address and browser
+  match every other record of that visit. All six are left out.
+- It is for pages that PROMISE anonymity only. `check_activity_naming_nobody.py`
+  names every caller (two files, five calls) and fails both ways; it also pins
+  the method's statement writing literal NULLs.
+- `PrayerChain::maybeAutoAssign()` gained `$sentAnonymously`: its record runs
+  inside the sender's request, so it would otherwise name them.
+- Not reached (#1017): a REFUSED reCAPTCHA v3 check writes its own
+  `CaptchaRejected` record through `Logger::activity()`, naming a signed-in
+  member. Nothing is saved in that case.
+- `check_activity_descriptions_personal.py`'s probe now reads
+  `activityNamingNobody(` calls by the same rules (plant added to its self-test).
+- The visitor step's columns are `GdprEraser::VISITOR_PRAYER_NULL_COLS`, held
+  equal to the catalogue's member instruction by `gdpr-coverage-selftest.php`.
+- Migration 286's column comment (and `full_schema.sql`'s) widened in place to
+  name prayer requests: no installation exists (D-135). The e2e harness passed
+  all phases with it.
+
+- A member's OWN erasure never reaches a request they sent through the
+  anonymous form: it finds prayer requests by `submitterID`, which
+  `anonymous-save.php` never writes. Only a visitor-address request does. Every
+  member-facing sentence about prayer requests and erasure now says so, and
+  each is pinned as rendered in section N of `tools/erasure-pages-selftest.php`.
+- Not in scope, raised by the coordinator: a keeping period for
+  `tblPrayerRequests.submitterIP`.
+
+- A record must not assert a fact the code never checks. The filed line said
+  the address "has no account" while `fileVisitorAddressRequest()` never looks
+  in `tblUsers`; it became false the moment the page told administrators to use
+  this request for members too. Nothing deletes a prayer request (no DELETE of
+  `tblPrayerRequests` under `web/`), so a network address on one with no e-mail
+  address is kept with no end date until #1019 (D-178).
+
+## A partial update reads the fields it was not sent under the lock (#1001)
+
+`AssetRegister::updateAsset()` has two callers with different contracts: the
+edit page posts every field (a full write), the API posts some (a partial
+write). The API used to make its partial write LOOK full by filling the
+missing fields from a read made before the lock — so its write was "last
+writer wins" over fields it never mentioned. The fourth argument
+`$onlyFields` names what was sent; everything else is taken from the row
+re-read `FOR UPDATE` inside the same transaction. Two things worth keeping:
+(1) the old audit record could not show the fault — its "before" was the same
+stale read, so the revert diffed as "no change" (plant B: R6 green while R3-R5
+red); the "before" is now the locked row. (2) Dropping `FOR UPDATE` from that
+re-read is invisible over HTTP: a plain read there is correct today only
+because it happens to be the transaction's first plain read. Section S of the
+test reaches the other case without changing `Currency::withParentLocked()`:
+a separate process loads the portal's start-up and swaps in a connection
+whose `begin_transaction()` asks for a consistent snapshot, so the snapshot
+predates the other writer's commit; only `FOR UPDATE` then gets the right
+row. (3) Round 1's race changed three columns, and a rule exempting two others
+passed it. A race test for "the rest of the row survives" must change the
+WHOLE row and compare it whole, with the list of columns it leaves alone
+checked against the schema — otherwise it tests the columns its author
+thought of.
+
+## Five small fixes (#918, #987, #945, #1014, #960)
+
+- **A coordinate is a number or nothing (#945).** `GeoLocation::coordinateNumber()`
+  decides what a coordinate box holds; never `(float)` a posted coordinate —
+  `(float) 'north'` is 0, and 0, 0 is a real place. Making the shared function
+  strict was not enough on the organisation page: a null there meant "clear
+  the stored position", so the page now leaves the stored position as it was, saves the rest
+  of the form and says why (measured: with only the function fixed, a typo cleared both stored values).
+- **createFromFormat()'s space matches "zero or more" spaces, tabs and no-break
+  spaces (#960).** So `2027-03-0110:00` and a U+00A0 separator parse cleanly in
+  PHP and are misread by the databases. ReportBuilder refuses non-ASCII text and
+  requires a space or tab. A five-digit year is already refused by
+  createFromFormat() on PHP 8.4.27, 8.5.12 and 8.6.0RC4 (measured), so it has no
+  rule of its own.
+- **A test of "today" must put the organisation in a zone whose date differs
+  from the server's NOW (#987).** rota-swaps section Y picks UTC+14 or UTC-11,
+  whichever differs, and asserts both "today listed" and "yesterday not", so one
+  half fails on the old code at any hour. Both halves were driven by moving the
+  test server's `time_zone`.

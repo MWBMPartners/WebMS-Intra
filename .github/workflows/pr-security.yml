@@ -2051,6 +2051,15 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_worker_records_listed.py
 
+      # 🙈 #988: a record that names nobody is written only where a page
+      #    promises anonymity. Logger::activityNamingNobody() leaves out the
+      #    account, session fingerprint and facts, address, browser and headers;
+      #    this names every file allowed to call it, failing both ways.
+      - name: 'Records that name nobody are only where anonymity is promised (hard gate, #988)'
+        id: activity_naming_nobody
+        if: always()
+        run: python3 -I tools/audit-checks/check_activity_naming_nobody.py
+
       # 🧪 EVERY AUDIT CHECK'S OWN SELF-TEST, FOUND RATHER THAN LISTED (#919).
       #
       # Several checks above carry a self-test (planted faults each must report,

@@ -694,6 +694,7 @@ Per-site prayer-request submission with moderation and anonymous public submissi
 - Logged-in submissions with per-request visibility (leadership-only / congregation feed).
 - "Display as Anonymous" toggle (moderators still see who submitted).
 - Public anonymous route at `/prayer-requests/anonymous` (no login) — CSRF + CAPTCHA + RateLimiter; always pending, leadership-only.
+- The anonymous form never links a request to an account, even for a signed-in member, and its activity records name nobody (`Logger::activityNamingNobody()`); it tells a signed-in member so, that the network address it keeps could be matched with their sign-ins, and how to have the request erased (#988, #1009).
 - Lifecycle: pending → active → answered (optional praise/testimony note) → archived.
 - Moderation queue at `/prayer-requests/manage`, with a per-row prayer-chain
   partner assign dropdown; full assign UI + private-note admin panel on
@@ -1332,11 +1333,18 @@ another repo, ever**.
   Records in organisations the member cannot open here are counted (D-151).
 - Full data copy: includes the member's own DBS checks (`dbsChecksAboutYou`, #1012; never who recorded them,
   D-154); My data shows a kind of record that could not be read as "could not be read", never as none.
-- Erasure request for a visitor's e-mail address (no account): event suggestions' name and address, the pre-#963
-  activity records naming it, and the approval e-mail's send-log and mail-queue rows, at the filing organisation only,
-  after a required tick and note on how the person was checked (#964; D-140, D-148 to D-150).
+- Erasure request for an e-mail address (whether or not it also belongs to an account): the name and address on
+  event suggestions made without signing in, every prayer request sent through the anonymous form with that address
+  (name, address, network address, the sender's own words and any prayer partner's note emptied; the request kept),
+  the pre-#963 activity records quoting the address (address replaced with "[erased]"; network address, browser,
+  request and session details emptied), and the approval e-mail (one still waiting deleted; in the record of one sent,
+  including one recorded under no organisation, the address replaced with "[erased]" and any error message emptied,
+  the record kept), at the filing organisation only, after a required tick and note on how the person was checked
+  (#964, #1009; D-140, D-148 to D-150, D-176). A member's own account erasure does not reach a request they sent
+  through the anonymous form; only this request does.
 - Erasure, accounts (#977): an account erased on request shows on Admin → Users as "Erased on request, cannot be changed" and cannot be edited, switched back on, placed into an organisation, added to one or offboarded.
 - No country is built in (#942, D-133): the installer asks for the installation's country (suggested from the browser's time zone, sending nothing), and each organisation chooses its own on Admin, Settings, Organisation. Every installer answer sends a strict Content Security Policy.
+- Duty Roster: upcoming duties are listed by the organisation's own date (#987). The assets API changes only the fields it was sent; a change made by somebody else at the same time is kept (#1001).
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 
@@ -1837,6 +1845,7 @@ exports and the booked days on the calendar: members of the organisation and
 venue managers. Nobody else, and nobody signed out. Costs: venue managers and
 administrators only.
 
+- The year schedule shows the message from the last save, delete or status change (#1014).
 - **Year schedule** — one row per hire date (matches the source spreadsheet
   1:1), month-grouped, with status colours, "times needed" flags and a Today
   anchor; CSV + PDF exports (cost column manager-only).

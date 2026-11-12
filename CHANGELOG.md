@@ -4,6 +4,65 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Anonymous prayer requests name nobody, and an e-mail-address erasure reaches them (#988, #1009; D-176, D-178)
+
+- **The anonymous prayer form no longer ties a request to a signed-in member's account (#988).** Its activity records
+  (the saved request, the form-token, captcha and too-many refusals) and the record of its automatic assignment to a
+  prayer partner are written by the new `Logger::activityNamingNobody()`, which keeps the type, the words and the
+  organisation and leaves out the account, the session fingerprint and facts, the network address, the browser and
+  the headers. Before, a member who used the form while signed in got records naming their account.
+- **What a member is told is true.** A signed-in member opening the form is told the request is not linked to their
+  account, that the network address it keeps could be compared with their own sign-ins by somebody with access to the
+  records, and that erasing their account does not reach it — only asking the organisation does, and only if they gave
+  an e-mail address. A visitor is told how to have a request erased. The privacy notice, the prayer-requests help and
+  the erasure policy say the same.
+- **An erasure request filed by e-mail address (D-140, D-148 to D-150) now reaches anonymous prayer requests (#1009,
+  D-176):** every request at that organisation sent through the anonymous form with that address has its name, e-mail
+  address, network address, the sender's own words and any prayer partner's note emptied (the request row is kept).
+  It is described everywhere as a request for an e-mail address, whether or not the address also belongs to an account
+  — never "no account". The erasure page's card, the message after filing and the admin help say exactly what each step
+  does: old activity records have the address replaced with "[erased]" and the network address, browser, request and
+  session details emptied; an approval e-mail still waiting is deleted; in the record of one already sent (including
+  one recorded under no organisation) the address is replaced with "[erased]" and any error message emptied, the record
+  itself kept.
+- A request sent without an e-mail address cannot be found by any erasure, and nothing deletes a prayer request, so its
+  network address is kept with no end date until #1019 sets a keeping period (D-178).
+- New hard gate `tools/audit-checks/check_activity_naming_nobody.py` names every caller of the method and fails both
+  ways. Tests: section N of `tools/erasure-pages-selftest.php` (the member-facing sentences pinned as rendered; the
+  four records a run writes read back whole), `activity-log`, `gdpr-eraser`, `gdpr-coverage`.
+
+### The assets API keeps changes it was not sent (#1001)
+
+- **Fixed (#1001):** the assets API (`POST /api/assets/update`, `PUT`/`PATCH
+  /api/v1/assets/{id}`) no longer puts back a change somebody else made while
+  it was working. It used to fill every field it was not sent from a copy of
+  the asset read before it took the asset's lock, and write those as if they
+  had been sent; it now writes only the fields it was sent, and every other
+  field as the asset holds it at the moment of the write. The asset's history
+  record of each change now compares against that same moment, so it no
+  longer hides such a revert. Tested by `tools/assets-api-update-selftest.php`.
+
+### Five small fixes (#918, #987, #945, #1014, #960)
+
+- **Attendance spreadsheet leaves out deleted sessions (#918).** The download
+  carried every deleted session's headcount and note, so its total could be
+  more than the reports page showed. It now follows the same rule as the page.
+- **Duty Roster "upcoming" follows the organisation's date (#987).** "My
+  upcoming duties", "Full roster" and Manage Rota used the database server's
+  date, so around midnight an organisation far from the server saw yesterday's
+  duties or lost today's. They now use the organisation's own calendar.
+- **A word typed as a map position no longer becomes 0 (#945).**
+  `GeoLocation::validateCoords()` turned any text into a number, so "north" was
+  saved as latitude 0, which is a real place. It now accepts only numbers
+  (plain or exponent form; exactly 0 is still valid). On the organisation
+  page, a position typed but unusable is no longer saved; the rest of the form
+  is, the stored position stays as it was, and the message says why.
+- **"Booking saved." now appears (#1014).** The venues year schedule printed
+  no message, so saves and refusals that return there were silent.
+- **Report filters refuse two date-and-time spellings the databases misread
+  (#960).** A no-break space between date and time (read as midnight by MySQL)
+  and no space at all (no rows on MySQL, every row on MariaDB) are refused.
+
 ### Four admin pages that showed something wrong or broke (#845, #840, #817, #1008; migration 287)
 
 - **Settings page: no Edit or Delete button on a setting it would refuse (#845).** How
