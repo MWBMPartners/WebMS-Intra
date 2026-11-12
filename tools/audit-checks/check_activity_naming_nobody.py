@@ -35,6 +35,14 @@ a form cannot be added to it - and its refusals taken off the record - without
 this check changing too; and it requires the anonymous form to name itself by
 the constant that list holds, so the form and the list cannot drift apart.
 
+And since round 2 of #1017's check, nothing ELSE may name itself as that form:
+the constant `FOR_ANONYMOUS_PRAYER_REQUEST` and its value
+('anonymous-prayer-request', a word used for nothing else) are COUNTED in every
+PHP file under web/ (USES below), failing both ways. Without that, any form
+could pass the constant, or its value as a literal, to `Captcha::verify()` and
+have its refused bot checks recorded naming nobody, while the list still read
+"today only the anonymous prayer form".
+
 WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 -----------------------------------------------------
 - Whether a listed call is really on the anonymous path: that is behaviour,
@@ -96,6 +104,16 @@ PINNED_STATEMENTS = {
     ],
 }
 
+# Every use of the anonymous form's name for the bot check, file by file (as
+# `php -w` prints the file). The constant twice in Captcha.php (its definition
+# and PROMISES_ANONYMITY) and once in the form; the value once, in its
+# definition. Any other file, or any other count, fails.
+USES = {
+    "FOR_ANONYMOUS_PRAYER_REQUEST": {"_core/Captcha.php": 2, "_apps/prayer-requests/anonymous-save.php": 1},
+    "'anonymous-prayer-request'": {"_core/Captcha.php": 1},
+    '"anonymous-prayer-request"': {},
+}
+
 LOGGER = "_core/Logger.php"
 # The method's own statement: the account and the five browser columns are
 # written as literal NULLs, never bound from anything.
@@ -130,17 +148,26 @@ def method_body(text: str) -> str:
 
 def problems(web: str) -> list[str]:
     found: dict[str, int] = {}
+    used: dict[str, dict[str, int]] = {needle: {} for needle in USES}
     for root, _dirs, files in os.walk(web):
         for name in files:
             if name.endswith(".php") is False:
                 continue
             path = os.path.join(root, name)
             with open(path, encoding="utf-8", errors="replace") as fh:
-                if METHOD not in fh.read():
-                    continue  # the cheap test first: php -w only on files that mention it
-            count = len(CALL.findall(stripped(path)))
+                raw = fh.read()
+            wanted = [needle for needle in USES if needle.strip("'\"") in raw]
+            if METHOD not in raw and wanted == []:
+                continue  # the cheap test first: php -w only on files that mention one of them
+            text = stripped(path)
+            rel = os.path.relpath(path, web).replace(os.sep, "/")
+            count = len(CALL.findall(text))
             if count > 0:
-                found[os.path.relpath(path, web).replace(os.sep, "/")] = count
+                found[rel] = count
+            for needle in wanted:
+                seen = text.count(needle)
+                if seen > 0:
+                    used[needle][rel] = seen
 
     wrong: list[str] = []
     for rel, count in sorted(found.items()):
@@ -157,6 +184,17 @@ def problems(web: str) -> list[str]:
                 "anonymous action now names somebody again, or a new one was added without a decision: change "
                 "the list only on purpose."
             )
+
+    for needle, expected in USES.items():
+        for rel in sorted(set(expected) | set(used[needle])):
+            want = expected.get(rel, 0)
+            got = used[needle].get(rel, 0)
+            if got != want:
+                wrong.append(
+                    f"{rel} uses {needle} {got} time(s); USES says {want}. Only the anonymous prayer form may name itself "
+                    "to the bot check as that form: anything else passing it has its refused bot checks recorded naming "
+                    "nobody (#1017). Change the list only on purpose."
+                )
 
     for rel, pins in sorted(PINNED_STATEMENTS.items()):
         path = os.path.join(web, rel)
@@ -321,6 +359,23 @@ def self_test() -> int:
     got = with_copy(list_only_in_comment)
     ok("the list emptied, with the old statement left in a comment, is reported (a comment is not the statement)",
        applied8["v"] is True and any("PROMISES_ANONYMITY" in g for g in got), "; ".join(got))
+
+    # 9. #1017 round 2: another form names itself as the anonymous form, by the constant.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/save.php",
+                                    "<?php\nuse Portal\\Core\\Captcha;\nCaptcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST);\n"))
+    ok("another form passing Captcha::FOR_ANONYMOUS_PRAYER_REQUEST is reported (#1017)",
+       any("zzplant/save.php uses FOR_ANONYMOUS_PRAYER_REQUEST" in g for g in got), "; ".join(got))
+
+    # 10. ... and by the literal value.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/save.php",
+                                    "<?php\n\\Portal\\Core\\Captcha::verify($_POST, 'anonymous-prayer-request');\n"))
+    ok("another form passing the value 'anonymous-prayer-request' as a literal is reported (#1017)",
+       any("zzplant/save.php uses 'anonymous-prayer-request'" in g for g in got), "; ".join(got))
+
+    # 11. A comment naming the constant is not a use.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/note.php",
+                                    "<?php\n// Captcha::FOR_ANONYMOUS_PRAYER_REQUEST and 'anonymous-prayer-request' are the form's.\n"))
+    ok("a comment naming the constant or its value is not reported", got == [], "; ".join(got))
 
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1

@@ -142,7 +142,13 @@ class Captcha
     //    It PROMISES whoever sends it that the request is not linked to
     //    them, even when they are a member signed in (#988), so a refusal
     //    recorded here names nobody either (#1017).
-    public const FOR_ANONYMOUS_PRAYER_REQUEST = 'prayer-request';
+    //    Its value is used NOWHERE else under web/, and the form is the ONLY
+    //    caller passing the constant: check_activity_naming_nobody.py counts
+    //    both, so no other form can borrow anonymous refusal records. (It was
+    //    'prayer-request' until round 2 of #1017's check, a word four other
+    //    places use as a type of live prompt or decision; a form name is never
+    //    stored or shown, so the change altered nothing a person sees.)
+    public const FOR_ANONYMOUS_PRAYER_REQUEST = 'anonymous-prayer-request';
 
     /**
      * The forms that promise anonymity: a refusal this class records while
@@ -612,10 +618,15 @@ class Captcha
     /**
      * Verify a reCAPTCHA v3 response, enforcing both action match AND score threshold.
      *
-     * The only check here that writes a record of its own: v3 answers "yes,
-     * a real token" and then a score, and a refusal on the score or the action
-     * is recorded so an administrator can see the threshold at work. Which
-     * kind of record depends on the form (`$form`): see recordV3Refusal().
+     * The only check here that writes an ACTIVITY record of its own: v3
+     * answers "yes, a real token" and then a score, and a refusal on the score
+     * or the action is recorded so an administrator can see the threshold at
+     * work. Which kind of record depends on the form (`$form`): see
+     * recordV3Refusal(). (Every provider can also write an Errors-page line,
+     * through postVerify() and curlPost(), when the provider cannot be reached
+     * or answers something that is not JSON. Those go through
+     * Logger::errorPlatform(), which keeps the request's network address and
+     * browser and is NOT made anonymous here - see #1017's notes.)
      */
     private static function verifyRecaptchaV3(string $secret, array $post, array $settings, string $form): bool
     {

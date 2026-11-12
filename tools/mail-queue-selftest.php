@@ -98,11 +98,14 @@
  *   F9   An erasure while a run of the job is working. (M5)
  *   F10  An erasure that cannot have the run lock at all: the person is out
  *        of the queue all the same, and running it again finishes it.
- *   R1   A message the job sends later through Microsoft 365 or Google is
- *        recorded in the send log under the message's OWN organisation, not
- *        the one the job's request resolved to (#1006): each route sending,
- *        each refusing, the Microsoft 365 route falling back to Google, and a
- *        message for no organisation. Driven through `/cron/mail-queue` with
+ *   R1   A message the job sends later is recorded in the send log under the
+ *        message's OWN organisation, not the one the job's request resolved
+ *        to (#1006), whichever line writes it: SMTP sending (the queue's own
+ *        line), a message expiring unsent (the queue's event line), Microsoft
+ *        365 unable to sign in (the queue's line for a route fault), and the
+ *        Microsoft 365 and Google routes' own lines - each sending, each
+ *        refusing, Microsoft falling back to Google - and a message for no
+ *        organisation. Driven through `/cron/mail-queue` with
  *        `tools/https-standin.php` standing where Microsoft and Google stand.
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
@@ -180,7 +183,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 165; // #1006 added six: part R1.
+const EXPECTED_CHECKS = 168; // #1006 added nine: part R1 (six, then three in round 2 of its check).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -4027,12 +4030,13 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
     ];
     /**
      * One message kept for `$site` and sent by ONE run of the job, as a
-     * scheduler calls it, with the two services answering as given. What the
+     * scheduler calls it, with the two services answering as given (and a
+     * sign-in service answering otherwise, when `$signIn` names one). What the
      * send log then holds for it, what the services were asked, and the job's answer.
      */
-    $r1Send = static function (string $subject, ?int $site, array $graph, array $gmail) use ($job, $state, $tokens): array {
+    $r1Send = static function (string $subject, ?int $site, array $graph, array $gmail, array $signIn = []) use ($job, $state, $tokens): array {
         child(['task' => 'add', 'messages' => [row([mailOf('other')], $subject, ['siteId' => $site])]]);
-        httpsStandinAnswers($state['https'], $tokens + ['graph.microsoft.com' => $graph, 'gmail.googleapis.com' => $gmail]);
+        httpsStandinAnswers($state['https'], $signIn + $tokens + ['graph.microsoft.com' => $graph, 'gmail.googleapis.com' => $gmail]);
         httpsStandinRequests($state['https']);
         $answer = $job('right');
 
@@ -4050,7 +4054,44 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
     $gmailOk     = [['path' => '/gmail/v1/users/', 'status' => 200, 'json' => ['id' => 'r1-made-up-id']]];
     $gmailNo     = [['path' => '/gmail/v1/users/', 'status' => 400, 'json' => ['error' => ['code' => 400, 'message' => 'Made-up refusal.']]]];
 
+    // ── The queue's OWN lines (round 2 of #1006's check: these were guarded by
+    //    nothing - setting the organisation to "this request's" in
+    //    logQueueAttempt() or logQueueEvent() left every check green).
+    //    1. SMTP, which the queue records itself through logQueueAttempt().
+    useServer('accept');
+    $smtp = $r1Send('R1 through SMTP, accepted', SITE_R1, $graphOk, $gmailOk);
+    $mail = mailSince('accept');
+    ok(
+        'SMTP sends a waiting message for another organisation (the stand-in mail server took it), and the queue\'s own line for it is under the message\'s own organisation (#1006)',
+        ($smtp['job']['json']['sent'] ?? 0) === 1 && count($mail['messages']) === 1 && $smtp['asked'] === [] && $smtp['left'] === 0
+            && $smtp['lines'] === [$line('smtp', 'sent', SITE_R1)],
+        json_encode($smtp['job']['json']) . '; messages ' . count($mail['messages']) . '; lines ' . json_encode($smtp['lines'])
+    );
+    //    2. A message whose use-by moment passed before it could go: the line
+    //       logQueueEvent() writes, with no attempt at all.
+    child(['task' => 'add', 'messages' => [row([mailOf('other')], 'R1 expired unsent', ['siteId' => SITE_R1, 'expiresAt' => gmdate('Y-m-d H:i:s', time() + 3600)])]]);
+    q("UPDATE tblMailQueue SET expiresAt = UTC_TIMESTAMP() - INTERVAL 5 SECOND WHERE subject = 'R1 expired unsent'");
+    $ran     = $job('right');
+    $expired = q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', ['R1 expired unsent']);
+    ok(
+        'a waiting message for another organisation that EXPIRES unsent is recorded, by the queue\'s event line, under the message\'s own organisation (#1006)',
+        ($ran['json']['expired'] ?? 0) === 1 && $expired === [$line('smtp', 'expired', SITE_R1)],
+        json_encode($ran['json']) . '; lines ' . json_encode($expired)
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 expired unsent'");
+    //    3. Microsoft 365 cannot even sign in: the route throws, writes nothing
+    //       itself, and the queue writes the line (logQueueAttempt()'s second road).
     setting('mail.provider', 'ms365');
+    $noSignIn = $r1Send('R1 through Microsoft 365, no sign-in', SITE_R1, $graphOk, $gmailOk,
+        ['login.microsoftonline.com' => [['path' => '/', 'status' => 401, 'json' => ['error' => 'invalid_client']]]]);
+    ok(
+        'Microsoft 365 cannot sign in: the message waits, the route wrote no line of its own, and the queue\'s line about the route fault is under the message\'s own organisation (#1006)',
+        $noSignIn['asked'] === ['login.microsoftonline.com POST 401'] && $noSignIn['left'] === 1
+            && $noSignIn['lines'] === [$line('ms365', 'queued', SITE_R1)],
+        'asked ' . json_encode($noSignIn['asked']) . '; waiting ' . $noSignIn['left'] . '; lines ' . json_encode($noSignIn['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Microsoft 365, no sign-in'");
+
     $sent = $r1Send('R1 through Microsoft 365, accepted', SITE_R1, $graphOk, $gmailOk);
     ok(
         'Microsoft 365 ACCEPTS a waiting message for another organisation: the job really sent it through the route (a sign-in, then the send, both answered by the stand-in), it left the queue, and its ONE line in the send log is under the message\'s own organisation (#1006)',
