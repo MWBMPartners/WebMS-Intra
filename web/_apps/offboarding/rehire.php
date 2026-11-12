@@ -129,7 +129,9 @@ $userId = (int) $o['userID'];
 
 try {
     $db->begin_transaction();
-    // Reactivate user + site membership. NOT credentials — user must reset.
+    // Reactivate user + site membership. NOT credentials: the password,
+    // passkeys and Microsoft or Google links offboarding removed stay
+    // removed, and the message after the commit says what the account has.
     // Nor roles, user-group or department memberships (#516, #517):
     // offboarding DELETED those rows (do.php steps 6, 6a, 6b), so there is
     // nothing here to switch back on; an administrator adds them again at

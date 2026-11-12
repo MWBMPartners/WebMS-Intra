@@ -231,7 +231,11 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 239; // #982 round 11 added M13p (the Rehire button's
+const EXPECTED_CHECKS = 241; // #982 round 12 added M13q (the Offboard page's
+                            // note and confirmation) and M13r (no Rehire
+                            // button for an account erased inside the undo
+                            // window). 241.
+                            // #982 round 11 added M13p (the Rehire button's
                             // confirmation promises nothing). 239.
                             // #982 round 10 added M13o (an e-mail address
                             // over 50 characters: no promise of success). 238.
@@ -3915,11 +3919,12 @@ const M13_GUS = 917064; // a live member of A with NO password row: rehired by a
 const M13_LEN = 917065; // a live member of A with NO password row, still linked to Microsoft when rehired (#982 round 9)
 const M13_PIP = 917066; // a live member of A: two passkeys and Google with no hosted domain when rehired (#982 round 9)
 const M13_RIA = 917067; // a live member of A: the rehire's read fails (#982 round 9)
+const M13_ELI = 917069; // a live member of A: offboarded, then ERASED inside the undo window (#982 round 12)
 const M13_OTT = 917068; // a live member of A with NO password row and an e-mail address over 50 characters (#982 round 10)
 // Ott's address is 75 characters: tblUsers.emailAddress holds 255, the sign-in
 // name the Users page would make from it (tblLocalAccounts.username) holds 50.
 const M13_OTT_MAIL = 'u917068.an-address-much-longer-than-a-sign-in-name-holds@selftest.invalid';
-foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail', M13_OTT => 'Ott Overlong'] as $m13Id => $m13Name) {
+foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail', M13_OTT => 'Ott Overlong', M13_ELI => 'Eli Erased'] as $m13Id => $m13Name) {
     q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, $m13Id === M13_OTT ? M13_OTT_MAIL : 'u' . $m13Id . '.erasure@selftest.invalid']);
     q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
 }
@@ -4112,7 +4117,7 @@ ok('M13j a password on the account (said as a fact, with no cause the code canno
 $gusRehire  = $rehireM(M13_GUS, 'adm');
 $gusSave    = $givePasswordM('adm', M13_GUS);
 $gusRows    = (int) one("SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ? AND `passwordHash` <> ''", 'i', [M13_GUS])['n'];
-ok('M13k an organisation administrator who rehires an account with no way in is told it has no other way in and that they can try giving it a password on the Users page - and the Users page really does store one when they do (#982 round 10)',
+ok('M13k an organisation administrator who rehires an account with no way in is told it has no way to sign in yet and that they can try giving it a password on the Users page - and the Users page really does store one when they do (#982 round 11)',
     str_contains($gusRehire, 'User rehired: their account is switched on again.') === true
     && str_contains($gusRehire, 'You can try giving it a password on the Users page, which will say if it cannot.') === true
     && $gusRows === 1,
@@ -4149,8 +4154,8 @@ ok('M13l an account still LINKED to Microsoft (not set up here) is said to have 
 // set a new password", untrue for an account with no password row ("Forgot
 // your password?" needs one) and for a Microsoft- or Google-only account.
 $offList = req($jar['root'], 'GET', '/offboarding')['body'];
-ok('M13p the Rehire button on the offboarding list asks "Rehire this user? Their account becomes active again. The next page says how they can sign in." and never says they will need to set a new password (#982 round 11)',
-    str_contains($offList, 'data-confirm="Rehire this user? Their account becomes active again. The next page says how they can sign in."') === true
+ok('M13p the Rehire button on the offboarding list asks "Rehire this user? Their account becomes active again, unless it has been erased by then. The next page says how they can sign in." and never says they will need to set a new password (#982 round 11)',
+    str_contains($offList, 'data-confirm="Rehire this user? Their account becomes active again, unless it has been erased by then. The next page says how they can sign in."') === true
     && stripos($offList, 'set a new password') === false && stripos($offList, 'reset password') === false,
     'confirmations on the page: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $offList, $offConfirm) > 0 ? $offConfirm[1] : ['(none)']));
 $ottRehire  = $rehireM(M13_OTT);
@@ -4163,6 +4168,48 @@ ok('M13o an account with no way in and an e-mail address over 50 characters is p
     && str_contains($ottRehire, 'You can give it') === false && str_contains($ottRehire, 'can be given') === false
     && $ottRows === 0 && str_contains($ottSave, 'longer than 50 characters') === true,
     'offboard said: ' . $ottOff . ' | rehire said: ' . $ottRehire . ' | save said: ' . $ottSave . ' | password rows: ' . $ottRows);
+
+// M13q: the Offboard page for a LIVE account carries the note and the Offboard
+// button's confirmation. Both used to promise a password reset or a re-enrolment,
+// which is untrue for an account with no password row or a Microsoft- or
+// Google-only one; both are facts now, with the erasure condition. The note and
+// the confirmation are drawn in the same block, only where offboarding is
+// possible, so one live page carries both.
+$eliPage = req($jar['root'], 'GET', '/offboarding/user?id=' . M13_ELI)['body'];
+ok('M13q the Offboard page for a live account says the removed password, passkeys and Microsoft or Google links are not put back, and that the account can be switched on again unless it has been erased by then - in the note AND the Offboard confirmation - and never "reset password" or "re-enrol" (#982 round 12)',
+    str_contains($eliPage, '— the account is switched on again, unless it has been erased by then. The password, passkeys and Microsoft or Google links that offboarding removed are not put back; the page shown after a rehire says what the account still has.') === true
+    && str_contains($eliPage, '? This removes their password, passkeys and Microsoft or Google links. Within the undo window the account can be switched on again, unless it has been erased by then, but those are not put back."') === true
+    && stripos($eliPage, 'reset password') === false && stripos($eliPage, 're-enrol') === false
+    && stripos($eliPage, "they'll need") === false && stripos($eliPage, 'they&#039;ll need') === false,
+    'confirmations: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $eliPage, $eliConfirm) > 0 ? $eliConfirm[1] : ['(none)']));
+
+// M13r: Eli is offboarded and his account is then ERASED while his offboarding
+// record is still there. rehire.php refuses an erased account (AccountGuard row
+// 3a), so the offboarding list must not offer a Rehire button for him: it used
+// to, because its "can undo" test asked about the window and not about erasure.
+// HOW THE STATE IS MADE, said plainly: a COMPLETED erasure DELETES the person's
+// tblOffboarding rows (the catalogue's 'erase' entry, matched by userID - measured
+// in the first version of this check, which ran a real request and found the
+// record gone), so the list cannot show such a row after a whole run. The row
+// survives when the account row has been emptied and the offboarding step has
+// not run - a run that stopped part-way. That state is made here directly: the
+// account row is given the erasure's tombstone (the three facts
+// GdprEraser::emptiedAccountSql() tests: '[Deleted User]', a deleted-...
+// address, switched off), exactly as the run's own step writes it.
+[, $eliOff] = $offboardM(M13_ELI, 'Selftest #982 round 12');
+$eliRecord  = (int) (one('SELECT `offboardingID` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [M13_ELI])['offboardingID'] ?? 0);
+$eliRun     = 'tombstone written directly';
+q("UPDATE `tblUsers` SET `fullName` = '[Deleted User]', `emailAddress` = ?, `isActive` = 0 WHERE `userID` = ?", 'si', ['deleted-' . M13_ELI . '@example.invalid', M13_ELI]);
+$eliRow     = one('SELECT `fullName`, `emailAddress`, `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_ELI]);
+$eliErased  = ($eliRow !== null && $eliRow['fullName'] === '[Deleted User]'
+    && str_starts_with((string) $eliRow['emailAddress'], 'deleted-') === true && (int) $eliRow['isActive'] === 0) ? 1 : 0;
+$eliList    = req($jar['root'], 'GET', '/offboarding')['body'];
+ok('M13r an account offboarded and then ERASED (its offboarding record still there) gets no Rehire button on the offboarding list (rehire.php would refuse it) and the list says it was erased so cannot be rehired (M13p is the control: a waiting account that is not erased does get the button) (#982 round 12)',
+    $eliRecord > 0 && $eliErased === 1
+    && str_contains($eliList, 'name="offboardingID" value="' . $eliRecord . '"') === false
+    && str_contains($eliList, 'Erased on request, so it cannot be rehired') === true,
+    'offboard said: ' . $eliOff . ' | erasure run: ' . $eliRun . ' | record ' . $eliRecord . ' | erased ' . $eliErased
+);
 
 // M13m: two passkeys (the plural sentence) and Google set up with NO hosted
 // domain (the sentence ends at the address, naming no domain).
