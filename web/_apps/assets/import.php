@@ -333,10 +333,13 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     //    letters ("R", "Rs", "kr") is not read (D-177). A refusal names a reason
     //    only where it is certain (two currency markers, decimals, commas,
     //    points, a minus, too large, nothing entered, a marker while no currency
-    //    is chosen); a sign or code that is not read as the organisation's
-    //    currency here is told so and to convert rather than relabel (rounds
-    //    10-11), naming no other currency; anything else is "That amount could not be read." with what
-    //    IS read. The rows are
+    //    is chosen); a cell starting with a currency marker the converter
+    //    RECOGNISES (a sign listed in Currency::SIGNS_OF, capitals joined to
+    //    one, or a known code followed by an amount or a sign) that is not read
+    //    as the organisation's currency is told it is not read as that currency
+    //    here, and to convert rather than relabel (rounds 10-12), naming no
+    //    other currency; every other start, an unrecognised sign included, is
+    //    "That amount could not be read." with what IS read. The rows are
     //    made in the organisation's currency, so that is the one passed. It used to strip
     //    "£", "$", "€", every comma and every space and go through a float, so
     //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure

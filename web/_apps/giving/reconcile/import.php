@@ -251,12 +251,16 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    read (D-177). A refusal names a reason only where it is certain — two
     //    currency markers, decimals, commas, points, a misplaced minus, too
     //    large, nothing entered, or a marker while no currency is chosen. A
-    //    sign or code that is not read as the import's currency HERE is told
-    //    exactly that — a claim about the portal, not about the currency — and
-    //    to convert the figure rather than put our code in front of it
-    //    (rounds 10-11, Currency::otherCurrencyWords()); which other currency it
-    //    is, is never guessed. Anything else is "That amount could not be
-    //    read." with what IS read (Currency::fileAdvice()). Negatives are allowed so a debit can
+    //    cell starting with a currency marker the converter RECOGNISES (a sign
+    //    listed in Currency::SIGNS_OF, capitals joined to one, or a known code
+    //    followed by an amount or a sign) that is not read as the import's
+    //    currency is told it is not read as that currency HERE — a claim about
+    //    the portal, not about the currency — and to convert the figure rather
+    //    than put our code in front of it (rounds 10-12,
+    //    Currency::otherCurrencyWords()); which other currency it is, is never
+    //    guessed. Every other start, a sign the converter does not recognise
+    //    included, is "That amount could not be read." with what IS read
+    //    (Currency::fileAdvice()). Negatives are allowed so a debit can
     //    be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.

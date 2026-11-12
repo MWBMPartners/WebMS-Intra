@@ -484,7 +484,15 @@ foreach ([['GBP £12.50', 'GBP', 'GBP', '£', false], ['£GBP 12.50', 'GBP', '£
           // The second marker NOT the organisation's: the figure may be in that
           // other currency, so it must not be told to keep GBP in front (round 10).
           ['GBP $12', 'GBP', 'GBP', '$', true], ['GBP$12', 'GBP', 'GBP', '$', true], ['USD £12', 'USD', 'USD', '£', true],
-          ['£$12', 'GBP', '£', '$', true], ['GBP US$12', 'GBP', 'GBP', 'US$', true], ['£USD 12', 'GBP', '£', 'USD', true]] as [$t, $code, $a, $b, $foreign]) {
+          ['£$12', 'GBP', '£', '$', true], ['GBP US$12', 'GBP', 'GBP', 'US$', true], ['£USD 12', 'GBP', '£', 'USD', true],
+          // Round 12: a second marker is "ours" only if ownMarkerAtStart() —
+          // the function that reads a single-marker cell — would read it.
+          // Capitals joined to one of our signs are NOT: "US$12" alone could
+          // not be read in CAD, so "CAD US$12" must not be told to keep CAD.
+          ['CAD US$12', 'CAD', 'CAD', 'US$', true], ['CNY JP¥1,200', 'CNY', 'CNY', 'JP¥', true], ['GIP GB£5', 'GIP', 'GIP', 'GB£', true],
+          ['CADUS$12', 'CAD', 'CAD', 'US$', true], ['USD US$5', 'USD', 'USD', 'US$', true],
+          ['GBP USD$12', 'GBP', 'GBP', 'USD', true], ['GBP ALL$5', 'GBP', 'GBP', 'ALL', true],
+          ['CAD CA$12', 'CAD', 'CAD', 'CA$', false]] as [$t, $code, $a, $b, $foreign]) {
     $want = $foreign === true
         ? 'That amount has two currency markers in front (' . $a . ' and ' . $b . '), and ' . $b . ' is not read as ' . $code . ' here. ' . convertWords($code)
         : 'That amount has two currency markers in front (' . $a . ' and ' . $b . '). Put only one in front, for example ' . $code . ' 12.50.';
@@ -493,7 +501,7 @@ foreach ([['GBP £12.50', 'GBP', 'GBP', '£', false], ['£GBP 12.50', 'GBP', '£
         $twice[] = $code . ' ' . $t . ' → ' . var_export($got, true);
     }
 }
-check('A10i TWO currency markers in front — after the organisation\'s code a sign; after one of its signs any sign or a code followed by an amount — with or without spaces ("GBP £12.50", "£GBP 12.50", "££12.50", "PHP ₱12.50", "AUD A$12.50", "EUR €5", "$USD 5", "GBP£12", "USD$5", "EUR€5", "AUDA$5") is refused saying so and asking for one; where the second is NOT the organisation\'s ("GBP $12", "GBP$12", "USD £12", "£$12", "GBP US$12", "£USD 12") it says so and to convert, never to keep the code in front (round 10)',
+check('A10i TWO currency markers in front — after the organisation\'s code a sign, capitals joined to one, or the code those capitals spell ("GBP USD$12", "GBP ALL$5"); after one of its signs any marker — with or without spaces ("GBP £12.50", "£GBP 12.50", "££12.50", "PHP ₱12.50", "AUD A$12.50", "EUR €5", "$USD 5", "GBP£12", "USD$5", "EUR€5", "AUDA$5") is refused saying so and asking for one; where the second is NOT the organisation\'s ("GBP $12", "GBP$12", "USD £12", "£$12", "GBP US$12", "£USD 12") it says so and to convert, never to keep the code in front (round 10); and "Put only one in front" ONLY where the second on its own is read as ours ("CAD CA$12"), never for capitals joined to our sign ("CAD US$12", "CNY JP¥1,200", "GIP GB£5", "CADUS$12", "USD US$5" — round 12)',
     $twice === [], implode(' | ', $twice));
 
 // A10k — D-177: a sign made only of LETTERS is NOT read in a file. Every such
@@ -673,6 +681,21 @@ foreach (['$12', '₱12', '£12', 'C$12', 'CUP ₱12', 'GBP $12'] as $t) {
         }
     }
 }
+// A10s — round 12: two shapes the reading rests on, pinned so a narrowing
+// goes red: a point straight after the code ("GBP .50" reads as 50; the
+// `[0-9.]` in amountOrSignFollows()), and ONE capital joined to a sign ("X$12"
+// is a marker, not read as GBP here; the `{1,3}` in lettersThenSymbolAtStart()).
+$r12 = [];
+foreach ([['GBP .50', 'GBP', 50], ['GBP -.50', 'GBP', -50], ['X$12', 'GBP', otherCur('GBP')], ['US$12', 'CAD', unreadable('CAD')],
+          ['US$12', 'AUD', unreadable('AUD')], ['₫12', 'GBP', unreadable('GBP')], ['₫12', '', unreadable('')]] as [$t, $code, $want]) {
+    $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
+    if ($got !== $want) {
+        $r12[] = ($code === '' ? 'no currency' : $code) . ' "' . $t . '" → ' . var_export($got, true);
+    }
+}
+check('A10s round 12: "GBP .50" reads as 50 and "GBP -.50" as -50; "X$12" (one capital joined to a sign) is a marker not read as GBP here; "US$12" in CAD and AUD (their "$" is their own) and "₫12" (a sign the converter does not recognise), with or without a currency, could not be read',
+    $r12 === [], implode(' | ', $r12));
+
 check('A10r round 11: "₱12" in CUP, "£12" in EGP, "C$12" in CAD, "BR$12" in BRL, "USD 12", "USD$5" and "ABC$12" in GBP are told the sign or code is not read as that currency HERE (never "does not use"), and "CUP ₱12" says "₱ is not read as CUP here"; "ABCD$12", a tab after a code or sign ("GBP\\t12", "£\\t12", "USD\\t12"), a bare "USD", "USD PAID" and "GBP USD 12" could not be read',
     $r11 === [], implode(' | ', $r11));
 
