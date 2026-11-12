@@ -248,8 +248,9 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    IN IT that currency is written with ("$" as the organisation's own
     //    dollars, whichever they are; the owner, D-165), either followed by any
     //    run of spaces. A sign made only of letters ("R", "Rs", "kr") is not
-    //    read (D-177). A refusal names a reason only where it is certain — two
-    //    currency markers, decimals, commas, points, a misplaced minus, too
+    //    read (D-177). A refusal names a reason only where it is certain — more
+    //    than one currency marker (Currency::manyMarkersWords(), one fixed
+    //    sentence), decimals, commas, points, a misplaced minus, too
     //    large, nothing entered, or a marker while no currency is chosen. A
     //    cell starting with a currency marker the converter RECOGNISES (a sign
     //    listed in Currency::SIGNS_OF with a symbol in it, capitals joined to

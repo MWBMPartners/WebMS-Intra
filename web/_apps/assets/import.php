@@ -331,7 +331,8 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     //    organisation; the owner, D-165), either followed by any run of spaces,
     //    exactly as the bank-statement import reads them. A sign made only of
     //    letters ("R", "Rs", "kr") is not read (D-177). A refusal names a reason
-    //    only where it is certain (two currency markers, decimals, commas,
+    //    only where it is certain (more than one currency marker — one fixed
+    //    sentence, Currency::manyMarkersWords() — decimals, commas,
     //    points, a minus, too large, nothing entered, a marker while no currency
     //    is chosen); a cell starting with a currency marker the converter
     //    RECOGNISES (a sign listed in Currency::SIGNS_OF with a symbol in it,

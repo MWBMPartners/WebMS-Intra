@@ -167,6 +167,13 @@ function convertWords(string $code): string
     return 'Only ' . $code . ' amounts are read here: if this figure is in another currency, convert it to ' . $code
         . ' first — do not just put ' . $code . ' in front of it.';
 }
+/** Round 14: the ONE sentence for any cell with more than one currency marker in front, the first ours. */
+function many(string $code): string
+{
+    return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
+        . 'write the figure with at most one ' . $code . ' sign or code in front, and if it is in another currency, '
+        . 'convert it to ' . $code . ' first.';
+}
 function otherCur(string $code): string
 {
     return 'That amount starts with a currency sign or code that is not read as ' . $code . ' here. ' . convertWords($code);
@@ -474,34 +481,34 @@ foreach ([['£1,234.56', 'GBP', 123456], ['-£3.00', 'GBP', -300], ['£-3.00', '
 check('A10g "£" in a FILE is read as the organisation\'s own pounds whenever they are written "£" (D-165, superseding D-157): sterling, Gibraltar, Falkland Islands, St Helena, Syrian, South Sudanese; the Egyptian and Lebanese pounds by their own "E£" and "L£"; "₱" for the Philippine peso',
     $pound === [], implode(' | ', $pound));
 
-// A10i — the currency written TWICE is refused, saying so (round 5's check: it
-// was called "another currency", which was untrue).
+// A10i — MORE THAN ONE currency marker in front, the first the organisation's
+// own, gets ONE fixed sentence that names, counts and judges no marker (round
+// 14). Rounds 10 to 13 built it from the markers, and each construction was
+// found untrue for some cell. Two markers, ours or not, and three or four.
 $twice = [];
-foreach ([['GBP £12.50', 'GBP', 'GBP', '£', false], ['£GBP 12.50', 'GBP', '£', 'GBP', false], ['££12.50', 'GBP', '£', '£', false], ['PHP ₱12.50', 'PHP', 'PHP', '₱', false],
-          ['AUD A$12.50', 'AUD', 'AUD', 'A$', false], ['EUR €5', 'EUR', 'EUR', '€', false], ['$USD 5', 'USD', '$', 'USD', false], ['-£ £3', 'GBP', '£', '£', false],
-          ['GBP£12', 'GBP', 'GBP', '£', false], ['USD$5', 'USD', 'USD', '$', false], ['EUR€5', 'EUR', 'EUR', '€', false], ['AUDA$5', 'AUD', 'AUD', 'A$', false],
-          ['GBP   £12', 'GBP', 'GBP', '£', false],
-          // The second marker NOT the organisation's: the figure may be in that
-          // other currency, so it must not be told to keep GBP in front (round 10).
-          ['GBP $12', 'GBP', 'GBP', '$', true], ['GBP$12', 'GBP', 'GBP', '$', true], ['USD £12', 'USD', 'USD', '£', true],
-          ['£$12', 'GBP', '£', '$', true], ['GBP US$12', 'GBP', 'GBP', 'US$', true], ['£USD 12', 'GBP', '£', 'USD', true],
-          // Round 12: a second marker is "ours" only if ownMarkerAtStart() —
-          // the function that reads a single-marker cell — would read it.
-          // Capitals joined to one of our signs are NOT: "US$12" alone could
-          // not be read in CAD, so "CAD US$12" must not be told to keep CAD.
-          ['CAD US$12', 'CAD', 'CAD', 'US$', true], ['CNY JP¥1,200', 'CNY', 'CNY', 'JP¥', true], ['GIP GB£5', 'GIP', 'GIP', 'GB£', true],
-          ['CADUS$12', 'CAD', 'CAD', 'US$', true], ['USD US$5', 'USD', 'USD', 'US$', true],
-          ['CAD CA$12', 'CAD', 'CAD', 'CA$', false]] as [$t, $code, $a, $b, $foreign]) {
-    $want = $foreign === true
-        ? 'That amount has two currency markers in front (' . $a . ' and ' . $b . '), and ' . $b . ' is not read as ' . $code . ' here. ' . convertWords($code)
-        : 'That amount has two currency markers in front (' . $a . ' and ' . $b . '). Put only one in front, for example ' . $code . ' 12.50.';
-    $got  = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
-    if ($got !== $want) {
-        $twice[] = $code . ' ' . $t . ' → ' . var_export($got, true);
+foreach ([['GBP £12.50', 'GBP'], ['£GBP 12.50', 'GBP'], ['££12.50', 'GBP'], ['PHP ₱12.50', 'PHP'], ['AUD A$12.50', 'AUD'], ['EUR €5', 'EUR'],
+          ['$USD 5', 'USD'], ['-£ £3', 'GBP'], ['GBP£12', 'GBP'], ['USD$5', 'USD'], ['EUR€5', 'EUR'], ['AUDA$5', 'AUD'], ['GBP   £12', 'GBP'],
+          ['GBP $12', 'GBP'], ['GBP$12', 'GBP'], ['USD £12', 'USD'], ['£$12', 'GBP'], ['GBP US$12', 'GBP'], ['£USD 12', 'GBP'],
+          ['CAD US$12', 'CAD'], ['CNY JP¥1,200', 'CNY'], ['GIP GB£5', 'GIP'], ['CADUS$12', 'CAD'], ['USD US$5', 'USD'], ['CAD CA$12', 'CAD'],
+          ['CUP ₱12', 'CUP'],
+          // Three and four markers (round 13's cells), ours or not.
+          ['GBP £$12', 'GBP'], ['GBP GBP$12', 'GBP'], ['££$12', 'GBP'], ['£GBP €12', 'GBP'], ['GBP£US$12', 'GBP'], ['£££$12', 'GBP'],
+          ['USD USD€5', 'USD'], ['$$€5', 'USD'], ['AED AED$12', 'AED'], ['GBP USD$12', 'GBP'], ['GBP ALL$5', 'GBP'], ['AED $AED 12', 'AED'],
+          ['£££12', 'GBP'], ['GBP £ £12', 'GBP'], ['£-£3', 'GBP'],
+          // More than one marker AND another fault: still the one sentence.
+          ['££12.345', 'GBP'], ['£££1.2.3', 'GBP'], ['GBP £0,500', 'GBP']] as [$t, $code]) {
+    foreach ([true, false] as $allowNegative) {
+        $got = Currency::parseAmount($t, $code, allowNegative: $allowNegative, fromFile: true);
+        if ($got !== many($code)) {
+            $twice[] = $code . ' ' . $t . ' → ' . var_export($got, true);
+        }
     }
 }
-check('A10i TWO currency markers in front — after the organisation\'s code a sign or capitals joined to one; after one of its signs any marker — with or without spaces ("GBP £12.50", "£GBP 12.50", "££12.50", "PHP ₱12.50", "AUD A$12.50", "EUR €5", "$USD 5", "GBP£12", "USD$5", "EUR€5", "AUDA$5") is refused saying so and asking for one; where the second is NOT the organisation\'s ("GBP $12", "GBP$12", "USD £12", "£$12", "GBP US$12", "£USD 12") it says so and to convert, never to keep the code in front (round 10); and "Put only one in front" ONLY where the second on its own is read as ours ("CAD CA$12"), never for capitals joined to our sign ("CAD US$12", "CNY JP¥1,200", "GIP GB£5", "CADUS$12", "USD US$5" — round 12)',
-    $twice === [], implode(' | ', $twice));
+if (Currency::parseAmount('-££3', 'GBP', fromFile: true) !== many('GBP')) {
+    $twice[] = 'GBP -££3 (no negatives) → ' . var_export(Currency::parseAmount('-££3', 'GBP', fromFile: true), true);
+}
+check('A10i MORE THAN ONE currency marker in front, the first the organisation\'s own — two of ours ("GBP £12.50", "££12.50", "CAD CA$12"), ours then not ("GBP $12", "CAD US$12", "CUP ₱12"), three or four ("GBP £$12", "£££$12", "£££12", "GBP USD$12"), with or without spaces, and with another fault too ("££12.345", "-££3") — gets ONE fixed sentence naming and counting no marker (round 14)',
+    $twice === [], implode(' | ', array_slice($twice, 0, 4)));
 
 // A10k — D-177: a sign made only of LETTERS is NOT read in a file. Every such
 // cell is refused (never stored): the organisation's own letters sign asks for
@@ -660,10 +667,6 @@ foreach ([['₱12', 'CUP'], ['£12', 'EGP'], ['£12.50', 'EGP'], ['C$12', 'CAD']
         $r11[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
-$cupTwice = 'That amount has two currency markers in front (CUP and ₱), and ₱ is not read as CUP here. ' . convertWords('CUP');
-if (Currency::parseAmount('CUP ₱12', 'CUP', fromFile: true) !== $cupTwice) {
-    $r11[] = 'CUP "CUP ₱12" → ' . var_export(Currency::parseAmount('CUP ₱12', 'CUP', fromFile: true), true);
-}
 foreach ([['ABCD$12', 'GBP'], ['GBP' . "\t" . '12', 'GBP'], ['£' . "\t" . '12', 'GBP'], ['USD' . "\t" . '12', 'GBP'], ['USD', 'GBP'],
           ['USD PAID', 'GBP'], ['GBP USD 12', 'GBP']] as [$t, $code]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
@@ -695,61 +698,29 @@ foreach ([['GBP .50', 'GBP', 50], ['GBP -.50', 'GBP', -50], ['X$12', 'GBP', othe
 check('A10s round 12: "GBP .50" reads as 50 and "GBP -.50" as -50; "X$12" (one capital joined to a sign) is a marker not read as GBP here; "US$12" in CAD and AUD (their "$" is their own) and "₫12" (a sign the converter does not recognise), with or without a currency, could not be read',
     $r12 === [], implode(' | ', $r12));
 
-// A10t — round 13: THREE or more markers. Round 12 judged only the first two,
-// so "GBP £$12" was told "(GBP and £). Put only one in front, for example GBP
-// 12.50" although dropping either left a refused cell. Every marker is now
-// named and counted, and "Put only one in front" is given only when the cell
-// would read with ONE of them left — the very reading this function gives it.
-function markersWords(array $all, string $code, bool $lastOurs): string
-{
-    $n = [2 => 'two', 3 => 'three', 4 => 'four'][count($all)];
-    $s = 'That amount has ' . $n . ' currency markers in front (' . implode(', ', array_slice($all, 0, -1)) . ' and ' . $all[count($all) - 1] . ')';
-
-    return $lastOurs === true
-        ? $s . '. Put only one in front, for example ' . $code . ' 12.50.'
-        : $s . ', and ' . $all[count($all) - 1] . ' is not read as ' . $code . ' here. ' . convertWords($code);
-}
+// A10t — the "own refusal" with ONE marker: a cell with one of the
+// organisation's markers and another fault is told that fault (round 14 keeps
+// these; with more than one marker the cell gets A10i's one sentence).
 $r13 = [];
-foreach ([['GBP £$12', 'GBP', ['GBP', '£', '$'], false], ['GBP GBP$12', 'GBP', ['GBP', 'GBP', '$'], false],
-          ['££$12', 'GBP', ['£', '£', '$'], false], ['£GBP €12', 'GBP', ['£', 'GBP', '€'], false],
-          ['GBP£US$12', 'GBP', ['GBP', '£', 'US$'], false], ['£££$12', 'GBP', ['£', '£', '£', '$'], false],
-          ['USD USD€5', 'USD', ['USD', 'USD', '€'], false], ['$$€5', 'USD', ['$', '$', '€'], false],
-          ['AED AED$12', 'AED', ['AED', 'AED', '$'], false],
-          // All ours, and the cell reads with one left: put only one.
-          ['£££12', 'GBP', ['£', '£', '£'], true], ['GBP £ £12', 'GBP', ['GBP', '£', '£'], true], ['£-£3', 'GBP', ['£', '£'], true]] as [$t, $code, $all, $ours]) {
-    $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
-    if ($got !== markersWords($all, $code, $ours)) {
-        $r13[] = $code . ' "' . $t . '" → ' . var_export($got, true);
-    }
-}
-// A known code spelt by the capitals before a sign counts, and so does the
-// sign after it: "GBP USD$12" is THREE markers, two of them not ours.
-foreach ([['GBP USD$12', 'GBP', 'GBP, USD and $', 'USD and $ are'], ['GBP ALL$5', 'GBP', 'GBP, ALL and $', 'ALL and $ are'],
-          ['AED $AED 12', 'AED', 'AED, $ and AED', '$ is']] as [$t, $code, $list, $which]) {
-    $want = 'That amount has three currency markers in front (' . $list . '), and ' . $which . ' not read as ' . $code . ' here. ' . convertWords($code);
-    if (Currency::parseAmount($t, $code, fromFile: true) !== $want) {
-        $r13[] = $code . ' "' . $t . '" → ' . var_export(Currency::parseAmount($t, $code, fromFile: true), true);
-    }
-}
-// All ours, but the cell would NOT read with one left: that reading's own refusal.
-foreach ([['££12.345', 'GBP', true, Currency::REFUSED_TOO_PRECISE], ['£££1.2.3', 'GBP', true, ONE_POINT],
-          ['-££3', 'GBP', false, Currency::REFUSED_NEGATIVE], ['GBP £0,500', 'GBP', true, BAD_COMMAS]] as [$t, $code, $neg, $want]) {
+foreach ([['£12.345', 'GBP', true, Currency::REFUSED_TOO_PRECISE], ['£1.2.3', 'GBP', true, ONE_POINT],
+          ['-£3', 'GBP', false, Currency::REFUSED_NEGATIVE], ['GBP 0,500', 'GBP', true, BAD_COMMAS]] as [$t, $code, $neg, $want]) {
     $got = Currency::parseAmount($t, $code, allowNegative: $neg, fromFile: true);
     if ($got !== $want) {
         $r13[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
-// Letters-only signs are never markers, first or second (D-177).
+// Letters-only signs are never markers, first or second (D-177): "GBP R12" has
+// ONE marker followed by a word, so it is not the one sentence either.
 foreach ([['GBP R12', 'ZAR'], ['GBP R12', 'GBP'], ['R12', 'ZAR'], ['Rs50', 'NPR'], ['kr12', 'SEK'], ['ZAR R12', 'ZAR']] as [$t, $code]) {
     $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
     if ($got !== unreadable($code)) {
         $r13[] = $code . ' "' . $t . '" → ' . var_export($got, true);
     }
 }
-check('A10t round 13: three or more markers are each named and counted — "GBP £$12", "GBP GBP$12", "££$12", "£GBP €12", "GBP£US$12", "£££$12", "USD USD€5", "$$€5", "AED AED$12" get the convert sentence, never "Put only one in front"; "GBP USD$12", "GBP ALL$5" and "AED $AED 12" are three markers, naming every one not ours; "£££12", "GBP £ £12", "£-£3" (which read with one left) get "Put only one"; "££12.345", "£££1.2.3", "GBP £0,500" and a refused "-££3" get their own refusal; letters-only signs ("GBP R12", "R12", "Rs50", "kr12", "ZAR R12") are never markers',
+check('A10t with ONE of the organisation\'s markers and another fault, the cell gets that fault\'s own refusal ("£12.345", "£1.2.3", "GBP 0,500", "-£3" where no negative is allowed); letters-only signs ("GBP R12", "R12", "Rs50", "kr12", "ZAR R12") are never markers and could not be read',
     $r13 === [], implode(' | ', $r13));
 
-check('A10r round 11: "₱12" in CUP, "£12" in EGP, "C$12" in CAD, "BR$12" in BRL, "USD 12", "USD$5" and "ABC$12" in GBP are told the sign or code is not read as that currency HERE (never "does not use"), and "CUP ₱12" says "₱ is not read as CUP here"; "ABCD$12", a tab after a code or sign ("GBP\\t12", "£\\t12", "USD\\t12"), a bare "USD", "USD PAID" and "GBP USD 12" could not be read',
+check('A10r round 11: "₱12" in CUP, "£12" in EGP, "C$12" in CAD, "BR$12" in BRL, "USD 12", "USD$5" and "ABC$12" in GBP are told the sign or code is not read as that currency HERE (never "does not use"), and "CUP ₱12" gets the one more-than-one-marker sentence; "ABCD$12", a tab after a code or sign ("GBP\\t12", "£\\t12", "USD\\t12"), a bare "USD", "USD PAID" and "GBP USD 12" could not be read',
     $r11 === [], implode(' | ', $r11));
 
 // A10j — every SYMBOLS sign (the one the portal WRITES) is also one its own

@@ -702,34 +702,22 @@ final class Currency
      *     ("-£3.00", "£-3.00"). A sign made only of LETTERS ("R", "kr", "Rs",
      *     "Fr.") is NOT read (the owner, D-177).
      *   A file refusal gives a specific reason ONLY where the converter can know
-     *   it for certain (#1004 rounds 9 to 13):
-     *     - more than one currency marker in front: every one of the
-     *       organisation's own that ownMarkerAtStart() takes in turn, then
-     *       perhaps one more that anyMarkerAtStart() finds and
-     *       ownMarkerAtStart() did not take. The organisation's code is only
+     *   it for certain (#1004 rounds 9 to 14):
+     *     - more than one currency marker in front: one of the organisation's
+     *       own (ownMarkerAtStart()), then another that ownMarkerAtStart() or
+     *       anyMarkerAtStart() finds after it. The organisation's code is only
      *       taken where an amount or a sign follows it (a sign listed in
      *       SIGNS_OF with a symbol in it, or capitals joined to one; never a
-     *       letters-only sign, so "GBP R12" could not be read), so after the
-     *       CODE the next marker is that sign ("GBP £12.50", "GBP$12"),
-     *       capitals joined to one ("GBP US$12"), or — where those capitals
-     *       are a code the portal knows — that CODE, and then the sign after
-     *       it as a further marker ("GBP USD$12" is GBP, USD and $; "GBP ALL$5"
-     *       is GBP, ALL and $). After one of its SIGNS the next is
-     *       any marker either function finds ("££12.50", "£GBP 12.50",
-     *       "£$12", "£USD 12"). The code followed by ANOTHER code and a figure
-     *       ("GBP USD 12") is not taken at all and could not be read. Every
-     *       marker is named and counted ("three currency markers in front
-     *       (GBP, £ and $)"), and the rest is decided BY CONSTRUCTION
-     *       (rounds 12 and 13): where the last is not ours, "…, and $ is not
-     *       read as GBP here." with the convert sentence ("CAD US$12",
-     *       "USD US$5": "US$12" alone could not be read in either). Where all
-     *       are ours, what follows them is read by this same function —
-     *       exactly how the cell would read with ONE of them left: if it
-     *       reads, "Put only one in front"; if not, that reading's own
-     *       refusal ("££12.345" is told about the decimals). So the sentence
-     *       never promises that keeping one marker makes a cell readable
-     *       unless it does. Round 12 told "GBP £$12" — three markers — "(GBP
-     *       and £). Put only one in front";
+     *       letters-only sign, so "GBP R12" could not be read), so "GBP £12",
+     *       "GBP $12", "GBP US$12", "GBP USD$12", "££12", "£GBP 12", "£$12",
+     *       "GBP £$12" all qualify, while "GBP USD 12" (the code followed by a
+     *       word) is not taken at all and could not be read. Every such cell
+     *       gets ONE fixed sentence, manyMarkersWords(), which names, counts
+     *       and judges none of the markers, so it is true of all of them,
+     *       ours or not, two or more (round 14). Rounds 10 to 13 built the
+     *       sentence from the markers, and each construction was found untrue
+     *       for some cell ("CAD US$12" told to keep CAD in front; "GBP £$12"
+     *       told it had two markers and to put only one in front);
      *     - at the start, after at most one minus, a marker
      *       anyMarkerAtStart() recognises — a sign listed in SIGNS_OF with a
      *       symbol in it, one to three capitals joined to such a sign ("US$"),
@@ -794,74 +782,29 @@ final class Currency
             // "$" is the organisation's own dollars, whichever dollars they are.
             // A letters-only sign is not read (D-177). Anything else is refused
             // below.
-            // EVERY currency marker in front, in turn, once the cell starts
-            // with one of the organisation's own: each is ours if
-            // ownMarkerAtStart() takes it where it stands, else not ours if
-            // anyMarkerAtStart() finds it ("GBP £12", "£££12", "GBP £$12",
-            // "AED $AED 12"); each followed by any run of spaces, and a minus
-            // may sit before the first or after any one of them, once.
-            $markersSeen = [];
-            $notOurs     = [];
-            // Each pass takes at least one character, so the walk ends.
-            $taken       = self::ownMarkerAtStart($text, $code);
-            while ($taken !== '') {
-                $markersSeen[] = $taken;
-                $text          = ltrim(substr($text, strlen($taken)), ' ');
+            $taken = self::ownMarkerAtStart($text, $code);
+            if ($taken !== '') {
+                $text = ltrim(substr($text, strlen($taken)), ' ');
                 if ($negative === false && str_starts_with($text, '-') === true) {
                     $negative = true;
                     $text     = substr($text, 1);
                 }
-                $taken = self::ownMarkerAtStart($text, $code);
-                if ($taken === '') {
-                    $taken = self::anyMarkerAtStart($text);
-                    if ($taken !== '') {
-                        $notOurs[] = $taken;
-                    }
+                // MORE THAN ONE currency sign or code in front: after one of
+                // the organisation's own, ANOTHER marker that ownMarkerAtStart()
+                // or anyMarkerAtStart() finds ("GBP £12", "££12", "GBP $12",
+                // "£$12", "GBP US$12", "GBP £$12", "AED AED$12"). Every such
+                // cell gets ONE fixed sentence, manyMarkersWords(), which
+                // names, counts and judges none of the markers, so it is true
+                // of every one of them — ours or not, two or four (round 14).
+                // Rounds 10 to 13 each built the sentence from the markers
+                // (which were ours, how many, whether one left would read),
+                // and each construction was found untrue for some cell: round
+                // 12 told "CAD US$12" to keep CAD in front; round 13's walk
+                // was the fourth attempt. Such a cell is never read, in any
+                // version, so this changes no stored value.
+                if (self::ownMarkerAtStart($text, $code) !== '' || self::anyMarkerAtStart($text) !== '') {
+                    return self::manyMarkersWords($code);
                 }
-            }
-            // MORE THAN ONE currency marker in front, the first ours: every
-            // one is named and counted, and those ownMarkerAtStart() did not
-            // take where they stood are NOT ours. What
-            // can follow the organisation's CODE is a sign ("GBP £12.50",
-            // "GBP $12"), capitals joined to one ("GBP US$12"), or a known
-            // code those capitals spell, the sign after it then counting as
-            // one more ("GBP USD$12" is GBP, USD and $); after
-            // one of its SIGNS, any marker ("££12.50", "£GBP 12.50", "£$12",
-            // "£USD 12"). "GBP USD 12" is NOT taken: its code is followed by a
-            // word, so the cell could not be read. Every marker is named and
-            // counted; round 8 called "GBP $12" "another currency (GBP)".
-            //   - Any marker that is not ours: "…, and $ is not read as GBP
-            //     here." with the convert sentence (rounds 10-12). Round 11
-            //     judged it by isForeignMarker(), which reads "US$" by its "$",
-            //     so "CAD US$12" was told to keep CAD in front of what may well
-            //     be US dollars, while "US$12" alone could not be read in CAD.
-            //   - All of them ours: what follows them is read by THIS
-            //     function — which is exactly how the cell would read with ONE
-            //     of them left. Only if it reads is the cell told "Put only one
-            //     in front"; otherwise it gets that reading's own refusal. So
-            //     the sentence promises that keeping one marker makes the cell
-            //     readable only when it does, by construction. Round 12 judged
-            //     the second marker alone, so "GBP £$12" — THREE markers — was
-            //     told "(GBP and £). Put only one in front, for example GBP
-            //     12.50", while dropping either still left a refused cell and
-            //     the example invited relabelling the "$" figure (round 13).
-            if (count($markersSeen) > 1) {
-                $markers = 'That amount has ' . self::countWord(count($markersSeen)) . ' currency markers in front ('
-                    . self::listWords($markersSeen) . ')';
-                if ($notOurs !== []) {
-                    $foreign = array_values(array_unique($notOurs));
-                    return $markers . ', and ' . self::listWords($foreign) . (count($foreign) === 1 ? ' is' : ' are')
-                        . ' not read as ' . $code . ' here. ' . self::convertWords($code);
-                }
-                // What follows the markers holds no marker (both functions
-                // above found none), so this call reads figures only and
-                // goes no deeper.
-                $alone = self::parseAmount(($negative === true ? '-' : '') . $text, $currency, $max, $allowNegative, true);
-                if (is_string($alone) === true) {
-                    return $alone;
-                }
-
-                return $markers . '. Put only one in front, for example ' . $code . ' 12.50.';
             }
         }
 
@@ -982,8 +925,8 @@ final class Currency
      * refusal whose reason cannot be known for certain) and
      * FILE_REASON_MINUS_NOT_HERE. Every other file-mode refusal carries its
      * own complete instruction (more than two decimals, commas, more than one
-     * point, a minus in the wrong place, too large, nothing entered, two
-     * currency markers, a currency sign or code not ours, no currency chosen).
+     * point, a minus in the wrong place, too large, nothing entered, more than one
+     * currency marker, a currency sign or code not ours, no currency chosen).
      */
     public static function fileAdvice(string $code): string
     {
@@ -1020,21 +963,32 @@ final class Currency
         return 'That amount starts with a currency sign or code that is not read as ' . $code . ' here. ' . self::convertWords($code);
     }
 
-    /** "a", "a and b", "a, b and c". @param list<string> $items */
-    private static function listWords(array $items): string
+    /**
+     * 💱 What a FILE's amount answers when, after one of the organisation's
+     * own markers (ownMarkerAtStart()), ANOTHER currency marker follows —
+     * one ownMarkerAtStart() or anyMarkerAtStart() finds (a sign listed in
+     * SIGNS_OF with a symbol in it, capitals joined to one, or a known code
+     * followed by an amount or a sign). That and nothing else (round 14). It
+     * names, counts and judges no marker, so it is true of every such cell:
+     * the markers may be ours or not, two or more. It asks for at most one of
+     * the organisation's markers, and for a figure in another currency to be
+     * converted first — never for a marker to be kept on a foreign figure.
+     * A cell whose FIRST marker is not the organisation's gets
+     * otherCurrencyWords() instead, which is true of it however many follow.
+     * A code is a marker only where an amount or a sign follows it, so a code
+     * followed by another code ("GBP USD 12", "GBP GBP 12") has no marker in
+     * front and could not be read (FILE_REASON_UNREADABLE).
+     */
+    public static function manyMarkersWords(string $code): string
     {
-        return count($items) === 1 ? $items[0] : implode(', ', array_slice($items, 0, -1)) . ' and ' . $items[count($items) - 1];
+        $code = strtoupper(trim($code));
+
+        return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
+            . 'write the figure with at most one ' . $code . ' sign or code in front, and if it is in another currency, '
+            . 'convert it to ' . $code . ' first.';
     }
 
-    /** "two", "three" … for the markers refusal; a figure past ten. */
-    private static function countWord(int $n): string
-    {
-        $words = [2 => 'two', 3 => 'three', 4 => 'four', 5 => 'five', 6 => 'six', 7 => 'seven', 8 => 'eight', 9 => 'nine', 10 => 'ten'];
-
-        return $words[$n] ?? (string) $n;
-    }
-
-    /** The instruction shared by otherCurrencyWords() and the markers refusal whose last marker is not ours. */
+    /** otherCurrencyWords()'s instruction. */
     private static function convertWords(string $code): string
     {
         return 'Only ' . $code . ' amounts are read here: if this figure is in another currency, convert it to ' . $code
@@ -1044,7 +998,8 @@ final class Currency
     /**
      * Is a marker anyMarkerAtStart() found at the START of a cell one that is
      * NOT read as this organisation's currency here? (Asked for a single
-     * marker only; a second marker is judged by ownMarkerAtStart() itself.)
+     * marker only; a cell with more than one gets manyMarkersWords(), which
+     * judges no marker.)
      * Its own code and own signs (signsOf(): the entries of SIGNS_OF with a
      * symbol in them — letters-only entries are never read, D-177) are read
      * as it. Any other sign in that data is not — "CA$" in a US-dollar
