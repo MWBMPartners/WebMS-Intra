@@ -145,12 +145,34 @@ if ($isCsvExport === true) {
     CsvExporter::download('assets-export-' . date('Y-m-d') . '.csv', $csvRows, $csvHeaders);
 }
 
+// 💬 The message a redirect left for this page (#1031). Many asset pages
+//    send people HERE after an action (list them with
+//    grep -rlE "Location: ' \. Site::url\('assets'\)( \.|\);)" web/_apps/assets)
+//    — deleting an asset ("Asset deleted."),
+//    the edit page finding an asset gone, a loan, a kit, an import — and each
+//    leaves a message in the session. This page never printed one, so every
+//    such message was silently lost (and stayed in the session until some
+//    other page printed it, out of context). Found while making the edit page
+//    say plainly that an asset deleted while it was being saved was NOT saved:
+//    that message ends its journey here. Read and cleared before the header,
+//    as the other asset pages do.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 // 📌 Page metadata
 $pageTitle   = 'Asset Tracker';
 $pageSection = 'assets';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Assets' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+
+if ($flashMsg !== '') {
+    // The type is one of Bootstrap's alert words, set by this portal's own
+    // handlers; escaped anyway, as everything printed is.
+    echo '<div class="alert alert-' . htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8') . '" role="alert">'
+        . htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8') . "</div>\n";
+}
 
 // 🎨 Status → badge colour, condition → badge colour. Kept local to this
 // page — a shared helper can move into AssetRegister once more pages need

@@ -73,6 +73,20 @@
  *      this organisation only (D3, D4), where that one row is closed too. (It used to draw both on the
  *      transcription period and the currency, which were then refused.) The
  *      drawing is also the fourth path section S reads.
+ *   R  #1021: the ROW rules (SettingsRowRule — a portal-wide row, a "public"
+ *      name, a stored name outside the safe characters), which refuse an
+ *      administrator of ONE organisation whatever the setting is. The page is
+ *      drawn as that administrator and Save is PRESSED on every row it drew:
+ *      a changed value where no Edit was drawn (refused, unchanged, recorded),
+ *      the row's own value where Edit was drawn (not refused, and the page
+ *      then SAYS it was saved — a save the database silently threw away
+ *      would otherwise pass). So the drawing
+ *      is judged against what the save handler does, not against a copy of
+ *      the rule. One fixture row per rule is named, each must carry the
+ *      rule's own note, and nobody but a global administrator sees Delete.
+ *      Then the global administrator: every row no lock method locks draws
+ *      Edit and Delete. S3 reads that the rule is asked on the change, delete
+ *      and drawing paths.
  *   P  plants, in a COPY of the portal: the transcription refusal taken out of
  *      the delete; the giving refusal taken out of the delete; every delete
  *      refusal taken out at once; the transcription refusal taken out of BOTH
@@ -80,7 +94,11 @@
  *      transcription call taken out of the delete and replaced by a string
  *      holding the call's text, and taken out of the DRAWING (P4c); and, for
  *      section D, the drawing's transcription ask switched off (P8) and the
- *      currency's note taken away (P9). Each must go red.
+ *      currency's note taken away (P9); and for #1021 the drawing's row-rule
+ *      ask switched off (P11), asked as if every viewer were a global
+ *      administrator (P12), the save handler's row refusal taken out (P13),
+ *      and, in memory, the drawing's ask replaced by another call (P4d). Each
+ *      must go red.
  *
  * HOW THE KEYS ARE ENUMERATED
  *   The candidates are every setting name in the database (a fresh install
@@ -113,10 +131,20 @@
  *     prefix written with a different function) is found only if its name is
  *     in the database or written in the method's body.
  *   - Section D reads the Settings page as a global administrator AND (D3,
- *     D4) as an administrator of this organisation only, but judges only the
- *     LOCKED rows. What that second administrator is shown for an ordinary
- *     installation-wide row (an Edit button the save handler then refuses,
- *     for a reason that is not a lock) is not judged here.
+ *     D4) as an administrator of this organisation only, and judges only the
+ *     LOCKED rows; section R (#1021) judges every other row. It used to say
+ *     here that an ordinary installation-wide row drawn with an Edit button
+ *     the save handler then refused "is not judged here" — that was #1021.
+ *   - Section R presses Save on every row with the row's OWN value where Edit
+ *     is drawn, so it proves such a save is not REFUSED; whether a changed
+ *     value would be accepted is proved for the control row only (R6). A
+ *     value-dependent refusal (a mail-queue number outside the installation's
+ *     range, say) on a row drawn with Edit is not something the drawing could
+ *     know, and none exists on a fresh installation.
+ *   - It runs on a fresh installation's rows. A row the database treats as
+ *     equal to another name is represented by ONE fixture (a zero-width space
+ *     inside "public"); the other look-alikes SettingsRowRule::isSafeName()
+ *     lists are covered by the same rule, not each pressed here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_locks SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         [SELFTEST_WEB_PORT=9836] php tools/settings-locks-selftest.php
@@ -465,6 +493,31 @@ foreach ($paths as $path => $code) {
 $missing = missingAsks($methods, $paths);
 check('S2 every lock method is asked on every one of the four paths', $missing === [], 'not asked: ' . implode('; ', $missing));
 
+/**
+ * #1021: the ROW rules (portal-wide row, "public" name, unsafe stored name) are
+ * decided by ONE method, SettingsRowRule::whyNotChangeable(), and it must be
+ * asked on the three paths that judge an EXISTING row: changing it, deleting
+ * it and drawing it. (Adding a row is judged by the name alone, with
+ * isSafeName() and isPublicName(), and cannot be portal-wide.)
+ *
+ * @return list<string> the paths that do not ask it
+ */
+function rowRuleMissing(array $paths): array
+{
+    $missing = [];
+    foreach (['changing a row (save.php)', 'deleting a row (index.php)', 'drawing a row (index.php)'] as $path) {
+        $code = $paths[$path] ?? '';
+        if ($code === '' || preg_match('/(?<![A-Za-z0-9_\\\\])(?:\\\\?Portal\\\\Core\\\\)?SettingsRowRule::whyNotChangeable\s*\(/', $code) !== 1) {
+            $missing[] = $path;
+        }
+    }
+
+    return $missing;
+}
+$rowMissing = rowRuleMissing($paths);
+check('S3 (#1021) the row rule, SettingsRowRule::whyNotChangeable(), is asked when changing, deleting AND drawing a row', $rowMissing === [],
+    'not asked on: ' . implode('; ', $rowMissing));
+
 // =============================================================================
 // 🏗️ The keys: every candidate asked of every method
 // =============================================================================
@@ -740,6 +793,8 @@ $cleanUp = static function () use (&$cleanedUp, $restore, &$added, $db, $removeP
         run($db, 'DELETE FROM `tblSettings` WHERE `settingID` = ?', 'i', [$id]);
     }
     run($db, "DELETE FROM `tblSettings` WHERE `settingKey` LIKE 'selftest836.ordinary.%'");
+    // #1021's section R fixtures, all carrying "selftest1021" in their name.
+    run($db, "DELETE FROM `tblSettings` WHERE `settingKey` LIKE '%selftest1021%'");
     $removePerson();
     run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` IN (?, ?)', 'ss', ['selftest-settings-locks', 'selftest-settings-locks-org']);
 };
@@ -827,8 +882,8 @@ $lastLog = static function () use ($db): int {
     return (int) (rows($db, 'SELECT COALESCE(MAX(`logID`), 0) AS `n` FROM `tblActivityLogs`')[0]['n'] ?? 0);
 };
 /** Was a refusal of one of these types, naming this key, recorded since $since? */
-$refusalNamed = static function (int $since, array $types, string $key) use ($db): bool {
-    foreach (rows($db, 'SELECT `activityType` AS `t`, `activityDescription` AS `d` FROM `tblActivityLogs` WHERE `logID` > ? AND `userID` = ?', 'ii', [$since, SL_ADMIN]) as $log) {
+$refusalNamed = static function (int $since, array $types, string $key, int $who = SL_ADMIN) use ($db): bool {
+    foreach (rows($db, 'SELECT `activityType` AS `t`, `activityDescription` AS `d` FROM `tblActivityLogs` WHERE `logID` > ? AND `userID` = ?', 'ii', [$since, $who]) as $log) {
         if (in_array((string) $log['t'], $types, true) === true && str_contains((string) $log['d'], '"' . $key . '"') === true) {
             return true;
         }
@@ -1070,6 +1125,8 @@ $drawn = static function () use ($http): array {
             'edit'   => str_contains($block, 'data-bs-target="#editModal"'),
             'delete' => str_contains($block, 'name="action" value="delete"'),
             'note'   => $note,
+            // #1021: which ROW rule the note names (SettingsRowRule's reason), or null.
+            'rowRefusal' => preg_match('/data-row-refusal="([^"]+)"/', $block, $rr) === 1 ? html_entity_decode($rr[1], ENT_QUOTES, 'UTF-8') : null,
         ];
     }
 
@@ -1139,6 +1196,211 @@ check('D4 ...and every one of the ' . count($snapshot) . ' locked rows draws no 
     $orgWrong === [], implode('; ', $orgWrong));
 $signIn();
 run($db, 'DELETE FROM `tblSettings` WHERE `settingID` = ?', 'i', [$controlId]);
+
+// =============================================================================
+head('Section R — #1021: the ROW rules — the page draws Edit exactly where the save accepts it');
+// =============================================================================
+// The save handler refuses an administrator of ONE organisation on three kinds
+// of row whatever the setting is (SettingsRowRule): a portal-wide row, a
+// "public" name, and a stored name outside the safe characters. The page used
+// to draw an Edit button on every one of them. This section does not ask the
+// rule what to expect: it draws the page as that administrator, then PRESSES
+// Save on every row it drew — a changed value where no Edit was drawn (it must
+// be refused, unchanged and recorded), the row's own value where Edit was
+// drawn (it must not be refused). So the drawing is judged against what the
+// save handler really does. Then the page is drawn as the global
+// administrator, for whom the row rules never refuse.
+//
+// Fixture rows, one per rule, so each rule is exercised by name: a portal-wide
+// row; this organisation's own row named "PUBLIC.…" (capitals: the rule ignores
+// letter case, as the database does); this organisation's own row whose name
+// has an invisible zero-width space after "pu" (the database's lookup treats it
+// as "public.…", the reason rule 3 exists); and an ordinary organisation row,
+// the control. Each name carries "selftest1021", which the clean-up removes.
+$rFixtures = [
+    \Portal\Core\SettingsRowRule::PORTAL_WIDE => [null, 'selftest1021.portalwide'],
+    \Portal\Core\SettingsRowRule::PUBLIC_NAME => [$site, 'PUBLIC.selftest1021a'],
+    \Portal\Core\SettingsRowRule::UNSAFE_NAME => [$site, "pu\u{200B}blic.selftest1021b"],
+    'control'                                   => [$site, 'selftest1021.ordinary'],
+];
+run($db, "DELETE FROM `tblSettings` WHERE `settingKey` LIKE '%selftest1021%'");
+$rIds = [];
+foreach ($rFixtures as $kind => [$level, $name]) {
+    run($db, "INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, 'r1021', '', 0)", 'is', [$level, $name]);
+    $rIds[$kind] = (int) $db->insert_id;
+}
+
+/**
+ * Press Save on one existing row as $who (the person signed in), and say what
+ * happened. The value goes in as posted; a secret's own value is never known
+ * to the page, so an empty box is what a person would post.
+ *
+ * @return array{unchanged: bool, changedTo: bool, logged: bool, status: int}
+ */
+$pressAs = static function (array $row, string $value, int $who) use ($http, $freshToken, $lastLog, $refusalNamed, $rowNow, $sameAs): array {
+    $token  = $freshToken();
+    $since  = $lastLog();
+    $answer = $http('POST', '/settings/save', ['csrf_token' => $token, 'settingID' => (string) $row['settingID'],
+        'settingKey' => (string) $row['settingKey'], 'settingValue' => $value]);
+    $now    = $rowNow((int) $row['settingID']);
+
+    return [
+        'unchanged' => $sameAs($now, $row),
+        'changedTo' => $now !== null && $now['settingValue'] === $value,
+        'logged'    => $refusalNamed($since, ['SettingsUpdateRefused'], (string) $row['settingKey'], $who),
+        'status'    => $answer['status'],
+    ];
+};
+
+/** Every row the page shows this organisation (its own, and the portal-wide ones), as stored now. */
+$rowsShown = static function () use ($db, $site): array {
+    return rows($db, 'SELECT * FROM `tblSettings` WHERE `siteID` = ? OR `siteID` IS NULL ORDER BY `settingID`', 'i', [$site]);
+};
+/** Put back the value and the "last changed" moment of every row that differs from $before (a press of a row's own value moves updatedAt). */
+$putBack = static function (array $before) use ($db): void {
+    foreach ($before as $row) {
+        run($db, 'UPDATE `tblSettings` SET `settingValue` = ?, `updatedAt` = ? WHERE `settingID` = ? AND (`settingValue` <> ? OR NOT (`updatedAt` <=> ?))',
+            'ssiss', [$row['settingValue'], $row['updatedAt'], (int) $row['settingID'], $row['settingValue'], $row['updatedAt']]);
+    }
+};
+
+/**
+ * The organisation administrator's sweep: draw the page, then press Save on
+ * every row it drew. Answers the lines that are wrong, and what was pressed.
+ *
+ * @return array{wrong: list<string>, refused: list<int>, accepted: list<int>, page: array, deleteDrawn: list<string>, noNote: list<string>}
+ */
+$orgSweep = static function () use ($drawn, $rowsShown, $pressAs, $putBack, $site, $http): array {
+    $page     = $drawn();
+    $before   = $rowsShown();
+    $wrong    = [];
+    $refused  = [];
+    $accepted = [];
+    $delete   = [];
+    $noNote   = [];
+    try {
+        foreach ($before as $row) {
+            $id    = (int) $row['settingID'];
+            $level = $row['siteID'] === null ? 'installation' : 'organisation ' . $site;
+            $seen  = $page['rows'][$id] ?? null;
+            if ($seen === null) {
+                $wrong[] = $row['settingKey'] . " ({$level}): not drawn at all";
+                continue;
+            }
+            if ($seen['delete'] === true) {
+                $delete[] = $row['settingKey'] . " ({$level})";
+            }
+            if ($seen['edit'] === false) {
+                if ($seen['note'] === null || $seen['note'] === '') {
+                    $noNote[] = $row['settingKey'] . " ({$level})";
+                }
+                $result = $pressAs($row, 'selftest1021-changed', SL_ORGADMIN);
+                $refused[] = $id;
+                if ($result['unchanged'] === false || $result['logged'] === false) {
+                    $wrong[] = $row['settingKey'] . " ({$level}): drawn WITHOUT Edit, yet Save "
+                        . ($result['unchanged'] === false ? 'CHANGED it' : 'left it but recorded no refusal');
+                }
+                continue;
+            }
+            $secret = \Portal\Core\SecretSettings::isMarked($row['isSensitive']) === true;
+            $own    = $secret === true ? '' : (string) $row['settingValue'];
+            $result = $pressAs($row, $own, SL_ORGADMIN);
+            $accepted[] = $id;
+            // "Not refused" is not enough: the UPDATE carries the row rules too,
+            // so a save the page should never have offered can be thrown away by
+            // the database with nothing recorded, and the person told "Nothing
+            // was changed … somebody else". So read back what the page SAYS: the
+            // save handler's own words for a save that went through (or, for a
+            // secret with an empty box, that the stored value was kept).
+            $said = html_entity_decode($http('GET', '/settings')['body'], ENT_QUOTES, 'UTF-8');
+            $key  = (string) $row['settingKey'];
+            $went = str_contains($said, 'Setting "' . $key . '" updated.') || str_contains($said, 'Setting "' . $key . '" saved. It already held that value')
+                || ($secret === true && str_contains($said, '"' . $key . '" is a secret, and the box was empty'));
+            if ($result['logged'] === true || $result['unchanged'] === false || $went === false) {
+                $wrong[] = $row['settingKey'] . " ({$level}): drawn WITH Edit, yet Save of its own value was "
+                    . ($result['logged'] === true ? 'REFUSED' : ($result['unchanged'] === false ? 'stored as something else' : 'not saved (the page did not say it was)'));
+            }
+        }
+    } finally {
+        $putBack($before);
+    }
+
+    return ['wrong' => $wrong, 'refused' => $refused, 'accepted' => $accepted, 'page' => $page, 'deleteDrawn' => $delete, 'noNote' => $noNote];
+};
+
+/** The three fixture rows judged as the organisation administrator must see them. @return list<string> */
+$fixturesWrong = static function (array $page) use ($rIds): array {
+    $wrong = [];
+    foreach ([\Portal\Core\SettingsRowRule::PORTAL_WIDE, \Portal\Core\SettingsRowRule::PUBLIC_NAME, \Portal\Core\SettingsRowRule::UNSAFE_NAME] as $reason) {
+        $seen = $page['rows'][$rIds[$reason]] ?? null;
+        if ($seen === null) {
+            $wrong[] = $reason . ': not drawn';
+            continue;
+        }
+        if ($seen['edit'] === true) {
+            $wrong[] = $reason . ': an EDIT button is drawn';
+        }
+        if ($seen['delete'] === true) {
+            $wrong[] = $reason . ': a DELETE button is drawn';
+        }
+        if ($seen['rowRefusal'] !== $reason || $seen['note'] !== \Portal\Core\SettingsRowRule::noteWords($reason)) {
+            $wrong[] = $reason . ': the note is ' . json_encode([$seen['rowRefusal'], $seen['note']]);
+        }
+    }
+
+    return $wrong;
+};
+
+$signIn('selftest-settings-locks-org');
+$sweep1021 = $orgSweep();
+$rPage     = $sweep1021['page'];
+$rControl  = $rPage['rows'][$rIds['control']] ?? null;
+$installationRows = count(array_filter($rowsShown(), static fn (array $r): bool => $r['siteID'] === null));
+check('R0 PREMISE: the organisation administrator sees the page whole, with every fixture row and more than 100 portal-wide rows drawn, and the control row carrying Edit',
+    $rPage['status'] === 200 && $rPage['whole'] === true && count(array_diff($rIds, array_keys($rPage['rows']))) === 0
+    && $installationRows > 100 && $rControl !== null && $rControl['edit'] === true && $rControl['rowRefusal'] === null,
+    'HTTP ' . $rPage['status'] . ', portal-wide rows: ' . $installationRows . ', control: ' . json_encode($rControl));
+foreach ([\Portal\Core\SettingsRowRule::PORTAL_WIDE => 'R1a', \Portal\Core\SettingsRowRule::PUBLIC_NAME => 'R1b', \Portal\Core\SettingsRowRule::UNSAFE_NAME => 'R1c'] as $reason => $label) {
+    $seen = $rPage['rows'][$rIds[$reason]] ?? null;
+    check($label . ' the ' . $reason . ' fixture draws no Edit and no Delete button, and the note naming that reason, in SettingsRowRule\'s own words',
+        $seen !== null && $seen['edit'] === false && $seen['delete'] === false && $seen['rowRefusal'] === $reason
+        && $seen['note'] === \Portal\Core\SettingsRowRule::noteWords($reason), json_encode($seen));
+}
+check('R2 for an administrator of one organisation, NO row draws a Delete button', $sweep1021['deleteDrawn'] === [],
+    implode('; ', $sweep1021['deleteDrawn']));
+check('R3 every row drawn without an Edit button carries a note saying why (' . count($sweep1021['refused']) . ' rows)',
+    $sweep1021['noNote'] === [], 'no note: ' . implode('; ', $sweep1021['noNote']));
+check('R4 Save pressed on EVERY row drawn without Edit (' . count($sweep1021['refused']) . ') is refused — unchanged, and recorded naming the key — and Save of its own value on every row drawn WITH Edit (' . count($sweep1021['accepted']) . ') is not refused',
+    $sweep1021['wrong'] === [], implode('; ', array_slice($sweep1021['wrong'], 0, 12)) . (count($sweep1021['wrong']) > 12 ? ' … (' . count($sweep1021['wrong']) . ' in all)' : ''));
+check('R5 PREMISE: the refused presses include the three fixtures and more than 100 portal-wide rows, and the accepted ones include the control',
+    count(array_diff([$rIds['portal-wide'], $rIds['public-name'], $rIds['unsafe-name']], $sweep1021['refused'])) === 0
+    && count($sweep1021['refused']) > 100 && in_array($rIds['control'], $sweep1021['accepted'], true) === true,
+    'refused ' . count($sweep1021['refused']) . ', accepted ' . count($sweep1021['accepted']));
+$controlRow = $rowNow($rIds['control']) + ['settingID' => $rIds['control']];
+$controlPress = $pressAs($controlRow, 'r1021-changed', SL_ORGADMIN);
+check('R6 PREMISE: the same Save, by the same person, DOES store a new value on the control row (so a refusal in R4 is a refusal, not a press that never works)',
+    $controlPress['changedTo'] === true && $controlPress['logged'] === false, 'HTTP ' . $controlPress['status']);
+run($db, "UPDATE `tblSettings` SET `settingValue` = 'r1021' WHERE `settingID` = ?", 'i', [$rIds['control']]);
+
+// The global administrator: the row rules never refuse them, so a row no lock
+// method locks — the three fixtures included — must draw Edit, and Delete
+// unless it belongs to the giving-records rule (which no delete may touch).
+$signIn();
+$rootPage  = $drawn();
+$rootWrong = [];
+foreach ($rowsShown() as $row) {
+    if ($changeLocked($row, true) === true) {
+        continue; // judged by section D
+    }
+    $seen = $rootPage['rows'][(int) $row['settingID']] ?? null;
+    $giving = strncasecmp((string) $row['settingKey'], 'giving.retention.', 17) === 0;
+    if ($seen === null || $seen['edit'] === false || ($seen['delete'] === false && $giving === false) || $seen['rowRefusal'] !== null) {
+        $rootWrong[] = $row['settingKey'] . ' (' . ($row['siteID'] === null ? 'installation' : 'organisation') . '): ' . json_encode($seen);
+    }
+}
+check('R7 for the GLOBAL administrator every row no lock method locks — the three fixtures included — draws Edit and Delete, and no row-rule note',
+    $rootPage['status'] === 200 && $rootWrong === [] && isset($rootPage['rows'][$rIds['portal-wide']]) === true,
+    implode('; ', array_slice($rootWrong, 0, 10)));
 
 // =============================================================================
 head('Section P — the plants: each refusal taken out of a COPY must turn this red');
@@ -1254,9 +1516,18 @@ check('P9 with the currency\'s note branch taken out, the plant applied AND sect
 // #845 round 2: the drawing asking the giving-records method as if every viewer
 // were a global administrator — the hold row then offers Edit to an
 // administrator of one organisation, which the save handler refuses.
+// #1021: the hold row is the INSTALLATION's, so the row rule (portal-wide rows
+// are a global administrator's) now closes it for that administrator as well,
+// and this plant alone changed nothing on the page (measured: P10 went red with
+// "D4 reported:" empty). Two guards over one row is right; but this plant
+// exists to prove D4 catches the GIVING method being misread, so the row rule's
+// ask is switched off with it, leaving the giving method the only thing closing
+// the row.
+$rowAskLine = "\$rowRefusal = SettingsRowRule::whyNotChangeable((string) \$row['settingKey'], \$row['siteID'] === null, \$isRoot);";
 $p10 = $plant($copyOf('index.php'), [
     "GivingRetention::lockedInGeneralEditor((string) \$row['settingKey'], \$row['siteID'] === null, \$isRoot);"
         => "GivingRetention::lockedInGeneralEditor((string) \$row['settingKey'], \$row['siteID'] === null, true);",
+    $rowAskLine => '$rowRefusal = null;',
 ], static function () use ($signIn, $drawn, $drawnWrong): array {
     $signIn('selftest-settings-locks-org');
     $wrong = $drawnWrong($drawn(), false);
@@ -1264,9 +1535,41 @@ $p10 = $plant($copyOf('index.php'), [
 
     return $wrong;
 });
-check('P10 with the drawing judging every viewer as a global administrator, the plant applied AND section D4 names a row drawn with an EDIT button',
+check('P10 with the drawing judging every viewer as a global administrator (giving-records method, and the #1021 row rule switched off), the plant applied AND section D4 names a row drawn with an EDIT button',
     $p10['applied'] === true && count(array_filter($p10['result'] ?? [], static fn (string $l): bool => str_contains($l, 'an EDIT button is drawn'))) > 0,
     'applied: ' . var_export($p10['applied'], true) . '; D4 reported: ' . implode('; ', $p10['result'] ?? []));
+
+// #1021: the drawing's row-rule ask switched off — the three fixture rows offer
+// Edit to an administrator of one organisation again, which the save refuses.
+$fixturesAsOrg = static function () use ($signIn, $drawn, $fixturesWrong): array {
+    $signIn('selftest-settings-locks-org');
+    $wrong = $fixturesWrong($drawn());
+    $signIn();
+
+    return $wrong;
+};
+$p11 = $plant($copyOf('index.php'), [$rowAskLine => '$rowRefusal = null;'], $fixturesAsOrg);
+check('P11 (#1021) with the drawing\'s row-rule ask switched off, the plant applied AND every fixture is named as drawn with an EDIT button',
+    $p11['applied'] === true && count(array_filter($p11['result'] ?? [], static fn (string $l): bool => str_contains($l, 'an EDIT button is drawn'))) === 3,
+    'applied: ' . var_export($p11['applied'], true) . '; reported: ' . implode('; ', $p11['result'] ?? []));
+$p12 = $plant($copyOf('index.php'), [$rowAskLine => str_replace(', $isRoot);', ', true);', $rowAskLine)], $fixturesAsOrg);
+check('P12 (#1021) with the drawing judging every viewer as a global administrator, the plant applied AND every fixture is named as drawn with an EDIT button',
+    $p12['applied'] === true && count(array_filter($p12['result'] ?? [], static fn (string $l): bool => str_contains($l, 'an EDIT button is drawn'))) === 3,
+    'applied: ' . var_export($p12['applied'], true) . '; reported: ' . implode('; ', $p12['result'] ?? []));
+// #1021: the save handler's row refusal taken out. Its UPDATE still carries the
+// rule, so the row is not written — but nothing is recorded and the person is
+// told "Nothing was changed … somebody else". R4 requires the refusal RECORDED.
+$p13 = $plant($copyOf('save.php'), ['    if ($rowRefusal !== null) {' => '    if (false) {'], static function () use ($signIn, $pressAs, $rowNow, $rIds): array {
+    $signIn('selftest-settings-locks-org');
+    $row    = $rowNow($rIds['portal-wide']) + ['settingID' => $rIds['portal-wide']];
+    $result = $pressAs($row, 'selftest1021-changed', SL_ORGADMIN);
+    $signIn();
+
+    return $result;
+});
+check('P13 (#1021) with the save handler\'s row refusal taken out, the plant applied AND the press on the portal-wide fixture is no longer RECORDED as refused (R4 would name it)',
+    $p13['applied'] === true && ($p13['result']['logged'] ?? true) === false,
+    'applied: ' . var_export($p13['applied'], true) . '; ' . json_encode($p13['result']));
 
 // Section S's own plants, in memory.
 $plantedIndex = str_replace(
@@ -1297,6 +1600,11 @@ check('P4b with the call replaced by a STRING holding its text (refuses nothing)
     $textOnly !== $indexRaw && $textMissing === ['deleting a row (index.php): TranscriptRetention::lockedInGeneralEditor()'],
     'section S reported: ' . ($textMissing === [] ? 'nothing missing' : implode('; ', $textMissing)));
 
+$rowAskGone = str_replace('SettingsRowRule::whyNotChangeable((string) $row[', 'SettingsRowRule::noteWords((string) $row[', $indexRaw);
+check('P4d (#1021) with the drawing\'s row-rule ask replaced by another call, section S3 names exactly the drawing path',
+    $rowAskGone !== $indexRaw && rowRuleMissing(threePaths($saveRaw, $rowAskGone)) === ['drawing a row (index.php)'],
+    'S3 reported: ' . implode('; ', rowRuleMissing(threePaths($saveRaw, $rowAskGone))));
+
 // After the presses and plants, every row is back exactly as it was.
 $back = 0;
 foreach ($snapshot as $row) {
@@ -1311,8 +1619,10 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 $cleanUp();
 
 // S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
-// per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5.
-$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1;
+// per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5;
+// #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d.
+$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
+    + 1 + 10 + 3 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

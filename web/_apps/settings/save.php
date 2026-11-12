@@ -52,6 +52,7 @@ use Portal\Core\MailRoutes;
 use Portal\Core\PasskeyAddress;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
+use Portal\Core\SettingsRowRule;
 use Portal\Core\Site;
 
 // 🛡️ Admin access check
@@ -112,7 +113,7 @@ $refusalCannotEncrypt = static fn (string $key): string =>
 $siteId = Site::id();
 
 // 🛡️ Is this person a GLOBAL administrator, as opposed to an administrator of
-//    one organisation? The difference decides the two refusals below.
+//    one organisation? The difference decides the row refusals below.
 //
 //    App::isRootAdmin() (web/_core/App.php) is the one place that answers it.
 //
@@ -138,160 +139,32 @@ $siteId = Site::id();
 $isGlobalAdmin = App::isRootAdmin();
 
 // -----------------------------------------------------------------------------
-// 🚧 THE REFUSALS, AND WHY THEY EXIST
+// 🚧 THE ROW REFUSALS (#1021: decided in ONE place, Portal\Core\SettingsRowRule)
 // -----------------------------------------------------------------------------
-// Refusals 1 and 2 are described here. Refusal 3 (a stored name outside the
-// safe characters) is explained beside $isSafeName and applied in the edit
-// branch. Refusal 4 (a name that would be both a value and a group) is
-// explained where it runs, in the "Insert new" branch. Refusals 1 to 3 apply
-// to everybody except a global administrator; refusal 4 applies to everybody.
-//
 // Getting in here needs App::isAdmin(), and that is true for an administrator
 // of ONE organisation as well as for a global administrator (see
 // web/_core/App.php — isAdmin() accepts isSiteAdmin and isSiteRootAdmin too).
 // So "an administrator" on this page does NOT mean "somebody in charge of the
 // whole installation".
 //
-// REFUSAL 1 — portal-wide rows.
-//   A settings row with no organisation against it (siteID is empty) is the
-//   fallback EVERY organisation on the installation reads when it has not set
-//   its own value. Until now the update ran
-//       WHERE settingID = ? AND (siteID = ? OR siteID IS NULL)
-//   so an administrator of one organisation could change a row that every
-//   other organisation then inherits — quietly, from a page that looks like it
-//   is about their own settings. Changing one of those is now reserved for a
-//   global administrator. Changing their OWN organisation's row is untouched
-//   and still works exactly as before.
+// For anybody but a global administrator, three kinds of ROW are refused
+// whatever the setting is: a portal-wide row (every other organisation reads
+// it as its fallback), a "public" / "public." name (the public website), and a
+// stored name outside the safe characters (the database can treat it as equal
+// to a protected one). Refusal 4 (a name that would be both a value and a
+// group) applies to everybody and is explained where it runs, in "Insert new".
 //
-// REFUSAL 2 — the key "public" on its own, and keys beginning "public.".
-//   (The bare name is included because a row called just "public" replaces
-//   every "public." setting when settings are loaded; see $isPublicKey.)
-//   Those keys control a genuinely public website that anybody on the
-//   internet can read, with no sign-in at all. The gate was put in place
-//   BEFORE the feature that needed it, so that the feature could not arrive
-//   into a page that already let the wrong people switch it on. The first such
-//   key, `public.events.copiedRule` (#493, migration 258), has its own card on
-//   Admin, Outside calendars, and its reader (`PublicWebsite::copiedRuleFor()`)
-//   holds an organisation to the installation's choice whatever row it finds.
-//   (Until #493 this said "None of them exist yet".) Note this is checked against the key STORED IN THE DATABASE
-//   for an edit, never the key sent with the form — otherwise somebody could
-//   send a harmless-looking key alongside the row number of a "public." row
-//   and slip straight past.
-//
-// Both refusals explain themselves on screen. A bare "forbidden" with no
-// reason leaves an administrator believing the portal is broken, and the next
-// thing they do is try again.
-// WHAT WAS WRONG with the first wording: it also suggested "add a setting of
-// the same name for your own organisation instead". This page refuses exactly
-// that. Its duplicate check (in the "Insert new" branch below, and already
-// there before this change) counts a portal-wide row as an existing name. The
-// advice sent administrators to something they could not do, so it was removed.
-$refusalGlobalRow = 'That setting is portal-wide: it is the value every '
-    . 'organisation on this installation uses unless it has set its own. '
-    . 'Only a global administrator can change it. If you need it changed, '
-    . 'please ask one.';
-$refusalPublicKey = 'The setting called "public", and every setting whose name begins '
-    . '"public.", control the public website, which anybody on the internet can '
-    . 'read without signing in. Only a global administrator can change those.';
-$refusalUnsafeName = 'This setting\'s name contains characters other than the letters '
-    . 'A to Z, numbers, full stops (.), hyphens (-) and underscores (_). The '
-    . 'database can treat a name like that as the same name as a protected '
-    . 'setting, so only a global administrator can change it. If you need it '
-    . 'changed, please ask one.';
-
-// 🔡 Is a setting name reserved for the public website — "public" on its own,
-//    or anything beginning "public." — in ANY letter case?
-//
-//    WHAT WAS WRONG, TWICE:
-//    1. The first version tested with str_starts_with(), which is
-//       case-sensitive. The database is not. The settingKey column compares
-//       names with utf8mb4_unicode_ci, which ignores the difference between
-//       capital and small letters, so a database lookup for "public.example"
-//       finds a row saved as "PUBLIC.example". A row named that way walked
-//       straight past the refusal and was then read as the public-website
-//       setting anyway.
-//    2. The second version only looked for "public." WITH the full stop, so
-//       the bare name "public" slipped through, and it passed the new-name
-//       check as well. That one name does more damage than any single
-//       "public." setting. When the portal loads its settings it turns the
-//       full stops into nesting (assign_setting() in web/_core/bootstrap.php):
-//       "public.website.enabled" becomes "enabled" inside "website" inside a
-//       group called "public". A row called just "public" is loaded as a
-//       plain value in the very place that group lives, and because an
-//       organisation's own rows are loaded after the portal-wide ones, it
-//       replaces the whole group — every public-website setting — for that
-//       organisation at once. Checked 13 September 2026 on MySQL 8.0.36 with
-//       the real loader: a site administrator added "public = disabled" and
-//       {"public":{"website":{"enabled":"true"}}} became {"public":"disabled"}.
-//    Setting names in this portal are NOT all lower case (portal.trustedProxies,
-//    for one), so the name itself is never changed to lower case. Only this
-//    test ignores case.
-$isPublicKey = static fn (string $key): bool =>
-    strcasecmp($key, 'public') === 0 || strncasecmp($key, 'public.', 7) === 0;
-
-// 🔤 Is a name made ONLY of the letters A to Z (either case), digits, full
-//    stops, hyphens and underscores?
-//
-//    Used twice: a NEW name must pass it (see "Insert new" below), and a name
-//    ALREADY STORED must pass it before an administrator of one organisation
-//    may change that row (refusal 3 below).
-//
-//    WHY THE STORED NAME IS CHECKED TOO — WHAT WAS WRONG: only new names were
-//    checked, and the "public." test on an existing row compared one
-//    character at a time. The database does not compare names that way.
-//    Checked 13 September 2026 on MySQL 8.0.36, using this column's own rules
-//    (utf8mb4_unicode_ci): each of these is EQUAL to "public.example" in an
-//    ordinary lookup —
-//      - "públic.example" with the accent typed as a separate mark after "u"
-//      - "ｐｕｂｌｉｃ.example" in full-width letters
-//      - "public．example" with a full-width full stop
-//      - "pu", an invisible zero-width space, then "blic.example"
-//      - "pu", the invisible control character number 1, then "blic.example"
-//        (plain ASCII: one byte per character)
-//    — yet the separate-accent, zero-width and control-character ones all
-//    FAIL the test LIKE 'public.%', which the UPDATE used to rely on. A row
-//    already stored under such a name (from before the new-name check, or
-//    written by a script) could be edited by an administrator of one
-//    organisation, and would still be found by a lookup for the real name.
-//
-//    WHAT WAS CONSIDERED AND REJECTED:
-//      - Converting names to one standard Unicode form before comparing. That
-//        needs PHP's Normalizer class, which shared hosting may not have, and
-//        it would only ever cover the tricks somebody thought of in advance.
-//      - "Refuse any name containing a character wider than one byte". It
-//        catches accents and full-width letters but NOT the control-character
-//        example above, which is a single byte.
-//    So the rule is written the other way round: allow only the few characters
-//    that cannot be confused with anything, and treat every other stored name
-//    as reserved for a global administrator. None of the 567 settings a fresh
-//    installation seeds breaks this rule (checked against full_schema.sql on
-//    MySQL 8.0.36), so no real setting is locked away by it.
-$isSafeName = static fn (string $key): bool => preg_match('/^[A-Za-z0-9._-]+\z/', $key) === 1;
-
-// 🧱 The same name rules, written for the database, so the UPDATE below can
-//    carry them inside the statement. web/_apps/settings/index.php repeats
-//    this text in its DELETE; if one changes, change both.
-//    It has ONE placeholder, $globalFlag: 1 lets a global administrator
-//    through whatever the name. For anybody else ALL of these must hold:
-//      - CHAR_LENGTH = LENGTH: every character is a single byte, so no accent,
-//        full-width letter or invisible Unicode mark;
-//      - COLLATE utf8mb4_bin NOT REGEXP '[^A-Za-z0-9._-]': no character outside
-//        the safe set, compared byte for byte. Two details are deliberate, and
-//        both were checked on MySQL 8.0.36. Without utf8mb4_bin the pattern
-//        ignores letter case, and then the Kelvin sign (a separate Unicode
-//        character that looks like K) is NOT flagged. And the pattern looks
-//        for one BAD character instead of matching a whole good name between
-//        ^ and $, because $ also matches just before a final line break, so
-//        "abc" followed by a new line would pass;
-//      - settingKey <> '': an empty name fails $isSafeName too;
-//      - not "public", and not beginning "public.", in any letter case.
-//    The first two between them do the job of $isSafeName. Both are kept, so
-//    that the rule does not rest on one regular-expression engine alone.
-$nameRuleSql = "(? = 1 OR (CHAR_LENGTH(settingKey) = LENGTH(settingKey) "
-    . "AND settingKey COLLATE utf8mb4_bin NOT REGEXP '[^A-Za-z0-9._-]' "
-    . "AND settingKey <> '' "
-    . "AND LOWER(settingKey) <> 'public' "
-    . "AND LOWER(settingKey) NOT LIKE 'public.%'))";
+// WHAT WAS WRONG (#1021): those three rules were written HERE, as closures and
+// three message strings, with a copy in the delete branch of index.php and the
+// SQL text repeated in both files. The Settings page's drawing asked none of
+// them, so it offered an organisation's own administrator an Edit button on
+// every portal-wide row, and pressing it ended in a refusal. They now live in
+// SettingsRowRule — the rules, the words, the SQL, and the reasons for each
+// (moved there whole, with what was measured) — and this handler, the delete
+// handler and the drawing all ask it, so the three cannot disagree. Note the
+// rule is asked with the key STORED in the database for an edit, never the
+// key sent with the form: otherwise somebody could send a harmless-looking key
+// beside the row number of a "public." row and slip straight past.
 
 if ($settingId > 0) {
     // 🔎 Read the row FIRST, so the decision is made on what is really stored
@@ -584,40 +457,20 @@ if ($settingId > 0) {
         exit();
     }
 
-    if ($isPortalWideRow === true && $isGlobalAdmin === false) {
+    // 🚧 The three row refusals (portal-wide, "public", unsafe stored name),
+    //    asked of the ONE place that decides them (#1021). The Settings page
+    //    asks the same method before it draws Edit, so a refusal here is now
+    //    only reachable by a request the page never offered (a stale tab, a
+    //    hand-made post). It sits AFTER every setting-level refusal above, so
+    //    a row that is both is explained by its own page, as before.
+    $rowRefusal = SettingsRowRule::whyNotChangeable($storedKey, $isPortalWideRow, $isGlobalAdmin);
+    if ($rowRefusal !== null) {
         Logger::activity(
             'SettingsUpdateRefused',
-            'Refused: portal-wide setting "' . $storedKey . '" may only be changed by a global administrator',
+            SettingsRowRule::logWords($rowRefusal, $storedKey),
             $_SESSION['user_id'] ?? null
         );
-        $_SESSION['flash_msg']  = $refusalGlobalRow;
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Site::url('settings'));
-        exit();
-    }
-
-    if ($isPublicKey($storedKey) === true && $isGlobalAdmin === false) {
-        Logger::activity(
-            'SettingsUpdateRefused',
-            'Refused: public-website setting "' . $storedKey . '" may only be changed by a global administrator',
-            $_SESSION['user_id'] ?? null
-        );
-        $_SESSION['flash_msg']  = $refusalPublicKey;
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Site::url('settings'));
-        exit();
-    }
-
-    // 🚧 Refusal 3 — a stored name outside the safe characters. The database
-    //    can treat such a name as equal to a reserved one, so the letter-case
-    //    test above cannot be trusted to recognise it. See $isSafeName.
-    if ($isSafeName($storedKey) === false && $isGlobalAdmin === false) {
-        Logger::activity(
-            'SettingsUpdateRefused',
-            'Refused: setting "' . $storedKey . '" has a name outside the safe characters and may only be changed by a global administrator',
-            $_SESSION['user_id'] ?? null
-        );
-        $_SESSION['flash_msg']  = $refusalUnsafeName;
+        $_SESSION['flash_msg']  = SettingsRowRule::refusalWords($rowRefusal, 'change');
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
@@ -754,7 +607,7 @@ if ($settingId > 0) {
     // -------------------------------------------------------------------------
     // 🔒 THE RULES ARE WRITTEN INTO THE STATEMENT, NOT ONLY CHECKED ABOVE
     // -------------------------------------------------------------------------
-    // The two refusals above decide what to SAY to the person. The conditions
+    // The row refusals above decide what to SAY to the person. The conditions
     // in this UPDATE decide what actually HAPPENS, and they are the same rules.
     //
     // WHAT WAS WRONG: the first version made the decision in PHP from the row
@@ -770,13 +623,14 @@ if ($settingId > 0) {
     // administrator, 0 for anybody else):
     //   - `siteID = ?`, this organisation's own row, is always allowed; a
     //     portal-wide row (`siteID IS NULL`) only when $globalFlag is 1;
-    //   - when $globalFlag is 0, the stored name must pass $nameRuleSql: only
-    //     safe characters, and not "public" or "public." in any letter case.
+    //   - when $globalFlag is 0, the stored name must pass
+    //     SettingsRowRule::nameRuleSql(): only safe characters, and not
+    //     "public" or "public." in any letter case.
     //     WHAT WAS WRONG with the version before that: it tested only
     //     LOWER(settingKey) NOT LIKE 'public.%'. That missed the bare name
     //     "public", and it missed names the database treats as EQUAL to a
     //     "public." name while LIKE, comparing one character at a time, does
-    //     not (see the note above $isSafeName for the cases checked).
+    //     not (see SettingsRowRule::isSafeName() for the cases checked).
     // Neither half of the siteID condition lets anybody reach another
     // organisation's row, even by guessing or forging its settingID.
     //
@@ -791,10 +645,10 @@ if ($settingId > 0) {
     // happened, and the person is told exactly that.
     $globalFlag = $isGlobalAdmin === true ? 1 : 0;
     $stmt = $mysqli->prepare(
-        'UPDATE tblSettings SET settingValue = ?, updatedAt = NOW() '
-        . 'WHERE settingID = ? AND isSensitive = ? '
-        . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
-        . 'AND ' . $nameRuleSql
+        'UPDATE `tblSettings` SET `settingValue` = ?, `updatedAt` = NOW() '
+        . 'WHERE `settingID` = ? AND `isSensitive` = ? '
+        . 'AND (`siteID` = ? OR (`siteID` IS NULL AND ? = 1)) '
+        . 'AND ' . SettingsRowRule::nameRuleSql()
     );
     if ($stmt === false) {
         $_SESSION['flash_msg']  = t('error.db_update_setting');
@@ -829,10 +683,10 @@ if ($settingId > 0) {
     $alreadyHeldValue = false;
     if ($rowsWritten < 1) {
         $recheck = $mysqli->prepare(
-            'SELECT settingValue FROM tblSettings '
-            . 'WHERE settingID = ? AND isSensitive = ? '
-            . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
-            . 'AND ' . $nameRuleSql . ' LIMIT 1'
+            'SELECT `settingValue` FROM `tblSettings` '
+            . 'WHERE `settingID` = ? AND `isSensitive` = ? '
+            . 'AND (`siteID` = ? OR (`siteID` IS NULL AND ? = 1)) '
+            . 'AND ' . SettingsRowRule::nameRuleSql() . ' LIMIT 1'
         );
         if ($recheck !== false) {
             $recheck->bind_param('iiiii', $settingId, $markFlag, $siteId, $globalFlag, $globalFlag);
@@ -879,11 +733,12 @@ if ($settingId > 0) {
 } else {
     // ➕ Insert new.
     //    This branch always writes the row against the CURRENT organisation
-    //    (siteID below is Site::id(), never empty), so refusal 1 cannot apply
-    //    here — nobody can create a portal-wide row from this page.
+    //    (siteID below is Site::id(), never empty), so the portal-wide row
+    //    refusal cannot apply here — nobody can create a portal-wide row from
+    //    this page.
     //
-    //    Refusal 2 does apply, and it matters: without it an administrator of
-    //    one organisation could add "public.something.enabled = true" for
+    //    The "public" refusal does apply, and it matters: without it an
+    //    administrator of one organisation could add "public.something.enabled = true" for
     //    their own organisation and switch a public website on for themselves.
     //    Turning a public surface on is a decision for whoever runs the whole
     //    installation, not for one tenant. Here the key can only come from the
@@ -901,10 +756,10 @@ if ($settingId > 0) {
     //    setting name the portal ships already fits this pattern, so nothing
     //    real is lost, and the whole family of look-alike names is shut out at
     //    once instead of being chased one trick at a time.
-    //    The same test ($isSafeName) is now ALSO applied to the name already
-    //    stored when an administrator of one organisation edits a row; see
-    //    refusal 3 in the edit branch above.
-    if ($isSafeName($settingKey) === false) {
+    //    The same test (SettingsRowRule::isSafeName()) is ALSO applied to the
+    //    name already stored when an administrator of one organisation edits
+    //    a row; see the row refusals in the edit branch above.
+    if (SettingsRowRule::isSafeName($settingKey) === false) {
         $_SESSION['flash_msg']  = 'A setting name can only contain the letters A to Z, '
             . 'numbers, full stops (.), hyphens (-) and underscores (_). Spaces, '
             . 'accented letters and other symbols are not allowed.';
@@ -1160,13 +1015,13 @@ if ($settingId > 0) {
         exit();
     }
 
-    if ($isPublicKey($settingKey) === true && $isGlobalAdmin === false) {
+    if (SettingsRowRule::isPublicName($settingKey) === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsInsertRefused',
             'Refused: public-website setting "' . $settingKey . '" may only be added by a global administrator',
             $_SESSION['user_id'] ?? null
         );
-        $_SESSION['flash_msg']  = $refusalPublicKey;
+        $_SESSION['flash_msg']  = SettingsRowRule::refusalWords(SettingsRowRule::PUBLIC_NAME, 'change');
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

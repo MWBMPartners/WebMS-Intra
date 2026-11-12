@@ -76,6 +76,17 @@ $sentFields = array_keys(array_intersect_key($data, $body));
 $actorUserId = ApiAuth::actorUserId() ?? 0;
 $ok = AssetRegister::updateAsset($assetId, $data, $actorUserId, $sentFields);
 if ($ok === false) {
+    // 🗑️ Deleted while this request waited for the asset's lock (#1031):
+    //    updateAsset() asks again under the lock and writes nothing to a
+    //    deleted asset. Asked FIRST, because a deleted asset is the reason
+    //    that makes every other one beside the point. The answer is the SAME
+    //    404 and the same words as the existence check above gives any asset
+    //    that is not there, so a caller learns nothing more from the race than
+    //    from asking a moment later. (There is no un-delete, so finding it gone
+    //    now means it was gone at the write.)
+    if (AssetRegister::get($assetId) === null) {
+        ApiResponse::error('Asset not found', 404);
+    }
     // 💷 A refusal UNDER the asset's lock (a repair recorded in another
     //    currency a moment ago, #966 round 6) is said as such, not blamed on
     //    the tag code.
@@ -87,7 +98,7 @@ if ($ok === false) {
     }
     // 🪞 Most likely cause: assetTagCode collides with another asset on
     // this site (uq_asset_tag) — see AssetRegister::updateAsset()'s own
-    // comment. The existence check above already ruled out "not found".
+    // comment. "Not found" was ruled out just above (and before the lock).
     ApiResponse::error('Could not update the asset — the asset tag code may already be in use on this site', 409);
 }
 

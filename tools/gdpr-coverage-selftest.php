@@ -2289,8 +2289,15 @@ $generalIndex = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/s
 $lockFn       = $method($retentionCode, 'lockedInGeneralEditor');
 $editLockAt   = strpos($generalSave, 'GivingRetention::lockedInGeneralEditor($storedKey, $isPortalWideRow, $isGlobalAdmin) === true');
 $addLockAt    = strpos($generalSave, 'GivingRetention::lockedInGeneralEditor($settingKey, false, $isGlobalAdmin) === true');
-$firstWrite   = min(array_filter([strpos($generalSave, 'UPDATE tblSettings'), strpos($generalSave, 'INSERT INTO tblSettings')], static fn ($at): bool => $at !== false) ?: [0]);
-$deleteAt     = strpos($generalIndex, 'DELETE FROM tblSettings');
+// Where a statement first names the table, with or without backticks round it
+// (#1021 backticked the save's UPDATE and the delete's DELETE, as the house
+// rule asks of changed SQL; a search for the bare text then found nothing and
+// this check went red over correct code). false when it is not there at all.
+$statementAt  = static function (string $code, string $verb): int|false {
+    return preg_match('/' . $verb . '\s+`?tblSettings`?/', $code, $found, PREG_OFFSET_CAPTURE) === 1 ? (int) $found[0][1] : false;
+};
+$firstWrite   = min(array_filter([$statementAt($generalSave, 'UPDATE'), $statementAt($generalSave, 'INSERT\s+INTO')], static fn ($at): bool => $at !== false) ?: [0]);
+$deleteAt     = $statementAt($generalIndex, 'DELETE\s+FROM');
 $deleteLockAt = strpos($generalIndex, 'GivingRetention::LOCKED_MESSAGE');
 check(
     'the general settings editor cannot change, add or delete a giving-records setting: each is refused before the first write, and the only row left open is the installation-wide hold for a global administrator',
