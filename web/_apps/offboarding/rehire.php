@@ -215,7 +215,10 @@ try {
     $_SESSION['flash_type'] = 'success';
 } catch (\Throwable $e) {
     $db->rollback();
-    $_SESSION['flash_msg']  = 'Rehire failed: ' . $e->getMessage();
+    // #982 round 2: the exception's own words went to the page. They are
+    // recorded for whoever investigates, and the page says what happened.
+    \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'REHIRE_FAIL', 'A rehire could not be completed', $e->getMessage());
+    $_SESSION['flash_msg']  = 'The rehire could not be completed, and nothing was changed. The reason has been recorded on Admin, Errors.';
     $_SESSION['flash_type'] = 'danger';
 }
 

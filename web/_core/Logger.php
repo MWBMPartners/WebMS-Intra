@@ -370,7 +370,7 @@ class Logger
         return null;
     }
 
-    public static function activity(string $type, string $description = '', ?int $userId = null): void
+    public static function activity(string $type, string $description = '', ?int $userId = null, bool $namesNobody = false): void
     {
         // Declared before the try so the fallback line below can use whatever
         // had been worked out before anything failed.
@@ -464,8 +464,22 @@ class Logger
             //      every record of somebody signed in as themselves.
             //    - It does nothing when there is no session, so a failed
             //      sign-in still names nobody.
-            if ($userId === null && $sessionFacts !== null && $sessionFacts['userID'] !== null) {
+            if ($userId === null && $namesNobody === false && $sessionFacts !== null && $sessionFacts['userID'] !== null) {
                 $userId = (int) $sessionFacts['userID'];
+            }
+            // 🚫 `$namesNobody` (#922): the ONE case where a signed-in request
+            //    must write a record naming no account, because the account
+            //    the session names is NOT IN THE DATABASE any more - a
+            //    whole-database restore of a snapshot taken before that
+            //    account existed, run by that very account. The column is
+            //    linked to tblUsers, so naming it would be REFUSED and the
+            //    record would reach only PHP's error log, which is how the
+            //    result of such a restore was lost (measured, #922 round 2).
+            //    The caller says so in the description instead. Never pass
+            //    it for an account that exists: that would hide the person
+            //    from an erasure (#626).
+            if ($namesNobody === true) {
+                $userId = null;
             }
 
             // 🌐 Include siteID for multi-site context

@@ -315,12 +315,16 @@ try {
 
     $db->commit();
 
-    $_SESSION['flash_msg']  = 'User offboarded. Audit row + per-step outcomes recorded.' . $erasureNote;
+    // Plain words (#982 round 2): this message is shown now, and it used to
+    // read "Audit row + per-step outcomes recorded".
+    $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
     $_SESSION['flash_type'] = 'success';
 } catch (\Throwable $e) {
     $db->rollback();
     \Portal\Core\Logger::errorPlatform('Offboarding', 'Critical', 'OFFBOARD_FAIL', $e->getMessage(), 'userID=' . $userId);
-    $_SESSION['flash_msg']  = 'Offboarding failed: ' . $e->getMessage();
+    // The exception's own words went to the page until #982 round 2; they
+    // are in the error record just written, and the page says what happened.
+    $_SESSION['flash_msg']  = 'Offboarding failed, and nothing was changed. The reason has been recorded on Admin, Errors.';
     $_SESSION['flash_type'] = 'danger';
 }
 

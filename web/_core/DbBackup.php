@@ -2538,9 +2538,13 @@ class DbBackup
      * said nothing either.
      *
      * Counts accounts that are switched ON now (a switched-off account has no
-     * browser to sign out) and would not be current after the restore. It
-     * reads the snapshot's `tblUsers` file through rows(), the same reader the
-     * restore itself uses, and changes nothing.
+     * browser to sign out) and would not be current after the restore, in TWO
+     * groups, because what they can do next differs (#922 round 2): an
+     * account whose number moved signs in again with the password it had
+     * when the snapshot was taken; an account NOT IN the snapshot, or
+     * switched OFF in it, cannot sign in at all afterwards. And it says which
+     * of those the viewer is. It reads the snapshot's `tblUsers` file through
+     * rows(), the same reader the restore itself uses, and changes nothing.
      *
      * WHAT IT CANNOT SAY: who is signed in at this moment (sessions are files
      * the portal does not list), so this counts ACCOUNTS whose browsers would
@@ -2548,10 +2552,13 @@ class DbBackup
      * has no numbers: every account in it counts as 0, which is what the
      * restore will write.
      *
-     * @return array{accounts: int, you: bool}|null Null when it could not be
-     *         worked out (the snapshot or the database could not be read);
-     *         the page then says the general sentence without a number.
-     *         Zero accounts when the snapshot does not hold `tblUsers` at all,
+     * @return array{changed: int, cannot: int, you: ?string}|null Null when it
+     *         could not be worked out (the snapshot or the database could not
+     *         be read); the page then says the general sentence without a
+     *         number. `changed`: accounts whose number moved; `cannot`:
+     *         accounts not in the snapshot or switched off in it; `you`:
+     *         'changed', 'missing', 'switched_off' or null (not signed out).
+     *         All zero when the snapshot does not hold `tblUsers` at all,
      *         because then the restore leaves it alone.
      */
     public function signInsEndedByRestoring(string $name, int $viewerId): ?array
@@ -2571,7 +2578,7 @@ class DbBackup
             }
         }
         if ($usersKey === null) {
-            return ['accounts' => 0, 'you' => false];
+            return ['changed' => 0, 'cannot' => 0, 'you' => null];
         }
         try {
             // What the snapshot would put back: number and switch per account.
@@ -2587,17 +2594,30 @@ class DbBackup
             if ($result === false) {
                 return null;
             }
-            $accounts = 0;
-            $you      = false;
+            $changed = 0;
+            $cannot  = 0;
+            $you     = null;
             while ($now = $result->fetch_assoc()) {
-                $id      = (int) $now['userID'];
-                $current = isset($then[$id]) === true && $then[$id]['on'] === true
-                    && $then[$id]['version'] === (int) $now['signInVersion'];
-                if ($current === false) {
-                    $accounts++;
-                    if ($id === $viewerId) {
-                        $you = true;
-                    }
+                $id = (int) $now['userID'];
+                // The same three outcomes Auth::signInVerdict() gives the
+                // next request, in the same order: no account, switched
+                // off, number moved.
+                if (isset($then[$id]) === false) {
+                    $what = 'missing';
+                } elseif ($then[$id]['on'] === false) {
+                    $what = 'switched_off';
+                } elseif ($then[$id]['version'] !== (int) $now['signInVersion']) {
+                    $what = 'changed';
+                } else {
+                    continue;
+                }
+                if ($what === 'changed') {
+                    $changed++;
+                } else {
+                    $cannot++;
+                }
+                if ($id === $viewerId) {
+                    $you = $what;
                 }
             }
             $result->free();
@@ -2608,7 +2628,7 @@ class DbBackup
             return null;
         }
 
-        return ['accounts' => $accounts, 'you' => $you];
+        return ['changed' => $changed, 'cannot' => $cannot, 'you' => $you];
     }
 
     /** The file holding one table, for the form the snapshot is in. */

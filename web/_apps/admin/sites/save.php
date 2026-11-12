@@ -71,7 +71,7 @@ if (preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $primaryColor) !== 1) {
 
 // 🔍 Validate required fields
 if ($siteName === '' || $siteKey === '') {
-    $_SESSION['flash_msg'] = 'Site name and key are required.';
+    $_SESSION['flash_msg'] = 'An organisation needs a name and a key. Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
@@ -79,7 +79,7 @@ if ($siteName === '' || $siteKey === '') {
 
 // 🔍 Validate siteKey format (alphanumeric + hyphens only)
 if (preg_match('/^[a-z0-9\-]+$/', $siteKey) !== 1) {
-    $_SESSION['flash_msg'] = 'Site key must contain only lowercase letters, numbers, and hyphens.';
+    $_SESSION['flash_msg'] = 'An organisation\'s key may contain only lower-case letters, numbers and hyphens. Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
@@ -228,7 +228,7 @@ try {
     $reservedKinds = ReservedKeys::kindsFor($db, $siteKey);
 } catch (\Throwable $e) {
     Logger::errorPlatform('ReservedKeys', 'Error', 'CHECK_FAIL', $e->getMessage(), 'siteKey=' . $siteKey);
-    $_SESSION['flash_msg'] = 'The portal could not check whether that site key is reserved, so nothing was saved. Try again.';
+    $_SESSION['flash_msg'] = 'The portal could not check whether that organisation key is reserved, so nothing was saved. Try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
@@ -363,10 +363,14 @@ if ($siteID > 0) {
 
     if ($stmt->execute() === true) {
         Logger::activity('SiteUpdate', 'Updated site #' . $siteID . ' (' . $siteName . ')');
-        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" updated successfully.' . ($zoneNotTaken === true ? $zoneNotTakenWords : '');
+        $_SESSION['flash_msg'] = 'Organisation "' . $siteName . '" updated successfully.' . ($zoneNotTaken === true ? $zoneNotTakenWords : '');
         $_SESSION['flash_type'] = 'success';
     } else {
-        $_SESSION['flash_msg'] = 'Failed to update site: ' . $stmt->error;
+        // #973 round 2: the database's own words went to the page here. They
+        //    are recorded for whoever investigates, and the page says what
+        //    happened in plain words.
+        Logger::errorPlatform('Sites', 'Error', 'SITE_UPDATE_FAILED', 'An organisation could not be updated', (string) $stmt->error);
+        $_SESSION['flash_msg'] = 'The organisation could not be updated, and nothing was changed. The reason has been recorded on Admin, Errors.';
         $_SESSION['flash_type'] = 'danger';
     }
     $stmt->close();
@@ -488,13 +492,15 @@ if ($siteID > 0) {
                 . 'role is the only one a global administrator is not given automatically, and an erasure '
                 . 'request for one of its members cannot be completed until somebody holds it. Add members, '
                 . 'then grant it on Admin, Roles.';
-        $_SESSION['flash_msg'] = 'Site "' . $siteName . '" created successfully.'
+        $_SESSION['flash_msg'] = 'Organisation "' . $siteName . '" created successfully.'
             . ($zoneNotTaken === true ? $zoneNotTakenWords : '') . $dcWords;
         $_SESSION['flash_type'] = 'success';
     } catch (\Throwable $e) {
         $db->rollback();
         Logger::errorPlatform('Sites', 'Error', 'ROLE_SEED_FAILED', 'Failed to create site and seed its roles', $e->getMessage());
-        $_SESSION['flash_msg'] = t('error.db_with_detail', ['detail' => $e->getMessage()]);
+        // The exception's own words are in the error record just written;
+        // the page says what happened in plain words (#973 round 2).
+        $_SESSION['flash_msg'] = 'The organisation could not be created, and nothing was saved. The reason has been recorded on Admin, Errors.';
         $_SESSION['flash_type'] = 'danger';
     }
 }

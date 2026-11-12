@@ -719,7 +719,12 @@ class GdprEraser
             //       #708 precedent), so that a decline reason stored in future
             //       is already reached. The booker's own `notes` are KEPT by
             //       the owner's decision of 3 November 2026, recorded in the
-            //       catalogue's `notEmptiedHere` (#723).
+            //       catalogue's `notEmptiedHere` (#723) - and marked
+            //       `needsReview` there (#724), so the person handling a
+            //       request decides line by line whether to empty them. The
+            //       reason below says exactly that, and NOT "they stay"
+            //       (#926 round 2: the first rewording promised the notes
+            //       would stay, which a Data Controller's decision can undo).
             //
             //    🧑 THE `reason` BELOW IS READ BY MEMBERS (#926): Request
             //       erasure and My data print it beside the row, as the
@@ -730,7 +735,7 @@ class GdprEraser
             //       in this comment; the reason says what happens to the
             //       member's record, in their words. Section B of
             //       tools/erasure-pages-selftest.php pins the rendered row.
-            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. Any notes typed on the booking stay with it'],
+            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. Any notes typed on the booking are kept unless the person handling your request decides they should be removed'],
             ['table' => 'tblResourceBooking', 'userCol' => 'approvedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s booking stays; who approved it is detached'],
             // 🧾 #703, D-016: KEPT, number and name. See the long note above
             //    the #709 instruction. The reason is the sentence a worker

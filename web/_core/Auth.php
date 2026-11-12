@@ -888,17 +888,14 @@ class Auth
         //    password change can end other sessions at no extra cost. The
         //    fallback costs one failed prepare, and only between files reaching
         //    a server and somebody pressing "Run migrations".
-        $readsVersion = true;
-        try {
-            $stmt = $db->prepare('SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-        } catch (\mysqli_sql_exception $unknownColumn) {
-            if ($unknownColumn->getCode() !== 1054) {
-                throw $unknownColumn;
-            }
-            $readsVersion = false;
-            $stmt = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-        }
-        if ($stmt === false) {
+        //
+        //    The query, that fallback and the comparison below live in ONE
+        //    place since #922: signInFacts() reads the row and signInVerdict()
+        //    judges it, and Auth::signInStateNow() asks the same two, so the
+        //    backup page's "your next page will sign you out" can never
+        //    disagree with what this method then does.
+        $facts = self::signInFacts($db, $userId);
+        if ($facts === null) {
             // Only possible if the connection stops reporting errors by
             // throwing. Could not ask, so the session is left alone, and
             // the reason is written down instead of passing silently.
@@ -906,15 +903,14 @@ class Auth
 
             return;
         }
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
+        $row     = $facts['row'];
+        $verdict = self::signInVerdict($row, $facts['readsVersion']);
 
-        // 🔢 Compared as a NUMBER. The flag arrives from a prepared statement
-        //    as the whole number 1, not the text '1'; `=== '1'` here would
-        //    sign every active person out on every request.
-        if ($row !== null && (int) $row['isActive'] === 1) {
+        // 🔢 isActive is compared as a NUMBER inside signInVerdict(). The flag
+        //    arrives from a prepared statement as the whole number 1, not the
+        //    text '1'; `=== '1'` would sign every active person out on every
+        //    request.
+        if ($verdict === self::SIGN_IN_CURRENT || $verdict === self::SIGN_IN_NOT_CURRENT) {
             // 🔐 Still allowed in. Now: was this session signed in under the
             //    account's CURRENT number (#598, D-104, D-108)? Every account
             //    starts at 0, and a session with no number (signed in before
@@ -933,9 +929,7 @@ class Auth
             //    that made a change is given the number only AFTER the change
             //    commits (passwordChangeCommitted()), so the only session
             //    meant to be equal is.
-            if ($readsVersion === false
-                || self::sessionVersion() === (int) ($row['signInVersion'] ?? 0)
-            ) {
+            if ($verdict === self::SIGN_IN_CURRENT) {
                 return;
             }
 
@@ -947,6 +941,10 @@ class Auth
             //    account, no snapshot, nothing the next person at this
             //    browser could not be told), and it is taken out the first
             //    time the sign-in page reads it: takeSignedOutNotice().
+            //    ONLY on this branch: a session ended because the account
+            //    was switched off, or is gone, says nothing (see
+            //    takeSignedOutNotice()); section Q of
+            //    tools/backup-page-selftest.php drives that.
             $_SESSION[self::SIGNED_OUT_NOTICE_KEY] = self::SIGNED_OUT_NOT_CURRENT;
             Logger::activity(
                 // Worded for BOTH causes (check round 3): a password reset,
@@ -1060,47 +1058,103 @@ class Auth
         return I18n::t('auth.signed_out_not_current');
     }
 
+    /** signInVerdict(): the session's sign-in is current; it is left alone. */
+    public const SIGN_IN_CURRENT = 'current';
+
+    /** signInVerdict(): the account is there and switched on, but its number has moved: the session is ended and told why. */
+    public const SIGN_IN_NOT_CURRENT = 'not_current';
+
+    /** signInVerdict(): the account is there and switched off: the session is ended and told nothing. */
+    public const SIGN_IN_SWITCHED_OFF = 'switched_off';
+
+    /** signInVerdict(): no such account: the session is ended and told nothing. */
+    public const SIGN_IN_NO_ACCOUNT = 'no_account';
+
     /**
-     * 🔢 Is THIS browser's sign-in still current - would its NEXT request
-     * keep it signed in (#922)? True or false, or null when it cannot tell
-     * (nobody is signed in, the account row cannot be read, or a database
-     * still waiting for migration 270 has no number to compare).
+     * 🔢 What THIS browser's next request will find about its sign-in (#922):
+     * one of the four SIGN_IN_* words above, or null when nobody is signed in
+     * or the account could not be read.
      *
-     * It asks exactly what endSessionOfInactiveAccount() asks - the account
-     * exists, is switched on, and carries the number this session was signed
-     * in under - and ENDS NOTHING. It exists for the one page that changes the
+     * It asks exactly what endSessionOfInactiveAccount() asks - through the
+     * same signInFacts() and signInVerdict(), so there is one test and not
+     * two - and ENDS NOTHING. It exists for the one page that changes the
      * answer under its own feet: a whole-database restore puts every
-     * account's number back as the snapshot held it, so the administrator who
-     * ran it can be signed out by their very next click. The backup page asks
-     * this straight after a restore and says so in the result, instead of
-     * letting the next page be a surprise.
+     * account's number, switch and very existence back as the snapshot held
+     * them, so the administrator who ran it can be signed out by their next
+     * click. The backup page asks this straight after a restore and says so
+     * in the result, in words that fit the case: a moved number can sign in
+     * again with the old password, a switched-off or missing account cannot.
      */
-    public static function signInStillCurrent(): ?bool
+    public static function signInStateNow(): ?string
     {
         if (isset($_SESSION['user_id']) === false) {
             return null;
         }
         try {
-            $db   = App::db();
-            $stmt = $db->prepare('SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+            $facts = self::signInFacts(App::db(), (int) $_SESSION['user_id']);
         } catch (\Throwable) {
-            // No connection, or error 1054 on a database that has not run
-            // migration 270 (where no session is ended for this reason at all).
             return null;
+        }
+
+        return $facts === null ? null : self::signInVerdict($facts['row'], $facts['readsVersion']);
+    }
+
+    /**
+     * 🔎 The ONE read of an account's sign-in facts (#598, #922): its
+     * `isActive` and `signInVersion`, or no row when there is no such
+     * account. On a database still waiting for migration 270 the version
+     * column does not exist; that one error (1054) falls back to reading
+     * `isActive` alone and says so in `readsVersion`. Every other error is
+     * thrown, as before.
+     *
+     * @return array{row: ?array<string, mixed>, readsVersion: bool}|null Null
+     *         only when the statement could not be prepared without throwing.
+     */
+    private static function signInFacts(\mysqli $db, int $userId): ?array
+    {
+        $readsVersion = true;
+        try {
+            $stmt = $db->prepare('SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        } catch (\mysqli_sql_exception $unknownColumn) {
+            if ($unknownColumn->getCode() !== 1054) {
+                throw $unknownColumn;
+            }
+            $readsVersion = false;
+            $stmt = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
         }
         if ($stmt === false) {
             return null;
         }
-        $userId = (int) $_SESSION['user_id'];
         $stmt->bind_param('i', $userId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
-        if ($row === null || (int) $row['isActive'] !== 1) {
-            return false;
+
+        return ['row' => $row, 'readsVersion' => $readsVersion];
+    }
+
+    /**
+     * ⚖️ The ONE judgement of THIS session against an account's facts: one
+     * of the four SIGN_IN_* words. Any difference in the number ends the
+     * session, a higher session number included (see the note in
+     * endSessionOfInactiveAccount() on why). With no version column
+     * (migration 270 not run) a switched-on account is current.
+     *
+     * @param array<string, mixed>|null $row From signInFacts().
+     */
+    private static function signInVerdict(?array $row, bool $readsVersion): string
+    {
+        if ($row === null) {
+            return self::SIGN_IN_NO_ACCOUNT;
+        }
+        if ((int) $row['isActive'] !== 1) {
+            return self::SIGN_IN_SWITCHED_OFF;
+        }
+        if ($readsVersion === false || self::sessionVersion() === (int) ($row['signInVersion'] ?? 0)) {
+            return self::SIGN_IN_CURRENT;
         }
 
-        return self::sessionVersion() === (int) $row['signInVersion'];
+        return self::SIGN_IN_NOT_CURRENT;
     }
 
     /**
@@ -1127,24 +1181,14 @@ class Auth
      */
     private static function accountVersion(\mysqli $db, int $userId): ?int
     {
-        try {
-            $stmt = $db->prepare('SELECT `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-        } catch (\mysqli_sql_exception $unknownColumn) {
-            if ($unknownColumn->getCode() !== 1054) {
-                throw $unknownColumn;
-            }
-
+        // Through signInFacts(), the one read of this row (#922), so the
+        // 1054 fallback and the query exist once.
+        $facts = self::signInFacts($db, $userId);
+        if ($facts === null || $facts['readsVersion'] === false || $facts['row'] === null) {
             return null;
         }
-        if ($stmt === false) {
-            return null;
-        }
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
 
-        return $row === null ? null : (int) $row['signInVersion'];
+        return (int) $facts['row']['signInVersion'];
     }
 
     /**

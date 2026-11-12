@@ -1399,7 +1399,7 @@ foreach (['Request erasure' => text($melAskHtml), 'My data' => text($melDataHtml
 }
 ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking row is found exactly once and as pinned, says in plain words what happens to the booking, and neither Request erasure nor My data carries the developers\' wording about columns that can never match (#926)',
     $askBookingPinned === true && str_contains($askBookingRow, 'the booking is kept so the room') === true
-    && str_contains($askBookingRow, 'Any notes typed on the booking stay with it') === true && $developerSeen === [],
+    && str_contains($askBookingRow, 'Any notes typed on the booking are kept unless the person handling your request decides they should be removed') === true && $developerSeen === [],
     mb_substr($askBookingRow, 0, 500) . ' | seen: ' . json_encode($developerSeen));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
@@ -3799,7 +3799,7 @@ ok('M12 the offboarding page for the erased account shows the reason and no form
 ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written, the account is switched off, and the offboarding page says so (#977, #982)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [OFF])['n'] === 1
     && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0
-    && str_ends_with($offToLive, '/offboarding') === true && str_contains($offSaidLive, 'User offboarded.') === true,
+    && str_ends_with($offToLive, '/offboarding') === true && str_contains($offSaidLive, 'Offboarded. Their account is switched off') === true,
     json_encode([$offToLive, $offSaidLive]));
 // #982: a post with no reason used to send the administrator to the Users
 // page with nothing said at all. It says why now, and offboards nobody. UNP
