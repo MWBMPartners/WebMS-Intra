@@ -225,7 +225,11 @@ appended with its real date and a note that it was added later.
 | [D-167](167-whether-an-organisation-issues-tax-receipts-is-a-setting.md) | 2026-11-12 | Whether an organisation issues tax receipts for gifts is its own setting | in force |
 | [D-168](168-a-hosts-home-stops-being-the-meeting-place-when-they-leave.md) | 2026-11-12 | When a host leaves a small group, their home stops being its meeting place automatically | in force |
 | [D-169](169-a-pending-suggestion-cannot-be-published-before-approval.md) | 2026-11-12 | A pending event suggestion cannot be published before it is approved | in force |
+| [D-170](170-a-repair-step-for-erased-accounts-re-saved-before-977.md) | 2026-11-12 | A repair step is built for erased accounts re-saved before #977 | in force |
+| [D-171](171-rota-swap-requests-have-configurable-limits.md) | 2026-11-12 | Rota swap requests have configurable limits, per duty and per day, set at installation and organisation level | in force |
+| [D-172](172-the-single-gift-ceiling-is-configurable.md) | 2026-11-12 | The single-gift ceiling is configurable at installation and organisation level | in force |
+| [D-173](173-outside-provider-spending-is-recorded-in-the-providers-own-currency.md) | 2026-11-12 | Outside-provider spending is recorded in the provider's own currency | in force |
 
-*169 decisions. This index is checked against the folder by
+*173 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
