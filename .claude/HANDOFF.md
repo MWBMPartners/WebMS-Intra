@@ -6,16 +6,16 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691, #966, #998, #1000.
-Last whole suite (with #968): green. Decisions D-129 to D-150 recorded on 11-12 November (D-135 is the owner's
+#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691, #966, #998, #1000, #964, #929.
+Last whole suite (with #968): green. Decisions D-129 to D-153 recorded on 11-12 November (D-135 is the owner's
 2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #964 — erase a visitor's event-suggestion details on request (D-140, D-148-D-150) | integrated locally (3 rounds + my wording fix + docs), unpushed | Whole suite and migration harness running, then push and close. Follow-ups #1006-#1010 |
-| #929 — a worker's data download lists records carrying their name (D-142) | `p929-build`, building | |
+| #1004 — strict reading of typed money amounts (D-152, D-153) | `p1004-build`, round 3 building | `Currency::parseAmount()`; new hard gate `check_no_float_money.py` to wire in pr-security.yml; new test `money-amount-selftest.php` to wire (port 9533). Follow-up #1013 |
+| #1012 — a member's own DBS checks in their data copy | `p1012-build`, building | |
 
 **Migration numbers taken:** 269-279 landed. 282, 283 (#966) and 286 (#964) used. 280, 281, 284, 285 unused. Next free: 287.
 **The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923); the whole-suite runner does not yet (#983).**
@@ -70,4 +70,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1010.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1013.
