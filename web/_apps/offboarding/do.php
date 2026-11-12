@@ -130,11 +130,22 @@ $run = function (string $label, string $sql, array $params, string $types) use (
         // 🔁 A DEADLOCK (1213) ROLLS THE WHOLE TRANSACTION BACK - every
         //    earlier step logged ok here included - and every statement after
         //    it then runs on its own and is kept (#982 round 5, measured:
-        //    deactivate_user logged ok, isActive = 1 after the "commit"). A
-        //    lock-wait timeout (1205) leaves the transaction half-done the same
-        //    way. Neither can be recorded as one failed step and carried on
-        //    from, so both end the offboarding: thrown to the catch below,
-        //    which rolls back and says nothing was done.
+        //    deactivate_user logged ok, isActive = 1 after the "commit"; and
+        //    driven by M13e of tools/erasure-pages-selftest.php, a real 1213
+        //    over HTTP with the offboarding chosen as the victim). It cannot be
+        //    recorded as one failed step and carried on from, so it ends the
+        //    offboarding: thrown to the catch below, which rolls back and says
+        //    nothing was done.
+        //
+        //    A LOCK-WAIT TIMEOUT (1205) IS DIFFERENT, and is re-thrown for a
+        //    different reason. With MySQL's default
+        //    (innodb_rollback_on_timeout = OFF, measured on 8.0.36) it undoes
+        //    ONLY the statement that waited; the transaction is still open and
+        //    earlier steps are intact. It is re-thrown anyway because a step
+        //    that waited that long means somebody else is changing this person
+        //    at the same moment, and an offboarding that rolls back whole and
+        //    says so is easier to trust than one committed with a step
+        //    silently missing.
         if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
             throw $e;
         }
@@ -143,6 +154,9 @@ $run = function (string $label, string $sql, array $params, string $types) use (
     }
 };
 
+// Set true straight after the commit; only then is the outcome read and worded.
+$committed = false;
+$erasureNote = '';
 try {
     $db->begin_transaction();
 
@@ -325,7 +339,17 @@ try {
     }
 
     $db->commit();
+    $committed = true;
+} catch (\Throwable $e) {
+    $db->rollback();
+    \Portal\Core\Logger::errorPlatform('Offboarding', 'Critical', 'OFFBOARD_FAIL', $e->getMessage(), 'userID=' . $userId);
+    // The exception's own words went to the page until #982 round 2; they
+    // are in the error record just written, and the page says what happened.
+    $_SESSION['flash_msg']  = 'Offboarding failed, and nothing was changed. The reason has been recorded on Admin, Errors.';
+    $_SESSION['flash_type'] = 'danger';
+}
 
+if ($committed === true) {
     // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after
     //    the commit, and from nothing else (#982 round 5). Rounds 2-4 decided
     //    it from the step log, and the step log can be wrong about what the
@@ -354,14 +378,26 @@ try {
             $failedSteps[] = $stepWords[(string) ($step['step'] ?? '')] ?? (string) ($step['step'] ?? 'a step');
         }
     }
+    // The read has its own try (#982 round 6): it runs AFTER the commit, so a
+    // failure here must never reach the catch above, whose words are "nothing
+    // was changed" - under strict reporting a failed read THROWS, and the page
+    // then said nothing changed when everything had (planted: a renamed
+    // column in the server's copy, M13f). A read that fails leaves
+    // $isActiveNow null: "recorded, but whether … could not be read".
     $isActiveNow = null;
-    $check       = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-    if ($check !== false) {
-        $check->bind_param('i', $userId);
-        $check->execute();
-        $checkRow    = $check->get_result()->fetch_assoc();
-        $isActiveNow = $checkRow === null ? null : (int) $checkRow['isActive'];
-        $check->close();
+    try {
+        $check = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        if ($check !== false) {
+            $check->bind_param('i', $userId);
+            $check->execute();
+            $checkRow    = $check->get_result()->fetch_assoc();
+            $isActiveNow = $checkRow === null ? null : (int) $checkRow['isActive'];
+            $check->close();
+        }
+    } catch (\Throwable $readFailed) {
+        \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'OFFBOARD_READ_FAILED',
+            'Offboarding account #' . $userId . ' was recorded, but the account could not be read afterwards', $readFailed->getMessage());
+        $isActiveNow = null;
     }
     if ($failedSteps !== []) {
         \Portal\Core\Logger::errorPlatform(
@@ -391,13 +427,6 @@ try {
             . $failedWords . $erasureNote;
         $_SESSION['flash_type'] = 'danger';
     }
-} catch (\Throwable $e) {
-    $db->rollback();
-    \Portal\Core\Logger::errorPlatform('Offboarding', 'Critical', 'OFFBOARD_FAIL', $e->getMessage(), 'userID=' . $userId);
-    // The exception's own words went to the page until #982 round 2; they
-    // are in the error record just written, and the page says what happened.
-    $_SESSION['flash_msg']  = 'Offboarding failed, and nothing was changed. The reason has been recorded on Admin, Errors.';
-    $_SESSION['flash_type'] = 'danger';
 }
 
 header('Location: ' . Site::url('offboarding'));

@@ -2998,9 +2998,9 @@ echo "\nQ. A whole restore that signs out the person who ran it (#922)\n";
 // with no notice, cannot sign in. Q26-Q27b: a snapshot whose account list
 // cannot be read - "could not be worked out", the restore fails, the red box
 // says nobody was signed out, and the failed line names who pressed it.
-// Q28-Q29: Rae restores a snapshot in which she is NOT a global
-// administrator - told before and after that she will not be able to open
-// this page again.
+// Q28-Q30: Rae restores a snapshot in which she is NOT a global
+// administrator - told before (Q29) and after (Q30) that she will not be able
+// to open this page again.
 Brs::$writer->query('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ' . BPS_ADMIN);
 $qBefore    = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
 $qTaken     = bps_message(bps_press($jar['root'], ['action' => 'snapshot_now'])['body']);
@@ -3034,7 +3034,7 @@ $qWarning = $qWarningOf($qInspect);
 brs_check(
     str_contains($qWarning, 'Putting this snapshot back whole signs out 4 accounts on their next page.') === true
     && str_contains($qWarning, '2 accounts have a sign-in number that differs from the snapshot\'s') === true
-    && str_contains($qWarning, 'only a password each had when the snapshot was taken will work.') === true
+    && str_contains($qWarning, 'only a password each had when the snapshot was taken will work; a Microsoft or Google sign-in is unaffected.') === true
     && str_contains($qWarning, '1 account is switched off in this snapshot; it cannot sign in until an administrator switches it back on.') === true
     && str_contains($qWarning, '1 account is not in this snapshot, and cannot be used to sign in afterwards.') === true
     && str_contains($qWarning, 'Yours is one of them: you will be asked to sign in as soon as the restore has finished') === true
@@ -3067,7 +3067,11 @@ $qLogin  = bps_request($qJar, 'GET', '/login')['body'];
 $qNotice = preg_match('#id="signed-out-notice">(.*?)</div>#s', $qLogin, $qFound) === 1 ? bps_text($qFound[1]) : '(no notice)';
 brs_check(
     str_contains($qNotice, 'You were signed out because your sign-in is no longer current') === true
-    && str_contains($qNotice, 'restored from a backup') === true,
+    && str_contains($qNotice, 'restored from a backup') === true
+    // #922 round 6: the notice's last sentence is pinned whole - it said "use
+    // the password you had", untrue for an account that had none then.
+    && str_contains($qNotice, 'After a restore, only a password your account had when that backup was taken will work; a Microsoft or Google sign-in is unaffected.') === true
+    && str_contains($qNotice, 'use the password you had') === false,
     'Q7 AFTER: the sign-in page says why she was signed out, naming a restore as one of the two reasons',
     $qNotice
 );
@@ -3207,6 +3211,8 @@ $qXenaSaid = bps_message(bps_request($qXenaJar, 'POST', '/admin/maintenance/back
 brs_check(
     str_starts_with($qXenaSaid, '[warning] Snapshot put back in full:') === true
     && str_contains($qXenaSaid, 'Your own account is switched off in the restored database') === true
+    && str_contains($qXenaSaid, 'you cannot sign in until an administrator switches it back on') === true
+    && str_contains($qXenaSaid, 'another global administrator') === false
     && str_contains($qXenaSaid, 'naming no account') === false,
     'Q22 DURING: the restore\'s answer says her account is switched off in the restored database, and nothing about a record naming nobody',
     $qXenaSaid

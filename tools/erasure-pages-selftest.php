@@ -231,7 +231,10 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 227; // #982 round 5 added M13d (the account is read,
+const EXPECTED_CHECKS = 231; // #982 round 6 added M13e (a real deadlock),
+                            // M13f (a failed read after the commit) and
+                            // M13g/M13h (rehire, by kind of account). 231.
+                            // #982 round 5 added M13d (the account is read,
                             // not the step log). 227.
                             // #982 round 3 added M13c (a failed step is not
                             // called a success). 226.
@@ -3871,6 +3874,140 @@ ok('M13d when the step log says the account was switched off but the account is 
     && str_contains($m13dSaid, 'their account is NOT switched off, so they may still be able to sign in') === true
     && str_contains($m13dSaid, 'Their account is switched off') === false,
     ($m13dApplied === true ? 'applied' : 'NOT APPLIED') . ' | step log said ok: ' . var_export($m13dLogOk, true) . ' | said: ' . $m13dSaid);
+
+// #982 round 6, M13e: A REAL DEADLOCK (1213), over HTTP. A second connection
+// makes its own transaction HEAVY (300 inserted rows, so InnoDB chooses the
+// offboarding - the smaller transaction - as the victim), locks Dee's
+// password row, and the offboarding is posted: it switches Dee off (locking
+// her tblUsers row) and then waits on the password row. The second connection
+// then updates Dee's tblUsers row: each now waits on the other, and MySQL
+// ends the lighter one. The check asserts THAT the offboarding was the
+// victim (the second connection's update went through), then that nothing
+// the offboarding did was kept: Dee is still on, her membership and password
+// are untouched, there is no offboarding record and no erasure request, and
+// the page says it failed and nothing was changed. Without do.php's re-throw
+// the steps after the deadlock run on their own and are kept (measured in
+// round 5): memberships ended, a record and an erasure request written, Dee on.
+// It needs `proc_open`-free curl_multi and a second connection only.
+const M13_DEE = 917062; // a live member of A with a password: the deadlock, then a rehire (#982)
+const M13_FAY = 917063; // a live member of A: the read after the commit fails (#982)
+foreach ([M13_DEE => 'Dee Deadlock', M13_FAY => 'Fay Failread'] as $m13Id => $m13Name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, 'u' . $m13Id . '.erasure@selftest.invalid']);
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$m13Id, 'selftest-erasure-m13-' . $m13Id, $hash]);
+}
+$m13State = static fn (int $uid): array => [
+    'on'       => (int) (one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [$uid])['isActive'] ?? -1),
+    'member'   => (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `isActive` = 1', 'i', [$uid])['n'],
+    'hashLen'  => (int) (one('SELECT LENGTH(`passwordHash`) AS `l` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [$uid])['l'] ?? -1),
+    'record'   => (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [$uid])['n'],
+    'erasure'  => (int) one('SELECT COUNT(*) AS `n` FROM `tblErasureRequest` WHERE `userID` = ?', 'i', [$uid])['n'],
+];
+$m13Second = new mysqli(
+    getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1',
+    getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root',
+    getenv('SELFTEST_DB_PASS') !== false ? (string) getenv('SELFTEST_DB_PASS') : '',
+    $dbName,
+    getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
+);
+$m13Second->query('DROP TABLE IF EXISTS `zz_selftest_p982_heavy`');
+$m13Second->query('CREATE TABLE `zz_selftest_p982_heavy` (`id` INT PRIMARY KEY) ENGINE=InnoDB');
+$deeBefore = $m13State(M13_DEE);
+$m13Second->begin_transaction();
+for ($m13i = 1; $m13i <= 300; $m13i++) {
+    $m13Second->query('INSERT INTO `zz_selftest_p982_heavy` (`id`) VALUES (' . $m13i . ')');
+}
+$m13Second->query('SELECT `userID` FROM `tblLocalAccounts` WHERE `userID` = ' . M13_DEE . ' FOR UPDATE')->fetch_all();
+$m13Tok   = token(req($jar['root'], 'GET', '/admin/users')['body']);
+$m13Curl  = curl_init('http://127.0.0.1:' . $port . ADDR_A . '/offboarding/do');
+curl_setopt_array($m13Curl, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 120, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+    CURLOPT_COOKIEJAR => $jar['root'], CURLOPT_COOKIEFILE => $jar['root'], CURLOPT_POST => true, CURLOPT_HTTPHEADER => ['Expect:'],
+    CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $m13Tok, 'userID' => M13_DEE, 'reason' => 'Selftest #982 deadlock', 'dataDisposition' => 'erase', 'effectiveDate' => gmdate('Y-m-d')]),
+]);
+$m13Multi = curl_multi_init();
+curl_multi_add_handle($m13Multi, $m13Curl);
+$m13Until = microtime(true) + 2.0; // long enough for the offboarding to switch Dee off and reach her password row
+do {
+    curl_multi_exec($m13Multi, $m13Running);
+    curl_multi_select($m13Multi, 0.05);
+} while ($m13Running > 0 && microtime(true) < $m13Until);
+$m13Victim = 'the offboarding';
+try {
+    $m13Second->query('UPDATE `tblUsers` SET `isActive` = `isActive` WHERE `userID` = ' . M13_DEE);
+} catch (\mysqli_sql_exception $m13Lost) {
+    $m13Victim = 'THE TEST\'S OWN CONNECTION (' . $m13Lost->getCode() . ')';
+}
+$m13Second->rollback();
+do {
+    curl_multi_exec($m13Multi, $m13Running);
+    curl_multi_select($m13Multi, 0.1);
+} while ($m13Running > 0);
+$m13Raw = (string) curl_multi_getcontent($m13Curl);
+curl_multi_remove_handle($m13Multi, $m13Curl);
+curl_multi_close($m13Multi);
+$m13Second->query('DROP TABLE IF EXISTS `zz_selftest_p982_heavy`');
+$m13Second->close();
+$m13To   = preg_match('/^Location:\s*(\S+)\s*$/mi', $m13Raw, $m13Loc) === 1 ? (string) parse_url($m13Loc[1], PHP_URL_PATH) : '';
+$m13Said = $m13To === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $m13To, null, '')['body']);
+$deeAfter = $m13State(M13_DEE);
+$m13Deadlock = one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'OFFBOARD_FAIL' AND `errorTitle` LIKE '%Deadlock%'");
+ok('M13e A REAL DEADLOCK in the middle of an offboarding (MySQL chose the offboarding as the victim, measured): the whole offboarding is rolled back - Dee still on, her membership and password untouched, no offboarding record, no erasure request - and the page says it failed and nothing was changed (#982 round 6)',
+    $m13Victim === 'the offboarding' && (int) ($m13Deadlock['n'] ?? 0) >= 1
+    && $deeAfter === $deeBefore && $deeAfter['on'] === 1 && $deeAfter['record'] === 0 && $deeAfter['erasure'] === 0
+    && str_contains($m13Said, 'Offboarding failed, and nothing was changed.') === true,
+    'victim: ' . $m13Victim . ' | deadlock recorded: ' . json_encode($m13Deadlock) . ' | before ' . json_encode($deeBefore)
+        . ' | after ' . json_encode($deeAfter) . ' | said: ' . $m13Said);
+
+// M13f: the read AFTER the commit fails (a renamed column in the server's
+// copy, for one press). Everything was committed, so the page must say the
+// offboarding was recorded and that whether the account is switched off
+// could not be read - never "nothing was changed", which is what it said
+// while the read sat inside the try whose catch says so.
+$m13fFrom    = 'SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1';
+$m13fApplied = substr_count($m13cOriginal, $m13fFrom) === 1;
+$m13fSaid    = '(not run)';
+if ($m13fApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13fFrom, 'SELECT `isActiveNoSuchColumn` FROM `tblUsers` WHERE `userID` = ? LIMIT 1', $m13cOriginal));
+    try {
+        [, $m13fSaid] = $offboardM(M13_FAY, 'Selftest #982 round 6');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+$fayAfter = $m13State(M13_FAY);
+ok('M13f when the account cannot be read AFTER the commit, the page says the offboarding was recorded and that whether the account is switched off could not be read - never "nothing was changed" - and it really was recorded (#982 round 6)',
+    $m13fApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
+    && $fayAfter['on'] === 0 && $fayAfter['record'] === 1
+    && str_contains($m13fSaid, 'The offboarding was recorded, but whether their account is switched off could not be read') === true
+    && str_contains($m13fSaid, 'nothing was changed') === false && str_contains($m13fSaid, 'isActiveNoSuchColumn') === false,
+    ($m13fApplied === true ? 'applied' : 'NOT APPLIED') . ' | after ' . json_encode($fayAfter) . ' | said: ' . $m13fSaid);
+
+// M13g/M13h: REHIRE, which nothing drove before. What the page says about
+// signing in must be true for the kind of account: Dee has a password row
+// (emptied by offboarding), Olly has none at all (Microsoft or Google only).
+[, $deeOffSaid] = $offboardM(M13_DEE, 'Selftest #982 rehire');
+$rehireM = static function (int $uid) use ($jar, $flashOn): string {
+    $id = (int) (one('SELECT `offboardingID` FROM `tblOffboarding` WHERE `userID` = ? AND `rehiredAt` IS NULL ORDER BY `offboardingID` DESC LIMIT 1', 'i', [$uid])['offboardingID'] ?? 0);
+    $tok  = token(req($jar['root'], 'GET', '/offboarding')['body']);
+    $sent = req($jar['root'], 'POST', '/offboarding/rehire', ['csrf_token' => $tok, 'offboardingID' => $id]);
+    $to   = (string) parse_url((string) $sent['location'], PHP_URL_PATH);
+
+    return $to === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $to, null, '')['body']);
+};
+$deeRehire = $rehireM(M13_DEE);
+ok('M13g rehiring an account WITH a password row (emptied by offboarding) switches it on and says to choose "Forgot your password?" on the sign-in page, or Microsoft or Google (#982 round 6)',
+    str_contains($deeOffSaid, 'Offboarded. Their account is switched off') === true
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_DEE])['isActive'] === 1
+    && str_contains($deeRehire, 'User rehired: their account is switched on again.') === true
+    && str_contains($deeRehire, 'they sign in by choosing "Forgot your password?" on the sign-in page') === true,
+    'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
+$ollyRehire = $rehireM(OFF);
+ok('M13h rehiring an account with NO password row says it has no password here and signs in with Microsoft or Google - never "Forgot your password?", which does nothing for it (#982 round 6)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
+    && str_contains($ollyRehire, 'This account has no password on this portal') === true
+    && str_contains($ollyRehire, 'Forgot your password') === false,
+    'rehire said: ' . $ollyRehire);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

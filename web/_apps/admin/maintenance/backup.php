@@ -590,7 +590,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     Auth::SIGN_IN_NOT_CURRENT  => ' Your own sign-in is not current in the restored database: its sign-in '
                         . 'number differs from the one you signed in under (usually because your password was reset, '
                         . 'changed or set after this snapshot was taken). The next page you open will ask you to sign in '
-                        . 'again, and only a password your account had when the snapshot was taken will work.'
+                        . 'again, and only a password your account had when the snapshot was taken will work; a Microsoft '
+                        . 'or Google sign-in is unaffected.'
                         . ($restorerGlobal === true
                             ? ' This result stays at the top of this page for seven days.'
                             : ' Your account is not a global administrator in the restored database, so you will not be '
@@ -921,7 +922,7 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                 . 'whole, it signs out every account that is not in it or is switched off in it, and every account whose '
                 . 'sign-in number differs from the snapshot\'s (usually because its password was reset, changed or set '
                 . 'since); such an account must sign in again, and only a password it had when the snapshot was taken '
-                . 'will work. Yours may be one of them.';
+                . 'will work (a Microsoft or Google sign-in is unaffected). Yours may be one of them.';
         } elseif ($signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'] > 0) {
             $total          = $signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'];
             $inspectSignIns = 'Putting this snapshot back whole signs out ' . ($total === 1 ? '1 account' : $total . ' accounts')
@@ -931,10 +932,10 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                     $signIns['changed'],
                     'has a sign-in number that differs from the snapshot\'s (usually because its password was reset, '
                         . 'changed or set after the snapshot was taken); it must sign in again, and only a password it had '
-                        . 'when the snapshot was taken will work.',
+                        . 'when the snapshot was taken will work; a Microsoft or Google sign-in is unaffected.',
                     'have a sign-in number that differs from the snapshot\'s (usually because a password was reset, '
                         . 'changed or set after the snapshot was taken); they must sign in again, and only a password each '
-                        . 'had when the snapshot was taken will work.'
+                        . 'had when the snapshot was taken will work; a Microsoft or Google sign-in is unaffected.'
                 ));
             }
             if ($signIns['switchedOff'] > 0) {
@@ -957,7 +958,8 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                   . 'page afterwards; its result is kept here for seven days for any global administrator.';
             $inspectSignIns .= match ($signIns['you']) {
                 'changed'      => ' Yours is one of them: you will be asked to sign in as soon as the restore has '
-                    . 'finished, and only a password your account had when the snapshot was taken will work.' . $keptForYou,
+                    . 'finished, and only a password your account had when the snapshot was taken will work; a Microsoft '
+                    . 'or Google sign-in is unaffected.' . $keptForYou,
                 'switched_off' => ' Yours is one of them: your account is switched off in this snapshot, so once it is '
                     . 'put back you cannot sign in until an administrator switches it back on. Its result is kept at the '
                     . 'top of this page for seven days for any global administrator who signs in.',
