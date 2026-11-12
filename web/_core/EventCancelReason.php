@@ -189,11 +189,14 @@ final class EventCancelReason
      *         `$arrived`): the rows in scope whose status carries one. Ask
      *         this, never the caller's own status UPDATE's affected-row count,
      *         which counts rows whose values CHANGED. That statement also
-     *         writes `updatedByID`, so it is 0 for a date only when the date
-     *         already had that status AND the same administrator made its last
-     *         edit — and such a date still takes the new reason here (round 2
-     *         of #998's check measured the page saying "0 event(s) updated"
-     *         over a reason it had just stored, in exactly that case).
+     *         writes `updatedByID`, so it is 0 for a date when the date already
+     *         had that status AND its `updatedByID` already named this
+     *         administrator — which is NOT the same as "this administrator made
+     *         the last edit": the events API's update never writes
+     *         `updatedByID`, so an edit through it leaves the column naming
+     *         whoever edited before. Such a date still takes the new reason
+     *         here (round 2 of #998's check measured the page saying "0
+     *         event(s) updated" over a reason it had just stored).
      */
     public static function write(mysqli $db, int $siteId, array $eventIds, bool $arrived, ?string $reason, ?int $seriesId = null): array
     {

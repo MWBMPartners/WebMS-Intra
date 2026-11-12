@@ -4818,6 +4818,58 @@ ok('U36g ...while the live date, already cancelled, takes the new reason (read b
 ok('U36h ...and the message counts ONE date updated and ONE carrying the reason, word for word',
     $bhMessage === '1 event(s) updated successfully. 1 date now carries the reason you gave.', $bhMessage);
 
+/**
+ * Pump a started request until the database says it is WAITING ON THIS
+ * CONNECTION'S LOCK on one row of tblEvents, or the deadline passes.
+ *
+ * WHY, and why "still running after two seconds" was not enough (round 4 of
+ * #998's check): a request can still be running because it is slow — a busy
+ * runner, or a sleep at the top of the handler — and then this connection
+ * hides the date BEFORE the request has read it at all, so its FIRST, plain
+ * read refuses and the locked second read is never exercised. Measured: with
+ * both API fixes removed and `sleep(3)` added, every race check stayed green.
+ * So the premise asks the database itself: `performance_schema.data_lock_waits`
+ * joined to `data_locks` on the REQUESTING lock must name `tblEvents`, its
+ * PRIMARY key, LOCK_DATA = this event's number, blocked by THIS connection's
+ * thread. That is the one state in which the order below is real.
+ *
+ * Refuses the whole run (never skips) when performance_schema is switched
+ * off, because without it the premise cannot be established and every race
+ * check after it would be vacuous.
+ *
+ * @param array{multi:\CurlMultiHandle, handle:\CurlHandle, running:int} $async
+ * @return array{multi:\CurlMultiHandle, handle:\CurlHandle, running:int, waiting:bool}
+ */
+function waitOnRowLock(array $async, int $eventId, float $seconds = 15.0): array
+{
+    $enabled = one('SELECT @@performance_schema AS `on`');
+    if ((int) ($enabled['on'] ?? 0) !== 1) {
+        refuse('performance_schema is switched off on this database server, so section U cannot tell whether its race requests really wait on the row lock');
+    }
+    $me      = (int) (one('SELECT `THREAD_ID` AS `t` FROM `performance_schema`.`threads` WHERE `PROCESSLIST_ID` = CONNECTION_ID()')['t'] ?? 0);
+    $waiting = false;
+    $until   = microtime(true) + $seconds;
+    $running = $async['running'];
+    while (microtime(true) < $until && $running > 0) {
+        curl_multi_exec($async['multi'], $running);
+        curl_multi_select($async['multi'], 0.1);
+        $found = one(
+            'SELECT COUNT(*) AS `n` FROM `performance_schema`.`data_lock_waits` `w` '
+            . 'JOIN `performance_schema`.`data_locks` `l` ON `l`.`ENGINE_LOCK_ID` = `w`.`REQUESTING_ENGINE_LOCK_ID` '
+            . "WHERE `l`.`OBJECT_NAME` = 'tblEvents' AND `l`.`INDEX_NAME` = 'PRIMARY' AND `l`.`LOCK_DATA` = ? "
+            . 'AND `w`.`BLOCKING_THREAD_ID` = ?',
+            'si',
+            [(string) $eventId, $me]
+        );
+        if ((int) ($found['n'] ?? 0) > 0) {
+            $waiting = true;
+            break;
+        }
+    }
+
+    return ['multi' => $async['multi'], 'handle' => $async['handle'], 'running' => $running, 'waiting' => $waiting];
+}
+
 // -----------------------------------------------------------------------------
 // U39 — THE SECOND ASK, UNDER THE LOCK. The first refusal reads without a
 // lock; between it and the write the date can be hidden. This connection
@@ -4852,14 +4904,9 @@ $db->begin_transaction();
 q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$raceId]);
 $raceMulti = curl_multi_init();
 curl_multi_add_handle($raceMulti, $raceHandle);
-$raceRunning = 1;
-$raceUntil   = microtime(true) + 2.0;
-while (microtime(true) < $raceUntil && $raceRunning > 0) {
-    curl_multi_exec($raceMulti, $raceRunning);
-    curl_multi_select($raceMulti, 0.1);
-}
-$raceAsync = ['multi' => $raceMulti, 'handle' => $raceHandle, 'running' => $raceRunning];
-ok('U39 (premise) the save is WAITING on this connection\'s lock, so the order below is real', $raceAsync['running'] > 0);
+$raceAsync = waitOnRowLock(['multi' => $raceMulti, 'handle' => $raceHandle, 'running' => 1], $raceId);
+ok('U39 (premise) the database says the save is WAITING on this connection\'s lock on THIS row, so the order below is real',
+    $raceAsync['waiting'] === true, 'running=' . $raceAsync['running']);
 q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$raceId]);
 $db->commit();
 restAsyncFinish($raceAsync);
@@ -4897,16 +4944,12 @@ $db->begin_transaction();
 q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$apiRaceId]);
 $apiRaceMulti = curl_multi_init();
 curl_multi_add_handle($apiRaceMulti, $apiRaceHandle);
-$apiRaceRunning = 1;
-$apiRaceUntil   = microtime(true) + 2.0;
-while (microtime(true) < $apiRaceUntil && $apiRaceRunning > 0) {
-    curl_multi_exec($apiRaceMulti, $apiRaceRunning);
-    curl_multi_select($apiRaceMulti, 0.1);
-}
-ok('U42 (premise) the API call is WAITING on this connection\'s lock, so the order below is real', $apiRaceRunning > 0);
+$apiRaceAsync = waitOnRowLock(['multi' => $apiRaceMulti, 'handle' => $apiRaceHandle, 'running' => 1], $apiRaceId);
+ok('U42 (premise) the database says the API call is WAITING on this connection\'s lock on THIS row, so the order below is real',
+    $apiRaceAsync['waiting'] === true, 'running=' . $apiRaceAsync['running']);
 q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$apiRaceId]);
 $db->commit();
-$apiRaceCode = restAsyncFinish(['multi' => $apiRaceMulti, 'handle' => $apiRaceHandle, 'running' => $apiRaceRunning]);
+$apiRaceCode = restAsyncFinish($apiRaceAsync);
 $apiRaceAfter = reasonRow($apiRaceId);
 ok('U43 HIDDEN WHILE THE API CALL WAITED: its status and reason are untouched (read back)',
     (string) ($apiRaceAfter['status'] ?? '') === 'cancelled' && (string) ($apiRaceAfter['cancelReason'] ?? '') === 'EVREP api race reason',
