@@ -136,13 +136,7 @@ MEASURED_85 = (
 # left for now). Fails BOTH ways: a listed call that has gone is reported, so
 # the line is deleted rather than left to excuse a future one; and a count that
 # no longer matches is reported, so a SECOND call cannot hide behind the first.
-PENDING = {
-    ("web/_apps/venues/invoice-save.php", "finfo_close"): (
-        1,
-        "another package was changing this file while #1003 was built; "
-        "remove the call (and this line) when that package has landed",
-    ),
-}
+PENDING = {}
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 ROOTS = (REPO / "web", REPO / "tools")

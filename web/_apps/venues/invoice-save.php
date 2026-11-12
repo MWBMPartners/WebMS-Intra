@@ -251,7 +251,8 @@ if (isset($_FILES['file']) === true && (int) $_FILES['file']['error'] !== UPLOAD
         $backToForm();
     }
     $sniffedMime = finfo_buffer($finfo, $binary);
-    finfo_close($finfo);
+    // ⚠️ No `finfo_close()` (#1003): it has done nothing since PHP 8.1 (the finfo
+    // object is freed when it goes out of scope) and PHP 8.5 marks it deprecated.
     if ($sniffedMime === false
         || in_array($sniffedMime, VENUES_INVOICE_ALLOWED_MIME, true) === false
         || array_key_exists($sniffedMime, Venues::AGREEMENT_FILE_MIME_EXT) === false
