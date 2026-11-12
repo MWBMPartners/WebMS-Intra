@@ -118,7 +118,11 @@
  *        KEPT in the queue under that organisation, not the one the request
  *        resolved to, and every send-log line about it - kept, sent later by
  *        the job, sent at once - is under it too; a caller naming none is
- *        still kept under its request's organisation (#1039).
+ *        still kept under its request's organisation (#1039). Round 2 of its
+ *        check added the lines no earlier case reached: sent at once
+ *        through Microsoft 365 and through Google (each writes its own line,
+ *        via the HTTPS stand-in), and refused at once for more people than
+ *        an hour allows and for a stored limit that is not a number.
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
  *   minutes themselves, twelve pages at once, and the other scheduled jobs
@@ -195,7 +199,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 181; // #1039 added four: part R2. #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
+const EXPECTED_CHECKS = 185; // #1039 added eight: part R2 (four, then four in round 2 of its check). #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -1048,10 +1052,22 @@ function startChild(array $job): array
     $env   = getenv();
     $env['PORTAL_ENV']   = 'prod';
     $env['SELFTEST_JOB'] = (string) json_encode($job);
+    // `viaHttpsStandin` (#1039, part R2): this child reaches Microsoft 365 and
+    // Google through the HTTPS stand-in, exactly as the portal's own server
+    // does (its bundle also trusts the stand-in mail servers). Opt-in, so no
+    // other part's child changes.
+    $trust = ($job['viaHttpsStandin'] ?? false) === true
+        ? httpsStandinServerArgs($state['https'])
+        : ['-d', 'openssl.cafile=' . $child . $sep . 'standin' . $sep . 'certs' . $sep . 'ca.pem'];
+    if (($job['viaHttpsStandin'] ?? false) === true) {
+        $env = httpsStandinServerEnv($state['https'], $env);
+    }
     $process = proc_open(
-        [PHP_BINARY, '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'max_execution_time=0',
-            '-d', 'openssl.cafile=' . $child . $sep . 'standin' . $sep . 'certs' . $sep . 'ca.pem',
-            '-d', 'session.save_path=' . $child . $sep . 'sessions', __FILE__, '--child', $child . $sep . 'web'],
+        array_merge(
+            [PHP_BINARY, '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'max_execution_time=0'],
+            $trust,
+            ['-d', 'session.save_path=' . $child . $sep . 'sessions', __FILE__, '--child', $child . $sep . 'web']
+        ),
         [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]],
         $pipes,
         $child,
@@ -4364,6 +4380,66 @@ if (part('R2', 'A message a caller names for another organisation is KEPT under 
             && $linesOf('R2 sent at once for another organisation') === [$line('sent', SITE_R1)],
         'outcome ' . json_encode($now['each'] ?? $now['threw']) . '; lines ' . json_encode($linesOf('R2 sent at once for another organisation'))
     );
+
+    // 5-6. Sent at once through Microsoft 365 and through Google, INSIDE the
+    //      request (round 2 of #1039's check: these two calls were guarded by
+    //      nothing - reverting either to "this request's organisation" left
+    //      the whole test green). Those two routes write their OWN send-log
+    //      line, so the line can only be under SITE_R1 if send() handed them
+    //      the named organisation. The child talks to the HTTPS stand-in as
+    //      the portal's server does in R1 (`viaHttpsStandin`).
+    foreach (['auth.ms365.tenantID' => 'selftest-r2-tenant', 'auth.ms365.appwide.clientID' => 'selftest-r2-client', 'auth.ms365.appwide.clientSecret' => 'selftest-r2-secret',
+        'mail.ms365.sharedMailbox' => '', 'mail.google.delegateUser' => SENDER, 'mail.google.serviceAccountKeyFile' => 'selftest-r2-google.json'] as $key => $value) {
+        setting($key, $value);
+    }
+    $r2Key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_RSA, 'private_key_bits' => 2048]);
+    openssl_pkey_export($r2Key, $r2Pem);
+    $r2KeyFile = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-r2-google.json';
+    file_put_contents($r2KeyFile, (string) json_encode(['private_key' => $r2Pem, 'client_email' => 'r2@' . DOMAIN]));
+    httpsStandinAnswers($state['https'], [
+        'login.microsoftonline.com' => [['path' => '/', 'status' => 200, 'json' => ['access_token' => 'r2-made-up-token', 'expires_in' => 3600]]],
+        'oauth2.googleapis.com'     => [['path' => '/token', 'status' => 200, 'json' => ['access_token' => 'r2-made-up-token', 'expires_in' => 3600]]],
+        'graph.microsoft.com'       => [['path' => '/v1.0/users/', 'status' => 202, 'body' => '']],
+        'gmail.googleapis.com'      => [['path' => '/gmail/v1/users/', 'status' => 200, 'json' => ['id' => 'r2-made-up-id']]],
+    ]);
+    foreach (['ms365' => 'R2 sent at once through Microsoft 365', 'google' => 'R2 sent at once through Google'] as $provider => $subject) {
+        setting('mail.provider', $provider);
+        $at = child(['task' => 'send', 'viaHttpsStandin' => true, 'messages' => [msg(mailOf('other'), $subject, 'A message.', ['siteId' => SITE_R1])]]);
+        ok(
+            'a message named for another organisation and sent at once through ' . ($provider === 'ms365' ? 'Microsoft 365' : 'Google')
+                . ' (the stand-in took it) is recorded, by the route\'s own line, under that organisation, not the request\'s (#1039)',
+            ($at['each'][0][1] ?? '') === 'sent' && (int) ($at['requestSite'] ?? 0) !== SITE_R1
+                && q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject])
+                    === [['provider' => $provider, 'status' => 'sent', 'siteID' => SITE_R1]],
+            'outcome ' . json_encode($at['each'] ?? $at['threw']) . '; lines ' . json_encode(q('SELECT provider, status, siteID FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]))
+        );
+    }
+    foreach (['auth.ms365.tenantID', 'auth.ms365.appwide.clientID', 'auth.ms365.appwide.clientSecret', 'mail.google.delegateUser', 'mail.google.serviceAccountKeyFile'] as $key) {
+        setting($key, '');
+    }
+    @unlink($r2KeyFile);
+    httpsStandinAnswers($state['https'], []);
+    setting('mail.provider', 'smtp');
+
+    // 7-8. Refused at once for the hourly limit, the two lines send() writes
+    //      before anything is kept (also guarded by nothing until round 2):
+    //      "for more people than a whole hour allows", and "the stored limit
+    //      is not a number" (the route then counts as not set up).
+    setting('mail.limit.perHour', '10'); // ordinary mail may use 5
+    $never = child(['task' => 'send', 'messages' => [msg(array_map('crowd', range(1, 6)), 'R2 never fits in an hour', 'A message.', ['siteId' => SITE_R1])]]);
+    ok(
+        'a message named for another organisation and for more people than a whole hour allows is refused, and the line saying so is under that organisation (#1039)',
+        ($never['each'][0] ?? null) === [false, 'refused', 0] && $linesOf('R2 never fits in an hour') === [$line('failed', SITE_R1)],
+        'outcome ' . json_encode($never['each'] ?? $never['threw']) . '; lines ' . json_encode($linesOf('R2 never fits in an hour'))
+    );
+    setting('mail.limit.perHour', 'fifty');
+    $notNumber = child(['task' => 'send', 'messages' => [msg(mailOf('other'), 'R2 the limit is not a number', 'A message.', ['siteId' => SITE_R1])]]);
+    ok(
+        'a message named for another organisation, refused because the stored hourly limit is not a number, has its line under that organisation (#1039)',
+        ($notNumber['each'][0][0] ?? null) === false && $linesOf('R2 the limit is not a number') === [$line('failed', SITE_R1)],
+        'outcome ' . json_encode($notNumber['each'] ?? $notNumber['threw']) . '; lines ' . json_encode($linesOf('R2 the limit is not a number'))
+    );
+    setting('mail.limit.perHour', '');
 }
 
 // =============================================================================

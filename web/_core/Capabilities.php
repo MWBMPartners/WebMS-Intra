@@ -1652,6 +1652,19 @@ final class Capabilities
      * So the two cannot overlap: whoever is second waits, and then reads what
      * the first committed.
      *
+     * A THIRD writer changes the mapping without calling either: deleting a
+     * role on the Roles page (`admin/roles/save.php`), whose `ON DELETE
+     * CASCADE` takes the role out of every set it opened. It takes this lock
+     * too — through its second ask, `whyRoleChangeRefusedUnderLock()`, which
+     * runs inside the delete's transaction before the DELETE — so it is
+     * covered, but only because that ask comes first; a delete moved ahead of
+     * it would change the mapping unlocked.
+     *
+     * NOT covered: deleting a whole ORGANISATION. Its `tblSites` row cascades
+     * to every mapping row and takes no lock here first; with the organisation
+     * itself gone there is nothing left to judge a role change against, so
+     * this is recorded rather than fixed.
+     *
      * WHY THE ORGANISATION'S ROW, and not the mapping's own rows: an
      * organisation that has never chosen anything for a capability HAS no
      * mapping row (that absence is how "as shipped" is stored), and a lock on
