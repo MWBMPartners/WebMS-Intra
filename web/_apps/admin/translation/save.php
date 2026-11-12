@@ -150,9 +150,13 @@ $capRaw    = is_string($capPosted) === true ? trim($capPosted) : '';
 //    narrower pattern in front (up to nine figures and two decimals, no comma,
 //    no sign), which section J of tools/content-translation-selftest.php pins;
 //    whatever the pattern lets through, the converter's answer is what decides,
-//    and a refusal from either goes to the same refusal below.
+//    and a refusal from either goes to the same refusal below. Its maximum is
+//    the largest figure the PATTERN admits (999,999,999.99), never the INT
+//    column default: with that default, 21,474,837 to 999,999,999.99 were told
+//    "could not be read as a figure", which is untrue, and never reached the
+//    hard-maximum refusal below, which is the one that says what the limit is.
 $capPence = preg_match('/^\d{1,9}(\.\d{1,2})?$/', $capRaw) === 1
-    ? \Portal\Core\Currency::parseAmount($capRaw, '')
+    ? \Portal\Core\Currency::parseAmount($capRaw, '', 99999999999)
     : 'not a figure';
 if (is_string($capPence) === true) {
     Logger::activity(

@@ -75,9 +75,9 @@ $action = (string) ($_POST['action'] ?? 'save');
 //    PHP 8.5, "184467440737095557.12" was stored as 40.96, and "1e17" came out
 //    negative so the page said "Amount cannot be negative", which was untrue.
 //    It answers an int, or the true reason the text was refused, which is
-//    shown and nothing is written. These are number boxes, so no currency
-//    symbol is expected and none is passed: a "too large" refusal states the
-//    limit as a plain number.
+//    shown and nothing is written. A typed box takes figures only (D-152):
+//    no comma and no currency sign. No currency is passed, so a "too large"
+//    refusal states the limit as a plain number.
 //    A BLANK rate box means "no rate" (null), as before. Any other text must be
 //    an amount: a figure that could not be read used to CLEAR the stored rate
 //    without a word. A refusal goes back to the form with nothing written.

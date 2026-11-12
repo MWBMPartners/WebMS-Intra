@@ -144,7 +144,7 @@ $pence = static function (string $key, string $label) use ($fail): ?int {
     //    or negative one, and text that was not a figure became "no value",
     //    which on an edit CLEARED the stored amount without a word. A refused
     //    figure now goes back to the form, with the reason, and nothing is
-    //    saved. These are number boxes, so no currency symbol is passed.
+    //    saved. Figures only (D-152); no currency is passed.
     $hundredths = \Portal\Core\Currency::parseAmount($v, '');
     if (is_string($hundredths) === true) {
         $fail($label . ': ' . $hundredths . ' Nothing was saved.');

@@ -113,8 +113,8 @@ if (in_array($provider, ['anthropic','openai','local'], true) === false) {
 //    (#1004), BEFORE anything is written. It used to go through a float with
 //    any text accepted: an absurd figure wrapped, "abc" or an empty box became
 //    a cap of 0 (which stops every request), and a negative was clamped to 0
-//    without a word. Each of those is refused now, with the reason. A number
-//    box in the installation's money, so no symbol is passed.
+//    without a word. Each of those is refused now, with the reason. Figures
+//    only (D-152); no currency is passed.
 $capPosted = $_POST['monthCap'] ?? '';
 $capPence  = \Portal\Core\Currency::parseAmount(is_string($capPosted) === true ? $capPosted : '', '');
 if (is_string($capPence) === true) {

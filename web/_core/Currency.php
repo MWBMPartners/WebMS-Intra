@@ -515,11 +515,17 @@ final class Currency
     /** What parseAmount() answers for an empty box. A caller whose box is optional tests for '' first. */
     public const REFUSED_EMPTY = 'No amount was entered.';
 
+    /** What a typed box answers for anything but figures (D-152: figures only). */
+    public const REFUSED_NOT_FIGURES = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs or letters.';
+
+    /** How every "too large" refusal begins; the rest is the column's most, written in the currency. */
+    public const REFUSED_TOO_LARGE_START = 'That amount is too large: the most that can be stored here is ';
+
     /**
-     * 🔢 THE ONE CONVERTER from a typed amount ("12.50", "£1,234.50", "-3")
-     * to a whole number of hundredths of `$currency`. It answers the number
-     * (an int), or a sentence saying truthfully why the text was REFUSED (a
-     * string). Nothing is ever guessed, rounded or clamped.
+     * 🔢 THE ONE CONVERTER from a typed amount ("12.50", "-3") to a whole
+     * number of hundredths of `$currency`. It answers the number (an int), or a
+     * sentence saying truthfully why the text was REFUSED (a string). Nothing
+     * is ever guessed, rounded or clamped.
      *
      * WHY IT EXISTS (#1004). Every money box used to do
      * `(int) round((float) $typed * 100)`. A float holds only about sixteen
@@ -533,37 +539,44 @@ final class Currency
      * comma) became 1,250.00. This reads the TEXT, figure by figure, and never
      * goes through a float.
      *
-     * WHAT IT ACCEPTS, decided deliberately (each is in tools/money-amount-selftest.php):
-     *   - figures, with at most ONE decimal point and at most TWO figures after
+     * A BOX A PERSON TYPES INTO (the default) — FIGURES ONLY (the owner, D-152):
+     *   - digits, with at most ONE decimal point and at most TWO figures after
      *     it ("12", "12.5", "12.50", ".50", "12."). Every currency the portal
      *     can store is counted in hundredths (see "Hundredths" in the file
      *     header), so two places is all a stored amount can carry. "12.345" is
      *     REFUSED rather than rounded: rounding a figure somebody typed is
      *     deciding for them;
-     *   - commas as THOUSANDS separators, only in their right places
-     *     ("1,234.50", "1,234,567"). The giving and project boxes are plain text
-     *     and people type commas; bank statements write them. A comma anywhere
-     *     else is refused, so "12,50" is never read as 1,250.00;
-     *   - this currency's OWN symbol or code in front ("£12.50", "CHF 12.50",
-     *     "-£3.00", "£-3.00"), because the giving pages and bank statements
-     *     have always been allowed to carry one. ANOTHER currency's symbol is
-     *     refused ("$12.50" for pounds), where the old strip-everything code
-     *     took it as pounds. With no currency known (''), no symbol at all;
+     *   - NO commas, NO currency sign or code, NO letters, NO inner spaces:
+     *     "1,234.50", "£12.50" and "GBP 12.50" are refused with a plain sentence
+     *     asking for figures only;
      *   - a leading minus, ONLY when the caller passes `$allowNegative`;
-     *   - spaces at either end. A space INSIDE the number is refused.
-     * WHAT IT REFUSES: an empty box, a power of ten ("1e17"), a "+" sign,
-     * anything else that is not a figure, more than two decimals, a misplaced
-     * comma, a negative where none is allowed, and anything above `$max`,
-     * which the caller sets to what its column holds (INT_COLUMN_MAX, the
-     * default; DECIMAL_10_2_MAX for a DECIMAL(10,2) column) or to a lower
-     * limit of its own. The size test compares the FIGURES as text, so it is
-     * exact at any length. A currency not counted in hundredths is refused
-     * outright (whyNotChoosable()): its amounts cannot be stored correctly.
+     *   - spaces at either end are ignored.
+     *
+     * A FILE THE PORTAL READS (`$fromStatement = true`, the bank-statement
+     * import ONLY): D-152 leaves a statement's own number format alone, because
+     * that is how banks write it. In this mode the converter ALSO accepts
+     *   - commas between groups of three ("1,234.50", "1,234,567"), the first
+     *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
+     *     500.00 or 1,250.00;
+     *   - the import's OWN currency sign or code in front ("£12.50",
+     *     "GBP 12.50", "-£3.00", "£-3.00"). The importer has always allowed a
+     *     leading sign; another currency's sign is refused, where the importer's
+     *     old pattern took "$" or "€" in a pounds import as pounds.
+     *
+     * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
+     * sign, anything else that is not a figure, more than two decimals, a
+     * negative where none is allowed, and anything above `$max`, which the
+     * caller sets to what its column holds (INT_COLUMN_MAX, the default;
+     * DECIMAL_10_2_MAX for a DECIMAL(10,2) column) or to what its own pattern
+     * admits (it must never be lower than a limit checked AFTER it, or that
+     * check's own message is never reached). The size test compares the
+     * FIGURES as text, so it is exact at any length. A currency not counted in
+     * hundredths is refused outright (whyNotChoosable()).
      *
      * The sentence names no box: a caller with several puts the box's name in
      * front ("Purchase cost: …"). It uses nothing but PHP.
      */
-    public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false): int|string
+    public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false, bool $fromStatement = false): int|string
     {
         $code = strtoupper(trim($currency));
         if (isset(self::NOT_HUNDREDTHS[$code]) === true) {
@@ -574,37 +587,39 @@ final class Currency
             return self::REFUSED_EMPTY;
         }
 
-        // ➖ A minus sign and this currency's own symbol or code, in either
-        //    order: "-£3.00" (how format() writes it) and "£-3.00" (how the old
-        //    copies did). The longest prefix is tried first, so "CA$" before "$".
+        // ➖ A leading minus. In a statement, the import's own sign or code may
+        //    sit either side of it: "-£3.00" and "£-3.00". The longest prefix is
+        //    tried first, so "CA$" before "$". A typed box takes no sign at all.
         $negative = false;
         if (str_starts_with($text, '-') === true) {
             $negative = true;
             $text     = substr($text, 1);
         }
-        $prefixes = [];
-        if ($code !== '') {
-            $prefixes[] = $code;
+        if ($fromStatement === true && $code !== '') {
+            $prefixes = [$code];
             if (self::symbol($code) !== '') {
                 $prefixes[] = self::symbol($code);
             }
             usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-        }
-        foreach ($prefixes as $prefix) {
-            if (str_starts_with($text, $prefix) === true) {
-                $text = ltrim(substr($text, strlen($prefix)), ' ');
-                break;
+            foreach ($prefixes as $prefix) {
+                if (str_starts_with($text, $prefix) === true) {
+                    $text = ltrim(substr($text, strlen($prefix)), ' ');
+                    break;
+                }
+            }
+            if ($negative === false && str_starts_with($text, '-') === true) {
+                $negative = true;
+                $text     = substr($text, 1);
             }
         }
-        if ($negative === false && str_starts_with($text, '-') === true) {
-            $negative = true;
-            $text     = substr($text, 1);
-        }
 
-        // 🔍 What is left must be figures, commas and at most one point.
-        $notAnAmount = 'That is not an amount: type it in figures, with at most one decimal point, for example 12.50'
-            . (self::prefix($code) !== '' ? ' or ' . self::prefix($code) . '12.50' : '') . '.';
-        if (preg_match('/^[0-9,]*(\.[0-9]*)?$/D', $text) !== 1) {
+        // 🔍 What is left must be figures and at most one point (and, in a
+        //    statement, commas).
+        $notAnAmount = $fromStatement === true
+            ? 'That is not an amount: it should be figures, with at most one decimal point, for example 1,234.50.'
+            : self::REFUSED_NOT_FIGURES;
+        $shape = $fromStatement === true ? '/^[0-9,]*(\.[0-9]*)?$/D' : '/^[0-9]*(\.[0-9]*)?$/D';
+        if (preg_match($shape, $text) !== 1) {
             if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
                 return 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
             }
@@ -617,9 +632,9 @@ final class Currency
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
             return $notAnAmount;
         }
-        if (str_contains($whole, ',') === true && preg_match('/^[0-9]{1,3}(,[0-9]{3})+$/D', $whole) !== 1) {
-            return 'The commas in that amount are in the wrong places: use a point for the decimals (12.50), '
-                . 'and a comma only between thousands (1,234.50).';
+        if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
+            return 'The commas in that amount are in the wrong places: a comma may only separate groups of three '
+                . 'figures (1,234.50), and the decimals follow a point (12.50).';
         }
         if (strlen($fraction) > 2) {
             return 'An amount can have at most two figures after the decimal point, for example 12.50.';
@@ -636,7 +651,7 @@ final class Currency
             return 'The amount cannot be negative.';
         }
         if (self::figuresAbove($figures, $max) === true) {
-            return 'That amount is too large: the most that can be stored here is ' . self::format(max(0, $max), $code) . '.';
+            return self::REFUSED_TOO_LARGE_START . self::format(max(0, $max), $code) . '.';
         }
         $hundredths = (int) $figures;
 

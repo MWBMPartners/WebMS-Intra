@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             //    converter, Currency::parseAmount() (#1004): a figure that could
             //    not be read used to clear the rate without a word, and an absurd
             //    one wrapped through a float. A refusal is thrown to the catch
-            //    below, before anything is written. A number box: no symbol.
+            //    below, before anything is written. Figures only (D-152).
             $ratePence = null;
             if (trim($rate) !== '') {
                 $ratePence = \Portal\Core\Currency::parseAmount($rate, '');

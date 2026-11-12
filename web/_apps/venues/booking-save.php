@@ -70,7 +70,7 @@ switch ($action) {
         //    (#1004): `(int) round((float) $v * 100)` wrapped an absurd figure
         //    into a small or negative one, and stored "abc" as a cost of 0.00.
         //    A refused figure goes back to the form with nothing written. The
-        //    box is a number box, so no currency symbol is expected or passed.
+        //    box takes figures only (D-152); no currency is passed.
         $costPounds = trim((string) ($_POST['costPence'] ?? ''));
         $data = $_POST;
         $data['costPence'] = null;

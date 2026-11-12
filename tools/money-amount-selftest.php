@@ -9,32 +9,46 @@
  * absurd figure WRAPPED — "184467440737095557.12" was stored silently as 40.96,
  * "1e17" came out negative so the page said "Amount cannot be negative" (untrue),
  * "-1e30" came out as a large positive number. Portal\Core\Currency::parseAmount()
- * is now the ONE converter, and this test proves it two ways:
+ * is now the ONE converter, with two modes (the owner, D-152): a box a person
+ * types into takes FIGURES ONLY; the bank-statement import alone also reads a
+ * statement's commas between groups of three and the import's own currency
+ * sign. This test proves it:
  *
  *   A  the converter itself (no database), over a TABLE OF DIMENSIONS rather
- *      than a few examples: every count of figures before the point (1 to 20)
- *      against every count after it (0 to 4), each sign, each kind of
- *      exponent, each placement of commas, whitespace at each end and inside,
- *      the empty box, each maximum (an INT column, a DECIMAL(10,2) column, a
- *      caller's own) at exactly the limit and one hundredth over, the
- *      currency's own symbol and code against another's, non-ASCII figures,
- *      and every two-decimal amount from 0.00 to 99.99 for exactness; then
- *      parseHundredths() (the asset API's pence fields),
+ *      than a few examples, in BOTH modes: every count of figures before the
+ *      point (1 to 20) against every count after it (0 to 4), each sign, the
+ *      same figures grouped with commas (1 to 15 figures), each kind of
+ *      exponent, each placement of commas (a first group starting 0 included),
+ *      whitespace at each end and inside, the empty box, each maximum (an INT
+ *      column, a DECIMAL(10,2) column, a caller's own) at exactly the limit and
+ *      one hundredth over, the currency's own sign and code against another's,
+ *      non-ASCII figures, and every two-decimal amount from 0.00 to 99.99 for
+ *      exactness; then parseHundredths() (the asset API's pence fields),
  *      storedDecimalToHundredths() and hundredthsToDecimal();
  *   B  over real HTTP, the FOUR venue handlers the issue names — invoice save
  *      (new and edited), allocation, payment, agreement and booking — each
  *      posted the issue's three values. Each is refused with a TRUE message
  *      read back off the page, and the database is read to prove nothing was
- *      stored. Each handler is then posted an ordinary figure, which IS
- *      stored exactly: without that, "nothing stored" could mean a dead
- *      fixture rather than a refusal (#645's lesson).
+ *      stored;
+ *   C  each handler is then posted an ordinary figure, which IS stored
+ *      exactly: without that, "nothing stored" could mean a dead fixture
+ *      rather than a refusal (#645's lesson);
+ *   D  silent faults of the old code, and D-152's commas and signs, refused;
+ *   E  projects, a gift, a giving campaign and the AI cap, each refused once
+ *      and stored once;
+ *   F  an offering count refuses a figure it could save but never CLOSE (the
+ *      gift log is a signed INT), and a count at exactly the limit closes;
+ *   G  the bank-statement import: a statement's commas and own sign read, a
+ *      debit too large to store skipped and named rather than stopping the
+ *      file, and a bad cell refused with the converter's own reason.
  *
  * WHAT IT CANNOT SHOW, said plainly:
- *   - the other handlers moved onto the converter (giving, projects, payments,
- *     assets, resources, the AI and translation caps) are not driven here; the
- *     converter they call is the one section A tests, and
- *     tools/currency-selftest.php and tools/content-translation-selftest.php
- *     drive several of them over HTTP with ordinary figures;
+ *   - several handlers moved onto the converter are NOT driven here with a
+ *     refused figure: payments checkout, project pledges, resources, asset
+ *     save, maintenance and CSV import, the asset API, the giving pledge, and
+ *     the offering count's envelopes and "resolve". They call the converter
+ *     section A tests; tools/currency-selftest.php drives several of them
+ *     with ordinary figures only;
  *   - a browser: a number box would normally stop "1e17" being typed at all.
  *     A crafted request is exactly what reaches the handler, so that is what
  *     this posts.
@@ -110,8 +124,9 @@ use Portal\Core\Currency;
 
 const TOO_LARGE_INT = 'That amount is too large: the most that can be stored here is 21,474,836.47.';
 const POWER_OF_TEN  = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
-const NOT_AN_AMOUNT = 'That is not an amount: type it in figures, with at most one decimal point, for example 12.50.';
-const BAD_COMMAS    = 'The commas in that amount are in the wrong places: use a point for the decimals (12.50), and a comma only between thousands (1,234.50).';
+const FIGURES_ONLY  = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs or letters.';
+const STATEMENT_NOT_AN_AMOUNT = 'That is not an amount: it should be figures, with at most one decimal point, for example 1,234.50.';
+const BAD_COMMAS    = 'The commas in that amount are in the wrong places: a comma may only separate groups of three figures (1,234.50), and the decimals follow a point (12.50).';
 const TOO_PRECISE   = 'An amount can have at most two figures after the decimal point, for example 12.50.';
 const NEGATIVE      = 'The amount cannot be negative.';
 
@@ -141,33 +156,65 @@ function expectedFor(string $whole, string $fraction, bool $negative, int $max, 
 // =============================================================================
 // A. The converter, with no database
 // =============================================================================
-head('Section A — Currency::parseAmount() over a table of dimensions (no database)');
+head('Section A — Currency::parseAmount() over a table of dimensions, in both modes (no database)');
 
-// A1 — figures before the point (1-20) × figures after it (0-4) × sign, against
-// the INT maximum. Each figure is a 7, so 7777…, which crosses the INT limit at
-// ten figures before the point minus two: the table covers both sides of it.
+// The two modes (D-152): a box a person types into takes FIGURES ONLY; the
+// bank-statement import (`$fromStatement`) also reads commas between groups of
+// three and the import's own currency sign, because that is how banks write.
+$modes = ['typed' => false, 'statement' => true];
+
+// A1 — figures before the point (1-20) × figures after it (0-4) × sign × both
+// modes, against the INT maximum. Each figure is a 7, so 7777…, which crosses
+// the INT limit at eight figures before the point: the table covers both sides.
 $mismatches = [];
 $cells      = 0;
-foreach ([false, true] as $negative) {
-    foreach ([false, true] as $allowNegative) {
-        for ($w = 1; $w <= 20; $w++) {
-            for ($f = 0; $f <= 4; $f++) {
-                $whole    = str_repeat('7', $w);
-                $fraction = str_repeat('3', $f);
-                $text     = ($negative === true ? '-' : '') . $whole . ($f > 0 ? '.' . $fraction : '');
-                $want     = expectedFor($whole, $fraction, $negative, Currency::INT_COLUMN_MAX, $allowNegative);
-                $got      = Currency::parseAmount($text, '', Currency::INT_COLUMN_MAX, $allowNegative);
-                $same     = $want === 'too large' ? (is_string($got) === true && str_starts_with($got, 'That amount is too large')) : $got === $want;
-                $cells++;
-                if ($same === false) {
-                    $mismatches[] = $text . ($allowNegative === true ? ' (negatives allowed)' : '') . ' → ' . var_export($got, true) . ', wanted ' . var_export($want, true);
+foreach ($modes as $modeName => $fromStatement) {
+    foreach ([false, true] as $negative) {
+        foreach ([false, true] as $allowNegative) {
+            for ($w = 1; $w <= 20; $w++) {
+                for ($f = 0; $f <= 4; $f++) {
+                    $whole    = str_repeat('7', $w);
+                    $fraction = str_repeat('3', $f);
+                    $text     = ($negative === true ? '-' : '') . $whole . ($f > 0 ? '.' . $fraction : '');
+                    $want     = expectedFor($whole, $fraction, $negative, Currency::INT_COLUMN_MAX, $allowNegative);
+                    $got      = Currency::parseAmount($text, '', Currency::INT_COLUMN_MAX, $allowNegative, $fromStatement);
+                    $same     = $want === 'too large' ? (is_string($got) === true && str_starts_with($got, Currency::REFUSED_TOO_LARGE_START)) : $got === $want;
+                    $cells++;
+                    if ($same === false) {
+                        $mismatches[] = $modeName . ' ' . $text . ($allowNegative === true ? ' (negatives allowed)' : '') . ' → ' . var_export($got, true) . ', wanted ' . var_export($want, true);
+                    }
                 }
             }
         }
     }
 }
-check('A1 every count of figures before the point (1 to 20) against every count after it (0 to 4), with and without a minus, negatives allowed or not (' . $cells . ' cells): stored exactly when it fits, refused with the right reason when it does not',
-    $mismatches === [] && $cells === 400, implode(' | ', array_slice($mismatches, 0, 5)));
+check('A1 every count of figures before the point (1 to 20) against every count after it (0 to 4), with and without a minus, negatives allowed or not, in BOTH modes (' . $cells . ' cells): stored exactly when it fits, refused with the right reason when it does not',
+    $mismatches === [] && $cells === 800, implode(' | ', array_slice($mismatches, 0, 5)));
+
+// A1s — the same, with the figures before the point written in groups of three
+// with commas (1 to 15 figures, so 0 to 4 commas), in both modes: the
+// statement reads them exactly; a typed box refuses every one with the
+// figures-only sentence.
+$mismatches = [];
+$grouped    = 0;
+for ($w = 1; $w <= 15; $w++) {
+    for ($f = 0; $f <= 2; $f++) {
+        $whole    = str_repeat('4', $w);
+        $withCommas = strrev(implode(',', str_split(strrev($whole), 3)));
+        $text     = $withCommas . ($f > 0 ? '.' . str_repeat('6', $f) : '');
+        $want     = expectedFor($whole, str_repeat('6', $f), false, Currency::INT_COLUMN_MAX, false);
+        $gotS     = Currency::parseAmount($text, '', Currency::INT_COLUMN_MAX, false, true);
+        $gotT     = Currency::parseAmount($text, '');
+        $sameS    = $want === 'too large' ? (is_string($gotS) === true && str_starts_with($gotS, Currency::REFUSED_TOO_LARGE_START)) : $gotS === $want;
+        $sameT    = $w <= 3 ? $gotT === $gotS : $gotT === Currency::REFUSED_NOT_FIGURES;
+        $grouped++;
+        if ($sameS === false || $sameT === false) {
+            $mismatches[] = $text . ' → statement ' . var_export($gotS, true) . ', typed ' . var_export($gotT, true);
+        }
+    }
+}
+check('A1s figures written in groups of three with commas (1 to 15 figures, 0 to 4 commas, 0 to 2 decimals; ' . $grouped . ' cells): the STATEMENT mode reads each exactly; a TYPED box refuses every one that has a comma, with the figures-only sentence (D-152)',
+    $mismatches === [] && $grouped === 45, implode(' | ', array_slice($mismatches, 0, 5)));
 
 // A2 — the same table against the DECIMAL(10,2) maximum and a caller's own maximum.
 $mismatches = [];
@@ -178,7 +225,7 @@ foreach ([Currency::DECIMAL_10_2_MAX, 100000, 0] as $max) {
             $text  = $whole . ($f > 0 ? '.' . str_repeat('9', $f) : '');
             $want  = expectedFor($whole, str_repeat('9', $f), false, $max, false);
             $got   = Currency::parseAmount($text, '', $max);
-            $same  = $want === 'too large' ? (is_string($got) === true && str_starts_with($got, 'That amount is too large')) : $got === $want;
+            $same  = $want === 'too large' ? (is_string($got) === true && str_starts_with($got, Currency::REFUSED_TOO_LARGE_START)) : $got === $want;
             if ($same === false) {
                 $mismatches[] = $text . ' (max ' . $max . ') → ' . var_export($got, true);
             }
@@ -201,41 +248,71 @@ check('A3d the too-large sentence is written in the currency given: £21,474,836
     Currency::parseAmount('99999999999', 'GBP') === 'That amount is too large: the most that can be stored here is £21,474,836.47.'
     && Currency::parseAmount('99999999999', 'CHF') === 'That amount is too large: the most that can be stored here is CHF 21,474,836.47.');
 
-// A4 — the issue's three values, each with its TRUE reason.
-check('A4 the issue\'s three values: "184467440737095557.12" is TOO LARGE (it used to be stored as 40.96), "1e17" and "-1e30" are refused as powers of ten — never "cannot be negative" and never a number',
-    Currency::parseAmount('184467440737095557.12', '') === TOO_LARGE_INT
-    && Currency::parseAmount('1e17', '') === POWER_OF_TEN && Currency::parseAmount('-1e30', '') === POWER_OF_TEN
-    && Currency::parseAmount('-1e30', '', allowNegative: true) === POWER_OF_TEN,
+// A4 — the issue's three values, each with its TRUE reason, in both modes.
+$a4 = [];
+foreach ($modes as $fromStatement) {
+    $a4[] = Currency::parseAmount('184467440737095557.12', '', fromStatement: $fromStatement) === TOO_LARGE_INT;
+    $a4[] = Currency::parseAmount('1e17', '', fromStatement: $fromStatement) === POWER_OF_TEN;
+    $a4[] = Currency::parseAmount('-1e30', '', fromStatement: $fromStatement) === POWER_OF_TEN;
+    $a4[] = Currency::parseAmount('-1e30', '', allowNegative: true, fromStatement: $fromStatement) === POWER_OF_TEN;
+}
+check('A4 the issue\'s three values, in both modes: "184467440737095557.12" is TOO LARGE (it used to be stored as 40.96), "1e17" and "-1e30" are refused as powers of ten — never "cannot be negative" and never a number',
+    in_array(false, $a4, true) === false,
     var_export([Currency::parseAmount('184467440737095557.12', ''), Currency::parseAmount('1e17', ''), Currency::parseAmount('-1e30', '')], true));
 
-// A5 — exponents, every spelling.
+// A5 — exponents, every spelling, both modes.
 $exps = ['1e17', '1E17', '1e+17', '1e-2', '1.5e2', '.5e1', '1,000e3', '-1e30', '9e999'];
-$bad  = array_values(array_filter($exps, static fn (string $t): bool => Currency::parseAmount($t, '', allowNegative: true) !== POWER_OF_TEN));
-check('A5 a power of ten is refused in every spelling (' . implode(', ', $exps) . '), with the sentence that says so', $bad === [], implode(', ', $bad));
+$bad  = [];
+foreach ($modes as $modeName => $fromStatement) {
+    foreach ($exps as $t) {
+        if (Currency::parseAmount($t, '', allowNegative: true, fromStatement: $fromStatement) !== POWER_OF_TEN) {
+            $bad[] = $modeName . ' ' . $t;
+        }
+    }
+}
+check('A5 a power of ten is refused in every spelling (' . implode(', ', $exps) . '), in both modes, with the sentence that says so', $bad === [], implode(', ', $bad));
 
 // A6 — signs.
 check('A6 signs: "-3" is refused where negatives are not allowed ("cannot be negative") and is -300 where they are; "-0" and "-0.00" are 0 either way; "+5", "--5", "5-" and "- 5" are not amounts',
     Currency::parseAmount('-3', '') === NEGATIVE && Currency::parseAmount('-3', '', allowNegative: true) === -300
     && Currency::parseAmount('-0', '') === 0 && Currency::parseAmount('-0.00', '') === 0
-    && Currency::parseAmount('+5', '', allowNegative: true) === NOT_AN_AMOUNT && Currency::parseAmount('--5', '', allowNegative: true) === NOT_AN_AMOUNT
-    && Currency::parseAmount('5-', '', allowNegative: true) === NOT_AN_AMOUNT && Currency::parseAmount('- 5', '', allowNegative: true) === NOT_AN_AMOUNT);
+    && Currency::parseAmount('+5', '', allowNegative: true) === FIGURES_ONLY && Currency::parseAmount('--5', '', allowNegative: true) === FIGURES_ONLY
+    && Currency::parseAmount('5-', '', allowNegative: true) === FIGURES_ONLY && Currency::parseAmount('- 5', '', allowNegative: true) === FIGURES_ONLY);
 
 // A7 — the decimal point.
-check('A7 the point: "12." is 1200, ".5" is 50, ".05" is 5, "007.50" is 750; "." alone, "1.2.3", "12.345" and "0.001" are refused, the last two as too many decimals',
+check('A7 the point: "12." is 1200, ".5" is 50, ".05" is 5, "007.50" is 750; "." alone and "1.2.3" are refused as not figures, "12.345" and "0.001" as too many decimals',
     Currency::parseAmount('12.', '') === 1200 && Currency::parseAmount('.5', '') === 50 && Currency::parseAmount('.05', '') === 5
-    && Currency::parseAmount('007.50', '') === 750 && Currency::parseAmount('.', '') === NOT_AN_AMOUNT && Currency::parseAmount('1.2.3', '') === NOT_AN_AMOUNT
+    && Currency::parseAmount('007.50', '') === 750 && Currency::parseAmount('.', '') === FIGURES_ONLY && Currency::parseAmount('1.2.3', '') === FIGURES_ONLY
     && Currency::parseAmount('12.345', '') === TOO_PRECISE && Currency::parseAmount('0.001', '') === TOO_PRECISE);
 
-// A8 — thousands separators, every placement.
-$commasOk  = ['1,234' => 123400, '1,234.50' => 123450, '12,345,678.9' => 1234567890, '999,999' => 99999900];
-$commasBad = ['12,50', '1,23', '1,2345', ',123', '1,,234', '1234,567', '1,234,56', '12,345,6789'];
-$okWrong   = array_keys(array_filter($commasOk, static fn (int $want, string $t): bool => Currency::parseAmount($t, '') !== $want, ARRAY_FILTER_USE_BOTH));
-$badWrong  = array_values(array_filter($commasBad, static fn (string $t): bool => Currency::parseAmount($t, '') !== BAD_COMMAS));
-check('A8 commas: accepted only between thousands (' . implode(', ', array_keys($commasOk)) . '); refused anywhere else, a decimal comma "12,50" included, which the old code stored as 1,250.00',
+// A8 — thousands separators, every placement, both modes.
+$commasOk  = ['1,234' => 123400, '1,234.50' => 123450, '12,345,678.9' => 1234567890, '999,999' => 99999900, '100,000' => 10000000];
+$commasBad = ['12,50', '1,23', '1,2345', ',123', '1,,234', '1234,567', '1,234,56', '12,345,6789', '0,500', '00,500', '012,345', '0,000,001'];
+$okWrong   = [];
+$badWrong  = [];
+foreach ($commasOk as $t => $want) {
+    if (Currency::parseAmount($t, '', fromStatement: true) !== $want) {
+        $okWrong[] = 'statement ' . $t;
+    }
+    if (Currency::parseAmount($t, '') !== FIGURES_ONLY) {
+        $okWrong[] = 'typed ' . $t;
+    }
+}
+foreach ($commasBad as $t) {
+    if (Currency::parseAmount($t, '', fromStatement: true) !== BAD_COMMAS) {
+        $badWrong[] = 'statement ' . $t . ' → ' . var_export(Currency::parseAmount($t, '', fromStatement: true), true);
+    }
+    if (Currency::parseAmount($t, '') !== FIGURES_ONLY) {
+        $badWrong[] = 'typed ' . $t;
+    }
+}
+check('A8 commas: a TYPED box refuses every comma with the figures-only sentence (D-152); a STATEMENT reads them only between groups of three (' . implode(', ', array_keys($commasOk)) . ') and refuses them anywhere else, including a decimal comma "12,50" (the old code stored 1,250.00) and a first group starting with 0 ("0,500", "00,500", "012,345")',
     $okWrong === [] && $badWrong === [], json_encode([$okWrong, $badWrong]));
-check('A8b other separators are not amounts: "1 234", "1.234,50", "1_000", "1\'000"',
-    Currency::parseAmount('1 234', '') === NOT_AN_AMOUNT && Currency::parseAmount('1.234,50', '') === NOT_AN_AMOUNT
-    && Currency::parseAmount('1_000', '') === NOT_AN_AMOUNT && Currency::parseAmount("1'000", '') === NOT_AN_AMOUNT);
+check('A8b other separators are not amounts, in either mode: "1 234", "1.234,50", "1_000", "1\'000"',
+    Currency::parseAmount('1 234', '') === FIGURES_ONLY && Currency::parseAmount('1.234,50', '') === FIGURES_ONLY
+    && Currency::parseAmount('1_000', '') === FIGURES_ONLY && Currency::parseAmount("1'000", '') === FIGURES_ONLY
+    && Currency::parseAmount('1 234', '', fromStatement: true) === STATEMENT_NOT_AN_AMOUNT && Currency::parseAmount('1.234,50', '', fromStatement: true) === STATEMENT_NOT_AN_AMOUNT
+    && Currency::parseAmount('1_000', '', fromStatement: true) === STATEMENT_NOT_AN_AMOUNT && Currency::parseAmount("1'000", '', fromStatement: true) === STATEMENT_NOT_AN_AMOUNT);
 
 // A9 — whitespace and the empty box.
 check('A9 spaces, tabs and line breaks at either end are ignored ("  12.50 ", "\t7\n"); an empty or blank box answers "No amount was entered."',
@@ -243,34 +320,58 @@ check('A9 spaces, tabs and line breaks at either end are ignored ("  12.50 ", "\
     && Currency::parseAmount('', '') === Currency::REFUSED_EMPTY && Currency::parseAmount("  \t ", '') === Currency::REFUSED_EMPTY
     && Currency::REFUSED_EMPTY === 'No amount was entered.');
 
-// A10 — the currency's own symbol and code, and another's.
-check('A10 the currency\'s OWN symbol or code is accepted in front, with the minus either side: "£12.50", "GBP 12.50", "-£3.00", "£-3.00" (negatives allowed), "CHF 3", "CA$5"',
-    Currency::parseAmount('£12.50', 'GBP') === 1250 && Currency::parseAmount('GBP 12.50', 'GBP') === 1250
-    && Currency::parseAmount('-£3.00', 'GBP', allowNegative: true) === -300 && Currency::parseAmount('£-3.00', 'GBP', allowNegative: true) === -300
-    && Currency::parseAmount('CHF 3', 'CHF') === 300 && Currency::parseAmount('CA$5', 'CAD') === 500);
-check('A10b ANOTHER currency\'s symbol is refused ("$12.50" for pounds, "£12.50" for euros), and with no currency known no symbol is accepted at all — the old code took "$12" as pounds',
-    is_string(Currency::parseAmount('$12.50', 'GBP')) === true && is_string(Currency::parseAmount('£12.50', 'EUR')) === true
-    && is_string(Currency::parseAmount('£12.50', '')) === true && is_string(Currency::parseAmount('$5', 'CAD')) === true);
-check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar)',
-    Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD'));
-check('A10d the not-an-amount sentence offers the currency\'s own way of writing it when there is one ("for example 12.50 or £12.50.")',
-    Currency::parseAmount('abc', 'GBP') === 'That is not an amount: type it in figures, with at most one decimal point, for example 12.50 or £12.50.');
+// A10 — the currency's own sign and code, and another's, both modes.
+$ownForms = [['£12.50', 'GBP', 1250], ['GBP 12.50', 'GBP', 1250], ['GBP12.50', 'GBP', 1250], ['-£3.00', 'GBP', -300], ['£-3.00', 'GBP', -300],
+    ['CHF 3', 'CHF', 300], ['CA$5', 'CAD', 500], ['€1,234.50', 'EUR', 123450]];
+$wrong = [];
+foreach ($ownForms as [$t, $code, $want]) {
+    if (Currency::parseAmount($t, $code, allowNegative: true, fromStatement: true) !== $want) {
+        $wrong[] = 'statement ' . $t;
+    }
+    if (Currency::parseAmount($t, $code, allowNegative: true) !== FIGURES_ONLY) {
+        $wrong[] = 'typed ' . $t . ' → ' . var_export(Currency::parseAmount($t, $code, allowNegative: true), true);
+    }
+}
+check('A10 the record\'s OWN sign or code ("£12.50", "GBP 12.50", "GBP12.50", "-£3.00", "£-3.00", "CHF 3", "CA$5", "€1,234.50"): a TYPED box refuses every one with the figures-only sentence (D-152); a STATEMENT reads each exactly',
+    $wrong === [], implode(' | ', $wrong));
+$other = [['$12.50', 'GBP'], ['£12.50', 'EUR'], ['£12.50', ''], ['$5', 'CAD'], ['USD 5', 'GBP']];
+$wrong = [];
+foreach ($other as [$t, $code]) {
+    if (is_int(Currency::parseAmount($t, $code, fromStatement: true)) === true || is_int(Currency::parseAmount($t, $code)) === true) {
+        $wrong[] = $t . ' in ' . ($code === '' ? 'no currency' : $code);
+    }
+}
+check('A10b ANOTHER currency\'s sign or code is refused in BOTH modes ("$12.50" for pounds, "£12.50" for euros, "USD 5" for pounds), and with no currency known no sign is read at all — the old bank import took "$" or "€" as pounds',
+    $wrong === [], implode(', ', $wrong));
+check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar), in both modes',
+    Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD')
+    && Currency::parseAmount('5', 'JPY', fromStatement: true) === Currency::whyNotChoosable('JPY'));
+check('A10d the two "not figures" sentences: a typed box asks for figures only and names commas, spaces, signs and letters (D-152); a statement says what the cell should look like',
+    Currency::parseAmount('abc', 'GBP') === 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs or letters.'
+    && Currency::parseAmount('abc', 'GBP', fromStatement: true) === 'That is not an amount: it should be figures, with at most one decimal point, for example 1,234.50.');
 
 // A11 — anything else that is not a figure.
 $odd = ['abc', '0x10', '１２', '١٢', '12abc', 'NaN', 'INF', '1/2', '½', '12 50', "12\x0050"];
-$bad = array_values(array_filter($odd, static fn (string $t): bool => is_int(Currency::parseAmount($t, ''))));
-check('A11 nothing else is a number: letters, hex, full-width and Arabic-Indic figures, NaN, INF, fractions, an inner space or NUL', $bad === [], json_encode($bad));
+$bad = [];
+foreach ($modes as $modeName => $fromStatement) {
+    foreach ($odd as $t) {
+        if (is_int(Currency::parseAmount($t, 'GBP', fromStatement: $fromStatement)) === true) {
+            $bad[] = $modeName . ' ' . json_encode($t);
+        }
+    }
+}
+check('A11 nothing else is a number, in either mode: letters, hex, full-width and Arabic-Indic figures, NaN, INF, fractions, an inner space or NUL', $bad === [], implode(', ', $bad));
 
 // A12 — exactness: every two-decimal amount 0.00 to 99.99 (the range where a
 // float most often lands a hair below the hundredth, e.g. 19.99 * 100).
 $inexact = 0;
 for ($pence = 0; $pence <= 9999; $pence++) {
     $text = intdiv($pence, 100) . '.' . str_pad((string) ($pence % 100), 2, '0', STR_PAD_LEFT);
-    if (Currency::parseAmount($text, '') !== $pence) {
+    if (Currency::parseAmount($text, '') !== $pence || Currency::parseAmount($text, '', fromStatement: true) !== $pence) {
         $inexact++;
     }
 }
-check('A12 every two-decimal amount from 0.00 to 99.99 (10,000 of them) comes back as exactly its number of hundredths', $inexact === 0, $inexact . ' wrong');
+check('A12 every two-decimal amount from 0.00 to 99.99 (10,000 of them) comes back as exactly its number of hundredths, in both modes', $inexact === 0, $inexact . ' wrong');
 
 // A13 — the API's pence fields.
 check('A13 parseHundredths() (the asset API): 89999 and "89999" are 89999, "007" is 7, 0 is 0, 2147483647 fits; 2147483648, "18446744073709555712", 899.5, 1e3 (a float), -1, "-1", "1e3", true, null and a list are refused',
@@ -295,9 +396,9 @@ check('A15 hundredthsToDecimal() writes the text a DECIMAL column takes: 123450 
     Currency::hundredthsToDecimal(123450) === '1234.50' && Currency::hundredthsToDecimal(5) === '0.05' && Currency::hundredthsToDecimal(-5) === '-0.05'
     && Currency::hundredthsToDecimal(0) === '0.00' && Currency::hundredthsToDecimal(9999999999) === '99999999.99');
 
-// A16 — the two counts this table rests on are pinned, so a shrunken table goes red.
-check('A16 the table is the size it says: 400 cells in A1 and 10,000 amounts in A12 (a loop narrowed by one edit would otherwise pass quietly)',
-    $cells === 400 && $pence === 10000);
+// A16 — the counts this table rests on are pinned, so a shrunken table goes red.
+check('A16 the tables are the size they say: 800 cells in A1, 45 in A1s and 10,000 amounts in A12 (a loop narrowed by one edit would otherwise pass quietly)',
+    $cells === 800 && $grouped === 45 && $pence === 10000);
 
 if (getenv('MONEY_SELFTEST_UNIT_ONLY') === '1') {
     echo "\nMONEY_SELFTEST_UNIT_ONLY=1: section B (over HTTP) was NOT run.\n";
@@ -657,9 +758,9 @@ head('Section C — the same posts with ordinary figures are stored exactly (so 
 $http('POST', ...$posts['an EDITED invoice (venues/invoice-save, save)']('412.50'));
 $inv = rows($db, 'SELECT `amountPence`, `invoiceRef` FROM `tblVenueInvoices` WHERE `invoiceID` = ?', 'i', [$invoice])[0] ?? [];
 check('C1 an edited invoice of "412.50" is stored as 41250', (int) ($inv['amountPence'] ?? 0) === 41250 && ($inv['invoiceRef'] ?? '') === 'MONEY-EDITED', json_encode($inv));
-$http('POST', ...$posts['a NEW invoice (venues/invoice-save, save)']('1,234.56'));
+$http('POST', ...$posts['a NEW invoice (venues/invoice-save, save)']('1234.56'));
 $new = rows($db, "SELECT `amountPence` FROM `tblVenueInvoices` WHERE `venueID` = ? AND `invoiceRef` = 'MONEY-NEW'", 'i', [$venue]);
-check('C2 a new invoice of "1,234.56" (thousands comma) is stored once, as 123456', count($new) === 1 && (int) $new[0]['amountPence'] === 123456, json_encode($new));
+check('C2 a new invoice of "1234.56" is stored once, as 123456', count($new) === 1 && (int) $new[0]['amountPence'] === 123456, json_encode($new));
 $http('POST', ...$posts['an allocation (venues/invoice-save, allocate)']('10.00'));
 $lines = rows($db, 'SELECT `amountPence` FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ?', 'i', [$invoice]);
 check('C3 an allocation of "10.00" is stored as 1000', count($lines) === 1 && (int) $lines[0]['amountPence'] === 1000, json_encode($lines));
@@ -681,11 +782,17 @@ head('Section D — two silent faults of the old code, refused now');
 $before = $snapshot();
 $page   = $flashAfter($http('POST', ...$posts['an allocation (venues/invoice-save, allocate)']('abc')));
 check('D1 an allocation amount that is not a figure ("abc") is refused, where it used to become "no amount" without a word',
-    str_contains($page, 'That is not an amount') === true && $snapshot() === $before);
+    str_contains($page, FIGURES_ONLY) === true && $snapshot() === $before);
 $before = $snapshot();
 $page   = $flashAfter($http('POST', ...$posts['an EDITED agreement\'s rate (venues/agreement-save)']('12,50')));
-check('D2 an agreement rate written with a decimal comma ("12,50") is refused with the reason, where the old code CLEARED the stored rate without a word',
-    str_contains($page, BAD_COMMAS) === true && $snapshot() === $before);
+check('D2 an agreement rate written with a decimal comma ("12,50") is refused, asking for figures only, where the old code CLEARED the stored rate without a word',
+    str_contains($page, 'Rate: ' . FIGURES_ONLY) === true && $snapshot() === $before);
+foreach (['D3' => '1,234.50', 'D3b' => '£12.50', 'D3c' => 'GBP 12.50'] as $label => $typed) {
+    $before = $snapshot();
+    $page   = $flashAfter($http('POST', ...$posts['a payment (venues/invoice-payment-save)']($typed)));
+    check($label . ' a payment typed as "' . $typed . '" is refused with the figures-only sentence (D-152), and nothing is stored',
+        str_contains($page, FIGURES_ONLY) === true && $snapshot() === $before);
+}
 
 // =============================================================================
 // E. Four of the other boxes moved onto the converter, over HTTP
@@ -698,7 +805,7 @@ $setting = static function (string $key, string $value) use ($db): void {
     run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
     run($db, "INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, '', 0)", 'ss', [$key, $value]);
 };
-$touched = ['org.currency', 'giving.enabled', 'ai_assist.enabled', 'ai_assist.monthCapPence', 'ai_assist.provider', 'ai_assist.userDailyCap', 'ai_assist.audience',
+$touched = ['org.currency', 'giving.enabled', 'giving.countRequiresTwoCounters', 'ai_assist.enabled', 'ai_assist.monthCapPence', 'ai_assist.provider', 'ai_assist.userDailyCap', 'ai_assist.audience',
     'ai_assist.anthropic.model', 'ai_assist.openai.model', 'ai_assist.local.baseUrl', 'ai_assist.local.model'];
 $marks = implode(',', array_fill(0, count($touched), '?'));
 $settingsBefore = rows($db, "SELECT * FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` IN ({$marks})", str_repeat('s', count($touched)), $touched);
@@ -713,8 +820,13 @@ register_shutdown_function(static function () use ($db, $settingsBefore, $touche
             run($db, 'DELETE FROM `tblProject` WHERE `projectID` = ?', 'i', [(int) $r['projectID']]);
         }
         run($db, "DELETE FROM `tblPledgeCampaigns` WHERE `siteID` = ? AND `name` = 'Money selftest fund'", 'i', [$site]);
+        foreach (rows($db, "SELECT `importID` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site]) as $r) {
+            run($db, 'DELETE FROM `tblBankTxns` WHERE `importID` = ?', 'i', [(int) $r['importID']]);
+            run($db, 'DELETE FROM `tblBankImports` WHERE `importID` = ?', 'i', [(int) $r['importID']]);
+        }
         foreach (rows($db, "SELECT `categoryID` FROM `tblGivingCategory` WHERE `siteID` = ? AND `name` = 'Money selftest category'", 'i', [$site]) as $r) {
             run($db, 'DELETE FROM `tblGivingEntry` WHERE `categoryID` = ?', 'i', [(int) $r['categoryID']]);
+            run($db, 'DELETE FROM `tblCountSessions` WHERE `categoryID` = ?', 'i', [(int) $r['categoryID']]);
             run($db, 'DELETE FROM `tblGivingCategory` WHERE `categoryID` = ?', 'i', [(int) $r['categoryID']]);
         }
     } catch (Throwable $e) {
@@ -734,8 +846,11 @@ $project  = static fn (string $amount): array => $http('POST', '/projects/manage
 $page = $flashAfter($project('1e17'));
 check('E1 a project target of "1e17" is refused with the power-of-ten sentence, and no project is made',
     str_contains($page, 'Target amount: ' . POWER_OF_TEN) === true && $projects() === [], json_encode($projects()));
-$project('1,500.00');
-check('E1b a project target of "1,500.00" is stored as 150000', array_map('intval', array_column($projects(), 'targetAmountPence')) === [150000], json_encode($projects()));
+$page = $flashAfter($project('1,500.00'));
+check('E1b a project target of "1,500.00" (a thousands comma) is refused with the figures-only sentence (D-152), and no project is made',
+    str_contains($page, 'Target amount: ' . FIGURES_ONLY) === true && $projects() === [], json_encode($projects()));
+$project('1500.00');
+check('E1c a project target of "1500.00" is stored as 150000', array_map('intval', array_column($projects(), 'targetAmountPence')) === [150000], json_encode($projects()));
 
 $gifts = static fn (): array => rows($db, 'SELECT `amountPence` FROM `tblGivingEntry` WHERE `categoryID` = ?', 'i', [$category]);
 $gift  = static fn (string $amount): array => $http('POST', '/giving/entry-save', ['csrf_token' => $freshToken('/giving/manage'),
@@ -743,8 +858,11 @@ $gift  = static fn (string $amount): array => $http('POST', '/giving/entry-save'
 $page = $flashAfter($gift('184467440737095557.12'));
 check('E2 a gift of "184467440737095557.12" is refused as too large (in pounds: £21,474,836.47), and no gift is stored — the old code stored 40.96',
     str_contains($page, 'Amount: That amount is too large: the most that can be stored here is £21,474,836.47.') === true && $gifts() === [], json_encode($gifts()));
-$gift('£12.50');
-check('E2b a gift typed with the organisation\'s own symbol, "£12.50", is stored as 1250', array_map('intval', array_column($gifts(), 'amountPence')) === [1250], json_encode($gifts()));
+$page = $flashAfter($gift('£12.50'));
+check('E2b a gift typed with the organisation\'s own sign, "£12.50", is refused with the figures-only sentence (D-152), and no gift is stored',
+    str_contains($page, 'Amount: ' . FIGURES_ONLY) === true && $gifts() === [], json_encode($gifts()));
+$gift('12.50');
+check('E2c a gift of "12.50" is stored as 1250', array_map('intval', array_column($gifts(), 'amountPence')) === [1250], json_encode($gifts()));
 
 $campaigns = static fn (): array => rows($db, "SELECT `goalAmountPence` FROM `tblPledgeCampaigns` WHERE `siteID` = ? AND `name` = 'Money selftest fund'", 'i', [$site]);
 $campaign  = static fn (string $amount): array => $http('POST', '/giving/campaign-save', ['csrf_token' => $freshToken('/giving/campaigns'),
@@ -753,10 +871,10 @@ $page = $flashAfter($campaign('-1e30'));
 check('E3 a campaign goal of "-1e30" is refused with the power-of-ten sentence, and no campaign is made',
     str_contains($page, 'Goal amount: ' . POWER_OF_TEN) === true && $campaigns() === [], json_encode($campaigns()));
 $page = $flashAfter($campaign('12,50'));
-check('E3b a campaign goal with a decimal comma, "12,50", is refused with the comma sentence — the old code made a goal of 1,250.00',
-    str_contains($page, 'Goal amount: ' . BAD_COMMAS) === true && $campaigns() === [], json_encode($campaigns()));
-$campaign('5,000');
-check('E3c a campaign goal of "5,000" is stored as 500000', array_map('intval', array_column($campaigns(), 'goalAmountPence')) === [500000], json_encode($campaigns()));
+check('E3b a campaign goal with a decimal comma, "12,50", is refused with the figures-only sentence — the old code made a goal of 1,250.00',
+    str_contains($page, 'Goal amount: ' . FIGURES_ONLY) === true && $campaigns() === [], json_encode($campaigns()));
+$campaign('5000');
+check('E3c a campaign goal of "5000" is stored as 500000', array_map('intval', array_column($campaigns(), 'goalAmountPence')) === [500000], json_encode($campaigns()));
 
 $cap = static fn (): string => (string) (rows($db, "SELECT `settingValue` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` = 'ai_assist.monthCapPence'")[0]['settingValue'] ?? '');
 $ai  = static fn (string $amount): array => $http('POST', '/admin/ai-assist/save', ['csrf_token' => $freshToken('/admin/ai-assist'),
@@ -769,6 +887,81 @@ check('E4b an EMPTY AI cap is refused ("No amount was entered."), where the old 
     str_contains($page, 'Monthly cap: No amount was entered.') === true && $cap() === '5000', 'stored ' . $cap());
 $ai('12.34');
 check('E4c an AI cap of "12.34" is stored as 1234', $cap() === '1234', 'stored ' . $cap());
+
+// =============================================================================
+// F. An offering count: a figure it can save, it can also CLOSE
+// =============================================================================
+// Closing a count writes each bucket and each envelope WHOLE into
+// tblGivingEntry.amountPence, a signed INT. Round 1 capped the count boxes at
+// their own DECIMAL(10,2) column (99,999,999.99), so a figure above
+// 21,474,836.47 saved and then made the count impossible to close.
+head('Section F — an offering count refuses a figure it could never close, and closes one at the limit');
+$setting('giving.countRequiresTwoCounters', 'false');
+run($db, "INSERT INTO `tblCountSessions` (`siteID`, `serviceDate`, `categoryID`, `status`, `currency`) VALUES (?, CURDATE(), ?, 'counting', 'GBP')", 'ii', [$site, $category]);
+$count = (int) $db->insert_id;
+$countRow = static fn (): array => rows($db, 'SELECT `cashTotal1`, `cashTotal`, `status` FROM `tblCountSessions` WHERE `countSessionID` = ?', 'i', [$count])[0] ?? [];
+$countPost = static fn (string $cash): array => $http('POST', '/giving/count/save', ['csrf_token' => $freshToken('/giving/count/session?id=' . $count),
+    'action' => 'count', 'countSessionID' => (string) $count, 'slot' => '1', 'cashAmount' => $cash, 'chequeAmount' => '0', 'envelopeAmount' => '0']);
+foreach (['F1' => '21474836.48', 'F1b' => '99999999.99'] as $label => $typed) {
+    $page = $flashAfter($countPost($typed));
+    check($label . ' a cash total of "' . $typed . '" (it fits the DECIMAL(10,2) column but not the gift log it is closed into) is refused, saying the most is £21,474,836.47, and nothing is saved',
+        str_contains($page, 'Cash total: That amount is too large: the most that can be stored here is £21,474,836.47.') === true
+        && array_key_exists('cashTotal1', $countRow()) === true && $countRow()['cashTotal1'] === null,
+        json_encode($countRow()) . (preg_match('/alert-[a-z]+">([^<]*)/', $page, $mm) === 1 ? '; said: ' . $mm[1] : '; no alert'));
+}
+$countPost('21474836.47');
+check('F2 a cash total of exactly "21474836.47" is saved and agreed (single-counter mode)',
+    ($countRow()['cashTotal1'] ?? '') === '21474836.47' && ($countRow()['cashTotal'] ?? '') === '21474836.47', json_encode($countRow()));
+$closed = $flashAfter($http('POST', '/giving/count/close', ['csrf_token' => $freshToken('/giving/count/session?id=' . $count), 'countSessionID' => (string) $count]));
+$logged = array_map('intval', array_column(rows($db, "SELECT `amountPence` FROM `tblGivingEntry` WHERE `reference` = CONCAT('Count #', ?) ORDER BY `entryID`", 'i', [$count]), 'amountPence'));
+check('F3 and that count CAN be closed: it is closed and the gift log holds 2147483647, the INT column\'s most',
+    ($countRow()['status'] ?? '') === 'closed' && in_array(2147483647, $logged, true) === true && str_contains($closed, 'Count session closed') === true,
+    json_encode([$countRow(), $logged]));
+
+// =============================================================================
+// G. The bank-statement import reads a statement's own number format (D-152)
+// =============================================================================
+head('Section G — the bank-statement import: commas and its own sign read, a huge debit skipped and named, a bad cell refused with its reason');
+$upload = static function (string $name, string $csv) use ($port, $jar, $child, $freshToken): array {
+    $file = $child . DIRECTORY_SEPARATOR . $name;
+    file_put_contents($file, $csv);
+    $handle = curl_init('http://127.0.0.1:' . $port . '/giving/reconcile/import');
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60,
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => ['csrf_token' => $freshToken('/giving/reconcile/import'), 'action' => 'upload', 'csv_file' => new CURLFile($file, 'text/csv', $name)],
+    ]);
+    $raw  = (string) curl_exec($handle);
+    $head = substr($raw, 0, (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE));
+
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $mm) === 1 ? $mm[1] : ''];
+};
+$statement = "Date,Description,Amount\n"
+    . "01/11/2026,Money selftest gift A,\"1,234.50\"\n"
+    . "02/11/2026,Money selftest gift B,£12.50\n"
+    . "03/11/2026,Money selftest rent,-99999999999.00\n"
+    . "04/11/2026,Money selftest small debit,-5.00\n"
+    . "05/11/2026,Money selftest gift C,\"-£0.00\"\n";
+$preview = $flashAfter($upload('money-selftest-' . bin2hex(random_bytes(4)) . '.csv', $statement));
+check('G1 a statement with "1,234.50" and "£12.50" credits previews TWO credits worth £1,247.00 — the statement\'s own commas and the import\'s own sign are read (D-152 leaves a file\'s format alone)',
+    preg_match('/<strong>2<\/strong>\s*credits,\s*£1,247\.00/', $preview) === 1, mb_substr(preg_replace('/\s+/', ' ', strip_tags($preview)) ?? '', 0, 600));
+check('G2 a debit too large to store ("-99999999999.00") does NOT stop the import: it is skipped with the other debits (3 skipped) and NAMED, as round 1 would have refused the whole file over it',
+    str_contains($preview, '3 skipped') === true
+    && str_contains($preview, 'Row 4: a debit of "-99999999999.00" is larger than the portal can store; it was skipped, as every debit is.') === true);
+$confirm = $http('POST', '/giving/reconcile/import', ['csrf_token' => $freshToken('/giving/reconcile/import'), 'action' => 'confirm']);
+$importId = (int) (rows($db, "SELECT MAX(`importID`) AS `m` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['m'] ?? 0);
+$txns = array_map('intval', array_column(rows($db, 'SELECT `amountPence` FROM `tblBankTxns` WHERE `importID` = ? ORDER BY `txnID`', 'i', [$importId]), 'amountPence'));
+check('G3 confirmed, the two credits are stored exactly: 123450 and 1250', $txns === [123450, 1250], 'HTTP ' . $confirm['status'] . '; ' . json_encode($txns));
+foreach (['G4' => ['0,500', 'the amount "0,500" was not read. ' . BAD_COMMAS],
+          'G4b' => ['$5.00', 'the amount "$5.00" was not read. ' . STATEMENT_NOT_AN_AMOUNT],
+          'G4c' => ['1e17', 'the amount "1e17" was not read. ' . POWER_OF_TEN]] as $label => [$cell, $said]) {
+    $before = rows($db, "SELECT COUNT(*) AS `n` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['n'];
+    $page   = $flashAfter($upload('money-selftest-' . bin2hex(random_bytes(4)) . '.csv', "Date,Description,Amount\n01/11/2026,Money selftest,\"{$cell}\"\n"));
+    $http('POST', '/giving/reconcile/import', ['csrf_token' => $freshToken('/giving/reconcile/import'), 'action' => 'cancel']);
+    $after  = rows($db, "SELECT COUNT(*) AS `n` FROM `tblBankImports` WHERE `siteID` = ? AND `filename` LIKE 'money-selftest-%'", 'i', [$site])[0]['n'];
+    check($label . ' a credit cell "' . $cell . '" stops the file with the CONVERTER\'s own reason — "Row 2: ' . $said . '" — never a blanket "unparseable", and nothing is imported',
+        str_contains($page, 'Row 2: ' . $said) === true && $after === $before, mb_substr(preg_replace('/\s+/', ' ', strip_tags($page)) ?? '', 0, 600));
+}
 
 echo "\n{$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

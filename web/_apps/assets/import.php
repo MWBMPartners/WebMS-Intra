@@ -323,11 +323,13 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     }
 
     // 💷 purchaseCostPounds → purchaseCostPence through the ONE converter,
-    //    Currency::parseAmount() (#1004), in the organisation's currency (the
-    //    rows are made in it). It accepts that currency's own symbol and
-    //    thousands commas in their right places. It used to strip "£", "$",
-    //    "€", every comma and every space and go through a float, so "$12" was
-    //    taken as pounds, "12,50" as 1,250.00, and an absurd figure wrapped.
+    //    Currency::parseAmount() (#1004): FIGURES ONLY, as in a typed box
+    //    (D-152 names only the bank-statement import as reading a file's own
+    //    number format; whether a spreadsheet of assets should too is asked on
+    //    #1004). It used to strip "£", "$", "€", every comma and every space
+    //    and go through a float, so "$12" was taken as pounds, "12,50" as
+    //    1,250.00, and an absurd figure wrapped. The organisation's currency
+    //    is passed so a "too large" refusal is written in it.
     $costRaw           = $get('purchaseCostPounds');
     $purchaseCostPence = null;
     if ($costRaw !== '') {

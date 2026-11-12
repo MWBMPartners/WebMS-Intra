@@ -78,7 +78,8 @@ $userId   = (int) ($_SESSION['user_id'] ?? 0);
 $currency = \Portal\Core\Currency::ofSite();
 
 // 💷 The typed gift is read by the ONE converter, Currency::parseAmount()
-//    (#1004), in the organisation's currency (so "£12.50" or "1,000" are fine).
+//    (#1004): figures only (D-152), so "£12.50" and "1,000" are refused with
+//    a plain sentence asking for figures.
 //    It used to strip every character that was not a figure or a point and go
 //    through a float: "1e5" became 15.00, "-5" became 5.00, "12,50" became
 //    1,250.00, and an absurd figure wrapped. Its maximum is what the payment's

@@ -103,7 +103,7 @@ $action = (string) ($_POST['action'] ?? 'add');
 // never a float: `(int) round((float) $v * 100)` wrapped an absurd figure into
 // a small or negative one, and text that was not a figure used to become "no
 // cost" without a word. A refused figure goes back with the reason, and
-// nothing is saved. A number box, so no currency symbol is passed.
+// nothing is saved. Figures only (D-152); no currency is passed.
 // -----------------------------------------------------------------------
 $costPosted    = $_POST['costPounds'] ?? '';
 $costPoundsRaw = is_string($costPosted) === true ? trim($costPosted) : '';

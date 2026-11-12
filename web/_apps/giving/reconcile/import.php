@@ -22,7 +22,8 @@
  *   action=cancel  — discards the in-progress upload.
  *
  * Credits (money in) ONLY are ever imported — debit/zero/blank lines are
- * silently skipped (counted); any OTHER malformed cell (a non-empty credit
+ * skipped and counted (a debit too large to store is also named under the
+ * count, #1004); any OTHER malformed cell (a non-empty credit
  * that isn't a parseable amount, or an unparseable date) fails the WHOLE
  * upload, because silently dropping a bad credit would corrupt the
  * reconciliation. Partial imports are not possible by design.
@@ -238,37 +239,38 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
         }
     }
 
-    // 💷 Amount → pence (credits only; debit/zero/blank silently skipped),
-    //    through the ONE converter, Currency::parseAmount() (#1004), in the
-    //    import's currency, negatives allowed so a debit can be recognised and
-    //    skipped. It used to accept "£", "$" or "€" whatever the import's
-    //    currency, commas anywhere ("12,50" became 1,250.00), and go through a
-    //    float. Spaces are still taken out first, as before: banks write them.
-    if ($mode === 'credit') {
-        $creditCell = (string) $get($mapping['credit']);
-        if ($creditCell === '') {
-            return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
+    // 💷 Amount → pence (credits only; debit/zero/blank skipped), through the
+    //    ONE converter, Currency::parseAmount() (#1004), in its STATEMENT mode:
+    //    a file the portal reads keeps the bank's own number format (D-152), so
+    //    commas between groups of three and the import's own currency sign are
+    //    read; negatives are allowed so a debit can be recognised and skipped.
+    //    It used to accept "£", "$" or "€" whatever the import's currency,
+    //    commas anywhere ("12,50" became 1,250.00), and go through a float.
+    //    Spaces are still taken out first, as before: banks write them.
+    $cellName = $mode === 'credit' ? 'credit amount' : 'amount';
+    $cell     = (string) $get($mode === 'credit' ? $mapping['credit'] : $mapping['amount']);
+    if ($cell === '') {
+        return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
+    }
+    $cleaned = str_replace(' ', '', $cell);
+    $pence   = \Portal\Core\Currency::parseAmount($cleaned, $currency, \Portal\Core\Currency::INT_COLUMN_MAX, true, true);
+    if (is_string($pence) === true) {
+        // ➖ A DEBIT too large to store is still a debit, and debits are never
+        //    imported: it is skipped like every other debit, and said, rather
+        //    than stopping the whole import over a line that would never have
+        //    been kept. The converter has already found the text well formed
+        //    (the refusal is about size), so a minus before the first figure
+        //    means the line is money going out.
+        if (str_starts_with($pence, \Portal\Core\Currency::REFUSED_TOO_LARGE_START) === true && preg_match('/^[^0-9]*-/', $cleaned) === 1) {
+            return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null,
+                'note' => 'Row ' . $rowNum . ': a debit of "' . $cell . '" is larger than the portal can store; it was skipped, as every debit is.'];
         }
-        $pence = \Portal\Core\Currency::parseAmount(str_replace(' ', '', $creditCell), $currency, \Portal\Core\Currency::INT_COLUMN_MAX, true);
-        if (is_string($pence) === true) {
-            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable credit amount "' . $creditCell . '". ' . $pence, 'row' => null];
-        }
-        if ($pence <= 0) {
-            return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
-        }
-    } else {
-        $amountCell = (string) $get($mapping['amount']);
-        if ($amountCell === '') {
-            return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
-        }
-        $pence = \Portal\Core\Currency::parseAmount(str_replace(' ', '', $amountCell), $currency, \Portal\Core\Currency::INT_COLUMN_MAX, true);
-        if (is_string($pence) === true) {
-            return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': unparseable amount "' . $amountCell . '". ' . $pence, 'row' => null];
-        }
-        if ($pence <= 0) {
-            // Zero or negative (debit encoded as a negative signed amount).
-            return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
-        }
+        // The converter's own reason, never a blanket "unparseable".
+        return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': the ' . $cellName . ' "' . $cell . '" was not read. ' . $pence, 'row' => null];
+    }
+    if ($pence <= 0) {
+        // Zero or negative (a debit written as a negative signed amount).
+        return ['ok' => false, 'skip' => true, 'error' => null, 'row' => null];
     }
 
     // 📅 Date → Y-m-d. Never pass slash-dates to strtotime — it assumes US
@@ -328,12 +330,16 @@ function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $
     $rows = [];
     $skipped = 0;
     $errors = [];
+    $notes = [];
     $rowNum = 1;
     while (($data = fgetcsv($fh, 0, $delimiter)) !== false) {
         $rowNum++;
         $parsed = reconcile_parse_row($data, $mapping, $mode, $rowNum, $currency);
         if ($parsed['skip'] === true) {
             $skipped++;
+            if (isset($parsed['note']) === true) {
+                $notes[] = (string) $parsed['note'];
+            }
             continue;
         }
         if ($parsed['ok'] === false) {
@@ -343,7 +349,7 @@ function reconcile_parse_csv(string $raw, array $mapping, string $mode, string $
         $rows[] = $parsed['row'];
     }
     fclose($fh);
-    return ['rows' => $rows, 'skipped' => $skipped, 'errors' => $errors];
+    return ['rows' => $rows, 'skipped' => $skipped, 'errors' => $errors, 'notes' => $notes];
 }
 
 /** Redirect back to the import page, optionally forcing the mapping view. */
@@ -452,8 +458,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (count($parsed['errors']) > 0) {
                 $upload['fatalErrors'] = $parsed['errors'];
             } else {
-                $upload['rows']    = $parsed['rows'];
-                $upload['skipped'] = $parsed['skipped'];
+                $upload['rows']      = $parsed['rows'];
+                $upload['skipped']   = $parsed['skipped'];
+                $upload['skipNotes'] = $parsed['notes'];
             }
         }
 
@@ -514,10 +521,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $parsed = reconcile_parse_csv((string) $upload['rawText'], $mapping, $mode, (string) $upload['delimiter'], (string) $upload['currency']);
         if (count($parsed['errors']) > 0) {
             $upload['fatalErrors'] = $parsed['errors'];
-            unset($upload['rows'], $upload['skipped']);
+            unset($upload['rows'], $upload['skipped'], $upload['skipNotes']);
         } else {
-            $upload['rows']    = $parsed['rows'];
-            $upload['skipped'] = $parsed['skipped'];
+            $upload['rows']      = $parsed['rows'];
+            $upload['skipped']   = $parsed['skipped'];
+            $upload['skipNotes'] = $parsed['notes'];
             unset($upload['fatalErrors']);
         }
         $_SESSION[RECONCILE_SESSION_KEY] = $upload;
@@ -867,6 +875,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-md-3"><strong><?php echo count($rows); ?></strong> credits, <?php echo htmlspecialchars(Giving::formatAmount($total, (string) $upload['currency']), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-md-2"><span class="text-muted"><?php echo (int) ($upload['skipped'] ?? 0); ?> skipped</span></div>
             </div>
+            <?php foreach ((array) ($upload['skipNotes'] ?? []) as $skipNote): ?>
+                <div class="small text-muted" data-skip-note><?php echo htmlspecialchars((string) $skipNote, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endforeach; ?>
             <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile/import'), ENT_QUOTES, 'UTF-8'); ?>?adjust=1" class="small">Adjust mapping</a>
         </div>
     </div>

@@ -93,8 +93,13 @@ function backToCountSession(int $id, string $msg, string $type): void
 
 /**
  * 💷 One typed count figure, read by the ONE converter, Currency::parseAmount()
- * (#1004), in the count's own currency and no larger than its DECIMAL(10,2)
- * column holds, written back as the text that column takes ("1234.50"). A
+ * (#1004), in the count's own currency, figures only (D-152), written back as
+ * the text its DECIMAL(10,2) column takes ("1234.50"). Its maximum is the INT
+ * maximum (21,474,836.47), NOT the DECIMAL column's 99,999,999.99: closing a
+ * count writes each bucket and each envelope WHOLE into
+ * tblGivingEntry.amountPence, a signed INT, so a larger figure would save here
+ * and then make the count impossible to close, with "please try again" a
+ * sentence that can never come true. A
  * refusal goes back to the count page with the box's name and the reason, and
  * nothing is saved. This replaces Giving::parseDecimal(), which stripped every
  * character that was not a figure, a point or a minus and went through a
@@ -103,7 +108,7 @@ function backToCountSession(int $id, string $msg, string $type): void
 function countFigureOrBack(string $field, string $label, string $currency, int $countSessionId): string
 {
     $typed  = is_string($_POST[$field] ?? null) === true ? (string) $_POST[$field] : '';
-    $answer = \Portal\Core\Currency::parseAmount($typed, $currency, \Portal\Core\Currency::DECIMAL_10_2_MAX);
+    $answer = \Portal\Core\Currency::parseAmount($typed, $currency, \Portal\Core\Currency::INT_COLUMN_MAX);
     if (is_string($answer) === true) {
         backToCountSession($countSessionId, $label . ': ' . $answer . ' Nothing was saved.', 'danger');
     }
