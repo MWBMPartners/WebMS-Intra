@@ -4,6 +4,30 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No currency is built in, and every amount keeps its own (#966; D-133, D-139; migrations 282, 283)
+
+- Each organisation chooses its currency (`org.currency`), suggested from its country; nothing writes a pound sign
+  or assumes pounds any more.
+- Expense claims and their lines and payments, member and
+  project pledges, collection counts, giving statements, bank lines, asset repairs and valuations, room hire rates
+  and venue invoice lines and payments now save their currency beside the amount (migration 283 fills existing rows
+  with each organisation's currency). Every total adds up per currency: two currencies show as two lines, never one
+  sum (Reports, giving pages and statements, payments, reconciliation, venue invoices, saved reports; the asset value
+  report shows one currency at a time). **An organisation's currency can change again** (the round-1 lock is gone):
+  every record keeps the currency it was made in, and amounts with no recorded currency can be labelled on
+  Organisation settings. **Expenses bought abroad:** a line can be quoted in another currency; the claimant types what
+  it cost in the claim's currency from their statement, which is what is approved and paid; the portal keeps both
+  figures and shows the rate worked out from them, and looks up no exchange rate. The expense CSV gains a Currency
+  column. **Fixed on the way:** the approval and treasury windows wrote a pound sign whatever the claim was in; a
+  project pledge is now charged in its own currency.
+- Gift Aid is claimed in pounds only: the HMRC claim file holds only gifts in pounds, and Manage giving says how many
+  gifts in another currency (or with none recorded) were left out.
+- A record's currency is kept when it is edited, and an asset's or venue invoice's currency cannot change while any of
+  its repairs, valuations, lines or payments is in another one; those writes lock the parent row first. Attaching the
+  first file to an invoice that had none now stores it, and two payments at once can no longer overpay an invoice.
+- Hard gate `tools/audit-checks/check_currency_writes.py`; test `tools/currency-selftest.php`. Follow-ups #991-#997,
+  #999, #1001, #1004. Codex has not reviewed this.
+
 ### A date hidden from a series can be brought back (#691; D-143 to D-147)
 
 - The series' bulk edit page now lists the series' hidden dates — those a pattern change removed and those

@@ -428,6 +428,12 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   **An erased account is never changed (#977):** `AccountGuard::decide()` row 3a refuses every reach but viewing for
   an account `GdprEraser::emptiedAccountSql()` calls erased, a global administrator included; pages that change an
   account without `check()` ask `AccountGuard::checkNotErased()`. Test: section M of `tools/erasure-pages-selftest.php`.
+- **Currency (#966; D-133, D-139).** `Portal\Core\Currency` is the ONE place: the organisation's currency
+  (`org.currency`, own row else the installation's, else none = plain numbers, never "£"; changeable), what a
+  country suggests, how an amount is written, and the one list of money tables (`OWN_TABLES`, `CHILD_TABLES`):
+  every money row keeps its own `currency`, an edit writes it only through `Currency::onEdit()` (hard gate
+  `check_currency_writes.py`), totals add up per currency (`addTo()`/`totalsLines()`), and an expense
+  line goes through `ExpenseRules::expenseLine()` (quoted and converted). Test: `tools/currency-selftest.php`.
 - **No place is built in either (#935, migration 274).** `Sabbath::place()` is the
   ONE answer to where sunset is worked out (typed place, else the organisation's
   map position, else none and the fixed times, said on the page);

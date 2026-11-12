@@ -23726,3 +23726,24 @@ still read under the lock, and only an administrator with the form token can sen
 - Test: section T of `tools/event-repeat-pages-selftest.php` (90 checks), including three lock tests with ONE
   worker — this run's own connection holds a row while the real page waits on it over HTTP, and each asserts the
   page is still waiting before anything else is judged.
+
+### Every amount keeps its own currency (#966; D-133, D-139)
+
+- A new money table gets a `currency` column and goes into `Currency::OWN_TABLES` (has `siteID`) or
+  `CHILD_TABLES` (child => [parent, linking column, parent key]); `currency-selftest.php` B3/B4 fail both ways.
+- A child row takes its PARENT's currency when written, never today's setting.
+- Never add amounts across currencies: `Currency::addTo()` then `totalsLines()`/`totalsHtml()`/`totalsWords()`.
+  A saved-report money column names its `currencyExpr`.
+- Round-1 columns have no default; round-2 columns default to '' so an older backup still restores. '' means
+  "not recorded" and is labelled by `Currency::labelUnlabelled()`, never guessed.
+- An expense line goes through `ExpenseRules::expenseLine()`; never total a claim from `unitCost * qty` alone.
+- A write of a currency that can change on a parent (asset, venue invoice), and every child insert under such a
+  parent, runs inside `Currency::withParentLocked()`: it begins the transaction, locks the parent first, and rolls
+  back on any throw. Never begin, lock or roll back by hand around those writes.
+- An EDITED money record's currency is `Currency::onEdit()` and nothing else: its own unless one is posted, never
+  today's, '' stays ''. A parent may not change currency while any child is in another one. The hard gate
+  `tools/audit-checks/check_currency_writes.py` fails on an UPDATE that writes `currency` without it, and on a child
+  INSERT that does not take its parent's.
+- Traps met: `ReportRegistry` expressions are unquoted `alias.column` by its own shape rule; a fixture that inserts
+  a claim must name its currency or a display check sees a plain number; a pound sign in a page's script is
+  `'\u00a3'`, which a search for "£" never finds.
