@@ -100,7 +100,8 @@ function httpsStandinServerEnv(array $standin, array $env): array
 }
 
 /**
- * What each service says from now on: { name: [ {path, status, json|body}, ... ] }.
+ * What each service says from now on: { name: [ {path, status, json|body}, ... ] },
+ * or {path, drop: true} for no answer at all - a network failure (#1043).
  * Written under another name and renamed, so the stand-in never reads half a file.
  */
 function httpsStandinAnswers(array $standin, array $answers): void

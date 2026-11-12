@@ -109,6 +109,11 @@
  *        READ for its line: replaced by a newer message, removed by hand, and
  *        held after a run died while handing it over. Driven through `/cron/mail-queue` with
  *        `tools/https-standin.php` standing where Microsoft and Google stand.
+ *        #1043 added a NETWORK FAILURE (the stand-in hangs up with no
+ *        answer): through Google, one line per attempt over three attempts
+ *        to giving up; Google's sign-in unanswered (the queue's line);
+ *        Microsoft 365 unanswered; and Microsoft falling back to Google with
+ *        neither answering (one line per route tried).
  *   (Since the second check, 13 October 2026: every event is made as the
  *   event form makes it, in a zone that is not London's; F1 holds the 15
  *   minutes themselves, twelve pages at once, and the other scheduled jobs
@@ -185,7 +190,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 171; // #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
+const EXPECTED_CHECKS = 177; // #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3). #1043 added six, in R1.
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -4184,6 +4189,99 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
         ($nobody['job']['json']['sent'] ?? 0) === 1 && $nobody['left'] === 0 && $nobody['lines'] === [$line('google', 'sent', null)],
         json_encode($nobody['job']['json']) . '; lines ' . json_encode($nobody['lines'])
     );
+
+    // ── #1043: A NETWORK FAILURE through Google leaves exactly ONE line per
+    //    attempt. Before #1043 MailerGoogle::send() answered false with NO line
+    //    when curl_exec() got no answer at all (and when curl_init() failed,
+    //    which no test can cause), while the queue - told the route writes its
+    //    own (`ownLog`) - wrote none either. So a message kept for later could be
+    //    tried, tried again and finally given up on with NOTHING in the send log.
+    //    The stand-in's `drop` answer reads the request and hangs up, which is a
+    //    real network failure to libcurl ("Empty reply from server").
+    //    WHY A WRONG ANSWER CANNOT PASS: each check asks for the EXACT list of
+    //    lines, so none (the fault) and two (a queue line on top of the route's)
+    //    are both red. Measured by putting the old send() back: see #1043.
+    $gmailDrop = [['path' => '/gmail/v1/users/', 'drop' => true]];
+    $dropLines = static fn (string $subject): array => q(
+        'SELECT provider, status, siteID, httpCode, errorCode FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]
+    );
+    $dropLine  = static fn (): array => ['provider' => 'google', 'status' => 'failed', 'siteID' => SITE_R1, 'httpCode' => null, 'errorCode' => 'CURL_FAIL'];
+    $dropSubject = 'R1 through Google, no answer at all (#1043)';
+    $drop1 = $r1Send($dropSubject, SITE_R1, $graphOk, $gmailDrop);
+    ok(
+        'Google gives NO ANSWER AT ALL (the connection is dropped): the message waits to be tried again, and the attempt has EXACTLY ONE line in the send log - Google\'s own, saying it failed and why ("CURL_FAIL"), under the message\'s own organisation (#1043)',
+        $drop1['asked'] === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 0'] && $drop1['left'] === 1
+            && $dropLines($dropSubject) === [$dropLine()],
+        'asked ' . json_encode($drop1['asked']) . '; waiting ' . $drop1['left'] . '; lines ' . json_encode($dropLines($dropSubject))
+    );
+    //    The SECOND attempt (made due at once by hand) adds exactly one more.
+    q('UPDATE tblMailQueue SET nextAttemptAt = UTC_TIMESTAMP() - INTERVAL 1 SECOND WHERE subject = ?', 's', [$dropSubject]);
+    httpsStandinRequests($state['https']);
+    $job('right');
+    $asked2 = array_map(static fn (array $r): string => $r['host'] . ' ' . $r['method'] . ' ' . $r['status'], httpsStandinRequests($state['https']));
+    ok(
+        'tried AGAIN and dropped again: still waiting, and now exactly TWO lines - one per attempt, not none and not two for one (#1043)',
+        $asked2 === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 0'] && count(queued("subject = '" . addslashes($dropSubject) . "' AND status = 'queued'")) === 1
+            && $dropLines($dropSubject) === [$dropLine(), $dropLine()],
+        'asked ' . json_encode($asked2) . '; lines ' . json_encode($dropLines($dropSubject))
+    );
+    //    The LAST attempt: made old enough (47 hours, inside the 48 past which it
+    //    would be given up on unsent) that the wait after this try runs past the
+    //    hours a message is tried for, so this failure gives it up. That is the
+    //    case #1043 names: given up on, and every try in the send log.
+    q('UPDATE tblMailQueue SET nextAttemptAt = UTC_TIMESTAMP() - INTERVAL 1 SECOND, createdAt = UTC_TIMESTAMP() - INTERVAL 47 HOUR WHERE subject = ?', 's', [$dropSubject]);
+    httpsStandinRequests($state['https']);
+    $job('right');
+    $asked3   = array_map(static fn (array $r): string => $r['host'] . ' ' . $r['method'] . ' ' . $r['status'], httpsStandinRequests($state['https']));
+    $gaveUp   = rowOf($dropSubject);
+    ok(
+        'tried a LAST time and dropped again: the message is GIVEN UP ON (failed, "not being tried again"), and the send log holds exactly THREE lines for its three attempts, each Google\'s own under the message\'s own organisation (#1043)',
+        $asked3 === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 0'] && ($gaveUp['status'] ?? '') === 'failed'
+            && str_contains((string) ($gaveUp['lastError'] ?? ''), 'not being tried again') === true
+            && $dropLines($dropSubject) === [$dropLine(), $dropLine(), $dropLine()],
+        'asked ' . json_encode($asked3) . '; the row is ' . json_encode([$gaveUp['status'] ?? null, $gaveUp['lastError'] ?? null]) . '; lines ' . json_encode($dropLines($dropSubject))
+    );
+    q('DELETE FROM tblMailQueue WHERE subject = ?', 's', [$dropSubject]);
+    //    A THROW is the other road, and stays one line too: Google's SIGN-IN
+    //    gets no answer, MailerGoogle throws before it writes anything, and the
+    //    queue writes the line instead (deliverQueued() turns `ownLog` off).
+    $tokenDrop = $r1Send('R1 through Google, sign-in gets no answer (#1043)', SITE_R1, $graphOk, $gmailOk,
+        ['oauth2.googleapis.com' => [['path' => '/token', 'drop' => true]]]);
+    ok(
+        'Google\'s SIGN-IN gets no answer: nothing is sent, the message waits, and the attempt has exactly ONE line - the queue\'s, because the route threw before writing its own (#1043)',
+        $tokenDrop['asked'] === ['oauth2.googleapis.com POST 0'] && $tokenDrop['left'] === 1
+            && $tokenDrop['lines'] === [$line('google', 'queued', SITE_R1)],
+        'asked ' . json_encode($tokenDrop['asked']) . '; waiting ' . $tokenDrop['left'] . '; lines ' . json_encode($tokenDrop['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Google, sign-in gets no answer (#1043)'");
+    //    MICROSOFT 365, the same failure: it never had the fault (sendViaGraph()
+    //    writes its failure line for ANY answer outside 200-299, and a dropped
+    //    connection reads as code 0), and this pins that it still writes ONE.
+    setting('mail.provider', 'ms365');
+    $graphDrop = [['path' => '/v1.0/users/', 'drop' => true]];
+    $msDrop = $r1Send('R1 through Microsoft 365, no answer at all (#1043)', SITE_R1, $graphDrop, $gmailOk);
+    ok(
+        'Microsoft 365 gives NO ANSWER AT ALL: the message waits, and the attempt has exactly ONE line, Microsoft\'s own, under the message\'s own organisation - this route never had #1043\'s fault (#1043)',
+        $msDrop['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 0'] && $msDrop['left'] === 1
+            && $msDrop['lines'] === [$line('ms365', 'failed', SITE_R1)],
+        'asked ' . json_encode($msDrop['asked']) . '; waiting ' . $msDrop['left'] . '; lines ' . json_encode($msDrop['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Microsoft 365, no answer at all (#1043)'");
+    //    And Microsoft failing over to Google when BOTH get no answer: one line
+    //    per ROUTE TRIED, as when the fallback sends (Microsoft's failure, then
+    //    Google's) - before #1043 Google's half was missing.
+    setting('mail.fallbackProvider', 'google');
+    $bothDrop = $r1Send('R1 through Microsoft 365, then Google, neither answers (#1043)', SITE_R1, $graphDrop, $gmailDrop);
+    setting('mail.fallbackProvider', '');
+    ok(
+        'Microsoft 365 gets no answer and the chosen fallback, Google, gets none either: the message waits, and there is one line for EACH route tried - Microsoft\'s failure and Google\'s - as when the fallback sends, both under the message\'s own organisation (#1043)',
+        $bothDrop['left'] === 1
+            && $bothDrop['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 0', 'oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 0']
+            && $bothDrop['lines'] === [$line('ms365', 'failed', SITE_R1), $line('google', 'failed', SITE_R1)],
+        'asked ' . json_encode($bothDrop['asked']) . '; waiting ' . $bothDrop['left'] . '; lines ' . json_encode($bothDrop['lines'])
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Microsoft 365, then Google, neither answers (#1043)'");
+    setting('mail.provider', 'google');
 
     // Put back: the route's settings, the key file, and the error lines the two
     // refusals wrote on purpose (LAST allows only the SMTP failures it knows).

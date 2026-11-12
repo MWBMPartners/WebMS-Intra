@@ -44,7 +44,10 @@
  *     "login.microsoftonline.com": [ {"path": "/", "status": 200,
  *         "json": {"access_token": "x", "expires_in": 3600}} ] }
  *   `path` is a PREFIX of the request's path; the first matching entry wins.
- *   `json` is sent as JSON; otherwise `body` is sent as written.
+ *   `json` is sent as JSON; otherwise `body` is sent as written. An entry
+ *   with `"drop": true` sends NOTHING: the request is read and the connection
+ *   closed, so the caller sees a network failure, not an answer (#1043).
+ *   It is logged with status 0.
  *
  * Usage (by a test, through `tools/https-standin-client.php`, never by hand):
  *   php tools/https-standin.php <empty folder> <name>[,<name>...] [--watch-parent]
@@ -245,6 +248,15 @@ while (true) {
                 $chosen = $entry;
                 break;
             }
+        }
+        if (is_array($chosen) === true && ($chosen['drop'] ?? false) === true) {
+            // 🌐 A NETWORK FAILURE (#1043): the request is read and then the
+            //    connection is closed with no answer at all, as when a service
+            //    or the network between hangs up. libcurl then reports "Empty
+            //    reply from server" and curl_exec() answers false - the one
+            //    road a status code cannot reach. Status 0 in the log.
+            $note(['host' => $host, 'method' => $method, 'path' => $path, 'status' => 0, 'bytes' => $got]);
+            continue;
         }
         $status = $chosen === null ? 404 : (int) ($chosen['status'] ?? 200);
         $body   = $chosen === null ? '' : (array_key_exists('json', $chosen) === true ? (string) json_encode($chosen['json']) : (string) ($chosen['body'] ?? ''));
