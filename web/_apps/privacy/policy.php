@@ -60,8 +60,13 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 <ul>
     <?php // 🗣️ #703 round 7: this said you could "download everything we hold about you" from My data.
           //    Untrue: My data's download holds only its inventory (each kind of record, how many, and what
-          //    an erasure would do with it). The copy of the data itself is Data Export. ?>
-    <li><strong>Article 15 — Right of access</strong>: download a copy of your data from <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">/account/data-export</a>; <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a> lists each kind of record we hold about you and what an erasure would do with it.</li>
+          //    an erasure would do with it). The copy of the data itself is Data Export.
+          // 🗣️ #1012: still true, but no longer complete since #929 - both pages also show the records that
+          //    carry the member's name because they MADE them (GdprEraser::recordsCarryingYourName(), D-142),
+          //    listed by kind, day and organisation, and only counted in an organisation the member cannot
+          //    open (D-151). Pinned as rendered ("privacy policy, your rights") by section P of
+          //    tools/erasure-pages-selftest.php. ?>
+    <li><strong>Article 15 — Right of access</strong>: download a copy of your data from <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">/account/data-export</a>; <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a> lists each kind of record we hold about you and what an erasure would do with it. Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it, and one held by an organisation you cannot open here is only counted.</li>
     <li><strong>Article 17 — Right to erasure</strong>: file a request at <a href="<?php echo htmlspecialchars(Site::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">/account/erasure-request</a>. We respond within one month.</li>
     <li><strong>Article 16 — Right to rectification</strong>: edit your profile via <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>">/account</a>.</li>
     <li><strong>Article 21 — Right to object</strong>: unsubscribe from any newsletter via the link in its footer.</li>

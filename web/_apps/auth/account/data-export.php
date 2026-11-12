@@ -66,6 +66,9 @@
  *                          the records that carry your name as the worker who
  *                          made them: kind, day and organisation, never the
  *                          other person's details — #929, D-142)
+ *   tblDbsChecks          (the DBS checks recorded FOR you: type, certificate
+ *                          reference, dates, status and notes, never who
+ *                          recorded them — #1012)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -618,6 +621,16 @@ $payload = [
         //    GdprEraser::recordsCarryingYourName(), the ONE place they are
         //    found and worded, which the My data page asks too.
         'recordsCarryingYourName' => GdprEraser::recordsCarryingYourName($userId),
+        // 🛡️ #1012: the DBS (safeguarding) checks ABOUT this person - the
+        //    ones recorded FOR them, which an erasure keeps. My data counted
+        //    them and this copy never handed them over. Asked of
+        //    GdprEraser::dbsChecksAboutYou(), the ONE place they are read,
+        //    which My data's count asks too, so the two cannot disagree. Which
+        //    columns are handed over, and why the recorder's name and number
+        //    are not, is set out on that method. Not to be confused with the
+        //    list just above, which is the checks this person RECORDED for
+        //    somebody else.
+        'dbsChecksAboutYou' => GdprEraser::dbsChecksAboutYou($userId),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

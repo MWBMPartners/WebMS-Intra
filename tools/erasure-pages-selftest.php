@@ -127,6 +127,14 @@
  *      made none sees none. A failed read of one kind, and of the person's
  *      organisations, is driven and must be named, never shown as none.
  *      Nine faults planted in the running copy, each turning its check red.
+ *   P. (#1012.) A member's own DBS checks: the full data copy hands over
+ *      both of Della's checks - number, type, certificate reference, dates,
+ *      status, when recorded and notes, each exactly as stored - and never
+ *      who recorded them; the check she recorded for another member is not
+ *      handed over as hers; My data counts exactly the rows the copy holds;
+ *      a member with none gets none; and the privacy policy's "Your rights"
+ *      section is pinned as rendered. Six faults planted, each turning its
+ *      check red.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -219,7 +227,15 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 177; // #929 round 3 added three: the driven "no such
+const EXPECTED_CHECKS = 191; // #1012 added section P (fourteen: the premise,
+                            // the copy's two checks field by field, the
+                            // recorder absent, another member's check absent,
+                            // My data's count agreeing with the copy, a member
+                            // with none, the privacy policy's "Your rights"
+                            // pinned as rendered, six plants and the clean run).
+                            // It also moved the pin-file check to after it,
+                            // which changes no count. 191.
+                            // #929 round 3 added three: the driven "no such
                             // table" view with the singular sentence (O9b),
                             // and its two plants (O18b, O18c). 177.
                             // #929 round 2 rebuilt section O as nineteen: the
@@ -503,6 +519,14 @@ const O_DBS      = 917235; // a DBS check Wil recorded for CHK
 const O_CASE_B   = 917236; // a care case Wil opened in B
 const O_VISIT_B  = 917237; // a visit Wil made on it
 const O_CASE_C   = 917238; // a care case Wil opened in C
+// #1012, section P: a member's own DBS checks in their full data copy.
+const P_DELLA     = 917058; // a member of A with two DBS checks of her own, who also recorded one for Otto
+const P_REX      = 917059; // a worker with an account, who recorded Della's first check
+const P_OTTO     = 917060; // a member of A whose check Della recorded
+const P_PENNY      = 917061; // a member of A with no DBS checks
+const P_DBS_ONE  = 917241; // Della's first check (recorded by Rex, 23:30 on the night Nuuk's clocks go forward)
+const P_DBS_TWO  = 917242; // Della's second, older check: expired, no reference, no notes, recorder known by name only
+const P_DBS_OTTO = 917243; // Otto's check, recorded by Della
 
 /** Every request this run's organisations hold for one account. */
 function requestsOf(int $user): array
@@ -3437,12 +3461,6 @@ foreach ($alrOrgCases as $case => [$got, $want]) {
 ok('L9 the ORGANISATION\'s form refuses a 0, an empty box, letters, a negative, a fraction and a figure past ten years in its own words: under an installation that keeps the log for ever it offers "Never delete", under one of 30 days it gives 1 to 30 and never names "Never delete" - also when a global administrator presses it, and when the organisation holds a figure of its own - each exactly the literal words here, nothing is saved, and both rows are put back (#940 round 4)',
     count($alrOrgCases) === 16 && $alrOrgWrong === [], implode(' || ', $alrOrgWrong));
 
-// The pin file as a whole, asked AFTER every rendered pin has been compared
-// (#703 round 10: it sat after the help page's pin, before section K's, and so
-// reported section K's pin as "compared by no check").
-ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
-    pinFileProblems() === [], implode(' | ', pinFileProblems()));
-
 // =============================================================================
 head('M. An erased account cannot be changed or switched back on (#977)');
 // =============================================================================
@@ -4583,6 +4601,255 @@ foreach ($o929Plants as $label => [$rel, $swaps, $expect]) {
 $o929Again = $o929Observe();
 ok('O19 with every plant taken out again, the same observations are all green, the driven failures included (#929)', $o929Again === [], implode('; ', $o929Again));
 q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$o929ZoneWas, ORG_A]);
+
+// =============================================================================
+head('P. A member\'s own DBS checks are in their full data copy, and the privacy policy says what My data shows (#1012)');
+// =============================================================================
+// The DBS (safeguarding) checks recorded FOR a member - `tblDbsChecks.userID`,
+// kept by an erasure - were counted on My data and never handed over in the
+// full data copy (`account/data-export`). GdprEraser::dbsChecksAboutYou() is
+// now the ONE place they are read: the copy hands over what it returns and My
+// data's count asks it, so the two cannot disagree.
+//
+// What the copy hands over, written out here in full so a change to any field
+// is a change somebody has to make here too: the record's number, the type,
+// the certificate reference, the issue and expiry dates, the status, when it
+// was recorded and its notes - each exactly as stored. What it never hands
+// over: who RECORDED the check, by name or by number (another person; the
+// rule this copy applies to every "who did this to you" column).
+//
+// The world, one ground each (#616). Della is a member of A with TWO checks:
+// one recorded by Rex, a worker with an account, and an older expired one with
+// no reference and no notes whose recorder is known only by a stored name.
+// Della herself recorded a check for Otto, another member - so her copy LISTS
+// that one (#929: kind and day only) and must hand over none of its details.
+// Penny is a member of A with no checks at all. Every detail that must NOT reach
+// Della is a marked string, and P1 asks first that each is really in the
+// database, or every "absent" below would pass on nothing.
+//
+// 🕰️ A is put on America/Nuuk for this section, as section O does, and the
+//    first check's `recordedAt` is 23:30 on 28 March 2026, inside the hour
+//    Nuuk's clocks skip that night. A copy that turned the stored text into a
+//    moment and back would move it to the next day; P11 plants exactly that.
+$p1012ZoneWas = one('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?', 'i', [ORG_A])['timezone'] ?? null;
+q("UPDATE `tblSites` SET `timezone` = 'America/Nuuk' WHERE `siteID` = ?", 'i', [ORG_A]);
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0), (?, ?, ?, 1, 0, 0)', 'ississississ',
+    [P_DELLA, 'P1012 Della Member', 'u' . P_DELLA . '.erasure@selftest.invalid', P_REX, 'P1012 Recorder Rex', 'u' . P_REX . '.erasure@selftest.invalid',
+        P_OTTO, 'P1012 Otto Other', 'u' . P_OTTO . '.erasure@selftest.invalid', P_PENNY, 'P1012 Penny Plain', 'u' . P_PENNY . '.erasure@selftest.invalid']);
+foreach ([P_DELLA, P_OTTO, P_PENNY] as $id) {
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+}
+q("INSERT INTO `tblDbsChecks` (`dbsCheckID`, `userID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedByID`, `recordedByName`, `recordedAt`, `notes`) VALUES "
+    . "(?, ?, 'enhanced', 'P1012-REF-ONE', '2024-02-29', '2027-02-28', 'valid', ?, 'P1012 Recorder Rex', '2026-03-28 23:30:00', 'P1012 note about Della'), "
+    . "(?, ?, 'basic', NULL, '2021-06-01', '2024-06-01', 'expired', NULL, 'P1012 Long-Gone Recorder', '2021-06-02 09:00:00', NULL), "
+    . "(?, ?, 'standard', 'P1012-OTTO-REF', '2025-05-05', '2028-05-05', 'valid', ?, 'P1012 Della Member', '2026-05-05 10:00:00', 'P1012 note about Otto')",
+    'iiiiiiii', [P_DBS_ONE, P_DELLA, P_REX, P_DBS_TWO, P_DELLA, P_DBS_OTTO, P_OTTO, P_DELLA]);
+foreach (['p1012della' => P_DELLA, 'p1012penny' => P_PENNY] as $who => $id) {
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
+    $in = $signIn($who);
+    if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+        refuse("signing in as selftest-erasure-{$who} did not work (HTTP {$in['status']} {$in['location']})");
+    }
+}
+
+$p1012Premise = one(
+    'SELECT (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `userID` = ? AND `dbsCheckID` IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `dbsCheckID` = ? AND `recordedByID` = ? AND `recordedByName` = \'P1012 Recorder Rex\') '
+    . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `dbsCheckID` = ? AND `recordedByID` IS NULL AND `recordedByName` = \'P1012 Long-Gone Recorder\') '
+    . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `dbsCheckID` = ? AND `userID` = ? AND `recordedByID` = ? AND `referenceNumber` = \'P1012-OTTO-REF\') '
+    . '+ (SELECT COUNT(*) FROM `tblDbsChecks` WHERE `userID` = ?) '
+    . '+ (SELECT COUNT(*) FROM `tblSites` WHERE `siteID` = ? AND `timezone` = \'America/Nuuk\') AS `n`',
+    'iiiiiiiiiii', [P_DELLA, P_DBS_ONE, P_DBS_TWO, P_DBS_ONE, P_REX, P_DBS_TWO, P_DBS_OTTO, P_OTTO, P_DELLA, P_PENNY, ORG_A]
+);
+// PHP's own zone data: P11 is only a test if a round trip in Nuuk moves this
+// reading. (In London it would be an ordinary time, and nothing would move.)
+$p1012RoundTrip = (static function (): string {
+    $was = date_default_timezone_get();
+    date_default_timezone_set('America/Nuuk');
+    $moved = date('Y-m-d H:i:s', (int) strtotime('2026-03-28 23:30:00'));
+    date_default_timezone_set($was);
+
+    return $moved;
+})();
+ok('P1 premise: Della\'s two DBS checks (one recorded by Rex, one by a recorder known only by name), the check Della recorded for Otto, and Penny with none are in the database with every marked detail; A is on America/Nuuk, where a strtotime() round trip moves the 23:30 reading; Della and Penny can sign in (#1012)',
+    (int) ($p1012Premise['n'] ?? -1) === 6 && $p1012RoundTrip !== '2026-03-28 23:30:00' && isset($jar['p1012della'], $jar['p1012penny']) === true,
+    json_encode([$p1012Premise, $p1012RoundTrip]));
+
+// What Della's copy must hold, written out in full: every field, every value
+// exactly as stored, in the record's own order.
+$p1012Expected = [
+    ['dbsCheckID' => P_DBS_ONE, 'dbsType' => 'enhanced', 'referenceNumber' => 'P1012-REF-ONE', 'issuedDate' => '2024-02-29',
+        'expiresAt' => '2027-02-28', 'status' => 'valid', 'recordedAt' => '2026-03-28 23:30:00', 'notes' => 'P1012 note about Della'],
+    ['dbsCheckID' => P_DBS_TWO, 'dbsType' => 'basic', 'referenceNumber' => null, 'issuedDate' => '2021-06-01',
+        'expiresAt' => '2024-06-01', 'status' => 'expired', 'recordedAt' => '2021-06-02 09:00:00', 'notes' => null],
+];
+// Who recorded Della's checks, by name and by number: in NONE of what she is handed.
+// (Numbers are not searched for as text: section N's activity records are
+// numbered 9170601 onwards, so a run's own later records can contain any short
+// number by chance. The keys are searched for instead, and P2 pins every value.)
+$p1012Recorder = ['P1012 Recorder Rex', 'P1012 Long-Gone Recorder', '"recordedByID"', '"recordedByName"'];
+// Otto's check: in NONE of what Della is handed (she recorded it, so it is LISTED
+// in her "records carrying your name" by kind and day, and nothing more).
+$p1012Otto = ['P1012-OTTO-REF', 'P1012 note about Otto', 'P1012 Otto Other'];
+// The privacy policy's "Your rights" section, as a member receives it.
+$p1012Rights = static fn (string $html): string => renderedRegion($html, $sectionAfter('Your rights'));
+
+/** One person's full data copy, My data page and My data JSON. */
+$p1012Fetch = static function (string $who) use (&$jar): array {
+    $export = req($jar[$who], 'GET', '/account/data-export');
+    $page   = req($jar[$who], 'GET', '/account/my-data');
+    $json   = req($jar[$who], 'GET', '/account/my-data?download=1');
+    $copy   = json_decode($export['body'], true);
+    $mine   = json_decode($json['body'], true);
+
+    return [
+        'export'    => $export,
+        'page'      => $page,
+        'json'      => $json,
+        'hasKey'    => is_array($copy['data'] ?? null) === true && array_key_exists('dbsChecksAboutYou', $copy['data']) === true,
+        'checks'    => $copy['data']['dbsChecksAboutYou'] ?? null,
+        'inventory' => is_array($mine['inventory'] ?? null) === true ? $mine['inventory'] : null,
+        'ok'        => $export['status'] === 200 && $page['status'] === 200 && $json['status'] === 200,
+    ];
+};
+/**
+ * My data's own rows for `tblDbsChecks`, as [count, first words of the reason],
+ * from the JSON and from the drawn page, in the order shown.
+ */
+$p1012Counted = static function (array $got): array {
+    $fromJson = [];
+    foreach ((array) $got['inventory'] as $row) {
+        if (($row['table'] ?? '') === 'tblDbsChecks') {
+            $fromJson[] = [(int) $row['rows'], mb_substr((string) $row['reason'], 0, 24)];
+        }
+    }
+    $fromPage = [];
+    $doc      = \Dom\HTMLDocument::createFromString((string) $got['page']['body'], LIBXML_NOERROR);
+    foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
+        $cells = [];
+        foreach ($row->children as $cell) {
+            $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
+        }
+        if (($cells[0] ?? '') === 'tblDbsChecks') {
+            $fromPage[] = [(int) ($cells[1] ?? -1), mb_substr((string) ($cells[3] ?? ''), 0, 24)];
+        }
+    }
+
+    return ['json' => $fromJson, 'page' => $fromPage];
+};
+
+/** Everything section P asserts, as the list of what was WRONG (empty when right). */
+$p1012Observe = static function () use ($p1012Fetch, $p1012Counted, $p1012Expected, $p1012Recorder, $p1012Otto, $p1012Rights, &$jar): array {
+    $wrong = [];
+    $della  = $p1012Fetch('p1012della');
+    $penny   = $p1012Fetch('p1012penny');
+    if ($della['ok'] === false || $penny['ok'] === false) {
+        $wrong[] = 'a download did not answer';
+    }
+    if ($della['hasKey'] === false || $della['checks'] !== $p1012Expected) {
+        $wrong[] = 'copy wrong';
+    }
+    foreach ($p1012Recorder as $secret) {
+        if (str_contains($della['export']['body'], $secret) === true) {
+            $wrong[] = 'recorder leaked';
+            break;
+        }
+    }
+    foreach ($p1012Otto as $secret) {
+        foreach (['export', 'page', 'json'] as $part) {
+            if (str_contains($della[$part]['body'], $secret) === true) {
+                $wrong[] = 'other member leaked';
+                break 2;
+            }
+        }
+    }
+    // My data's count of the checks ABOUT Della must be the number of rows her
+    // copy hands over - and the checks she RECORDED stay a row of their own.
+    $copied  = is_array($della['checks']) === true ? count($della['checks']) : -1;
+    $counted = $p1012Counted($della);
+    $want    = [[$copied, 'Safeguarding record. Kep'], [1, 'DBS checks you recorded ']];
+    if ($counted['json'] !== $want || $counted['page'] !== $want) {
+        $wrong[] = 'count disagrees';
+    }
+    if ($penny['hasKey'] === false || $penny['checks'] !== [] || $p1012Counted($penny) !== ['json' => [], 'page' => []]) {
+        $wrong[] = 'penny sees something';
+    }
+    $policy = req($jar['p1012della'], 'GET', '/privacy/policy');
+    $rights = $p1012Rights((string) $policy['body']);
+    if ($policy['status'] !== 200 || $rights === '' || $rights !== (readRenderedPins()['pins']['privacy policy, your rights'] ?? null)) {
+        $wrong[] = 'policy wrong';
+    }
+
+    return array_values(array_unique($wrong));
+};
+
+$p1012First = $p1012Observe();
+$p1012Is    = static fn (string $what): bool => in_array($what, $p1012First, true) === false && in_array('a download did not answer', $p1012First, true) === false;
+ok('P2 Della\'s full data copy (account/data-export) hands over BOTH her DBS checks under "dbsChecksAboutYou" - number, type, certificate reference, issue and expiry dates, status, when recorded and notes - every value exactly as stored (the 23:30 reading inside the hour Nuuk skips is unmoved), in order, with nothing else in each entry (#1012)',
+    $p1012Is('copy wrong'), implode('; ', $p1012First));
+ok('P3 who recorded Della\'s checks - Rex\'s name, the other recorder\'s stored name, and any recorder field at all (its number included) - is nowhere in her full data copy (#1012)',
+    $p1012Is('recorder leaked'), implode('; ', $p1012First));
+ok('P4 nothing of Otto\'s check - its reference, its notes, Otto\'s name - reaches Della in her copy, her My data page or its JSON, although she recorded it (#1012, #929)',
+    $p1012Is('other member leaked'), implode('; ', $p1012First));
+ok('P5 My data counts exactly the rows the copy hands over (2), in its JSON and on its page, and the check Della recorded for Otto stays a row of its own (1) (#1012)',
+    $p1012Is('count disagrees'), implode('; ', $p1012First));
+ok('P6 Penny, who has no DBS checks, is handed an empty "dbsChecksAboutYou" and My data shows her no DBS row (#1012)',
+    $p1012Is('penny sees something'), implode('; ', $p1012First));
+// The pin is recorded through renderedPin() ONCE, here, on the clean page, so
+// the pin file's own check counts it; the plants below compare without it.
+$p1012RightsNow = $p1012Rights((string) req($jar['p1012della'], 'GET', '/privacy/policy')['body']);
+ok('P7 the privacy policy\'s "Your rights" section - Article 15 now saying that both My data and the full copy also show the records carrying your name because you made them, listed only by kind, day and organisation, and only counted where you cannot open the organisation - is exactly the pinned markup a member receives, found once, inside exactly the pinned wrappers (#1012)',
+    renderedPin('privacy policy, your rights', $p1012RightsNow) && $p1012Is('policy wrong'),
+    $p1012RightsNow === '' ? 'not exactly one such section' : mb_substr($p1012RightsNow, 0, 600));
+
+// Planted in the RUNNING copy (no opcache: see the server's start), each must
+// turn its own observation red, and the file is put back byte for byte.
+$p1012Plants = [
+    'P8 the copy no longer hands the checks over (the rows missing)' => [
+        '_apps/auth/account/data-export.php', ["'dbsChecksAboutYou' => GdprEraser::dbsChecksAboutYou(\$userId)," => ''], 'copy wrong'],
+    'P9 the checks matched on EITHER column, so the check Della recorded for Otto is handed over as hers (another member\'s check included)' => [
+        '_core/GdprEraser.php', ['FROM `tblDbsChecks` WHERE `userID` = ? ORDER BY `dbsCheckID`' => 'FROM `tblDbsChecks` WHERE ? IN (`userID`, `recordedByID`) ORDER BY `dbsCheckID`'], 'other member leaked'],
+    'P10 who recorded each check read and handed over (a field that must be absent)' => [
+        '_core/GdprEraser.php', ['`recordedAt`, `notes` \'' => '`recordedAt`, `notes`, `recordedByName` \'',
+            "'notes'           => \$row['notes'] === null ? null : (string) \$row['notes']," => "'notes'           => \$row['notes'] === null ? null : (string) \$row['notes'], 'recordedByName' => \$row['recordedByName'],"], 'recorder leaked'],
+    'P11 the time turned into a moment and back on the organisation\'s clock, not handed over as stored' => [
+        '_core/GdprEraser.php', ["'recordedAt'      => (string) \$row['recordedAt']," => "'recordedAt'      => date('Y-m-d H:i:s', (int) strtotime((string) \$row['recordedAt'])),"], 'copy wrong'],
+    'P12 My data counting the checks with its own query while the copy leaves expired checks out (the two allowed to disagree)' => [
+        '_core/GdprEraser.php', ["if (\$table === 'tblDbsChecks' && \$col === 'userID' && \$via === null) {" => 'if (false) {',
+            'FROM `tblDbsChecks` WHERE `userID` = ? ORDER BY `dbsCheckID`' => 'FROM `tblDbsChecks` WHERE `userID` = ? AND `status` <> \'expired\' ORDER BY `dbsCheckID`'], 'count disagrees'],
+    'P13 the privacy policy\'s Article 15 sentence put back as it was before #1012' => [
+        '_apps/privacy/policy.php', [' Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it, and one held by an organisation you cannot open here is only counted.</li>' => '</li>'], 'policy wrong'],
+];
+foreach ($p1012Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach ($swaps as $from => $to) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $p1012Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1012)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$p1012Again = $p1012Observe();
+ok('P14 with every plant taken out again, the same observations are all green (#1012)', $p1012Again === [], implode('; ', $p1012Again));
+q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$p1012ZoneWas, ORG_A]);
+
+// The pin file as a whole, asked AFTER every rendered pin has been compared
+// (#703 round 10: it sat after the help page's pin, before section K's, and so
+// reported section K's pin as "compared by no check"; #1012 moved it again,
+// to here after the last section, because section P compares a pin too).
+ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
+    pinFileProblems() === [], implode(' | ', pinFileProblems()));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

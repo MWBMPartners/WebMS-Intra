@@ -4147,7 +4147,17 @@ class GdprEraser
             }
             try {
                 $count = 0;
-                $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE ' . $where);
+                // 🛡️ #1012: the DBS checks ABOUT this person are counted by
+                //    asking dbsChecksAboutYou(), the ONE place they are read,
+                //    so this number and the rows the full data copy hands over
+                //    cannot disagree. (The checks this person RECORDED, the
+                //    `recordedByID` instruction, are counted below as usual.)
+                $stmt = false;
+                if ($table === 'tblDbsChecks' && $col === 'userID' && $via === null) {
+                    $count = count(self::dbsChecksAboutYou($userId));
+                } else {
+                    $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE ' . $where);
+                }
                 if ($stmt !== false) {
                     $stmt->bind_param('i', $userId);
                     $stmt->execute();
@@ -4450,6 +4460,111 @@ class GdprEraser
                     . 'listed; the organisation that holds it can tell you about it.'
                 : $out['notListed'] . ' more records of these kinds carry your name in organisations you cannot open '
                     . 'here. They are not listed; the organisation that holds each one can tell you about it.';
+        }
+
+        return $out;
+    }
+
+    /**
+     * 🛡️ The DBS (safeguarding) checks ABOUT this person - the ones recorded
+     *    FOR them, `tblDbsChecks.userID` - as their own data copy hands them
+     *    over (#1012).
+     *
+     * WHY THIS EXISTS. Those checks are kept when the person is erased (the
+     * catalogue's `retain` instruction on `userID`), and My data COUNTED them,
+     * but until #1012 the full data copy (`account/data-export`) never read
+     * the rows. Measured on commit 1cbbe72a: the copy's only mention of
+     * `tblDbsChecks` was its header's #929 list, and no query in it read the
+     * table. So a member asking for a copy of their data was not given their
+     * own safeguarding checks.
+     *
+     * THE ONE PLACE these rows are read, for BOTH answers: the full data copy
+     * hands over what this returns, and `inventory()` counts the same rows by
+     * asking this method rather than writing its own `COUNT(*)`, so My data's
+     * number and the copy's rows cannot disagree.
+     *
+     * WHICH COLUMNS, and why. Everything about the check itself, as stored:
+     *   - `dbsCheckID`: the record's own number, so the member can name it
+     *     when asking the organisation about it. (#929 left the number out of
+     *     a WORKER's list because those records are about somebody else; this
+     *     record is about the member.)
+     *   - `dbsType` (basic, standard, enhanced, or enhanced with the barred
+     *     list - the level of the check), `referenceNumber` (the certificate's
+     *     own reference, printed on the certificate the member holds, and
+     *     already shown to them on `account/safeguarding`), `issuedDate`,
+     *     `expiresAt`, `status`, `recordedAt` (when it was written into the
+     *     portal) and `notes`.
+     *   - `notes` is included because it is written about this check, so it
+     *     is the member's data. No page writes it today: the one INSERT,
+     *     `_apps/admin/safeguarding/dbs-save.php`, names no `notes` column, so
+     *     whatever is there was put in by hand.
+     * LEFT OUT, on purpose:
+     *   - `recordedByID` and `recordedByName`: WHO recorded the check is
+     *     another person (a worker), and this copy leaves out every "who did
+     *     this to you" column - `grantedByID` on roles, `addedByID` on groups,
+     *     `moderatorID` on prayer requests and the rest - for that reason.
+     *     The member's own safeguarding page does not show the recorder
+     *     either. The worker's name stays ON the record (D-016, D-110 to
+     *     D-113); it is just not handed to the person the check is about.
+     *     Whether a member should be given the recorder's name is left open
+     *     for the owner on #1012; until they decide, it is not given.
+     *   - `userID`: it is the member themselves, already the copy's subject.
+     *   - An organisation: `tblDbsChecks` has NO organisation column (a DBS
+     *     check is about a person, not an organisation - see
+     *     `admin/safeguarding/dbs.php`), so there is none to give.
+     *
+     * TIMES are handed over exactly as stored - a DATE as `YYYY-MM-DD`, the
+     * DATETIME `recordedAt` as `YYYY-MM-DD HH:MM:SS` - and never turned into a
+     * moment: nothing records which clock `recordedAt` was read on, and a
+     * round trip through strtotime() moves a reading inside the hour a clock
+     * change skips (#777).
+     *
+     * FAILURES: error 1146 (no such table - a database from before the
+     * safeguarding feature) means none are held, so the answer is an empty
+     * list. Any other database error is NOT answered as "none": it is thrown,
+     * as every other part of the data copy does, because a copy that quietly
+     * left the checks out is the fault #1012 fixes.
+     *
+     * @return list<array{dbsCheckID: int, dbsType: string, referenceNumber: string|null, issuedDate: string, expiresAt: string, status: string, recordedAt: string, notes: string|null}>
+     */
+    public static function dbsChecksAboutYou(int $userId): array
+    {
+        $db = App::db();
+        try {
+            // Every identifier backticked (the reserved-word rule, #718). The
+            // column list IS the decision above: nothing not named here can
+            // reach the copy, however the rest of this file changes.
+            $stmt = $db->prepare(
+                'SELECT `dbsCheckID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedAt`, `notes` '
+                . 'FROM `tblDbsChecks` WHERE `userID` = ? ORDER BY `dbsCheckID`'
+            );
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+        } catch (\mysqli_sql_exception $failure) {
+            // (Named `$failure`, not `$problem`: section O of
+            //  tools/erasure-pages-selftest.php plants a fault by finding the
+            //  1146 test as written in recordsCarryingYourName() exactly once
+            //  in this file, so a second copy of that text would stop it.)
+            if ($failure->getCode() === 1146) {
+                return [];
+            }
+            throw $failure;
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'dbsCheckID'      => (int) $row['dbsCheckID'],
+                'dbsType'         => (string) $row['dbsType'],
+                'referenceNumber' => $row['referenceNumber'] === null ? null : (string) $row['referenceNumber'],
+                'issuedDate'      => (string) $row['issuedDate'],
+                'expiresAt'       => (string) $row['expiresAt'],
+                'status'          => (string) $row['status'],
+                'recordedAt'      => (string) $row['recordedAt'],
+                'notes'           => $row['notes'] === null ? null : (string) $row['notes'],
+            ];
         }
 
         return $out;
