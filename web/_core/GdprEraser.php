@@ -3543,11 +3543,11 @@ class GdprEraser
      *      seconds before it writes its send-log row (or keeps the message in
      *      the queue). So an approval that read the address just BEFORE this
      *      step committed can still write ONE send-log row, or one waiting
-     *      message, after steps 3 and 4 have passed. An administrator sees it
-     *      as a "your event suggestion has been approved" row to the address
-     *      in Admin, Integrations, Email (Recent sends) with a time after the
-     *      erasure's report, and running a fresh request for the address
-     *      clears it. Holding the event row locked across a mail send to close
+     *      message, after steps 3 and 4 have passed. Admin, Integrations,
+     *      Email's "Recent sends" shows only the last ten sends, so such a
+     *      row is quickly pushed off it and cannot be relied on to show it;
+     *      if an approval may have been pressed while the request ran, a
+     *      fresh request for the address clears it. Holding the event row locked across a mail send to close
      *      the window was rejected: a send can wait on a mail server for a long
      *      time, and every edit of that event would wait with it.
      *   2. The activity log: a record written before #963 by the public form

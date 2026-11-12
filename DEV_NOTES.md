@@ -23780,3 +23780,24 @@ still read under the lock, and only an administrator with the form token can sen
   (the picture) goes red; removing the SECOND ask leaves the row unchanged (the UPDATE's `isDeleted = 0`)
   and only U41 (the message) goes red.
 - `empty()` hides the string "0": test a text column for `!== ''`.
+
+### An erasure for somebody with no account (#964)
+
+- The kind of request is `tblErasureRequest.subjectKind`, never inferred from an empty `userID` (every completed
+  request has one). `GdprEraser::executeVisitorAddress()` is the only runner of a `visitor_address` request; it calls
+  none of an account erasure's steps. Its steps run suggestions first, then the pre-#963 activity records, then the
+  mail queue, then the send log — the order narrows, and does not close, the window in which an approval pressed
+  during the run still e-mails the visitor.
+- The approval e-mail is found by `EventSuggestions::APPROVAL_SUBJECT` — the send log and the queue keep no record of
+  why a message was sent — so changing that subject would stop the erasure finding every e-mail sent before the change.
+- The database's comparison ignores capitals, a trailing space AND accents (measured), so it only finds candidates;
+  PHP makes the exact match.
+- `GdprEraser::VISITOR_ACTIVITY_NULL_COLS` must equal the `tblActivityLogs` instruction's `nullCols` for a member;
+  `gdpr-coverage-selftest.php` fails both ways.
+- Filing takes a required note (D-148), kept in the sealed audit trail; a filing that loses a deadlock (1213) is tried
+  once more (untested, #1010).
+- Known limit: a queued approval e-mail later sent by the scheduled job through Microsoft 365 or Google is logged under
+  whichever organisation the job was working in (#1006), so such a send-log row is not reached.
+- Test: section N of `tools/erasure-pages-selftest.php` (it loads the real form, N3a), section 24 of
+  `tools/gdpr-coverage-selftest.php`.
+

@@ -1325,6 +1325,9 @@ another repo, ever**.
 - Currency: one per organisation (`org.currency`), suggested from the country, changeable; every money record
   keeps its own (`Currency::OWN_TABLES`, `CHILD_TABLES`); totals per currency; unrecorded amounts can be labelled.
 - Expenses: a line may be quoted in another currency, with the converted amount from the claimant's statement.
+- Erasure request for a visitor's e-mail address (no account): event suggestions' name and address, the pre-#963
+  activity records naming it, and the approval e-mail's send-log and mail-queue rows, at the filing organisation only,
+  after a required tick and note on how the person was checked (#964; D-140, D-148 to D-150).
 - Erasure, accounts (#977): an account erased on request shows on Admin → Users as "Erased on request, cannot be changed" and cannot be edited, switched back on, placed into an organisation, added to one or offboarded.
 - No country is built in (#942, D-133): the installer asks for the installation's country (suggested from the browser's time zone, sending nothing), and each organisation chooses its own on Admin, Settings, Organisation. Every installer answer sends a strict Content Security Policy.
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).

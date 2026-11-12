@@ -4,6 +4,23 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An erasure can reach somebody without an account who suggested an event (#964; D-140, D-148 to D-150; migration 286)
+
+- An administrator files a request for the visitor's e-mail address on Erasure requests, after ticking that they
+  checked, outside the portal, that it really is that person, and writing a short note on how (D-148; the note is
+  kept for ever, so it must not hold the person's details).
+- Running it empties the name and address on that address's event suggestions at the organisation; takes the
+  address out of the activity log's records of such suggestions written before #963 and empties those records'
+  network address, browser and request details; deletes a waiting "your event suggestion has been approved" e-mail;
+  and takes the address out of the record of each such e-mail sent.
+- It touches no account (not even a member's using the same address) and nothing at another organisation (D-150),
+  except a send-log row recorded under no organisation. The visitor is not e-mailed (D-149). Nothing is cleared
+  automatically (D-140).
+- Limits, stated on the help page and in the policy: a queued copy later sent through Microsoft 365 or Google is
+  logged under the wrong organisation and is not reached (#1006); an Errors line quoting the address is deleted only
+  by the retention clear-out; an approval pressed while the request runs can still leave one row, cleared by a
+  fresh request. Follow-ups #1006-#1010. Codex has not reviewed this.
+
 ### An event's cancellation reason can be set, and a hidden date cannot be edited (#998, #1000)
 
 - **An event's cancellation reason can be set now (#998).** Manage Events' event form and a series'

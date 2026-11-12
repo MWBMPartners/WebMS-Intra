@@ -85,9 +85,10 @@ never automatically.**
    e-mail - this narrows, and does not close, the window in which an approval
    pressed while the run is going still e-mails the visitor: an approval that
    read the address just before this step can still write one send-log row or
-   one waiting message afterwards, visible in Admin, Integrations, Email as a
-   "your event suggestion has been approved" row timed after the erasure; a
-   fresh request for the address clears it); an activity record written before
+   one waiting message afterwards. Admin, Integrations, Email lists only the
+   last ten sends, so such a row is easily pushed off that list: if an approval
+   may have been pressed while the request ran, file a fresh request for the
+   address afterwards, which clears it); an activity record written before
    #963 that reads exactly "Event #N submitted by anonymous" and the address, at
    this organisation and naming no account, has the address replaced by
    "[erased]" and its network address, browser, request headers, session
