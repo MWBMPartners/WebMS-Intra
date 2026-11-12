@@ -836,8 +836,11 @@ check('K12 a venue at a southern, eastern position stores it as given',
 
 // ── L ────────────────────────────────────────────────────────────────────────
 echo "L. \"Test connection\" asks a provider every time, never the cache\n";
-// The fixed address testConnection() looks up. A row for it may already be
-// in this database from somewhere else; it is left as found.
+// The fixed address testConnection() looks up. If no row for it existed
+// before this section, the row the presses write is removed afterwards. If one
+// DID exist, it is left in place, but the presses will have overwritten its
+// position and provider and added to its hit count — on a selftest database
+// only, which is the only kind this test will run against.
 $testAddress = 'Westminster, London, United Kingdom';
 $testHash    = $portalKey($testAddress, '');
 $hadTestRow  = $cacheRow($testAddress) !== null;
@@ -857,6 +860,16 @@ check('L3 THE POINT: the second press asks the provider again rather than the ca
 $shown = $http('GET', '/admin/integrations/geocoding');
 check('L4 ...and the page says which provider answered',
     str_contains($shown['body'], 'via nominatim'), true);
+// With a Google key set, the test must go to Google FIRST, as a real look-up
+// does: a test path that went straight to Nominatim would pass L1-L4 and
+// report "Connected" while a broken Google key went unnoticed.
+$setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+$stubReset();
+$pressTest();
+$shownG = $http('GET', '/admin/integrations/geocoding');
+check('L5 with a Google key set, Test connection asks Google first, and says Google answered',
+    [$stubCalls(), str_contains($shownG['body'], 'via google')], [['google'], true]);
+$setSetting('geo.google.apiKey', '');
 if ($hadTestRow === false) {
     $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `queryHash` = ?');
     $st->bind_param('s', $testHash);

@@ -19,7 +19,7 @@
  *
  * NOMINATIM POLICY COMPLIANCE (mandatory, built in from first commit):
  *   1. Descriptive User-Agent — productName/version (admin contact).
- *   2. Spacing — calls are spaced about a second apart, using a last-call
+ *   2. Spacing — the portal waits about a second between its own calls, using a last-call
  *      timestamp in the `geo.nominatim.lastCallAt` setting row and
  *      `usleep()`ing the remainder, hard-capped at 1.2s. This is NOT a
  *      guarantee of one request a second: there is no lock, so two requests
@@ -28,7 +28,8 @@
  *   3. Cache — `tblGeocodeCache`, so the same address limited to the same
  *      country (#1035) is normally looked up once. Only usable answers are
  *      kept (#1034), so an address with no usable answer is asked again,
- *      and "Test connection" deliberately skips the cache.
+ *      and "Test connection" deliberately skips READING the cache (it still
+ *      writes the fresh answer it gets, which is a real answer).
  *   4. Attribution — respected at the display layer (map_attribution copy).
  *
  * No SSRF guard needed: both hosts are `const`, never caller-supplied.
@@ -36,8 +37,9 @@
  * Public methods:
  *   Geocoder::forward($address, $countryCode = null)  -> ?array{lat,lng,formatted,source}
  *   Geocoder::reverse($lat, $lng)                      -> ?array{formatted,source}
- *     (reverse() has NEVER had a caller: `git log -S"Geocoder::reverse" -- web/`
- *      shows only 3694c693, which added it. No page turns coordinates into an
+ *     (reverse() has NEVER had a caller: `git log -S"Geocoder::reverse" e3f8cbc1 -- web/`
+ *      shows only 3694c693, which added it; 44970579 and later add the name
+ *      only in comments like this one. No page turns coordinates into an
  *      address, and none may say it does.)
  *   Geocoder::autoEnabled()                            -> bool
  *   Geocoder::testConnection()                         -> array{success,message}
@@ -206,7 +208,8 @@ class Geocoder
      * providers themselves, never the cache, and reports which provider
      * answered. Never echoes provider error text.
      *
-     * It skips the cache on purpose (#1034 round 3): through forward() it was
+     * It skips READING the cache on purpose (#1034 round 3), and still writes
+     * the fresh answer it gets: through forward() it was
      * answered from the cache after the first success, so it reported
      * "Connected" without contacting anybody.
      *

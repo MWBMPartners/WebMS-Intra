@@ -5,7 +5,7 @@
  * Admin — Geocoding integration settings 🌍 (#456 Chunk A)
  * -----------------------------------------------------------------------------
  * Provider chain: Google (when a key is set) -> OpenStreetMap Nominatim
- * fallback (calls spaced about a second apart, cached, attribution required). Nominatim
+ * fallback (the portal waits about a second between its own calls, cached, attribution required). Nominatim
  * requires a descriptive User-Agent built from the product name/version +
  * an admin contact address (`privacy.contactEmail`, falling back to
  * `mail.defaultFromAddress`).
@@ -87,8 +87,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <p class="text-secondary">
     Finds the map position (coordinates) for an address. When a key is set below, <strong>Google</strong>
     is asked first; if it has no answer, or its answer is not a usable map position, <strong>OpenStreetMap
-    Nominatim</strong> is asked instead. With no key, only Nominatim is asked. Calls to Nominatim are
-    spaced about a second apart, as its rules ask.
+    Nominatim</strong> is asked instead. With no key, only Nominatim is asked. The portal waits about a
+    second between its own calls to Nominatim, as its rules ask, but two look-ups made at the same
+    moment are not held apart.
     A usable answer is kept, so the same address limited to the same country is normally looked up
     only once; an address that got no usable answer is asked again the next time.
 </p>
@@ -100,8 +101,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    asked again), and since #1035 the same address is kept once per country.
 //    Round 3 (12 November 2026) removed two more untrue claims: "(and back)" —
 //    nothing turns coordinates into an address, `Geocoder::reverse()` has
-//    never had a caller (`git log -S"Geocoder::reverse" -- web/` shows only
-//    3694c693) — and "at most once a second", which the spacing cannot
+//    never had a caller (`git log -S"Geocoder::reverse" e3f8cbc1 -- web/` shows only
+//    3694c693; 44970579 adds the name only in comments) — and "at most once a
+//    second", which the spacing cannot
 //    guarantee because nothing locks it (see Geocoder::throttle()).
 ?>
 

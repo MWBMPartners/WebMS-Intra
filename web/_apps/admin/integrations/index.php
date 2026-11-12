@@ -849,7 +849,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary small mb-3">
             Address <i class="fa-solid fa-arrow-right" aria-hidden="true"></i> coordinates (one way only).
             Google first when a key is set, then OpenStreetMap Nominatim when Google has no usable answer
-            or there is no key. Nominatim calls are spaced about a second apart, and usable answers are kept.
+            or there is no key. The portal waits about a second between its own calls to Nominatim, but
+            two look-ups made at the same moment are not held apart. Usable answers are kept.
         </p>
         <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/geocoding'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm">
             <i class="fa-solid fa-arrow-right me-1" aria-hidden="true"></i>Manage Geocoding
