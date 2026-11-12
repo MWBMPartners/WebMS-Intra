@@ -644,7 +644,10 @@ final class Currency
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
      *   - the record's three-letter CODE in front ("GBP 12.50", "AUD 1,234.50"),
-     *     or any SIGN its currency is written with (SIGNS_OF, from ICU): "$" is
+     *     or any SIGN its currency is written with (SIGNS_OF, from ICU; a sign
+     *     or code of letters only, such as the rand's "R", only where a figure,
+     *     a space, a minus or a point follows it, so "RUB 12" is not read as
+     *     "R" + "UB 12"): "$" is
      *     read as US dollars in a USD organisation and as Australian dollars in
      *     an AUD one, "£" as Gibraltar pounds in a GIP one (the owner, D-165,
      *     superseding D-155 and D-157). A minus may sit either side of it
@@ -652,9 +655,11 @@ final class Currency
      *     refused, saying so. A sign the organisation's currency is never
      *     written with is refused, saying which and that it is another
      *     currency; and with
-     *     NO currency chosen for the organisation, any sign is refused, saying
-     *     so and what to do (D-139: an amount's money is never guessed, so
-     *     "£12.50" cannot be stored as money of no known kind).
+     *     NO currency chosen for the organisation, any sign or code is refused,
+     *     saying so and what to do (D-139: an amount's money is never guessed,
+     *     so "£12.50" cannot be stored as money of no known kind). A sign of
+     *     letters only ("R", "kr") counts as one where a figure, a space, a
+     *     minus or a point follows it ("R12"); "Rent" is a word, not a sign.
      *
      * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
      * sign, a misplaced minus, a second decimal point, more than two decimals,
@@ -697,7 +702,7 @@ final class Currency
             usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
             $taken = '';
             foreach ($prefixes as $prefix) {
-                if (str_starts_with($text, $prefix) === true) {
+                if (self::startsWithWord($text, $prefix) === true) {
                     $taken = $prefix;
                     $text  = ltrim(substr($text, strlen($prefix)), ' ');
                     break;
@@ -711,7 +716,7 @@ final class Currency
             // round 5 called that "another currency", which was untrue.
             if ($taken !== '') {
                 foreach ($prefixes as $prefix) {
-                    if (str_starts_with($text, $prefix) === true) {
+                    if (self::startsWithWord($text, $prefix) === true) {
                         return 'That amount has its currency written twice (' . $taken . ' and ' . $prefix . '). '
                             . 'Put only one in front, for example ' . $code . ' 12.50.';
                     }
@@ -834,27 +839,35 @@ final class Currency
     }
 
     /**
-     * 💱 The currency sign or code a text BEGINS with ("£", "CA$", "USD"), or ''.
-     * Only for saying truthfully why a file's amount was refused: signs from
-     * SYMBOLS (longest first) and "¥", or three capital letters the portal
-     * knows as a currency, followed by a figure, a space, a minus or a point.
+     * 💱 The currency sign or code a text BEGINS with ("£", "CA$", "USD", "R"),
+     * or ''. Only for saying truthfully why a file's amount was refused. Asked
+     * in this order, each longest first:
+     *   1. a sign from SIGNS_OF with a SYMBOL in it ("$", "£", "GH₵", "R$"),
+     *      wherever it is followed by anything;
+     *   2. three capital letters the portal knows as a currency ("RUB"),
+     *      followed by a figure, a space, a minus or a point;
+     *   3. a sign from SIGNS_OF made of LETTERS only ("R", "kr", "Fr."), under
+     *      the same condition as a code — so "R12" names the rand's sign while
+     *      "Rent 12" names nothing (round 7: without that condition an ordinary
+     *      word would be called a currency).
      */
     private static function currencyWrittenAtStart(string $text): string
     {
-        // Only signs with a symbol in them ("$", "£", "GH₵", "R$"): a sign made
-        // of letters alone ("R", "kr", "Fr.") would be found at the start of
-        // ordinary words ("Rent"), and called a currency, which is untrue.
-        $signs = [];
+        $symbolic = [];
+        $letters  = [];
         foreach (self::SIGNS_OF as $list) {
             foreach ($list as $sign) {
-                if (preg_match('/[^\p{L}.]/u', $sign) === 1) {
-                    $signs[$sign] = true;
+                if (self::isLettersOnly($sign) === true) {
+                    $letters[$sign] = true;
+                } else {
+                    $symbolic[$sign] = true;
                 }
             }
         }
-        $signs = array_keys($signs);
-        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-        foreach ($signs as $sign) {
+        $byLength = static fn (string $a, string $b): int => strlen($b) <=> strlen($a);
+        $symbolic = array_keys($symbolic);
+        usort($symbolic, $byLength);
+        foreach ($symbolic as $sign) {
             if (str_starts_with($text, $sign) === true) {
                 return $sign;
             }
@@ -862,8 +875,42 @@ final class Currency
         if (preg_match('/^([A-Z]{3})(?=[ 0-9.\-])/', $text, $m) === 1 && self::isKnown($m[1]) === true) {
             return $m[1];
         }
+        $letters = array_keys($letters);
+        usort($letters, $byLength);
+        foreach ($letters as $sign) {
+            if (self::startsWithWord($text, $sign) === true) {
+                return $sign;
+            }
+        }
 
         return '';
+    }
+
+    /** Is a sign or code made of letters (and points) only — "R", "kr", "Fr.", "GBP"? */
+    private static function isLettersOnly(string $sign): bool
+    {
+        return preg_match('/^[\p{L}.]+$/u', $sign) === 1;
+    }
+
+    /**
+     * Does `$text` begin with `$prefix` as a sign or code rather than as the
+     * start of a longer word? A prefix with a symbol in it always does; one of
+     * letters only ("R", "kr", "GBP") only when what follows is a figure, a
+     * space, a minus, a point or nothing — so the rand's "R" is not cut off
+     * "RUB 12" (round 7: that turned a rouble cell into "UB 12" and advised
+     * relabelling it as rand).
+     */
+    private static function startsWithWord(string $text, string $prefix): bool
+    {
+        if (str_starts_with($text, $prefix) === false) {
+            return false;
+        }
+        if (self::isLettersOnly($prefix) === false) {
+            return true;
+        }
+        $rest = substr($text, strlen($prefix));
+
+        return $rest === '' || preg_match('/^[ 0-9.\-]/', $rest) === 1;
     }
 
     /**

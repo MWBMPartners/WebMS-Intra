@@ -248,9 +248,10 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    is written with ("$" as the organisation's own dollars, whichever they
     //    are; the owner, D-165). A sign the currency is never written with is
     //    refused as another currency's, as is the currency written twice, or
-    //    any sign while the organisation has no currency chosen, each with the
-    //    reason and what to do. Negatives are allowed so a debit can be
-    //    recognised and skipped.
+    //    any sign or code while the organisation has no currency chosen (a
+    //    letters-only sign such as the rand's "R" where a figure follows it),
+    //    each with the reason and what to do. Negatives are allowed so a debit
+    //    can be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
     //    Spaces are still taken out first, as before: banks write them.

@@ -330,7 +330,8 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     //    ("£" as Gibraltar pounds in a GIP organisation; the owner, D-165),
     //    exactly as the bank-statement import reads them. A sign the currency is
     //    never written with is refused as another currency's, as is the
-    //    currency written twice, or any sign while no currency is chosen. The
+    //    currency written twice, or any sign or code while no currency is
+    //    chosen (a letters-only sign such as "R" where a figure follows it). The
     //    rows are made in the organisation's currency, so that is the one
     //    passed. It used to strip
     //    "£", "$", "€", every comma and every space and go through a float, so

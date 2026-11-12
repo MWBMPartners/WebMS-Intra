@@ -469,6 +469,29 @@ foreach ([['GBP £12.50', 'GBP', 'GBP', '£'], ['£GBP 12.50', 'GBP', '£', 'GBP
 check('A10i the organisation\'s currency written TWICE ("GBP £12.50", "£GBP 12.50", "££12.50", "PHP ₱12.50", "AUD A$12.50", "EUR €5", "$USD 5") is refused saying so and asking for one — never "another currency"',
     $twice === [], implode(' | ', $twice));
 
+// A10k — a letters-only sign ("R", "kr", "Fr.", "P", "L", "K", "Q") is read
+// for its own currency only where a figure, space, minus or point follows,
+// so the rand's "R" is never cut off "RUB 12" (round 7's check).
+$letters = [];
+foreach ([['R12', 'ZAR', 1200], ['R 12', 'ZAR', 1200], ['-R12', 'ZAR', -1200], ['kr 12', 'SEK', 1200], ['kr12', 'NOK', 1200],
+          ['Fr. 12', 'CHF', 1200], ['Fr.12', 'CHF', 1200], ['P5', 'BWP', 500], ['Q5', 'GTQ', 500], ['L5', 'HNL', 500], ['K5', 'MMK', 500],
+          ['RUB 12', 'ZAR', otherCode('RUB', 'ZAR')], ['RON 12', 'ZAR', otherCode('RON', 'ZAR')], ['PLN 5', 'BWP', otherCode('PLN', 'BWP')],
+          ['PHP 5', 'BWP', otherCode('PHP', 'BWP')], ['QAR 5', 'GTQ', otherCode('QAR', 'GTQ')], ['LKR 5', 'HNL', otherCode('LKR', 'HNL')],
+          ['KES 5', 'MMK', otherCode('KES', 'MMK')], ['R$12', 'ZAR', signNotUsed('R$', 'ZAR')], ['L£5', 'HNL', signNotUsed('L£', 'HNL')],
+          ['R12', 'GBP', signNotUsed('R', 'GBP')], ['R12', '', NO_CURRENCY_START . 'R' . NO_CURRENCY_END],
+          ['ZAR R12', 'ZAR', 'That amount has its currency written twice (ZAR and R). Put only one in front, for example ZAR 12.50.']] as [$t, $code, $want]) {
+    $got = Currency::parseAmount($t, $code, allowNegative: true, fromFile: true);
+    if ($got !== $want) {
+        $letters[] = ($code === '' ? 'no currency' : $code) . ' ' . $t . ' → ' . var_export($got, true);
+    }
+}
+$rent = Currency::parseAmount('Rent 12', 'GBP', fromFile: true);
+if ($rent !== 'That is not an amount. ' . advice('GBP')) {
+    $letters[] = 'GBP Rent 12 → ' . var_export($rent, true);
+}
+check('A10k letters-only signs: ZAR "R12", SEK "kr 12", CHF "Fr. 12", BWP "P5", GTQ "Q5", HNL "L5", MMK "K5" read; "RUB 12", "RON 12" (ZAR), "PLN 5", "PHP 5" (BWP), "QAR 5", "LKR 5", "KES 5" are named as the other currency they are, never cut to "UB 12"; ZAR "R$12" and HNL "L£5" name the whole sign; "R12" in GBP names R, with no currency says so; GBP "Rent 12" names no sign',
+    $letters === [], implode(' | ', $letters));
+
 // A10j — every SYMBOLS sign (the one the portal WRITES) is also one its own
 // currency is READ with, so a file the portal could have written reads back.
 $symbols  = (new ReflectionClassConstant(Currency::class, 'SYMBOLS'))->getValue();
@@ -484,15 +507,19 @@ check('A10j every sign the portal WRITES an amount with (' . count($symbols) . '
 // A10h — no FILE refusal ever ADVISES writing a currency sign, by any spelling:
 // the instruction part of every sentence (after the reason) is checked against
 // EVERY sign the converter reads, not for the word "sign" (round 5's check).
-$allSigns = [];
+$allSigns    = [];
+$letterSigns = [];
 foreach ((new ReflectionClassConstant(Currency::class, 'SIGNS_OF'))->getValue() as $list) {
     foreach ($list as $sign) {
         if (preg_match('/[^\p{L}.]/u', $sign) === 1) {
             $allSigns[$sign] = true;
+        } else {
+            $letterSigns[$sign] = true;
         }
     }
 }
 $allSigns    = array_keys($allSigns);
+$letterSigns = array_keys($letterSigns);
 $advisedSign = [];
 $refusals    = 0;
 foreach (['', 'GBP', 'USD', 'AUD', 'NZD', 'CAD', 'CNY', 'GIP', 'FKP', 'EGP', 'PHP', 'CUP', 'EUR', 'CHF', 'ZAR'] as $code) {
@@ -514,8 +541,15 @@ foreach (['', 'GBP', 'USD', 'AUD', 'NZD', 'CAD', 'CNY', 'GIP', 'FKP', 'EGP', 'PH
             }
             $instruction = $at === PHP_INT_MAX ? '' : substr($got, $at);
             foreach ($allSigns as $sign) {
-                // "-12.50" (a minus in an example) is not a sign; every currency sign has a symbol in it.
+                // A sign with a symbol in it is looked for anywhere in the instruction.
                 if ($instruction !== '' && str_contains($instruction, $sign) === true) {
+                    $advisedSign[] = ($code === '' ? 'no currency' : $code) . ' ' . $t . ' → ' . $got;
+                    break;
+                }
+            }
+            foreach ($letterSigns as $sign) {
+                // A letters-only sign ("R", "kr", "Fr.") as a sign: not inside a word, and followed by a figure.
+                if ($instruction !== '' && preg_match('/(?<!\p{L})' . preg_quote($sign, '/') . ' ?[0-9]/u', $instruction) === 1) {
                     $advisedSign[] = ($code === '' ? 'no currency' : $code) . ' ' . $t . ' → ' . $got;
                     break;
                 }
@@ -526,8 +560,8 @@ foreach (['', 'GBP', 'USD', 'AUD', 'NZD', 'CAD', 'CNY', 'GIP', 'FKP', 'EGP', 'PH
         }
     }
 }
-check('A10h no FILE refusal advises writing a currency sign by ANY spelling — the instruction part of each of ' . $refusals . ' refusals (15 currencies, 25 cells, negatives allowed or not) is checked against all ' . count($allSigns) . ' signs the converter reads, as well as for the words',
-    $advisedSign === [] && $refusals > 500, implode(' | ', array_slice($advisedSign, 0, 3)));
+check('A10h no FILE refusal advises writing a currency sign by ANY spelling — the instruction part of each of ' . $refusals . ' refusals (15 currencies, 25 cells, negatives allowed or not) is checked against all ' . (count($allSigns) + count($letterSigns)) . ' signs the converter reads (' . count($allSigns) . ' with a symbol, looked for anywhere; ' . count($letterSigns) . ' of letters only, looked for before a figure), as well as for the words',
+    $advisedSign === [] && $refusals > 500 && count($allSigns) + count($letterSigns) >= 58, implode(' | ', array_slice($advisedSign, 0, 3)));
 check('A10c a currency not counted in hundredths is refused outright, with the reason the organisation page gives (yen, Kuwaiti dinar), in both modes',
     Currency::parseAmount('5', 'JPY') === Currency::whyNotChoosable('JPY') && Currency::parseAmount('5', 'KWD') === Currency::whyNotChoosable('KWD')
     && Currency::parseAmount('5', 'JPY', fromFile: true) === Currency::whyNotChoosable('JPY'));
