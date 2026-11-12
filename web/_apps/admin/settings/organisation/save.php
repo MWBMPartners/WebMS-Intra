@@ -36,7 +36,10 @@
  * coords/W3W (invalid non-empty W3W is rejected with a flash — nothing
  * saved; empty is fine), applies the W3W dual-mode verify/fill contract
  * (§A1: API off/unavailable never blocks a save), and best-effort forward-
- * geocodes when `Geocoder::autoEnabled()` is on and coords are still empty.
+ * geocodes when `Geocoder::autoEnabled()` is on and both coordinate boxes were
+ * left empty. When the boxes were TYPED but cannot be used (#945), neither
+ * what3words nor the look-up fills a position, the stored position is left
+ * exactly as it was, and the rest of the form is still saved.
  *
  * WHO MAY SAVE WHAT, AND AT WHICH LEVEL (#677, 30 October 2026)
  * -----------------------------------------------------------------------------

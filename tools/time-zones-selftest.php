@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 285;  // + nine in part P (#945: P17b-P17j) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 289;  // + thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3919,7 +3919,7 @@ ok(
         && (float) $nearZero['place']['lng'] === 0.0, // JSON carries 0.0 as 0, so compared as a number
     json_encode($nearZero)
 );
-// P17b-P17k (#945): a coordinate that is not a NUMBER is never turned into 0.
+// P17b-P17n (#945): a coordinate that is not a NUMBER is never turned into 0.
 // GeoLocation::validateCoords() used `(float)`, which makes any text a number:
 // "north" became 0, a real place on the equator, and was saved. Now a typed
 // position that cannot be used leaves the STORED one exactly as it was, while
@@ -3939,6 +3939,15 @@ foreach ([
     'P17c a WORD in the longitude box' => [['latitude' => '51.5074', 'longitude' => 'west'], 'the latitude and longitude must be numbers'],
     'P17d a decimal COMMA ("51,5" used to be saved as 51)' => [['latitude' => '51,5', 'longitude' => '-0.1278'], 'the latitude and longitude must be numbers'],
     'P17e one box filled and the other left empty' => [['latitude' => '51.5074', 'longitude' => ''], 'only one of the two boxes was filled in'],
+    // Out of range (round 3 of the check: nothing pinned this branch, so a
+    // planted `$positionKept = '';` there let "95, 0" CLEAR the stored
+    // position silently). One case per box, each beside a good value.
+    'P17k a latitude OUT OF RANGE (95, 0)' => [['latitude' => '95', 'longitude' => '0'], 'the latitude must be from -90 to 90 and the longitude from -180 to 180'],
+    'P17l a longitude OUT OF RANGE (51.5074, 200)' => [['latitude' => '51.5074', 'longitude' => '200'], 'the latitude must be from -90 to 90 and the longitude from -180 to 180'],
+    // A box holding only SPACES counts as empty (the check trims), so this is
+    // "one box filled", not "not a number". Removing trim() from the "typed?"
+    // test turns the reason into "must be numbers" and this goes red.
+    'P17m a box holding only SPACES beside a number' => [['latitude' => '51.5074', 'longitude' => '   '], 'only one of the two boxes was filled in'],
 ] as $what => [$boxes, $reason]) {
     $line  = 'Selftest 945 ' . substr($what, 0, 4);
     $sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save', ['addressLine1' => $line, 'countryCode' => 'GB'] + $boxes);
@@ -3951,6 +3960,18 @@ foreach ([
         said($sent) . '; shown "' . $shown . '"; line 1 ' . json_encode($orgLine1()) . '; stored ' . json_encode($orgPos())
     );
 }
+// P17n: BOTH boxes holding only spaces is "both empty", so (no look-up being
+// set up: the installation's seed has it off) the stored position is CLEARED
+// with no "not changed" message -- the other half of P17m's trim.
+setting('geo.autoGeocode', 'false');
+$sent  = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 945 spaces', 'countryCode' => 'GB', 'latitude' => '  ', 'longitude' => ' ', 'what3words' => '']);
+$shown = flashAfter($adminJar, '/admin/settings/organisation');
+ok(
+    'P17n both boxes holding only SPACES count as empty: the stored position is cleared, with no "not changed" message',
+    $sent['status'] === 302 && $orgPos() === ['', ''] && str_contains($shown, 'map position was not changed') === false,
+    said($sent) . '; shown "' . $shown . '"; stored ' . json_encode($orgPos())
+);
 // The over-reach direction: what IS a number still saves -- the exponent form
 // the page used to write (#935), and exactly 0 in both boxes, which is a real
 // place and must never be mistaken for "nothing typed".
