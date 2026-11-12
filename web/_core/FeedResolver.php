@@ -199,7 +199,7 @@ final class FeedResolver
      *                                       calendar's events, so a tampered
      *                                       entry can do nothing.
      *
-     * @return array{changed:int, newPending:int, pendingTotal:int, approvedBySave:int}
+     * @return array{changed:int, newPending:int, pendingTotal:int, approvedBySave:int, followers:array<int,array{follows:int, eventID:int}>}
      *         `changed` = events whose stored answer was rewritten.
      *         `newPending` = approval rows waiting at the end that were not
      *         waiting before (what a notification says is new).
@@ -208,7 +208,11 @@ final class FeedResolver
      *         declined to approved because the administrator saw them on the
      *         choice page and saved (0 whenever `$savedChoice` is null); the
      *         choice page reports it, so a colleague's decline is never
-     *         overturned without anybody being told.
+     *         overturned without anybody being told. `followers` (#855) =
+     *         every approval row this resolve WROTE as following another
+     *         date's decision (part 7's sibling rule), new or updated in
+     *         place: row number => `follows` (the row it follows) and
+     *         `eventID` (its date). `FeedAdmin::decide()` reads it.
      */
     public static function resolveFeed(
         \mysqli $db,

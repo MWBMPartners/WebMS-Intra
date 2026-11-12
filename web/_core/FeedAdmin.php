@@ -2393,7 +2393,7 @@ final class FeedAdmin
      * version read the row's `decisionNote` text, which also holds an
      * administrator's own typed note, so "Same reason as (approval #51)" on a
      * row somebody else had DECLINED read as following this call.
-
+     *
      * IN THIS ORDER, and why:
      *   1. Checks of the request's own shape that need NO database at all —
      *      the decision word (a wrong one throws, as part 7's
@@ -2420,11 +2420,12 @@ final class FeedAdmin
      *      the calendar under the rules in force BEFORE any item is decided,
      *      so an item whose request those rules would no longer make (made
      *      under the other copied-in rule, or under a rule that has since
-     *      run out) is "changed", never decided on its old request. After
-     *      the second resolve, still inside the lock, the after-resolve step
-     *      uses that resolve's own report of the follower rows it wrote
-     *      to choose each failed item's "changed" wording (see "HOW STEP 5
-     *      DIFFERS" above).
+     *      run out) is "changed", never decided on its old request. There is
+     *      NO after-resolve step: once `inFeedLock()` has returned (after its
+     *      commit), this method reads the second resolve's own report of the
+     *      follower rows it wrote (`resolved.followers`, held in memory — no
+     *      database read) to choose each failed item's "changed" wording (see
+     *      "HOW STEP 5 DIFFERS" above).
      *
      * ONE LOCK PER CALENDAR, SO NOT ALL-OR-NOTHING ACROSS CALENDARS (plan
      * section 4.1). If a later calendar fails — its lock times out, or the
@@ -2528,7 +2529,7 @@ final class FeedAdmin
         //    as before the join was added.
         $feedByApproval   = [];
         $seriesByApproval = []; // approvalID => the repeating event it belongs to, for series dates only
-        $eventByApproval  = []; // approvalID => its date (step 5's after-resolve read, #855)
+        $eventByApproval  = []; // approvalID => its date (step 5 matches it against `resolved.followers`, #855)
         if ($unique !== []) {
             $approvalIds  = array_keys($unique);
             $placeholders = implode(',', array_fill(0, count($approvalIds), '?'));
@@ -2665,12 +2666,17 @@ final class FeedAdmin
             // second resolve wrote for its date AS A FOLLOWER of a row this
             // call claimed — original approval number => that row. The date
             // test is pinned (D20 case f: followers of OTHER dates). The
-            // "follows a row this call claimed" test, said plainly, cannot be
-            // made false by any test: the first resolve, under the same lock,
-            // has already applied every EARLIER decision, so a follower the
-            // second resolve writes can only follow a row claimed in between —
-            // this call's. It stays so that a later change to the resolver
-            // cannot silently widen "follows your decision" to any decision.
+            // "follows a row this call claimed" test cannot be triggered in an
+            // ordinary run, and no test here triggers it: the first resolve,
+            // under the same lock, has already applied every earlier decision,
+            // so a follower the second resolve writes normally follows a row
+            // claimed in between — this call's. It CAN matter: each resolve
+            // reads the database's clock (`databaseNowUtc()`), so at a
+            // one-second boundary a rule's window can open or close between
+            // the two, and the second resolve can then write a follower of an
+            // OLDER decision. This test keeps such a date out of "follows your
+            // decision" (it reads "please review it again"), and stops a later
+            // change to the resolver widening the wording to any decision.
             $claimedHere  = array_map('intval', $result['decidedIds']);
             $followedHere = [];
             foreach ($feedItems as $item) {
@@ -2964,7 +2970,8 @@ final class FeedAdmin
      * rolled back and returned exactly as given (nothing written, no
      * resolve). A result with `ok === true` is resolved and committed, and
      * gains a `resolved` key: `FeedResolver::resolveFeed()`'s own return
-     * array (`changed`, `newPending`, `pendingTotal`, `approvedBySave`).
+     * array (`changed`, `newPending`, `pendingTotal`, `approvedBySave`,
+     * `followers` — the follower rows it wrote; #855, read by `decide()`).
      *
      * This is the ONLY place in `FeedAdmin` that calls `resolveFeed()`
      * (C10 item 2) — every write above reaches the resolver through here,
