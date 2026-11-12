@@ -2524,6 +2524,93 @@ class DbBackup
         return is_string($opened) === true ? $opened : $opened['manifest'];
     }
 
+    /**
+     * 🔢 Who would be SIGNED OUT by putting this snapshot back whole (#922).
+     *
+     * Since #598 (D-104, D-108) a browser stays signed in only while the
+     * account exists, is switched on, and carries the sign-in number the
+     * browser was signed in under. A whole restore puts `tblUsers` back as the
+     * snapshot held it, numbers included, so every account whose number has
+     * moved on since (a password reset, changed or set), every account not in
+     * the snapshot, and every account switched off in it, is signed out on
+     * its next page - the administrator pressing Restore included. Until #922
+     * nothing said so beforehand, and afterwards they met a sign-in page that
+     * said nothing either.
+     *
+     * Counts accounts that are switched ON now (a switched-off account has no
+     * browser to sign out) and would not be current after the restore. It
+     * reads the snapshot's `tblUsers` file through rows(), the same reader the
+     * restore itself uses, and changes nothing.
+     *
+     * WHAT IT CANNOT SAY: who is signed in at this moment (sessions are files
+     * the portal does not list), so this counts ACCOUNTS whose browsers would
+     * be signed out, not browsers. And a snapshot taken before migration 270
+     * has no numbers: every account in it counts as 0, which is what the
+     * restore will write.
+     *
+     * @return array{accounts: int, you: bool}|null Null when it could not be
+     *         worked out (the snapshot or the database could not be read);
+     *         the page then says the general sentence without a number.
+     *         Zero accounts when the snapshot does not hold `tblUsers` at all,
+     *         because then the restore leaves it alone.
+     */
+    public function signInsEndedByRestoring(string $name, int $viewerId): ?array
+    {
+        if (self::isSnapshotName($name) === false) {
+            return null;
+        }
+        $opened = $this->openSnapshot($this->pathOf($name));
+        if (is_string($opened) === true) {
+            return null;
+        }
+        $usersKey = null;
+        foreach (array_keys((array) $opened['manifest']['tables']) as $listed) {
+            // Capitals ignored: lower_case_table_names is a server setting (#697).
+            if (strcasecmp((string) $listed, 'tblUsers') === 0) {
+                $usersKey = (string) $listed;
+            }
+        }
+        if ($usersKey === null) {
+            return ['accounts' => 0, 'you' => false];
+        }
+        try {
+            // What the snapshot would put back: number and switch per account.
+            $then = [];
+            foreach ($this->rows($opened['dir'], $usersKey, $opened['format']) as $row) {
+                $then[(int) ($row['userID'] ?? 0)] = [
+                    'on'      => (int) ($row['isActive'] ?? 0) === 1,
+                    'version' => (int) ($row['signInVersion'] ?? 0),
+                ];
+            }
+            // What every switched-on account carries now.
+            $result = $this->db->query('SELECT `userID`, `signInVersion` FROM `tblUsers` WHERE `isActive` = 1');
+            if ($result === false) {
+                return null;
+            }
+            $accounts = 0;
+            $you      = false;
+            while ($now = $result->fetch_assoc()) {
+                $id      = (int) $now['userID'];
+                $current = isset($then[$id]) === true && $then[$id]['on'] === true
+                    && $then[$id]['version'] === (int) $now['signInVersion'];
+                if ($current === false) {
+                    $accounts++;
+                    if ($id === $viewerId) {
+                        $you = true;
+                    }
+                }
+            }
+            $result->free();
+        } catch (\Throwable) {
+            // A file the restore itself would refuse, or a database still
+            // waiting for migration 270 (no `signInVersion`, and so no
+            // browser is signed out for this reason at all): no number.
+            return null;
+        }
+
+        return ['accounts' => $accounts, 'you' => $you];
+    }
+
     /** The file holding one table, for the form the snapshot is in. */
     private static function tableFile(string $dir, string $table, int $format): string
     {

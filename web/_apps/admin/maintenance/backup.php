@@ -529,6 +529,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $notes
                 ));
                 $flashType = $notes === '' ? 'success' : 'warning';
+                // 🔢 #922: the restore has just put every account's sign-in
+                //    number back as the snapshot held it. If THIS person's
+                //    number moved on since the snapshot, their very next click
+                //    signs them out (#598, D-104, D-108) - which is right, and
+                //    used to happen with nothing said: they met a sign-in page
+                //    with no message, and this result survived only in the
+                //    activity log. So it is said HERE, on the one answer they
+                //    are sure to see, and the result is kept on this page for
+                //    seven days (the "last whole restore" box below), where
+                //    they land again after signing back in. Asked AFTER the
+                //    restore, of the restored row, through the same test the
+                //    sign-in check itself makes.
+                if (Auth::signInStillCurrent() === false) {
+                    $flash .= ' Your own sign-in is not current in the restored database: your password was reset, '
+                            . 'changed or set after this snapshot was taken, or your account is not in it. The next page '
+                            . 'you open will ask you to sign in again, with the password you had when the snapshot was '
+                            . 'taken. This result stays at the top of this page for seven days.';
+                    $flashType = 'warning';
+                }
             } else {
                 // The message already explains, in plain words, that nothing
                 // was changed. Show it as it is rather than wrapping it in
@@ -709,6 +728,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $snapshots = $backup->listSnapshots();
 
+// 🧾 ------------------------------------------------------------------------
+//    THE LAST WHOLE RESTORE, for seven days (#922). A restore can sign out the
+//    very administrator who ran it (see the note at the restore above), and
+//    then the result they were shown is gone with their session; until #922
+//    it survived only in the activity log. Its line there is written AFTER
+//    the restore, so it outlives the restore itself, and this box reads it
+//    back on every ordinary visit: whoever signs in again and comes back here
+//    finds what happened. Two look-ups, one per kind of line, each served by
+//    the activity log's index on (activityType, timestamp), so the cost does
+//    not grow with the log. Not drawn on the answer to a press, which shows
+//    its own result.
+//
+//    WHAT IT CANNOT SAY: anything the line does not hold. It is the same
+//    sentence the activity log keeps, with who pressed it and when, in the
+//    database's own clock as the activity log shows it.
+$lastRestore = null;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    try {
+        foreach (['BackupRestored', 'BackupRestoreFailed'] as $restoreType) {
+            $stmt = $db->prepare(
+                'SELECT `l`.`logID`, `l`.`activityType`, `l`.`activityDescription`, `l`.`timestamp`, `u`.`fullName` '
+                . 'FROM `tblActivityLogs` `l` LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `l`.`userID` '
+                . 'WHERE `l`.`activityType` = ? AND `l`.`timestamp` >= (NOW() - INTERVAL 7 DAY) '
+                . 'ORDER BY `l`.`timestamp` DESC, `l`.`logID` DESC LIMIT 1'
+            );
+            if ($stmt === false) {
+                continue;
+            }
+            $stmt->bind_param('s', $restoreType);
+            $stmt->execute();
+            $found = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($found !== null && ($lastRestore === null || (int) $found['logID'] > (int) $lastRestore['logID'])) {
+                $lastRestore = $found;
+            }
+        }
+    } catch (\Throwable $ignored) {
+        // The box is a convenience; the page must still open without it.
+        $lastRestore = null;
+        unset($ignored);
+    }
+}
+
 // 🛟 ------------------------------------------------------------------------
 //    The rows a restore was about to lose to a cascade, kept instead of lost
 //    (#694). Grouped by table, because that is what the two buttons act on:
@@ -764,6 +826,7 @@ $inspect = $_GET['inspect'] ?? '';
 $inspectManifest  = null;
 $inspectUnlisted  = '';
 $inspectOneMoment = '';
+$inspectSignIns   = '';
 if (DbBackup::isSnapshotName($inspect) === true) {
     $opened = $backup->manifestOf($inspect);
     if (is_array($opened) === true) {
@@ -775,6 +838,29 @@ if (DbBackup::isSnapshotName($inspect) === true) {
         //    with their finger over the Restore button — what they can do
         //    about it differs from what the person who took it could.
         $inspectOneMoment = DbBackup::oneMomentWarning(DbBackup::oneMomentIn($opened), true);
+        // 🔢 #922: whose sign-in this restore would end, said BEFORE the
+        //    button is pressed. DbBackup counts; the words are here.
+        $signIns = $backup->signInsEndedByRestoring($inspect, (int) ($_SESSION['user_id'] ?? 0));
+        if ($signIns === null) {
+            $inspectSignIns = 'Putting this snapshot back whole also puts back every account\'s sign-in as it was '
+                . 'when it was taken. Anybody whose password has been reset, changed or set since then (you too, if '
+                . 'yours has) is signed out on their next page, and signs in again with the password they had then. '
+                . 'How many people that is could not be worked out.';
+        } elseif ($signIns['accounts'] > 0) {
+            $inspectSignIns = sprintf(
+                'Putting this snapshot back whole signs out %d account%s on their next page%s: each one\'s password '
+                . 'was reset, changed or set after this snapshot was taken, or the account is not in it or is '
+                . 'switched off in it. They sign in again with the password they had when it was taken; an account '
+                . 'that is not in the snapshot cannot sign in at all.%s',
+                $signIns['accounts'],
+                $signIns['accounts'] === 1 ? '' : 's',
+                $signIns['you'] === true ? ', yours among them' : '',
+                $signIns['you'] === true
+                    ? ' You will be asked to sign in as soon as the restore has finished; its result stays at the '
+                      . 'top of this page for seven days.'
+                    : ''
+            );
+        }
     } elseif (is_dir($backup->pathOf($inspect)) === true || is_link($backup->pathOf($inspect)) === true) {
         // Something by that name IS there and was not opened: say why. (A
         // name with nothing behind it draws the plain list, as before.)
@@ -807,6 +893,16 @@ $csrf = Auth::csrfToken();
 
 <?php if ($flash !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($flash, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php if ($lastRestore !== null): ?>
+    <?php // 🧾 #922: the last whole restore, from its activity-log line. See where $lastRestore is read. ?>
+    <div class="alert alert-<?php echo $lastRestore['activityType'] === 'BackupRestored' ? 'info' : 'danger'; ?>" id="last-whole-restore" role="status">
+        <strong>The last whole restore</strong>
+        (<?php echo htmlspecialchars((string) $lastRestore['timestamp'], ENT_QUOTES, 'UTF-8'); ?><?php if (($lastRestore['fullName'] ?? '') !== ''): ?>, by <?php echo htmlspecialchars((string) $lastRestore['fullName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>):
+        <?php echo htmlspecialchars((string) $lastRestore['activityDescription'], ENT_QUOTES, 'UTF-8'); ?>
+        <span class="d-block small mt-1">A restore signs out everybody whose password was reset, changed or set after its snapshot was taken, which is why this is kept here for seven days: it is also in the activity log.</span>
+    </div>
 <?php endif; ?>
 
 <?php
@@ -1150,6 +1246,10 @@ $scheduleBadge    = $scheduleFrequency === 'off'
                 <?php // 🧊 Also above the buttons (#581). Unlike the warning above it, this does NOT mean the restore will be refused — it means it MIGHT be, and the sentence says which message to look for. Nothing is said at all when the snapshot's answer is "yes". ?>
                 <div class="alert alert-secondary" id="snapshot-one-moment-warning"><?php echo htmlspecialchars($inspectOneMoment, ENT_QUOTES, 'UTF-8'); ?></div>
             <?php endif; ?>
+            <?php if ($inspectSignIns !== ''): ?>
+                <?php // 🔢 #922: above the buttons, like the two warnings before it. Nothing is drawn when nobody would be signed out. ?>
+                <div class="alert alert-warning" id="snapshot-sign-ins-warning"><?php echo htmlspecialchars($inspectSignIns, ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
             <?php // 🎭 The check comes first and looks harmless on purpose: it is the thing to press before the dangerous button below it. ?>
             <form method="post" class="mb-2" data-confirm="Check that this snapshot can be restored? This is a full rehearsal: every row is written into the database and then taken out again, so nothing is changed. It takes as long as a real restore, and the portal is closed to everyone else while it runs. Stay on this page until it finishes." data-confirm-confirm-label="Run the check">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -1160,7 +1260,7 @@ $scheduleBadge    = $scheduleFrequency === 'off'
                 </button>
                 <span class="text-muted small ms-2">Rehearses the whole restore and changes nothing.</span>
             </form>
-            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
+            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs. Anybody whose password was reset, changed or set after the snapshot was taken is signed out, you too if yours was." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="restore_full">
                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">

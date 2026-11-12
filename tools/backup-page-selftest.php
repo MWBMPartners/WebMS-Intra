@@ -81,6 +81,13 @@
  *      lines in both places they are shown, a stored value the portal will not
  *      use, a stored "copies to keep" figure outside the boxes' own range, and
  *      "Run now" answering green for a run that sent nothing (#671).
+ *   Q. (#922) A whole restore that signs out the administrator who ran it:
+ *      the snapshot's page says beforehand how many accounts it signs out and
+ *      whether theirs is one, the restore's own answer says their next page
+ *      will ask them to sign in, the sign-in page then says why (once), and
+ *      the backup page shows the restore's result again after they sign back
+ *      in. A control: the same snapshot, once the numbers agree, warns of
+ *      nothing.
  *
  * "IDENTICAL AFTERWARDS" IS CHECKED BY AN INDEPENDENT READER. The comparison
  * is `brs_fingerprint()` from tools/backup-restore-selftest.php: every value
@@ -2949,6 +2956,95 @@ Brs::$writer->query('DELETE FROM tblUsers WHERE userID >= 970950');
 Brs::$writer->query('DELETE FROM tblSettings WHERE settingID = ' . $hrSetting);
 Brs::$writer->query('DELETE FROM tblSites WHERE siteID = ' . $hrOrg);
 brs_removeFolder($backups . '/' . $hrSnapshot);
+
+// =============================================================================
+echo "\nQ. A whole restore that signs out the person who ran it (#922)\n";
+// =============================================================================
+// Since #598 (D-104, D-108) a browser is signed out once its account's sign-in
+// number differs from the one it signed in under, and a whole restore puts
+// every number back as the snapshot held it. So the global administrator who
+// runs a restore, if their password changed after the snapshot, is signed out
+// by their next click. That is right; what #922 found is that nothing said so:
+// no warning before, a sign-in page with no message after, and the result
+// surviving only in the activity log. This drives the whole journey: a
+// snapshot, two passwords "changed" after it (the number moved, the password
+// itself left alone so the test can sign in again), the warning on the
+// snapshot's page, the restore's own answer, the next click, the sign-in page,
+// signing in again, and the result waiting on the backup page.
+$qBefore    = array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []);
+$qTaken     = bps_message(bps_press($jar['root'], ['action' => 'snapshot_now'])['body']);
+$qNew       = array_values(array_diff(array_map('basename', glob($backups . '/upgrade-*', GLOB_ONLYDIR) ?: []), $qBefore));
+$qSnapshot  = (string) ($qNew[0] ?? '');
+brs_check(str_starts_with($qTaken, '[success] Snapshot created:') === true && count($qNew) === 1, 'Q1 the premise: a fresh snapshot was taken', $qTaken . ' ' . implode(', ', $qNew));
+// A password changed for ROOT and for MEMBER after the snapshot: what a change
+// does to the number (Auth::passwordChangeCommitted() adds to it).
+Brs::$writer->query('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 7 WHERE `userID` IN (' . BPS_ROOT . ', ' . BPS_MEMBER . ')');
+// ROOT's own browser signed in AFTER the change, so it carries the new number
+// - the browser that made a change is the one left signed in.
+$qJar   = $child . '/jar-root-q.txt';
+$qSignIn = static function () use ($qJar, $password): int {
+    $tok = bps_token(bps_request($qJar, 'GET', '/login')['body']);
+    $in  = bps_request($qJar, 'POST', '/login', ['csrf_token' => $tok, 'username' => 'selftest-backup-root', 'password' => $password]);
+
+    return $in['status'] === 302 && str_contains($in['location'], 'login') === false ? 1 : 0;
+};
+brs_check($qSignIn() === 1, 'Q2 the premise: the administrator signs in after the change, so their browser carries the new number');
+$qInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnapshot)['body'];
+$qWarning = preg_match('#<div class="alert alert-warning" id="snapshot-sign-ins-warning">(.*?)</div>#s', $qInspect, $qFound) === 1 ? bps_text($qFound[1]) : '(no warning)';
+brs_check(
+    str_contains($qWarning, 'Putting this snapshot back whole signs out 2 accounts on their next page, yours among them') === true
+    && str_contains($qWarning, 'You will be asked to sign in as soon as the restore has finished') === true
+    && strpos($qInspect, 'id="snapshot-sign-ins-warning"') < strpos($qInspect, 'name="action" value="restore_full"'),
+    'Q3 BEFORE: the snapshot\'s page says, above the Restore button, that restoring signs out two accounts, the administrator\'s among them, and what happens next',
+    $qWarning
+);
+brs_check(
+    preg_match('/data-confirm="[^"]*Anybody whose password was reset, changed or set after the snapshot was taken is signed out[^"]*"[^>]*data-confirm-confirm-label="Restore all"/', $qInspect) === 1,
+    'Q4 and the Restore button\'s own confirmation box says it too'
+);
+$qAnswer = bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qInspect), 'action' => 'restore_full', 'name' => $qSnapshot]);
+$qSaid   = bps_message($qAnswer['body']);
+brs_check(
+    str_starts_with($qSaid, '[warning] Snapshot put back in full:') === true
+    && str_contains($qSaid, 'Your own sign-in is not current in the restored database') === true
+    && str_contains($qSaid, 'with the password you had when the snapshot was taken') === true,
+    'Q5 DURING: the restore\'s own answer says it worked AND that the administrator\'s next page will ask them to sign in again',
+    $qSaid
+);
+$qNext = bps_request($qJar, 'GET', '/admin/maintenance/backup');
+brs_check(
+    $qNext['status'] === 302 && str_contains($qNext['location'], '/login') === true,
+    'Q6 the premise of #922: the very next click is sent to the sign-in page (the sign-in is not current any more)',
+    'HTTP ' . $qNext['status'] . ' ' . $qNext['location']
+);
+$qLogin  = bps_request($qJar, 'GET', '/login')['body'];
+$qNotice = preg_match('#id="signed-out-notice">(.*?)</div>#s', $qLogin, $qFound) === 1 ? bps_text($qFound[1]) : '(no notice)';
+brs_check(
+    str_contains($qNotice, 'You were signed out because your sign-in is no longer current') === true
+    && str_contains($qNotice, 'restored from a backup') === true,
+    'Q7 AFTER: the sign-in page says why they were signed out, naming a restore as one of the two reasons',
+    $qNotice
+);
+$qLoginAgain = bps_request($qJar, 'GET', '/login')['body'];
+brs_check(str_contains($qLoginAgain, 'id="signed-out-notice"') === false, 'Q8 and says it once: a reload of the sign-in page does not say it again');
+brs_check($qSignIn() === 1, 'Q9 the premise: they sign in again');
+$qBack = bps_request($qJar, 'GET', '/admin/maintenance/backup')['body'];
+$qBox  = preg_match('#<div class="alert alert-info" id="last-whole-restore"[^>]*>(.*?)</div>#s', $qBack, $qFound) === 1 ? bps_text($qFound[1]) : '(no box)';
+brs_check(
+    str_contains($qBox, 'The last whole restore') === true && str_contains($qBox, 'Snapshot ' . $qSnapshot . ' put back in full:') === true
+    && str_contains($qBox, 'Rae Root') === true,
+    'Q10 and the backup page, opened again, shows the result of the restore they ran and who ran it, read from the activity log, which the restore did not take away',
+    $qBox
+);
+// CONTROL: the database now holds exactly the snapshot's numbers, so the same
+// snapshot would sign out nobody, and the page then says nothing at all.
+$qControl = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnapshot)['body'];
+brs_check(
+    str_contains($qControl, 'Inspecting:') === true && str_contains($qControl, 'id="snapshot-sign-ins-warning"') === false,
+    'Q11 CONTROL: with every account\'s number now as the snapshot holds it, the same page draws no sign-in warning'
+);
+bps_settle();
+brs_removeFolder($backups . '/' . $qSnapshot);
 
 // =============================================================================
 $failed = Brs::$proofOk === false;

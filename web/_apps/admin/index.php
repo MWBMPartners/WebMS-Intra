@@ -629,7 +629,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
         It would take over /<?php echo $clashKey; ?>/ if the portal were switched to address prefixes.
         <?php endif; ?>
         <?php if ($isUmbrella === true): ?>
-        Change the key at <a href="<?php echo htmlspecialchars(Router::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Sites</a> (Edit).
+        Change the key at <a href="<?php echo htmlspecialchars(Router::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Organisations</a> (Edit).
         Links already shared under /<?php echo $clashKey; ?>/ will stop working when it changes.
         <?php else: ?>
         Ask a global administrator to change it.
@@ -972,7 +972,7 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
             <div class="col-6 col-md-4 col-lg-2">
                 <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-dark w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-sitemap fa-lg"></i>
-                    <span class="small">Sites</span>
+                    <span class="small">Organisations</span>
                 </a>
             </div>
             <?php endif; ?>

@@ -28,7 +28,7 @@
  * `admin/users/unplaced.php` exists instead of a second automatic
  * back-fill rule. It refuses to place a role into an organisation the
  * person is not an ACTIVE member of (Q4 of the #516 plan) — add them to
- * that organisation first (Admin -> Sites -> Users, or this same "no
+ * that organisation first (Admin, Organisations, Users, or this same "no
  * organisation" list), then come back here.
  *
  * @package   Portal\Admin
@@ -127,7 +127,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="mb-0">
         <strong>What to do.</strong> Pick the right organisation for each row below and press &ldquo;Place&rdquo;.
         The role must already exist in that organisation's own list (Admin &rarr; Roles) and the person must
-        already be an active member of it — add them first if not, at Admin &rarr; Sites &rarr; Users.
+        already be an active member of it — add them first if not, at Admin, Organisations, Users.
     </p>
 </div>
 

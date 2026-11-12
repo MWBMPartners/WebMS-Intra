@@ -231,7 +231,12 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 223; // #988/#1009 check round 4 added seven: the
+const EXPECTED_CHECKS = 225; // #982 added M13b (an offboarding post with no
+                            // reason is refused in words) and #926 added B4b
+                            // (Request erasure shows a member no developer
+                            // note, pinned as rendered). M12 and M13 now also
+                            // read the offboarding page's message. 223 + 2 = 225.
+                            // #988/#1009 check round 4 added seven: the
                             // GdprErasureExecuted record of N5's run read back
                             // whole (N5b); the four records of a run - executed,
                             // incomplete, stopped and refused - driven and read
@@ -1358,6 +1363,44 @@ ok('AN EXPENSE CLAIM THAT KEEPS THE ACCOUNT NUMBER SAYS SO IN ITS LABEL: Cal\'s 
     && str_contains($askClaimRow, 'kept, with some details about you removed but still carrying your account number')
     && str_contains($dataClaimRow, 'kept, with some details about you removed but still carrying your account number'),
     mb_substr($askClaimRow, 0, 400) . ' | ' . mb_substr($dataClaimRow, 0, 400));
+
+// 🧑 #926: Request erasure and My data print each kind of record's REASON to
+//    the member. The room booking's reason carried a developer's note ("CAN
+//    NEVER MATCH, because nothing writes it — the decline branch of
+//    resources/action.php ...") which is true and means nothing to the person
+//    reading it; the asset loan's reason carried another. The notes live in
+//    code comments now (GdprEraser::catalogue()). Mel booked a room, so her
+//    Request erasure page has a booking row: it is found exactly once and
+//    pinned AS RENDERED, and neither of her two pages carries any of the
+//    developer wording anywhere. The premise (a booking row exists at all) is
+//    part of the pin: an empty region fails it.
+$melAskHtml  = (string) req($jar['mel'], 'GET', '/account/erasure-request')['body'];
+$melDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
+$askBookingRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblResourceBooking') {
+            $rows[] = $li;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$askBookingPinned = renderedPin('request erasure tblResourceBooking', $askBookingRow);
+$developerWords   = ['CAN NEVER MATCH', 'resources/action.php', 'declineReason', 'counterpartyName', '#708', 'the limit is recorded'];
+$developerSeen    = [];
+foreach (['Request erasure' => text($melAskHtml), 'My data' => text($melDataHtml)] as $pageName => $pageText) {
+    foreach ($developerWords as $word) {
+        if (str_contains($pageText, $word) === true) {
+            $developerSeen[] = $pageName . ': ' . $word;
+        }
+    }
+}
+ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking row is found exactly once and as pinned, says in plain words what happens to the booking, and neither Request erasure nor My data carries the developers\' wording about columns that can never match (#926)',
+    $askBookingPinned === true && str_contains($askBookingRow, 'the booking is kept so the room') === true
+    && str_contains($askBookingRow, 'Any notes typed on the booking stay with it') === true && $developerSeen === [],
+    mb_substr($askBookingRow, 0, 500) . ' | seen: ' . json_encode($developerSeen));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
 //    erasure's words bare, so a record still held read "deleted" and an
@@ -3727,24 +3770,46 @@ ok('M11 CONTROL: the same page still adds a LIVE account to the organisation, an
     json_encode([$livAtB, $livAtBNow, $saidLivAdd, $saidLivRm]));
 
 // Offboarding: the page offers no form for the erased account and says why,
-// and a hand-made post is refused. offboarding/index.php prints no message at
-// all (it never has), so what the post SAYS is not read here; what it WROTE is.
+// and a hand-made post is refused. Since #982 the page the post lands on
+// (offboarding/index.php) PRINTS the handler's answer; until then it printed
+// no message at all, so the refusal was read by the next page that printed
+// one (here, the Users page this helper fetched its form token from) or by
+// nobody. So the helper follows the redirect it is given and reads THAT page,
+// and M12 and M13 now require the words as well as what was written.
 $offPage    = req($jar['root'], 'GET', '/offboarding/user?id=' . ZED)['body'];
-$offboardM  = static function (int $uid) use ($jar): void {
-    $tok = token(req($jar['root'], 'GET', '/admin/users')['body']);
-    req($jar['root'], 'POST', '/offboarding/do', ['csrf_token' => $tok, 'userID' => $uid, 'reason' => 'Selftest #977', 'dataDisposition' => 'retain', 'effectiveDate' => gmdate('Y-m-d')]);
+$offboardM  = static function (int $uid, string $reason = 'Selftest #977') use ($jar, $flashOn): array {
+    $tok  = token(req($jar['root'], 'GET', '/admin/users')['body']);
+    $sent = req($jar['root'], 'POST', '/offboarding/do', ['csrf_token' => $tok, 'userID' => $uid, 'reason' => $reason, 'dataDisposition' => 'retain', 'effectiveDate' => gmdate('Y-m-d')]);
+    $to   = (string) parse_url((string) $sent['location'], PHP_URL_PATH);
+
+    // The redirect already carries the organisation's part, so it is asked
+    // as it stands (no second ADDR_A in front: #536's "never join two built
+    // addresses").
+    return [$to, $to === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $to, null, '')['body'])];
 };
 $beforeOff = $zedRowM();
-$offboardM(ZED);
+[$offTo, $offSaid] = $offboardM(ZED);
 $zedOffRows = (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [ZED])['n'];
-ok('M12 the offboarding page for the erased account shows the reason and no form, and a hand-made offboarding post for it writes no offboarding record and leaves the account row unchanged (#977)',
+ok('M12 the offboarding page for the erased account shows the reason and no form, and a hand-made offboarding post for it lands on the offboarding page, which SHOWS the refusal and its reason (#982), writes no offboarding record and leaves the account row unchanged (#977)',
     str_contains(text($offPage), ERASED_WORDS) === true && str_contains($offPage, 'name="dataDisposition"') === false
+    && str_ends_with($offTo, '/offboarding') === true && str_contains($offSaid, ERASED_WORDS) === true
     && $zedOffRows === 0 && $zedRowM() === $beforeOff,
-    json_encode([mb_substr(text($offPage), 0, 300), str_contains($offPage, 'name="dataDisposition"'), $zedOffRows]));
-$offboardM(OFF);
-ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written and the account is switched off (#977)',
+    json_encode([mb_substr(text($offPage), 0, 300), str_contains($offPage, 'name="dataDisposition"'), $offTo, $offSaid, $zedOffRows]));
+[$offToLive, $offSaidLive] = $offboardM(OFF);
+ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written, the account is switched off, and the offboarding page says so (#977, #982)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [OFF])['n'] === 1
-    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0);
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0
+    && str_ends_with($offToLive, '/offboarding') === true && str_contains($offSaidLive, 'User offboarded.') === true,
+    json_encode([$offToLive, $offSaidLive]));
+// #982: a post with no reason used to send the administrator to the Users
+// page with nothing said at all. It says why now, and offboards nobody. UNP
+// is a live account nobody has offboarded, so a missing record is the
+// refusal's doing and not the account's state.
+[$offToBare, $offSaidBare] = $offboardM(UNP, '');
+ok('M13b a hand-made offboarding post with NO reason lands on the Users page, which says a reason is needed and that nobody was offboarded, and no offboarding record is written (#982)',
+    str_ends_with($offToBare, '/admin/users') === true && str_contains($offSaidBare, 'A reason is needed to offboard somebody. Nobody was offboarded.') === true
+    && (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [UNP])['n'] === 0,
+    json_encode([$offToBare, $offSaidBare]));
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

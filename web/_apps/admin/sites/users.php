@@ -231,7 +231,7 @@ $personName = static function (mixed $name): string {
 $siteName    = htmlspecialchars($siteInfo['siteName'], ENT_QUOTES, 'UTF-8');
 $pageTitle   = 'Users — ' . $siteInfo['siteName'];
 $pageSection = 'admin';
-$breadcrumbs = ['Admin' => Site::url('admin'), 'Sites' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Organisations' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>

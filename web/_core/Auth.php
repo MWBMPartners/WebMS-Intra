@@ -940,6 +940,14 @@ class Auth
             }
 
             self::endThisSession();
+            // 📣 #922: say WHY on the sign-in page this request is about to
+            //    send them to. Until #922 the person simply found themselves
+            //    signed out with nothing said - the administrator who had
+            //    just run a restore included. Only a word goes in (no
+            //    account, no snapshot, nothing the next person at this
+            //    browser could not be told), and it is taken out the first
+            //    time the sign-in page reads it: takeSignedOutNotice().
+            $_SESSION[self::SIGNED_OUT_NOTICE_KEY] = self::SIGNED_OUT_NOT_CURRENT;
             Logger::activity(
                 // Worded for BOTH causes (check round 3): a password reset,
                 // change or administrator's new password, AND a whole-database
@@ -1014,6 +1022,86 @@ class Auth
      * tools/sign-in-limits-selftest.php.
      */
     private const SIGN_IN_VERSION_KEY = 'sign_in_version';
+
+    /**
+     * 📣 The session entry saying why the person was just signed out (#922),
+     * read ONCE by the sign-in page through takeSignedOutNotice(). It holds
+     * one of the words below and nothing else: never an account, a name or
+     * anything about a restore, because the session it is written into is a
+     * NEW, empty one belonging to nobody yet, and whoever uses this browser
+     * next reads it.
+     */
+    private const SIGNED_OUT_NOTICE_KEY = 'signed_out_because';
+
+    /** The sign-in was no longer current: a password reset, change or set, or a database restore. */
+    public const SIGNED_OUT_NOT_CURRENT = 'not_current';
+
+    /**
+     * 📣 Why this browser was just signed out, in words for the sign-in page,
+     * or '' when it was not (#922). Taken out of the session as it is read, so
+     * it is said once and a reload does not say it again.
+     *
+     * The only reason recorded today is SIGNED_OUT_NOT_CURRENT, set by
+     * endSessionOfInactiveAccount(). The sentence names both causes because
+     * this browser cannot tell which it was - the same reason the activity
+     * line it writes names both. An account switched OFF is deliberately not
+     * told anything here: that is an administrator's decision about the
+     * person, and saying it to whoever opens the browser next is not this
+     * page's to do.
+     */
+    public static function takeSignedOutNotice(): string
+    {
+        $why = $_SESSION[self::SIGNED_OUT_NOTICE_KEY] ?? null;
+        unset($_SESSION[self::SIGNED_OUT_NOTICE_KEY]);
+        if ($why !== self::SIGNED_OUT_NOT_CURRENT) {
+            return '';
+        }
+
+        return I18n::t('auth.signed_out_not_current');
+    }
+
+    /**
+     * 🔢 Is THIS browser's sign-in still current - would its NEXT request
+     * keep it signed in (#922)? True or false, or null when it cannot tell
+     * (nobody is signed in, the account row cannot be read, or a database
+     * still waiting for migration 270 has no number to compare).
+     *
+     * It asks exactly what endSessionOfInactiveAccount() asks - the account
+     * exists, is switched on, and carries the number this session was signed
+     * in under - and ENDS NOTHING. It exists for the one page that changes the
+     * answer under its own feet: a whole-database restore puts every
+     * account's number back as the snapshot held it, so the administrator who
+     * ran it can be signed out by their very next click. The backup page asks
+     * this straight after a restore and says so in the result, instead of
+     * letting the next page be a surprise.
+     */
+    public static function signInStillCurrent(): ?bool
+    {
+        if (isset($_SESSION['user_id']) === false) {
+            return null;
+        }
+        try {
+            $db   = App::db();
+            $stmt = $db->prepare('SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        } catch (\Throwable) {
+            // No connection, or error 1054 on a database that has not run
+            // migration 270 (where no session is ended for this reason at all).
+            return null;
+        }
+        if ($stmt === false) {
+            return null;
+        }
+        $userId = (int) $_SESSION['user_id'];
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($row === null || (int) $row['isActive'] !== 1) {
+            return false;
+        }
+
+        return self::sessionVersion() === (int) $row['signInVersion'];
+    }
 
     /**
      * The account whose TWO-FACTOR CODE step is about to call

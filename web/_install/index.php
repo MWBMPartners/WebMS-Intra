@@ -4577,7 +4577,7 @@ header('X-Robots-Tag: noindex, nofollow');
                 <ol class="mb-0 mt-1">
                     <li>Sign in with the e-mail address and password of the administrator account.</li>
                     <?php // The time zone is set on the Sites page and nowhere else since #604: this line used to send people to Admin, Settings for it. ?>
-                    <li>In Admin, Sites, press Edit and set your organisation&rsquo;s name and time zone. In Admin, Settings, set the name shown on the sign-in page, and the artwork.</li>
+                    <li>In Admin, Organisations, press Edit and set your organisation&rsquo;s name and time zone. In Admin, Settings, set the name shown on the sign-in page, and the artwork.</li>
                     <li>In Admin, Integrations, Email, tell the portal how to send e-mail, and send yourself a test.</li>
                     <li>Add the people who will use the portal.</li>
                 </ol>

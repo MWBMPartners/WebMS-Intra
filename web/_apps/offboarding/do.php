@@ -54,6 +54,15 @@ $disp      = (string) ($_POST['dataDisposition'] ?? 'retain');
 $effective = (string) ($_POST['effectiveDate'] ?? date('Y-m-d'));
 
 if ($userId <= 0 || $reason === '') {
+    // 📋 #982: this refusal said nothing either. The form marks the reason
+    //    as required, so a browser stops an empty one before it is sent; a
+    //    hand-made post, or a browser that ignores `required`, used to land
+    //    on the Users page with no word of why nothing happened. That page
+    //    prints the message.
+    $_SESSION['flash_msg']  = $userId <= 0
+        ? 'No account was named, so nobody was offboarded.'
+        : 'A reason is needed to offboard somebody. Nobody was offboarded.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/users'));
     exit();
 }
