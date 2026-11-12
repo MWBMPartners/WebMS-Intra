@@ -244,15 +244,17 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    ONE converter, Currency::parseAmount() (#1004), in its FILE mode
     //    (`fromFile`): a file the portal reads keeps the bank's own number
     //    format (D-152), so commas between groups of three are read, and the
-    //    import currency's three-letter CODE in front (where a figure, minus or
-    //    point follows), or any sign WITH A SYMBOL IN IT that currency is
-    //    written with ("$" as the organisation's own dollars, whichever they
-    //    are; the owner, D-165). A sign made only of letters ("R", "Rs", "kr")
-    //    is not read (D-177): the cell is refused asking for the code. A symbol
-    //    sign or code of another currency, the currency written twice, and any
-    //    symbol sign or code while the organisation has no currency chosen are
-    //    refused, each with the reason and what to do. Negatives are allowed so
-    //    a debit can be recognised and skipped.
+    //    import currency's three-letter CODE in front, or any sign WITH A SYMBOL
+    //    IN IT that currency is written with ("$" as the organisation's own
+    //    dollars, whichever they are; the owner, D-165), either followed by any
+    //    run of spaces. A sign made only of letters ("R", "Rs", "kr") is not
+    //    read (D-177). A refusal names a reason only where it is certain — two
+    //    currency markers, decimals, commas, points, a misplaced minus, too
+    //    large, nothing entered, or a marker while no currency is chosen;
+    //    anything else, including another currency's sign or code, is "That
+    //    amount could not be read." with what IS read (Currency::fileAdvice()).
+    //    It never guesses another currency. Negatives are allowed so a debit can
+    //    be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
     //    Spaces are still taken out first, as before: banks write them.
@@ -275,7 +277,7 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
                 'note' => 'Row ' . $rowNum . ': a debit of "' . $cell . '" is larger than the portal can store; it was skipped, as every debit is.'];
         }
         // The converter's own reason, never a blanket "unparseable".
-        return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ': the ' . $cellName . ' "' . $cell . '" was not read. ' . $pence, 'row' => null];
+        return ['ok' => false, 'skip' => false, 'error' => 'Row ' . $rowNum . ', ' . $cellName . ' "' . $cell . '": ' . $pence, 'row' => null];
     }
     if ($pence <= 0) {
         // Zero or negative (a debit written as a negative signed amount).

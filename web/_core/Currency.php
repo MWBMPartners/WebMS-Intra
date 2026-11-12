@@ -244,8 +244,8 @@ final class Currency
      * D-177, superseding D-165 for those signs): such signs clash with ordinary
      * text ("R Smith", "P.O. 1234"), and round 7's check measured "Rs.50"
      * stored as 0.50, a hundred times too small. A cell written with one is
-     * refused, asking for the three-letter code. They stay in SIGNS_OF because
-     * that is ICU's data, and lettersSignsOf() needs them to say so.
+     * refused as a cell that could not be read, with the advice to write the
+     * three-letter code. They stay in SIGNS_OF because that is ICU's data.
      *
      * @return list<string>
      */
@@ -254,24 +254,6 @@ final class Currency
         $signs = array_values(array_filter(
             self::SIGNS_OF[strtoupper(trim($code))] ?? [],
             static fn (string $sign): bool => self::isLettersOnly($sign) === false
-        ));
-        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-
-        return $signs;
-    }
-
-    /**
-     * The SIGNS_OF entries of this currency made only of letters (D-177): NOT
-     * read in a file; used only to tell a cell written with one that the code
-     * is wanted instead. Longest first.
-     *
-     * @return list<string>
-     */
-    private static function lettersSignsOf(string $code): array
-    {
-        $signs = array_values(array_filter(
-            self::SIGNS_OF[strtoupper(trim($code))] ?? [],
-            static fn (string $sign): bool => self::isLettersOnly($sign) === true
         ));
         usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
 
@@ -611,17 +593,19 @@ final class Currency
     public const REFUSED_NOT_FIGURES = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.';
 
     /**
-     * The REASONS a file's amount is refused (D-152, D-153). Each is followed by
-     * fileAdvice(), the one sentence saying how to write it — figures, commas
-     * only between thousands, and the three-letter CODE in front if you like.
-     * The advice never points at a currency sign: round 4 said "the currency's
-     * own sign", which is false for every currency whose sign is shared or which
-     * has no sign here at all.
+     * What a FILE's amount answers when the converter cannot say for CERTAIN why
+     * the cell is not an amount — a cell beginning with a sign, a code or
+     * letters this organisation does not use, a plus sign, a power of ten, a
+     * cell with no figures — followed by fileAdvice(), which says exactly what
+     * IS read (#1004 round 9). Rounds 2 to 8 tried to name which OTHER currency
+     * such a cell was in, and every attempt produced untrue sentences: "GBP $12"
+     * was called another currency, GBP; "P.O. 1234" was called a currency sign;
+     * "TOP-UP 20" was called the pa'anga. A refusal now gives a specific reason
+     * only where the reason is certain (see parseAmount()).
      */
-    public const FILE_REASON_NOT_FIGURES   = 'That is not an amount.';
-    public const FILE_REASON_PLUS          = 'Leave out the plus sign.';
+    public const FILE_REASON_UNREADABLE     = 'That amount could not be read.';
+    /** A minus where a file's amount may NOT be negative (the asset import). */
     public const FILE_REASON_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative.';
-    public const FILE_REASON_NO_FIGURES    = 'That cell has no figures in it.';
 
     /** The other refusals, each worded for the one shape it is given (#1004). */
     public const REFUSED_POWER_OF_TEN = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
@@ -676,24 +660,27 @@ final class Currency
      *   - commas between groups of three ("1,234.50", "1,234,567"), the first
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
-     *   - the record's three-letter CODE in front, where a figure, a minus or
-     *     a point follows it, after at most one space ("GBP 12.50",
-     *     "AUD1,234.50"); "ALL PAID" and "TRY again" are not codes;
+     *   - the organisation's three-letter CODE in front, where — after any
+     *     run of spaces — a figure, a minus or a point follows ("GBP 12.50",
+     *     "GBP  12.50", "AUD1,234.50"); "ALL PAID" and "TOP-UP 20" are not codes;
      *   - or any sign WITH A SYMBOL IN IT that its currency is written with
-     *     (signsOf(), from ICU): "$" is read as US dollars in a USD organisation
-     *     and as Australian dollars in an AUD one, "£" as Gibraltar pounds in a
-     *     GIP one (the owner, D-165, superseding D-155 and D-157). A minus may
-     *     sit either side of it ("-£3.00", "£-3.00").
-     *   A sign made only of LETTERS ("R", "kr", "Rs", "Fr.") is NOT read (the
-     *   owner, D-177): a cell written with the organisation's own such sign is
-     *   refused asking for the code ("ZAR 12.50"), and any other letters are
-     *   simply "not an amount". The currency written TWICE ("GBP £12.50",
-     *   "GBP£12", "££12.50") is refused, saying so. A symbol sign or code the
-     *   organisation's currency is not written with is refused, saying which
-     *   and that it is another currency; and with NO currency chosen for the
-     *   organisation, any symbol sign or code is refused, saying so and what to
-     *   do (D-139: an amount's money is never guessed, so "£12.50" cannot be
-     *   stored as money of no known kind).
+     *     (signsOf(), from ICU), again followed by any run of spaces: "$" is
+     *     read as US dollars in a USD organisation and as Australian dollars in
+     *     an AUD one, "£" as Gibraltar pounds in a GIP one (the owner, D-165,
+     *     superseding D-155 and D-157). A minus may sit either side of it
+     *     ("-£3.00", "£-3.00"). A sign made only of LETTERS ("R", "kr", "Rs",
+     *     "Fr.") is NOT read (the owner, D-177).
+     *   A file refusal gives a specific reason ONLY where the converter can know
+     *   it for certain (#1004 round 9): two currency markers in front (two of
+     *   this organisation's, or its code with any symbol sign straight after —
+     *   "GBP £12.50", "GBP$12", "££12.50"); more than two decimals; misplaced
+     *   commas; more than one point; a minus in the wrong place, or where none
+     *   is allowed; too large; nothing entered; and, with NO currency chosen for
+     *   the organisation, a currency marker of any kind (D-139: an amount's
+     *   money is never guessed). EVERY other refusal — including any cell that
+     *   begins with a sign, code or letters this organisation does not use — is
+     *   the one sentence FILE_REASON_UNREADABLE followed by fileAdvice(), which
+     *   says exactly what is read. It never tries to name another currency.
      *
      * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
      * sign, a misplaced minus, a second decimal point, more than two decimals,
@@ -732,7 +719,7 @@ final class Currency
             // The code, or a symbol sign this currency is written with (D-165):
             // "$" is the organisation's own dollars, whichever dollars they are.
             // A letters-only sign is not read (D-177). Anything else is refused
-            // below with the reason.
+            // below.
             $taken = self::ownMarkerAtStart($text, $code);
             if ($taken !== '') {
                 $text = ltrim(substr($text, strlen($taken)), ' ');
@@ -740,11 +727,16 @@ final class Currency
                     $negative = true;
                     $text     = substr($text, 1);
                 }
-                // The currency written TWICE ("GBP £12.50", "GBP£12", "££12.50",
-                // "AUDA$5"): round 5 called that "another currency", untrue.
+                // TWO currency markers in front: another of this organisation's
+                // ("££12.50", "£GBP 12.50"), or — after its CODE — any symbol
+                // sign at all ("GBP £12.50", "GBP $12", "USD £12"). Certain, so
+                // said; round 8 called "GBP $12" "another currency (GBP)".
                 $again = self::ownMarkerAtStart($text, $code);
+                if ($again === '' && $taken === $code) {
+                    $again = self::symbolSignAtStart($text);
+                }
                 if ($again !== '') {
-                    return 'That amount has its currency written twice (' . $taken . ' and ' . $again . '). '
+                    return 'That amount has two currency markers in front (' . $taken . ' and ' . $again . '). '
                         . 'Put only one in front, for example ' . $code . ' 12.50.';
                 }
             }
@@ -760,7 +752,7 @@ final class Currency
         $whole    = $point === false ? $text : substr($text, 0, $point);
         $fraction = $point === false ? '' : substr($text, $point + 1);
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
-            return $fromFile === true ? self::FILE_REASON_NO_FIGURES . ' ' . self::fileAdvice($code) : self::REFUSED_NO_FIGURES;
+            return $fromFile === true ? self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code) : self::REFUSED_NO_FIGURES;
         }
         if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
             return self::REFUSED_COMMAS;
@@ -796,56 +788,48 @@ final class Currency
      */
     private static function whyNotAnAmount(string $text, string $code, bool $fromFile, bool $allowNegative): string
     {
-        if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
-            return self::REFUSED_POWER_OF_TEN;
-        }
         if ($fromFile === true) {
-            $written = self::currencyWrittenAtStart($text);
-            if ($written !== '' && $code === '') {
-                return 'That amount is written with a currency (' . $written . '), but no currency is chosen for this '
+            // No currency chosen, and the cell carries a marker: its money
+            // cannot be known (D-139), and that is certain.
+            $marker = $code === '' ? self::anyMarkerAtStart($text) : '';
+            if ($marker !== '') {
+                return 'That amount is written with a currency (' . $marker . '), but no currency is chosen for this '
                     . 'organisation, so the portal cannot tell what money it is. Choose the organisation\'s currency in '
                     . 'Admin, Settings, Organisation, then import the file again.';
             }
-            // A sign or code that is not this currency's (D-165). Every sign
-            // this currency IS written with was read above, so what reaches here
-            // really is another currency's.
-            if ($written !== '' && preg_match('/^[A-Z]{3}$/D', $written) === 1) {
-                return 'That amount is written in another currency (' . $written . '), not ' . $code . '. Import a file kept in '
-                    . $code . ', or check the organisation\'s currency in Admin, Settings, Organisation.';
-            }
-            if ($written !== '') {
-                return 'That amount is written with the sign ' . $written . ', which ' . $code . ' is not written with, so it is '
-                    . 'in another currency. Import a file kept in ' . $code . ', or check the organisation\'s currency in '
-                    . 'Admin, Settings, Organisation.';
-            }
-            // The organisation's OWN letters-only sign before a figure ("R12",
-            // "Rs.50", "kr 12"): not read (D-177), and said so. Only its own:
-            // "R Smith" or "Q1 2026" in another organisation is simply not an
-            // amount, and naming a currency there would be untrue.
-            foreach (self::lettersSignsOf($code) as $sign) {
-                if (preg_match('/^' . preg_quote($sign, '/') . '\.? ?(?=[0-9.\-])/u', $text) === 1) {
-                    return 'That is not an amount: a currency sign made of letters, such as ' . $sign . ', is not read in a '
-                        . 'file. Write the three-letter code instead, for example ' . $code . ' 12.50.';
+            // Only figures, points, commas and minus signs: the fault is in
+            // their arrangement, and can be said for certain.
+            if (preg_match('/^[0-9.,\-]+$/D', $text) === 1 && preg_match('/[0-9]/', $text) === 1) {
+                if (str_contains($text, '-') === true) {
+                    return $allowNegative === true
+                        ? self::REFUSED_MINUS_PLACE
+                        : self::FILE_REASON_MINUS_NOT_HERE . ' ' . self::fileAdvice($code);
                 }
+                if (substr_count($text, '.') > 1) {
+                    return self::REFUSED_ONE_POINT;
+                }
+                // A comma after the decimal point ("1.234,50").
+                return self::REFUSED_COMMAS;
             }
+            // Anything else: never a guess at which currency it might be.
+            return self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code);
         }
-        $allowed = $fromFile === true ? '0-9.,+\-' : '0-9.+\-';
-        if (preg_match('/[^' . $allowed . ']/', $text) === 1) {
-            return $fromFile === true ? self::FILE_REASON_NOT_FIGURES . ' ' . self::fileAdvice($code) : self::REFUSED_NOT_FIGURES;
+        if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
+            return self::REFUSED_POWER_OF_TEN;
+        }
+        if (preg_match('/[^0-9.+\-]/', $text) === 1) {
+            return self::REFUSED_NOT_FIGURES;
         }
         if (str_contains($text, '+') === true) {
-            return $fromFile === true ? self::FILE_REASON_PLUS . ' ' . self::fileAdvice($code) : self::REFUSED_PLUS;
+            return self::REFUSED_PLUS;
         }
         if (str_contains($text, '-') === true) {
-            if ($allowNegative === true) {
-                return self::REFUSED_MINUS_PLACE;
-            }
-            return $fromFile === true ? self::FILE_REASON_MINUS_NOT_HERE . ' ' . self::fileAdvice($code) : self::REFUSED_MINUS_NOT_HERE;
+            return $allowNegative === true ? self::REFUSED_MINUS_PLACE : self::REFUSED_MINUS_NOT_HERE;
         }
         if (substr_count($text, '.') > 1) {
             return self::REFUSED_ONE_POINT;
         }
-        // A file's comma after the decimal point ("1.234,50").
+
         return self::REFUSED_COMMAS;
     }
 
@@ -857,13 +841,12 @@ final class Currency
      * all (D-165). With no currency chosen, no code is offered: a code would
      * be refused too.
      *
-     * It ends exactly FOUR file-mode refusals — those about how the cell is
-     * written with nothing more specific to say: FILE_REASON_NOT_FIGURES,
-     * FILE_REASON_PLUS, FILE_REASON_MINUS_NOT_HERE and FILE_REASON_NO_FIGURES.
-     * Every other file-mode refusal carries its own complete instruction
-     * instead (a power of ten, commas, decimals, a misplaced minus, a negative,
-     * an empty cell, too large, the currency written twice, another currency,
-     * no currency chosen). Round 5's check found a claim that it ended them all.
+     * It ends exactly TWO file-mode refusals: FILE_REASON_UNREADABLE (every
+     * refusal whose reason cannot be known for certain) and
+     * FILE_REASON_MINUS_NOT_HERE. Every other file-mode refusal carries its
+     * own complete instruction (more than two decimals, commas, more than one
+     * point, a minus in the wrong place, too large, nothing entered, two
+     * currency markers, no currency chosen).
      */
     public static function fileAdvice(string $code): string
     {
@@ -874,43 +857,29 @@ final class Currency
             : 'Write it in figures, with commas only between thousands if you like, for example 1,234.56.';
     }
 
-    /**
-     * 💱 The SYMBOL sign or the code of ANY currency a text begins with ("£",
-     * "CA$", "R$", "USD"), or ''. Only for saying truthfully why a file's
-     * amount was refused. Asked in this order:
-     *   1. a sign with a symbol in it, from any currency's SIGNS_OF, longest
-     *      first, whatever follows it;
-     *   2. three capital letters the portal knows as a currency, followed —
-     *      after at most one space — by a figure, a minus, a point or a symbol
-     *      sign ("RUB 12", "USD$5"), so "ALL PAID" and "TRY again" name nothing.
-     * A sign made only of letters is never named here (D-177): "R Smith",
-     * "P.O. 1234" and "Q1 2026" are not currencies.
-     */
-    private static function currencyWrittenAtStart(string $text): string
+    /** Every sign with a symbol in it, from any currency's SIGNS_OF, longest first. @return list<string> */
+    private static function symbolSigns(): array
     {
-        $symbolic = [];
+        $signs = [];
         foreach (self::SIGNS_OF as $list) {
             foreach ($list as $sign) {
                 if (self::isLettersOnly($sign) === false) {
-                    $symbolic[$sign] = true;
+                    $signs[$sign] = true;
                 }
             }
         }
-        $symbolic = array_keys($symbolic);
-        usort($symbolic, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-        foreach ($symbolic as $sign) {
+        $signs = array_keys($signs);
+        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return $signs;
+    }
+
+    /** The sign with a symbol in it, of ANY currency, that a text begins with, or ''. */
+    private static function symbolSignAtStart(string $text): string
+    {
+        foreach (self::symbolSigns() as $sign) {
             if (str_starts_with($text, $sign) === true) {
                 return $sign;
-            }
-        }
-        if (preg_match('/^([A-Z]{3}) ?(.*)$/sDu', $text, $m) === 1 && self::isKnown($m[1]) === true) {
-            if (preg_match('/^[0-9.\-]/', $m[2]) === 1) {
-                return $m[1];
-            }
-            foreach ($symbolic as $sign) {
-                if (str_starts_with($m[2], $sign) === true) {
-                    return $m[1];
-                }
             }
         }
 
@@ -918,23 +887,53 @@ final class Currency
     }
 
     /**
-     * 🏷️ The organisation's own marker a file cell begins with — its code where
-     * a figure, a minus, a point or one of its symbol signs follows (after at
-     * most one space), else one of its symbol signs — or ''. A letters-only
-     * sign is never a marker (D-177). Used twice by parseAmount(): to read the
-     * marker, and to find the currency written a second time.
+     * 💱 A currency marker of ANY currency that a text begins with, or '' —
+     * asked only when the organisation has NO currency chosen, to say so. A
+     * sign with a symbol in it; or three capital letters the portal knows as a
+     * currency, followed — after any run of spaces — by an amount (a figure or
+     * a point, after at most one minus) or a symbol sign ("GBP 12.50", "USD$5"). Letters-only signs are
+     * never markers (D-177), and "ALL PAID" or "TOP-UP 20" are not codes.
+     */
+    private static function anyMarkerAtStart(string $text): string
+    {
+        $sign = self::symbolSignAtStart($text);
+        if ($sign !== '') {
+            return $sign;
+        }
+        if (preg_match('/^([A-Z]{3}) *(.*)$/sDu', $text, $m) === 1 && self::isKnown($m[1]) === true
+            && self::amountOrSignFollows($m[2]) === true) {
+            return $m[1];
+        }
+
+        return '';
+    }
+
+    /**
+     * Does what follows a code begin an amount — a figure or a point, after at
+     * most one minus — or a symbol sign? So "GBP 12", "GBP -12" and "GBP£12"
+     * are codes, while "TOP-UP 20", "ALL-IN" and "ALL PAID" are words.
+     */
+    private static function amountOrSignFollows(string $rest): bool
+    {
+        $after = str_starts_with($rest, '-') === true ? substr($rest, 1) : $rest;
+
+        return preg_match('/^[0-9.]/', $after) === 1 || self::symbolSignAtStart($after) !== '';
+    }
+
+    /**
+     * 🏷️ The organisation's own marker a file cell begins with, or '': its CODE
+     * where — after any run of spaces — an amount (a figure or a point, after
+     * at most one minus) or ANY symbol sign follows (the last is then two
+     * markers, which parseAmount() refuses), else one of its own symbol signs. A letters-only sign is never
+     * a marker (D-177).
      */
     private static function ownMarkerAtStart(string $text, string $code): string
     {
-        $signs = self::signsOf($code);
-        $after = '[0-9.\-]';
-        if ($signs !== []) {
-            $after = '(?:[0-9.\-]|' . implode('|', array_map(static fn (string $s): string => preg_quote($s, '/'), $signs)) . ')';
-        }
-        if (preg_match('/^' . preg_quote($code, '/') . ' ?(?=' . $after . ')/u', $text) === 1) {
+        if (preg_match('/^' . preg_quote($code, '/') . ' *(.*)$/sDu', $text, $m) === 1
+            && self::amountOrSignFollows($m[1]) === true) {
             return $code;
         }
-        foreach ($signs as $sign) {
+        foreach (self::signsOf($code) as $sign) {
             if (str_starts_with($text, $sign) === true) {
                 return $sign;
             }

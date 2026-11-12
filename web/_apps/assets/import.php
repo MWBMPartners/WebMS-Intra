@@ -326,15 +326,16 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     //    Currency::parseAmount() (#1004), in its FILE mode (the owner, D-153):
     //    a spreadsheet saved with currency formatting writes "£1,234.56", so
     //    commas between groups of three are read, and the organisation's
-    //    three-letter CODE in front (where a figure, minus or point follows),
-    //    or any sign WITH A SYMBOL IN IT that currency is written with ("£" as
-    //    Gibraltar pounds in a GIP organisation; the owner, D-165), exactly as
-    //    the bank-statement import reads them. A sign made only of letters
-    //    ("R", "Rs", "kr") is not read (D-177): the cell is refused asking for
-    //    the code. Another currency's symbol sign or code, the currency written
-    //    twice, and any symbol sign or code while no currency is chosen are
-    //    refused with the reason. The rows are made in the organisation's
-    //    currency, so that is the one passed. It used to strip
+    //    three-letter CODE in front, or any sign WITH A SYMBOL IN IT that
+    //    currency is written with ("£" as Gibraltar pounds in a GIP
+    //    organisation; the owner, D-165), either followed by any run of spaces,
+    //    exactly as the bank-statement import reads them. A sign made only of
+    //    letters ("R", "Rs", "kr") is not read (D-177). A refusal names a reason
+    //    only where it is certain (two currency markers, decimals, commas,
+    //    points, a minus, too large, nothing entered, a marker while no currency
+    //    is chosen); anything else, including another currency's sign or code,
+    //    is "That amount could not be read." with what IS read. The rows are
+    //    made in the organisation's currency, so that is the one passed. It used to strip
     //    "£", "$", "€", every comma and every space and go through a float, so
     //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure
     //    wrapped.
