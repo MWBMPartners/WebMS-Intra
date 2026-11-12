@@ -564,8 +564,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flashType = $notes === '' ? 'success' : 'warning';
                 // The three ways the restorer's own sign-in can end, each its
                 // own whole sentence, because what they can do next differs
-                // (#922 rounds 2-3): a moved number must sign in again and only
-                // only the way the account could sign in then works; an account
+                // (#922 rounds 2-3): a moved number must sign in again, with its
+                // password, passkeys and links as they were then; an account
                 // switched off cannot sign in until switched back on; an
                 // account not there cannot sign in with it. The result is kept
                 // at the top of this page for seven days (the "last whole
@@ -590,7 +590,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     Auth::SIGN_IN_NOT_CURRENT  => ' Your own sign-in is not current in the restored database: its sign-in '
                         . 'number differs from the one you signed in under (usually because your password was reset, '
                         . 'changed or set after this snapshot was taken). The next page you open will ask you to sign in '
-                        . 'again, and you can sign in only the way your account could when the snapshot was taken.'
+                        . 'again. Your password, passkeys and Microsoft or Google links are as they were when the snapshot '
+                        . 'was taken.'
                         . ($restorerGlobal === true
                             ? ' This result stays at the top of this page for seven days.'
                             : ' Your account is not a global administrator in the restored database, so you will not be '
@@ -911,11 +912,21 @@ if (DbBackup::isSnapshotName($inspect) === true) {
         //   differs and gives the usual cause as usual;
         // - "signs in with the password it had" was untrue for an account that
         //   had none then, and "a Microsoft or Google sign-in is unaffected"
-        //   was untrue too - a restore puts back the passkeys AND the settings
-        //   that set up Microsoft and Google sign-in (#922 round 7) - so every
-        //   such sentence names NO method: an account can sign in only the way
-        //   it could when the snapshot was taken, because the whole database,
-        //   settings included, is as it was then;
+        //   was untrue too (#922 round 7); and round 7's "can sign in only the
+        //   way it could when the snapshot was taken" was untrue for an OLD-FORM
+        //   snapshot, which keeps today's tblSettings (#922 round 8). So every
+        //   such sentence states a FACT and promises no route: an account's
+        //   password, passkeys and Microsoft or Google links are as they were
+        //   when the snapshot was taken. Checked against both kinds of
+        //   snapshot: tblLocalAccounts, tblWebAuthnCredentials and
+        //   tblLinkedAccounts are not on DbBackup::WHOLE_DATABASE_ONLY, so a
+        //   restore of either kind puts them back (what an old-form snapshot
+        //   leaves alone is that list: the upgrade record, the single-use
+        //   sign-in codes, the settings and the kept rows). The limit, said
+        //   here rather than in every sentence: a snapshot that does not
+        //   HOLD one of those tables (hand-edited, or older than the table)
+        //   leaves it as it is today; every snapshot this portal takes holds
+        //   every tbl table;
         // - a switched-off account can sign in once switched back on, so it is
         //   never also told it cannot sign in "at all";
         // - the result is kept on THIS page, which only a global administrator
@@ -925,8 +936,8 @@ if (DbBackup::isSnapshotName($inspect) === true) {
             $inspectSignIns = 'How many accounts putting this snapshot back would sign out could not be worked out. Put back '
                 . 'whole, it signs out every account that is not in it or is switched off in it, and every account whose '
                 . 'sign-in number differs from the snapshot\'s (usually because its password was reset, changed or set '
-                . 'since); such an account must sign in again, and can sign in only the way it could when the snapshot '
-                . 'was taken. Yours may be one of them.';
+                . 'since); such an account must sign in again, and its password, passkeys and Microsoft or Google links '
+                . 'are as they were when the snapshot was taken. Yours may be one of them.';
         } elseif ($signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'] > 0) {
             $total          = $signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'];
             $inspectSignIns = 'Putting this snapshot back whole signs out ' . ($total === 1 ? '1 account' : $total . ' accounts')
@@ -935,11 +946,11 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                 $inspectSignIns .= ' ' . ucfirst($accounts(
                     $signIns['changed'],
                     'has a sign-in number that differs from the snapshot\'s (usually because its password was reset, '
-                        . 'changed or set after the snapshot was taken); it must sign in again, and can sign in only the way '
-                        . 'it could when the snapshot was taken.',
+                        . 'changed or set after the snapshot was taken); it must sign in again, and its password, passkeys '
+                        . 'and Microsoft or Google links are as they were when the snapshot was taken.',
                     'have a sign-in number that differs from the snapshot\'s (usually because a password was reset, '
-                        . 'changed or set after the snapshot was taken); they must sign in again, and each can sign in only '
-                        . 'the way it could when the snapshot was taken.'
+                        . 'changed or set after the snapshot was taken); they must sign in again, and their passwords, '
+                        . 'passkeys and Microsoft or Google links are as they were when the snapshot was taken.'
                 ));
             }
             if ($signIns['switchedOff'] > 0) {
@@ -962,7 +973,8 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                   . 'page afterwards; its result is kept here for seven days for any global administrator.';
             $inspectSignIns .= match ($signIns['you']) {
                 'changed'      => ' Yours is one of them: you will be asked to sign in as soon as the restore has '
-                    . 'finished, and you can sign in only the way your account could when the snapshot was taken.' . $keptForYou,
+                    . 'finished, and your password, passkeys and Microsoft or Google links are as they were when the '
+                    . 'snapshot was taken.' . $keptForYou,
                 'switched_off' => ' Yours is one of them: your account is switched off in this snapshot, so once it is '
                     . 'put back you cannot sign in until an administrator switches it back on. Its result is kept at the '
                     . 'top of this page for seven days for any global administrator who signs in.',

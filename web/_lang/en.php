@@ -81,7 +81,7 @@ return [
     'auth.terms_notice'             => ':site_name is a private intranet for staff and volunteers. All sign-ins, page views, and actions are logged and retained for audit purposes. By signing in you acknowledge that you are an authorised user and consent to monitoring of your activity.',
     'auth.password_reset_success'   => 'Your password has been updated. Please sign in.',
     // #922: shown once on the sign-in page after a session is ended because its sign-in is no longer current.
-    'auth.signed_out_not_current'   => 'You were signed out because your sign-in is no longer current: since you signed in, your password was reset, changed or set by an administrator, or the portal\'s database was restored from a backup. Please sign in again. After a restore, an account can sign in only the way it could when that backup was taken.',
+    'auth.signed_out_not_current'   => 'You were signed out because your sign-in is no longer current: since you signed in, your password was reset, changed or set by an administrator, or the portal\'s database was restored from a backup. Please sign in again. After a restore, an account\'s password, passkeys and Microsoft or Google links are as they were when that backup was taken.',
     'auth.invalid_session_token'    => 'Invalid session token. Please try again.',
     'auth.captcha_failed'           => 'Captcha verification failed.',
     'auth.enter_credentials'        => 'Please enter your username or email and password.',

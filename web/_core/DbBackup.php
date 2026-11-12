@@ -2541,10 +2541,12 @@ class DbBackup
      * THREE groups, because what each can do next differs (#922 rounds 2-3):
      *   - `changed`: the number differs (usually a password reset, changed or
      *     set since the snapshot, though an earlier restore can do it too).
-     *     It must sign in again, and can sign in only the way it could when
-     *     the snapshot was taken: the restore puts back its password, its
-     *     passkeys AND the settings that set up Microsoft and Google sign-in,
-     *     so the page names no method (#922 round 7).
+     *     It must sign in again, and its password, passkeys and Microsoft or
+     *     Google links are as they were when the snapshot was taken - those
+     *     three tables are not on WHOLE_DATABASE_ONLY, so a restore of either
+     *     kind puts them back; whether a route WORKS also depends on settings,
+     *     which an old-form snapshot keeps from today, so the page states the
+     *     fact and promises no route (#922 rounds 7-8).
      *   - `switchedOff`: switched off in the snapshot; cannot sign in until an
      *     administrator switches it back on.
      *   - `missing`: not in the snapshot; cannot sign in with it at all.

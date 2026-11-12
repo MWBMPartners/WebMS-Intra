@@ -231,7 +231,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 232; // #982 round 7 added M13i (rehire where Google
+const EXPECTED_CHECKS = 233; // #982 round 8 added M13j (a password, a passkey
+                            // and Microsoft, each said as a fact). 233.
+                            // #982 round 7 added M13i (rehire where Google
                             // sign-in is set up). 232.
                             // #982 round 6 added M13e (a real deadlock),
                             // M13f (a failed read after the commit) and
@@ -4013,33 +4015,53 @@ $rehireM = static function (int $uid) use ($jar, $flashOn): string {
     return $to === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $to, null, '')['body']);
 };
 $deeRehire = $rehireM(M13_DEE);
-ok('M13g rehiring an account WITH a password row (emptied by offboarding) switches it on and says to choose "Forgot your password?" on the sign-in page, or Microsoft or Google (#982 round 6)',
+// The rehire page states FACTS about what the account has, and promises no
+// route (#982 round 8). Every branch is pinned by a sentence only it writes.
+ok('M13g rehiring an account whose password offboarding EMPTIED, with nothing else set up: it says the password was removed and a new one can be set with "Forgot your password?" if this portal can send e-mail - and names no other route (#982 round 8)',
     str_contains($deeOffSaid, 'Offboarded. Their account is switched off') === true
     && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_DEE])['isActive'] === 1
     && str_contains($deeRehire, 'User rehired: their account is switched on again.') === true
-    && str_contains($deeRehire, 'They can sign in by choosing "Forgot your password?" on the sign-in page and setting a new password.') === true
-    && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false,
+    && str_contains($deeRehire, 'Offboarding removed their password; they can set a new one with "Forgot your password?" on the sign-in page, if this portal can send e-mail.') === true
+    && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false && str_contains($deeRehire, 'passkey') === false,
     'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
 $ollyRehire = $rehireM(OFF);
-ok('M13h rehiring an account with NO password row, no passkey, and neither Microsoft nor Google set up says plainly it has no way to sign in yet and what can be done - never "Forgot your password?" or a route that is not there (#982 round 7)',
+ok('M13h rehiring an account with NO password row, no passkey, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that an administrator cannot give it a password (#982 round 8)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
-    && str_contains($ollyRehire, 'But they have no way to sign in yet') === true
-    && str_contains($ollyRehire, 'neither Microsoft nor Google sign-in is set up here') === true
-    && str_contains($ollyRehire, 'Forgot your password') === false && str_contains($ollyRehire, 'They can sign in') === false,
+    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here. A global administrator sets those up on Admin, Settings; an administrator cannot give this account a password.') === true
+    && str_contains($ollyRehire, 'Forgot your password') === false,
     'rehire said: ' . $ollyRehire);
-// M13i: the same kind of account where Google sign-in IS set up for the
-// organisation: the page names Google, and only Google.
+// M13i: Google sign-in set up for the organisation, limited to a hosted domain.
 siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
+siteSetting(ORG_A, 'auth.google.hostedDomain', 'selftest-982.example');
 try {
     $unaRehire = $rehireM(UNP);
 } finally {
-    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.google.clientID']);
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey IN (?, ?)', 'iss', [ORG_A, 'auth.google.clientID', 'auth.google.hostedDomain']);
 }
-ok('M13i rehiring an account with no password where Google sign-in IS set up says they can sign in with Google - and names no route that is not there (#982 round 7)',
+ok('M13i where Google sign-in IS set up (limited to a hosted domain), the page says so with its condition - the same e-mail address, in that domain - and names nothing else (#982 round 8)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [UNP])['n'] === 0
-    && str_contains($unaRehire, 'They can sign in with Google.') === true
-    && str_contains($unaRehire, 'Microsoft') === false && str_contains($unaRehire, 'Forgot your password') === false,
+    && str_contains($unaRehire, 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail address in the selftest-982.example domain.') === true
+    && str_contains($unaRehire, 'Microsoft') === false && str_contains($unaRehire, 'no way to sign in') === false,
     'rehire said: ' . $unaRehire);
+// M13j: the failed-step states, made with SQL between the offboarding and the
+// rehire: Fay's password is put back (the step that removes it "did not
+// complete"), a passkey is left registered, and Microsoft sign-in is set up.
+// One rehire, three sentences, each written by one branch only.
+q('UPDATE `tblLocalAccounts` SET `passwordHash` = ? WHERE `userID` = ?', 'si', [$hash, M13_FAY]);
+q("INSERT INTO `tblWebAuthnCredentials` (`userID`, `credentialID`, `publicKey`) VALUES (?, 'selftest-982-cred', 'selftest-982-key')", 'i', [M13_FAY]);
+siteSetting(ORG_A, 'auth.ms365.enduser.clientID', 'selftest-982-ms-client');
+try {
+    $fayRehire = $rehireM(M13_FAY);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.ms365.enduser.clientID']);
+    q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_FAY]);
+}
+ok('M13j a password the offboarding did not remove, a passkey still registered and Microsoft sign-in set up are each said as a fact, with Microsoft\'s condition - and "Forgot your password?" is not offered (#982 round 8)',
+    str_contains($fayRehire, 'They still have a password on this portal: the offboarding step that removes it did not complete.') === true
+    && str_contains($fayRehire, '1 passkey is still registered to the account.') === true
+    && str_contains($fayRehire, 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same e-mail address in the Microsoft tenant set up here.') === true
+    && str_contains($fayRehire, 'Forgot your password') === false && str_contains($fayRehire, 'Google') === false,
+    'rehire said: ' . $fayRehire);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

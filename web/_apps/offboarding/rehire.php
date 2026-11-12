@@ -208,59 +208,66 @@ try {
     }
 
     $db->commit();
-    // 🔑 HOW THEY CAN SIGN IN NOW IS READ, not assumed (#982 rounds 5-7).
-    //    Switching the account on gives back nothing offboarding removed, and
-    //    a step of the offboarding may have failed, so each route is asked of
-    //    what is really there, after the commit, in its own try:
-    //      - a password row with a password still in it: they can use it (the
-    //        removal step failed); an emptied one: "Forgot your password?" on
-    //        the sign-in page sets a new one; NO password row: that page does
-    //        nothing for them, and an administrator may not give them a
-    //        password (D-018);
-    //      - a passkey still registered;
-    //      - Microsoft or Google sign-in, only where it is SET UP here
-    //        (Auth::isMS365Configured() / isGoogleConfigured()): it matches a
-    //        switched-on account by its e-mail address.
-    //    With none of them the account has no way in at all, and the page
-    //    says so and what can be done, instead of naming a route that does
-    //    not exist (round 6's "where this portal offers that" was untrue for
-    //    every account here with neither set up).
-    $ways          = null;
+    // 🔑 WHAT THE ACCOUNT HAS NOW, as FACTS that promise nothing (#982
+    //    rounds 5-8). Rounds 5-7 each promised a route that might not work:
+    //    "reset your password" to an account with none, "with Microsoft or
+    //    Google" where neither was set up, then "They can sign in with Google"
+    //    where Google was set up - but set up is not the same as working: the
+    //    callbacks match a switched-on account by its e-mail address, Microsoft
+    //    only within the tenant set up here, Google only within its hosted
+    //    domain when one is set. So each part is read after the commit, in its
+    //    own try, and said as what IS there, with its conditions:
+    //      - the password row: usable (the removal step did not complete),
+    //        emptied (a new one via "Forgot your password?", which needs this
+    //        portal to be able to send e-mail), or none;
+    //      - passkeys still registered;
+    //      - Microsoft / Google sign-in, only where set up, with its condition.
+    //    With nothing at all, it says the account has no way in yet and who
+    //    can change that. An administrator may not give a password to an
+    //    account that has none (D-018). Every branch is pinned by M13g-M13j
+    //    of tools/erasure-pages-selftest.php.
+    $facts         = null;
     $passwordState = Auth::passwordState($db, $userId);
     try {
         $kind = $db->prepare('SELECT COUNT(*) AS `passkeys` FROM `tblWebAuthnCredentials` WHERE `userID` = ?');
         if ($passwordState !== null && $kind !== false) {
             $kind->bind_param('i', $userId);
             $kind->execute();
-            $have = $kind->get_result()->fetch_assoc();
+            $passkeys = (int) ($kind->get_result()->fetch_assoc()['passkeys'] ?? 0);
             $kind->close();
-            $ways = [];
+            $facts = [];
             if ($passwordState === Auth::PASSWORD_USABLE) {
-                $ways[] = 'with their password, which the offboarding did not remove';
+                $facts[] = 'They still have a password on this portal: the offboarding step that removes it did not complete.';
             } elseif ($passwordState === Auth::PASSWORD_EMPTIED) {
-                $ways[] = 'by choosing "Forgot your password?" on the sign-in page and setting a new password';
+                $facts[] = 'Offboarding removed their password; they can set a new one with "Forgot your password?" on the '
+                    . 'sign-in page, if this portal can send e-mail.';
             }
-            if ((int) ($have['passkeys'] ?? 0) > 0) {
-                $ways[] = 'with a passkey still registered to the account';
+            if ($passkeys > 0) {
+                $facts[] = $passkeys === 1
+                    ? '1 passkey is still registered to the account.'
+                    : $passkeys . ' passkeys are still registered to the account.';
             }
             if (Auth::isMS365Configured() === true) {
-                $ways[] = 'with Microsoft';
+                $facts[] = 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same '
+                    . 'e-mail address in the Microsoft tenant set up here.';
             }
             if (Auth::isGoogleConfigured() === true) {
-                $ways[] = 'with Google';
+                $hostedDomain = (string) (App::settings('auth.google.hostedDomain') ?? '');
+                $facts[] = 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail '
+                    . 'address' . ($hostedDomain !== '' ? ' in the ' . $hostedDomain . ' domain' : '') . '.';
             }
         }
     } catch (\Throwable $kindUnread) {
-        $ways = null;
+        $facts = null;
     }
-    if ($ways === null) {
+    if ($facts === null) {
         $howTheySignIn = ' How they can sign in could not be read: check their account on the Users page.';
-    } elseif ($ways === []) {
-        $howTheySignIn = ' But they have no way to sign in yet: this account has no password on this portal and no passkey, '
-            . 'and neither Microsoft nor Google sign-in is set up here. A global administrator can set up Microsoft or '
-            . 'Google sign-in on Admin, Integrations; an administrator cannot give this account a password.';
+    } elseif ($facts === []) {
+        $howTheySignIn = ' This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor '
+            . 'Google sign-in is set up here. A global administrator sets those up on Admin, Settings; an administrator '
+            . 'cannot give this account a password.';
     } else {
-        $howTheySignIn = ' They can sign in ' . implode(', or ', $ways) . '.';
+        $howTheySignIn = ' ' . implode(' ', $facts);
     }
     $_SESSION['flash_msg']  = 'User rehired: their account is switched on again.' . $howTheySignIn
         . ($cancelledRequests > 0
