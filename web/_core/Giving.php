@@ -42,6 +42,32 @@ class Giving
     public const MAIL_WAITING = 'waiting in the mail queue';
 
     /**
+     * 🧾 WHICH STATEMENT ROWS THE SCHEDULED JOB SENDS: the WHERE clause of
+     * `cron/giving-statements`, and the ONE copy of it (#820). The job's
+     * query and Check this portal's count of waiting work
+     * (`PortalCheck::JOB_WORK_WAITING`) are both built from this, so the page
+     * counts exactly the rows the job takes.
+     *
+     * WHAT WAS WRONG. The job and the page each held their own copy, and a
+     * self-test compared the two as TEXT, so a change to how the job builds
+     * its query (a JOIN before the WHERE, an extra condition after it) could
+     * change what it sends with that test still green. And the job's copy
+     * left out one condition the page carried — that the organisation is
+     * active — so rows for a switched-off organisation were selected, then
+     * skipped a step later (Site::forceContext() refuses them), on every run
+     * for ever, each using up one of the run's LIMIT places ahead of real
+     * work, because the rows are taken oldest first.
+     *
+     * A row that FAILED to send (`errorMsg` set) is deliberately not taken:
+     * the bulk-statements design (gap #4, security item 9) says "failures never
+     * auto-retry (manual retry only) so a misconfiguration can't loop-spam
+     * donors". A treasurer's Retry on the statements page clears the error,
+     * and the job then takes the row again.
+     */
+    public const STATEMENTS_THE_JOB_SENDS = '`queuedAt` IS NOT NULL AND `emailedAt` IS NULL AND `errorMsg` IS NULL '
+        . 'AND `siteID` IN (SELECT `siteID` FROM `tblSites` WHERE `isActive` = 1)';
+
+    /**
      * Whether the current user is allowed to see / record all entries.
      * Members without this can only see their own.
      *
@@ -75,16 +101,17 @@ class Giving
     //    Currency::hundredthsToDecimal().
 
     /**
-     * Format pence as a currency display string. Pass the entry's OWN
-     * currency where it has one; left out (null), it is the open
-     * organisation's currency (Currency::ofSite()). It used to default to
-     * GBP, so an organisation anywhere had its gifts shown in pounds (#966).
-     * The writing itself is Currency::format(), the one place it is done.
-     */
-    /**
      * 🧾 The statement's closing totals, one line per currency (D-139): "Total
-     * given: €120.00 · of which Gift Aid eligible: €100.00". With gifts in two
+     * given: £120.00 · of which Gift Aid eligible: £100.00". With gifts in two
      * currencies there are two lines, never one sum.
+     *
+     * 🎁 ONLY A POUNDS LINE names a Gift Aid figure (#999). Gift Aid is a UK
+     * scheme claimed in pounds, and the claim file holds pounds only
+     * (buildHmrcCsv(), D-139), so a line in any other currency says plainly
+     * that Gift Aid does not apply to it. It used to say "of which Gift Aid
+     * eligible: €100.00" for euro gifts by a donor with a declaration — a
+     * figure the charity could never claim, which the statement then
+     * disagreed with the claim file about.
      *
      * @param array<string,int> $totals
      * @param array<string,int> $giftAidTotals
@@ -97,13 +124,52 @@ class Giving
         ksort($totals, SORT_STRING);
         $html = '';
         foreach ($totals as $code => $hundredths) {
-            $html .= '<p class="total right">Total given: ' . $esc(Currency::format((int) $hundredths, (string) $code))
-                . ' &middot; of which Gift Aid eligible: ' . $esc(Currency::format((int) ($giftAidTotals[$code] ?? 0), (string) $code)) . '</p>';
+            $html .= '<p class="total right">Total given: ' . $esc(Currency::format((int) $hundredths, (string) $code));
+            if ((string) $code === self::GIFT_AID_CURRENCY) {
+                $html .= ' &middot; of which Gift Aid eligible: ' . $esc(Currency::format((int) ($giftAidTotals[$code] ?? 0), (string) $code));
+            } else {
+                $html .= ' &middot; ' . $esc(self::GIFT_AID_NOT_THIS_CURRENCY);
+            }
+            $html .= '</p>';
         }
 
         return $html;
     }
 
+    /** What a statement says beside a total in any currency but pounds (#999). */
+    public const GIFT_AID_NOT_THIS_CURRENCY = 'Gift Aid applies only to gifts in pounds sterling';
+
+    /**
+     * 🎁 "Is this gift one a Gift Aid claim can include?", as SQL over the
+     * giving entry aliased `$e` — the ONE rule the statement and the
+     * statements preview (and so the statement log's `giftAidPence`) ask, so
+     * they cannot disagree (#999). Two conditions:
+     *   - the gift is in POUNDS (GIFT_AID_CURRENCY): the claim file holds
+     *     pounds only, so a gift in any other currency, or with none
+     *     recorded, is never counted as eligible;
+     *   - an active declaration of the donor's covers the gift's date, asked
+     *     with EXISTS (never a JOIN), so two overlapping declarations can
+     *     never count one gift twice.
+     * The claim file's own reader, hmrcRows(), keeps one row per gift by
+     * choosing a single declaration (it needs that declaration's address),
+     * and filters to pounds in buildHmrcCsv(); the two agree on which gifts.
+     * The currency is a constant in code, never input, so it is written into
+     * the SQL as text.
+     */
+    private static function giftAidEligibleSql(string $e): string
+    {
+        return '(' . $e . '.`currency` = \'' . self::GIFT_AID_CURRENCY . '\' AND EXISTS (SELECT 1 FROM `tblGiftAidDeclaration` `gd` '
+            . 'WHERE `gd`.`siteID` = ' . $e . '.`siteID` AND `gd`.`donorID` = ' . $e . '.`donorID` AND `gd`.`status` = \'active\' '
+            . 'AND `gd`.`validFrom` <= ' . $e . '.`donatedAt` AND (`gd`.`validTo` IS NULL OR `gd`.`validTo` >= ' . $e . '.`donatedAt`)))';
+    }
+
+    /**
+     * Format pence as a currency display string. Pass the entry's OWN
+     * currency where it has one; left out (null), it is the open
+     * organisation's currency (Currency::ofSite()). It used to default to
+     * GBP, so an organisation anywhere had its gifts shown in pounds (#966).
+     * The writing itself is Currency::format(), the one place it is done.
+     */
     public static function formatAmount(int $pence, ?string $currency = null): string
     {
         return Currency::format($pence, $currency ?? Currency::ofSite());
@@ -201,6 +267,8 @@ class Giving
      * Every gift in the range that a Gift Aid declaration covers, in ANY
      * currency, with the gift's own currency: the ONE reader behind
      * buildHmrcCsv() and hmrcLeftOutCount(), so the two cannot disagree.
+     * EXACTLY ONE ROW PER GIFT however many declarations cover it (#999):
+     * the address comes from the most recent of them.
      *
      * @return list<array<string, mixed>>
      */
@@ -217,11 +285,22 @@ class Giving
             . '       `d`.`address`, `d`.`postcode` '
             . 'FROM `tblGivingEntry` `e` '
             . 'INNER JOIN `tblUsers` `u` ON `u`.`userID` = `e`.`donorID` '
-            . 'INNER JOIN `tblGiftAidDeclaration` `d` ON `d`.`donorID` = `e`.`donorID` '
-            . '    AND `d`.`siteID` = `e`.`siteID` '
-            . "    AND `d`.`status` = 'active' "
-            . '    AND `d`.`validFrom` <= `e`.`donatedAt` '
-            . '    AND (`d`.`validTo` IS NULL OR `d`.`validTo` >= `e`.`donatedAt`) '
+            // 🎁 ONE declaration per gift, never one row per declaration (#999).
+            //    This used to join EVERY active declaration covering the gift's
+            //    date, so a donor with two overlapping declarations (one made
+            //    online and one on paper, say) put the same gift in the claim
+            //    file twice, and the charity would have claimed it twice from
+            //    HMRC. The declaration is now chosen by a subquery that names
+            //    exactly one: the most recent to start (`validFrom`), then the
+            //    newest record (`declarationID`), because the latest declaration
+            //    carries the address the donor most recently gave.
+            . 'INNER JOIN `tblGiftAidDeclaration` `d` ON `d`.`declarationID` = ('
+            . '    SELECT `d2`.`declarationID` FROM `tblGiftAidDeclaration` `d2` '
+            . '    WHERE `d2`.`donorID` = `e`.`donorID` AND `d2`.`siteID` = `e`.`siteID` '
+            . "      AND `d2`.`status` = 'active' "
+            . '      AND `d2`.`validFrom` <= `e`.`donatedAt` '
+            . '      AND (`d2`.`validTo` IS NULL OR `d2`.`validTo` >= `e`.`donatedAt`) '
+            . '    ORDER BY `d2`.`validFrom` DESC, `d2`.`declarationID` DESC LIMIT 1) '
             // The kept name is used only for a donor whose account has
             // really been emptied. A kept row beside a LIVE member (an
             // erasure that stopped part way) is not that: their name is
@@ -354,10 +433,7 @@ class Giving
         $stmt = $db->prepare(
             'SELECT e.donatedAt, e.amountPence, e.currency, e.method, e.reference, '
             . '       c.name AS categoryName, '
-            . '       EXISTS (SELECT 1 FROM tblGiftAidDeclaration d '
-            . '               WHERE d.siteID = e.siteID AND d.donorID = e.donorID AND d.status = "active" '
-            . '                 AND d.validFrom <= e.donatedAt AND (d.validTo IS NULL OR d.validTo >= e.donatedAt)'
-            . '              ) AS giftAidEligible '
+            . '       ' . self::giftAidEligibleSql('e') . ' AS giftAidEligible '
             . 'FROM tblGivingEntry e INNER JOIN tblGivingCategory c ON c.categoryID = e.categoryID '
             . 'WHERE e.siteID = ? AND e.donorID = ? AND e.donatedAt BETWEEN ? AND ? '
             . 'ORDER BY e.donatedAt, e.entryID'
@@ -386,11 +462,11 @@ class Giving
         foreach ($entries as $e) {
             $amount = (int) $e['amountPence'];
             Currency::addTo($totals, (string) ($e['currency'] ?? ''), $amount);
-            // 🎁 Gift Aid eligibility per entry, computed above via EXISTS
-            // (never a JOIN against tblGiftAidDeclaration) — an overlapping
-            // pair of active declarations can never double-count a single
-            // entry's amount into this sum, mirroring buildHmrcCsv()'s own
-            // known JOIN hazard note above.
+            // 🎁 Gift Aid eligibility per entry, from giftAidEligibleSql(): an
+            // EXISTS (never a JOIN against tblGiftAidDeclaration), so an
+            // overlapping pair of active declarations can never count one
+            // gift twice, and in POUNDS only (#999), so this figure is what the
+            // claim file can really hold.
             if ((int) $e['giftAidEligible'] === 1) {
                 Currency::addTo($giftAidTotals, (string) ($e['currency'] ?? ''), $amount);
             }
@@ -436,8 +512,9 @@ class Giving
             . self::statementTotalsHtml($totals, $giftAidTotals, $currency, $esc)
             . '<p class="muted" style="margin-top:32px;">'
             . 'This statement is for your records. Please retain a copy for tax purposes. '
-            . 'The "Gift Aid eligible" figure is the portion of your giving covered by an active Gift Aid '
-            . 'declaration on file — it is not the amount reclaimed, which is calculated and claimed by the charity.'
+            . 'The "Gift Aid eligible" figure is the portion of your giving in pounds sterling covered by an active '
+            . 'Gift Aid declaration on file — it is not the amount reclaimed, which is calculated and claimed by the '
+            . 'charity. Gift Aid applies only to gifts in pounds sterling.'
             . '</p></body></html>';
 
         // 📁 Namespaced by siteID + periodKey — the old flat
@@ -572,9 +649,9 @@ class Giving
 
     /**
      * Per-donor preview for the bulk statements page — site-scoped totals,
-     * Gift Aid eligible sum (via EXISTS, never a declaration JOIN, so
-     * overlapping declarations can't double-count — same rule as
-     * buildHmrcCsv() above), opt-out flag, and this period's log status.
+     * Gift Aid eligible sum (giftAidEligibleSql(): pounds only, via EXISTS,
+     * never a declaration JOIN, so overlapping declarations can't
+     * double-count), opt-out flag, and this period's log status.
      *
      * Donors with no active tblUserSites row for this site (#440 Q3 —
      * "left the site but gave during the period") are INCLUDED here
@@ -592,6 +669,9 @@ class Giving
      * Totals are PER CURRENCY (D-139): `totals` and `giftAidTotals` map a
      * currency to hundredths; `totalPence`/`giftAidPence` hold a figure only
      * when the donor gave in one currency (`currency`), else 0 and ''.
+     * `giftAidTotals` holds POUNDS only (#999): Gift Aid is claimed in pounds,
+     * so it is empty for a donor who gave in no pounds, and `giftAidPence` is
+     * 0 for any other currency (giftAidEligibleSql()).
      *
      * @return array<int, array{totals:array<string,int>, giftAidTotals:array<string,int>, currency:string,
      *   donorID:int, fullName:string, emailAddress:string,
@@ -609,11 +689,8 @@ class Giving
             . '       COUNT(*) AS entryCount, '
             . '       e.currency AS currency, '
             . '       SUM(e.amountPence) AS totalPence, '
-            . '       SUM(CASE WHEN EXISTS ('
-            . '             SELECT 1 FROM tblGiftAidDeclaration d '
-            . '             WHERE d.siteID = e.siteID AND d.donorID = e.donorID AND d.status = "active" '
-            . '               AND d.validFrom <= e.donatedAt AND (d.validTo IS NULL OR d.validTo >= e.donatedAt)'
-            . '           ) THEN e.amountPence ELSE 0 END) AS giftAidPence '
+            // 🎁 The one eligibility rule (#999): pounds only, EXISTS not JOIN.
+            . '       SUM(CASE WHEN ' . self::giftAidEligibleSql('e') . ' THEN e.amountPence ELSE 0 END) AS giftAidPence '
             . 'FROM tblGivingEntry e '
             . 'INNER JOIN tblUsers u ON u.userID = e.donorID '
             . 'LEFT JOIN tblUserSites us ON us.userID = e.donorID AND us.siteID = e.siteID AND us.isActive = 1 '
@@ -647,7 +724,12 @@ class Giving
             $did = (int) $r['donorID'];
             if (isset($rows[$did]) === true) {
                 Currency::addTo($rows[$did]['totals'], (string) $r['currency'], (int) $r['totalPence']);
-                Currency::addTo($rows[$did]['giftAidTotals'], (string) $r['currency'], (int) $r['giftAidPence']);
+                // 🎁 A Gift Aid figure is kept for POUNDS only (#999): the
+                //    sum is 0 for every other currency, and listing "€0.00"
+                //    beside it would read as if Gift Aid could apply.
+                if (strtoupper((string) $r['currency']) === self::GIFT_AID_CURRENCY) {
+                    Currency::addTo($rows[$did]['giftAidTotals'], (string) $r['currency'], (int) $r['giftAidPence']);
+                }
                 $rows[$did]['entryCount']  += (int) $r['entryCount'];
                 $rows[$did]['totalPence']   = 0;
                 $rows[$did]['giftAidPence'] = 0;
@@ -656,7 +738,8 @@ class Giving
             }
             $rows[$did] = [
                 'totals'        => [strtoupper((string) $r['currency']) => (int) $r['totalPence']],
-                'giftAidTotals' => [strtoupper((string) $r['currency']) => (int) $r['giftAidPence']],
+                'giftAidTotals' => strtoupper((string) $r['currency']) === self::GIFT_AID_CURRENCY
+                    ? [self::GIFT_AID_CURRENCY => (int) $r['giftAidPence']] : [],
                 'currency'      => strtoupper((string) $r['currency']),
                 'donorID'      => (int) $r['donorID'],
                 'fullName'     => (string) $r['fullName'],
@@ -1003,8 +1086,9 @@ class Giving
         // here (affected_rows !== 1) and does nothing — no double email.
         // Mirrors Payments::markPaymentSucceeded()'s atomic
         // `WHERE status = "pending"` transition. If Mailer then fails,
-        // the claim is rolled back (emailedAt reset to NULL) so the row
-        // remains eligible for a future retry.
+        // the claim is rolled back (emailedAt reset to NULL, the failure
+        // recorded) so a treasurer's Retry can send it again — by hand only:
+        // see rollbackStatementClaim() (#820).
         $claimed = 0;
         $claim = $db->prepare('UPDATE tblGivingStatementLog SET emailedAt = NOW() WHERE logID = ? AND emailedAt IS NULL');
         if ($claim !== false) {
@@ -1166,9 +1250,17 @@ class Giving
     /**
      * SEC-03 rollback — undo a claim-then-send claim (sendStatementEmail())
      * when Mailer actually fails AFTER the atomic claim already stamped
-     * `emailedAt`. Resets it back to NULL so the row's claim predicate
-     * (`emailedAt IS NULL`) makes it eligible for a future retry, instead
-     * of being permanently (and falsely) stuck looking "sent".
+     * `emailedAt`. Resets it back to NULL so the row is not permanently (and
+     * falsely) stuck looking "sent", and records the failure in `errorMsg`.
+     *
+     * ⚠️ THE ROW IS NOT RETRIED BY ITSELF (#820). This used to say it "remains
+     * eligible for a future retry", which read as though the scheduled job
+     * would try it again — and the job never does, because it takes only rows
+     * with no `errorMsg` (STATEMENTS_THE_JOB_SENDS). That is on purpose
+     * (failures are retried by hand only, so a misconfiguration cannot mail
+     * donors over and over): a treasurer's Retry on the statements page clears
+     * `errorMsg`, and only then do the page's Email button and the job take
+     * the row again.
      */
     private static function rollbackStatementClaim(int $logId, string $message): void
     {

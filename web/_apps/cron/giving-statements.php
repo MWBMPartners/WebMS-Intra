@@ -80,11 +80,17 @@ if ($cap < 1) {
 
 TimeLimit::atLeast(300);
 
+// 🧾 WHICH ROWS: Giving::STATEMENTS_THE_JOB_SENDS, the one copy of this
+//    selection, which Check this portal also counts by (#820). It includes
+//    "the organisation is active": rows of a switched-off organisation used
+//    to be taken here and then skipped below on every run, each using up one
+//    of this run's LIMIT places ahead of real work. A row whose send FAILED is
+//    not taken (failures are retried by hand, from the statements page).
 $pending = [];
 $stmt = $db->prepare(
-    'SELECT logID, siteID, donorID, pdfPath, periodKey, fromDate, toDate FROM tblGivingStatementLog '
-    . 'WHERE queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL '
-    . 'ORDER BY queuedAt LIMIT ?'
+    'SELECT `logID`, `siteID`, `donorID`, `pdfPath`, `periodKey`, `fromDate`, `toDate` FROM `tblGivingStatementLog` '
+    . 'WHERE ' . Giving::STATEMENTS_THE_JOB_SENDS . ' '
+    . 'ORDER BY `queuedAt` LIMIT ?'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $cap);

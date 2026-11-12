@@ -1996,10 +1996,39 @@ final class ExpenseRules
      * need its own decision, and the claimant's statement is the evidence an
      * auditor wants. The rate shown on the pages is worked out from the two.
      *
-     * Answers the line, or a sentence saying why it is refused.
+     * 🔢 EVERY FIGURE IS READ STRICTLY, AND NEVER THROUGH A FLOAT (#1013).
+     * This used to be `is_numeric($unit) === true ? (float) $unit : 0.0`, then
+     * `round($qty * $unit, 2)`. So a unit cost that was not a figure ("abc")
+     * became 0.00 without a word, "1e5" was taken as 100,000.00, "12.345" was
+     * rounded for the claimant, a quantity of "2.5" or "abc" silently became 2
+     * or 1, and nothing stopped a figure larger than the DECIMAL(10,2) columns
+     * hold (99,999,999.99). Now:
+     *   - the unit cost and the converted amount are read by the ONE converter,
+     *     Currency::parseAmount(), with DECIMAL_10_2_MAX (the most `unitCost`
+     *     and `lineTotal` hold): figures only, at most two decimals, no power
+     *     of ten, no negative (D-152); a refusal is the converter's own true
+     *     sentence, with the line and the box named in front;
+     *   - the quantity is a whole number from 1 to what an INT column holds,
+     *     or the line is refused saying so;
+     *   - quantity × unit cost is worked out in whole HUNDREDTHS, and refused
+     *     when the line's total would not fit its column, BEFORE the multiply
+     *     (by division), so it cannot pass PHP's integer range either;
+     *   - a value sent by a program as a JSON number is turned into the text
+     *     it stands for by amountText() first, so the API is read by the same
+     *     rule as the form.
+     * Zero is still a valid unit cost (a free item), as the API description
+     * says; the claim as a whole must still come to more than zero, which is
+     * the callers' rule, alongside claimTotal().
      *
-     * @return array{desc:string, qty:int, unit:float, quotedCurrency:string,
-     *   quotedLineTotal:float, lineTotal:float, currency:string}|string
+     * Answers the line, or a sentence saying why it is refused. Money comes
+     * back twice: as whole hundredths (`…Hundredths`, for adding up) and as
+     * the DECIMAL text the column takes (`unit`, `quotedLineTotal`,
+     * `lineTotal`, from Currency::hundredthsToDecimal()), so a caller binds
+     * text ('s') and no figure is ever a float on its way to the database.
+     *
+     * @return array{desc:string, qty:int, unit:string, unitHundredths:int, quotedCurrency:string,
+     *   quotedLineTotal:string, quotedHundredths:int, lineTotal:string, lineHundredths:int,
+     *   currency:string}|string
      */
     public static function expenseLine(
         string $desc,
@@ -2009,9 +2038,6 @@ final class ExpenseRules
         mixed $converted,
         string $claimCurrency
     ): array|string {
-        $qtyInt    = is_numeric($qty) === true ? (int) $qty : 1;
-        $unitFloat = is_numeric($unit) === true ? (float) $unit : 0.0;
-        $quoted    = round($qtyInt * $unitFloat, 2);
         $claimCurrency = strtoupper(trim($claimCurrency));
         $quotedCode = Currency::fromPosted(is_string($quotedCurrency) === true ? $quotedCurrency : '');
         if ($quotedCode === null) {
@@ -2020,10 +2046,36 @@ final class ExpenseRules
         if ($quotedCode === '') {
             $quotedCode = $claimCurrency;
         }
+
+        // 🔢 The quantity: a whole number, 1 or more, that an INT column holds.
+        $qtyInt = self::wholeQuantity($qty);
+        if ($qtyInt === null) {
+            return 'Quantity of "' . $desc . '": ' . self::MSG_QUANTITY;
+        }
+
+        // 🔢 The unit cost, in the QUOTED currency (what the receipt says).
+        $unitText = self::amountText($unit);
+        $unitHundredths = is_string($unitText) === true
+            ? Currency::parseAmount($unitText, $quotedCode, Currency::DECIMAL_10_2_MAX)
+            : $unitText['refused'];
+        if (is_string($unitHundredths) === true) {
+            return 'Unit cost of "' . $desc . '": ' . $unitHundredths;
+        }
+
+        // 🧮 quantity × unit cost, in whole hundredths. Asked by DIVISION first
+        //    (the most a unit can cost at this quantity), so the multiply below
+        //    can never pass PHP's integer range: 2,147,483,647 × 9,999,999,999
+        //    would. The limit is the one a single box is held to, because
+        //    the line's total is kept in a column of the same size.
+        if ($unitHundredths > 0 && $unitHundredths > intdiv(Currency::DECIMAL_10_2_MAX, $qtyInt)) {
+            return 'The total of "' . $desc . '" (' . $qtyInt . ' at that unit cost) is too large: the most one line '
+                . 'can hold is ' . Currency::format(Currency::DECIMAL_10_2_MAX, $quotedCode) . '.';
+        }
+        $quoted = $qtyInt * $unitHundredths;
+
         if ($quotedCode === $claimCurrency) {
             // Quoted in the claim's own money: one figure, asked once.
-            return ['desc' => $desc, 'qty' => $qtyInt, 'unit' => $unitFloat, 'quotedCurrency' => $quotedCode,
-                'quotedLineTotal' => $quoted, 'lineTotal' => $quoted, 'currency' => $claimCurrency];
+            return self::lineOf($desc, $qtyInt, $unitHundredths, $quotedCode, $quoted, $quoted, $claimCurrency);
         }
         if ($claimCurrency === '') {
             // The CLAIM has no currency: a new claim when the organisation has
@@ -2034,13 +2086,175 @@ final class ExpenseRules
             return '"' . $desc . '" is quoted in ' . $quotedCode . ', but this claim has no currency recorded to '
                 . 'convert it into. Ask an administrator to choose or record one on Organisation settings.';
         }
-        if (is_numeric($converted) === false || (float) $converted <= 0) {
-            return '"' . $desc . '" is quoted in ' . $quotedCode . ': type what it cost in ' . $claimCurrency
-                . ', as your card or bank statement shows it.';
+
+        // 🔢 The converted amount, in the CLAIM's currency. Nothing typed, or
+        //    zero, gets the sentence asking for it; anything else typed that
+        //    is not an amount gets the converter's reason, so "abc" is not
+        //    merely told to type the cost (it was) when the fault is the text.
+        $askForIt = '"' . $desc . '" is quoted in ' . $quotedCode . ': type what it cost in ' . $claimCurrency
+            . ', as your card or bank statement shows it.';
+        $convText = self::amountText($converted);
+        if (is_string($convText) === true && trim($convText) === '') {
+            return $askForIt;
+        }
+        $convHundredths = is_string($convText) === true
+            ? Currency::parseAmount($convText, $claimCurrency, Currency::DECIMAL_10_2_MAX)
+            : $convText['refused'];
+        if (is_string($convHundredths) === true) {
+            return 'Cost in ' . $claimCurrency . ' of "' . $desc . '": ' . $convHundredths;
+        }
+        if ($convHundredths <= 0) {
+            return $askForIt;
         }
 
-        return ['desc' => $desc, 'qty' => $qtyInt, 'unit' => $unitFloat, 'quotedCurrency' => $quotedCode,
-            'quotedLineTotal' => $quoted, 'lineTotal' => round((float) $converted, 2), 'currency' => $claimCurrency];
+        return self::lineOf($desc, $qtyInt, $unitHundredths, $quotedCode, $quoted, $convHundredths, $claimCurrency);
+    }
+
+    /** What a refused quantity is told (#1013): the rule, with nothing of the claim in it. */
+    public const MSG_QUANTITY = 'A quantity must be a whole number of 1 or more, written in figures, for example 3.';
+
+    /**
+     * 🔢 The most a quantity can be: what the INT column `quantity` holds.
+     * A larger quantity is refused rather than wrapped or cut.
+     */
+    public const QUANTITY_MAX = 2147483647;
+
+    /**
+     * One judged line, with each figure as hundredths AND as the DECIMAL text
+     * its column takes.
+     *
+     * @return array{desc:string, qty:int, unit:string, unitHundredths:int, quotedCurrency:string,
+     *   quotedLineTotal:string, quotedHundredths:int, lineTotal:string, lineHundredths:int,
+     *   currency:string}
+     */
+    private static function lineOf(string $desc, int $qty, int $unit, string $quotedCode, int $quoted, int $line, string $claimCurrency): array
+    {
+        return [
+            'desc'             => $desc,
+            'qty'              => $qty,
+            'unit'             => Currency::hundredthsToDecimal($unit),
+            'unitHundredths'   => $unit,
+            'quotedCurrency'   => $quotedCode,
+            'quotedLineTotal'  => Currency::hundredthsToDecimal($quoted),
+            'quotedHundredths' => $quoted,
+            'lineTotal'        => Currency::hundredthsToDecimal($line),
+            'lineHundredths'   => $line,
+            'currency'         => $claimCurrency,
+        ];
+    }
+
+    /**
+     * 🔢 A quantity as a whole number from 1 to QUANTITY_MAX, or null.
+     *
+     * Accepted: a PHP int (a JSON whole number), a string of figures with
+     * spaces at either end allowed ("3", " 03 "), or a float that IS a whole
+     * number (a JSON `3.0`, which PHP decodes as a float and is still three).
+     * Refused: anything else — "2.5" (the old `(int)` cut it to 2), "abc" (it
+     * became 1), "1e3", "-1", 0, an array. The size is compared as TEXT, so a
+     * figure beyond PHP's integer range is refused, never wrapped.
+     */
+    public static function wholeQuantity(mixed $qty): ?int
+    {
+        if (is_float($qty) === true) {
+            if (is_finite($qty) === false || floor($qty) !== $qty || $qty < 1 || $qty > self::QUANTITY_MAX) {
+                return null;
+            }
+
+            return (int) $qty;
+        }
+        if (is_int($qty) === true) {
+            return ($qty >= 1 && $qty <= self::QUANTITY_MAX) ? $qty : null;
+        }
+        if (is_string($qty) === false || preg_match('/^[0-9]+$/D', trim($qty)) !== 1) {
+            return null;
+        }
+        $figures = ltrim(trim($qty), '0');
+        $limit   = (string) self::QUANTITY_MAX;
+        if ($figures === '' || strlen($figures) > strlen($limit)
+            || (strlen($figures) === strlen($limit) && strcmp($figures, $limit) > 0)) {
+            return null;
+        }
+
+        return (int) $figures;
+    }
+
+    /**
+     * 🔢 A posted or JSON amount as the TEXT Currency::parseAmount() reads, or
+     * `['refused' => sentence]` for a value that is not text or a number at
+     * all (an array, true/false), so it is refused rather than read as 0.
+     * Nothing at all (null: a JSON field left out) is '' — "No amount was
+     * entered." where an amount is needed.
+     *
+     * A form posts text, which is passed on unchanged. A JSON API sends a
+     * NUMBER (the API description says `number`, example 12.5), which PHP has
+     * already decoded into an int or a float before any of our code runs, so
+     * the characters the program sent are gone. A float is written back as the
+     * SHORTEST decimal that is exactly the same float — 12.5 as "12.5", 12.345
+     * as "12.345" (then refused for its third decimal), 0.1 as "0.1" — tried
+     * one decimal place at a time with sprintf('%.nF'), never with
+     * `(string)`, json_encode() or var_export(), whose output depends on the
+     * server's `precision` and `serialize_precision` settings (with
+     * serialize_precision 17, json_encode(0.1) is "0.10000000000000001", which
+     * would refuse a plain 0.10). A float too big to have any decimals (from
+     * about 1e15 up) is written out in full figures, so it is refused as too
+     * large — never as "a power of ten", which the program did not write. A
+     * float with no shortest form within 20 places is non-zero and smaller
+     * than any two-decimal amount, so it is refused as too precise.
+     *
+     * WHAT IT CANNOT TELL: once decoded, a JSON `1e5` and `100000` are the same
+     * float, so `1e5` SENT AS A JSON NUMBER is read as 100,000.00 — the number
+     * really is that. `"1e5"` sent as TEXT is refused as a power of ten, as on
+     * the form.
+     *
+     * @return string|array{refused:string}
+     */
+    public static function amountText(mixed $value): string|array
+    {
+        if ($value === null) {
+            return '';
+        }
+        if (is_string($value) === true) {
+            return $value;
+        }
+        if (is_int($value) === true) {
+            return (string) $value;
+        }
+        if (is_float($value) === true && is_finite($value) === true) {
+            for ($places = 0; $places <= 20; $places++) {
+                $text = sprintf('%.' . $places . 'F', $value);
+                if ((float) $text === $value) {
+                    return $text;
+                }
+            }
+
+            return ['refused' => Currency::REFUSED_TOO_PRECISE];
+        }
+
+        return ['refused' => Currency::REFUSED_NOT_FIGURES];
+    }
+
+    /**
+     * 🔢 A claim's total from its judged lines, in whole hundredths, or the
+     * sentence refusing it when it would not fit `tblExpenseClaims.totalAmount`
+     * (a DECIMAL(10,2), 99,999,999.99). Every line may fit on its own while
+     * their sum does not; the old code added floats and let the database find
+     * out. Added as whole numbers, so it is exact, and checked after each line
+     * so it cannot pass PHP's integer range on the way.
+     *
+     * @param list<array{lineHundredths:int}> $lines
+     */
+    public static function claimTotal(array $lines, string $claimCurrency): int|string
+    {
+        $total = 0;
+        foreach ($lines as $line) {
+            $total += (int) $line['lineHundredths'];
+            if ($total > Currency::DECIMAL_10_2_MAX) {
+                return 'The claim\'s total is too large: the most one claim can hold is '
+                    . Currency::format(Currency::DECIMAL_10_2_MAX, $claimCurrency) . '. Split it into two claims.';
+            }
+        }
+
+        return $total;
     }
 
     /**

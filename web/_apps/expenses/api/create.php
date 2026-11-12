@@ -138,7 +138,6 @@ if (is_array($itemsRaw) === false || count($itemsRaw) === 0) {
 }
 
 $items      = [];
-$totalAmount = 0.0;
 // 💷 A claim is in the organisation's currency today (#966, D-139).
 $claimCurrency = \Portal\Core\Currency::ofSite();
 foreach ($itemsRaw as $idx => $itemRaw) {
@@ -156,15 +155,13 @@ foreach ($itemsRaw as $idx => $itemRaw) {
         $description = null;
     }
 
-    if (is_numeric($itemRaw['unitCost'] ?? null) === false || (float) $itemRaw['unitCost'] < 0) {
-        ApiResponse::error('items[' . $idx . '].unitCost must be a decimal ≥ 0', 400);
-    }
-    $unitCost = round((float) $itemRaw['unitCost'], 2);
-
-    $quantity = (int) ($itemRaw['quantity'] ?? 0);
-    if ($quantity < 1) {
-        ApiResponse::error('items[' . $idx . '].quantity must be an integer ≥ 1', 400);
-    }
+    // 🔢 unitCost and quantity are judged by ExpenseRules::expenseLine() below,
+    //    with the rest of the line (#1013). This used to be `is_numeric()`
+    //    then `round((float) …, 2)` and `(int)`: "1e5" was accepted as
+    //    100,000.00, "12.345" was rounded, a quantity of 2.5 became 2, and a
+    //    figure larger than DECIMAL(10,2) holds was not refused at all. The
+    //    values go to the rule as the JSON decoded them, so a number and a
+    //    string of figures are read by the same converter as the claim form.
 
     $purchaseDate = null;
     if (isset($itemRaw['purchaseDate']) === true && trim((string) $itemRaw['purchaseDate']) !== '') {
@@ -188,19 +185,18 @@ foreach ($itemsRaw as $idx => $itemRaw) {
     // 💷 Through the ONE rule (ExpenseRules::expenseLine(), #966, D-139): the
     //    QUOTED amount and currency are kept, and the CONVERTED amount in the
     //    claim's currency is what the total adds up.
-    $judged = ExpenseRules::expenseLine($itemName, $quantity, $unitCost, $itemRaw['quotedCurrency'] ?? '', $itemRaw['convertedAmount'] ?? '', $claimCurrency);
+    $judged = ExpenseRules::expenseLine($itemName, $itemRaw['quantity'] ?? null, $itemRaw['unitCost'] ?? null, $itemRaw['quotedCurrency'] ?? '', $itemRaw['convertedAmount'] ?? '', $claimCurrency);
     if (is_string($judged) === true) {
         ApiResponse::error('items[' . $idx . ']: ' . $judged, 400);
     }
-    $lineTotal = $judged['lineTotal'];
-    $totalAmount += $lineTotal;
 
     $items[] = [
         'itemName'     => $itemName,
         'description'  => $description,
-        'unitCost'     => $unitCost,
-        'quantity'     => $quantity,
-        'lineTotal'    => $lineTotal,
+        'unitCost'     => $judged['unit'],
+        'quantity'     => $judged['qty'],
+        'lineTotal'    => $judged['lineTotal'],
+        'lineHundredths' => $judged['lineHundredths'],
         'currency'        => $judged['currency'],
         'quotedCurrency'  => $judged['quotedCurrency'],
         'quotedLineTotal' => $judged['quotedLineTotal'],
@@ -208,7 +204,13 @@ foreach ($itemsRaw as $idx => $itemRaw) {
         'supplier'     => $supplier,
     ];
 }
-$totalAmount = round($totalAmount, 2);
+// 🧮 Added up in whole hundredths and refused when it would not fit the
+//    claim's DECIMAL(10,2) column (#1013); bound as text, never a float.
+$totalHundredths = ExpenseRules::claimTotal($items, $claimCurrency);
+if (is_string($totalHundredths) === true) {
+    ApiResponse::error($totalHundredths, 400);
+}
+$totalAmount = \Portal\Core\Currency::hundredthsToDecimal($totalHundredths);
 
 $status = 'Pending';
 
@@ -225,7 +227,7 @@ try {
         throw new \RuntimeException('Failed to prepare claim insert: ' . $db->error);
     }
     $stmt->bind_param(
-        'iiissdss',
+        'iiisssss',
         $siteId, $ownerUserId, $deptId, $claimTitle, $claimDate, $totalAmount, $status, $claimCurrency
     );
     if ($stmt->execute() === false) {
@@ -244,7 +246,7 @@ try {
     }
     foreach ($items as $it) {
         $itemStmt->bind_param(
-            'issdidssssd',
+            'isssissssss',
             $claimId, $it['itemName'], $it['description'], $it['unitCost'],
             $it['quantity'], $it['lineTotal'], $it['purchaseDate'], $it['supplier'],
             $it['currency'], $it['quotedCurrency'], $it['quotedLineTotal']

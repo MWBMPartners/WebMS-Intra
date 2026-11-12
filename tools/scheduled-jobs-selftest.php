@@ -490,13 +490,27 @@ check(
 //       FOUND THE FIRST VERSION OF THIS COMMENT UNTRUE: it named two places
 //       when there were nine. The list in `$printed` is what these two
 //       commands return, outside `web/_apps/cron/` and `docs/decisions/`:
-//         grep -rnE "[0-9*/,]+ [0-9*/,]+ \* \* \*" web/_apps README.md docs/INSTALL.md
-//         grep -rnE "every (five|fifteen|[0-9]+)( to [0-9]+|-[0-9]+)? minutes|every hour|once a (day|night|week)" \
-//             web/_apps README.md docs/INSTALL.md
+//         grep -rnE "[0-9*/,]+ [0-9*/,]+ \* \* \*" web/_apps web/_core README.md docs/INSTALL.md
+//         grep -rnE "every (five|fifteen|[0-9]+)( to [0-9]+|-[0-9]+)? minutes|every hour|once a (day|night|week)|every night|daily" \
+//             web/_apps web/_core README.md docs/INSTALL.md
 //       read by hand for the lines that tell a customer how often to call a
 //       job. It CANNOT see a schedule worded some other way, and it leaves
 //       out `CHANGELOG.md`, whose entries are a record of what shipped, not
 //       an instruction kept current.
+//
+//    ⚠️ #820: THE FIRST SEARCH LEFT OUT `web/_core` AND "every night", and two
+//       places a customer reads were held by nothing: the Backup page's
+//       sentences, which `DbBackup.php` builds ("once a day", twice), and the
+//       Retention page's "every night, say". #793's round-3 check changed them
+//       to "once a week" / "every week" with all 219 checks green. They are
+//       listed below now. What the widened search ALSO finds, and is left out
+//       on purpose: "the nightly clear-out" and "nightly" in about twenty
+//       sentences (privacy notice, help, settings pages, GdprEraser,
+//       ActivityLogRetention, the personal-data catalogue). Each DESCRIBES
+//       when the retention job deletes something rather than telling a
+//       customer how often to call a job, and "nightly" agrees with that
+//       job's one-day gap; "fortnightly" is a repeat pattern for events and
+//       groups, and "daily" in DbBackup's code is a setting's value.
 //
 //    'header' is the phrase the job's own page states, or null where it states
 //    none (health — judged from the health page's line — and the jobs D-070
@@ -563,7 +577,7 @@ $toSeconds = static function (string $said): ?int {
         return 604800;
     }
     if (str_contains($said, 'once a night') === true || str_contains($said, 'once a day') === true
-        || str_contains($said, 'daily') === true) {
+        || str_contains($said, 'every night') === true || str_contains($said, 'daily') === true) {
         return 86400;
     }
     return null;
@@ -650,6 +664,13 @@ $printed = [
     ['web/_apps/admin/maintenance/backup.php',
      'Set it to call <code>/cron/backup-run?token=&lt;your token&gt;</code> <strong>once a day</strong>',
      'cron/backup-run', 'once a day'],
+    // #820: the Backup page's warnings, built by DbBackup.php (web/_core).
+    ['web/_core/DbBackup.php', 'scheduler has to, once a day, at the address below.',
+     'cron/backup-run', 'once a day'],
+    ['web/_core/DbBackup.php', 'and it is meant to be called once a day. So no',
+     'cron/backup-run', 'once a day'],
+    ['web/_apps/admin/maintenance/retention.php', 'For scheduled execution (every night, say), set',
+     'cron/retention-sweep', 'every night'],
     ['web/_apps/help/admin-first-steps.php',
      '<code>0 3 * * * curl -fsS "https://YOUR-PORTAL/cron/retention-sweep?token=YOUR_TOKEN"',
      'cron/retention-sweep', '0 3 * * *'],
@@ -812,6 +833,10 @@ ScheduledJobs::forgetTableCheck();
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'MailRoutes.php';
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'MailQueue.php';
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'PortalCheck.php';
+// #820: PortalCheck::JOB_WORK_WAITING is built from Giving::STATEMENTS_THE_JOB_SENDS. With no
+// autoloader here, a missing Giving would make that count throw, which the page turns into
+// "cannot tell, so needed" — a quiet difference, not a loud one. So it is required.
+require $repo . $sep . 'web' . $sep . '_core' . $sep . 'Giving.php';
 
 $setSetting = static function (string $key, string $value) use ($db): void {
     $stmt = $db->prepare(
@@ -2050,6 +2075,109 @@ $db->query('DROP TABLE `tblScheduledJobRun`');
 $db->query($grab[0]);
 $apply287();
 ScheduledJobs::forgetTableCheck();
+
+echo "\n=== K. #820: the giving job takes exactly what Check this portal counts ===\n";
+// ⚠️ DRIVEN, BECAUSE A TEXT COMPARISON COULD NOT SEE THE SELECTION CHANGE.
+//    Before #820, section Q of tools/portal-check-selftest.php compared the
+//    job's WHERE clause with the page's as TEXT. The job builds its query in
+//    pieces, so a JOIN before the WHERE or an extra `AND …` after it changed
+//    what it sends with that check green (#793's round-3 check: 78 of 78). And
+//    the job's own copy lacked "the organisation is active", so it TOOK rows
+//    of a switched-off organisation, skipped each a step later, and spent its
+//    LIMIT places on them ahead of real work.
+//
+//    So this RUNS the real page against rows in every state and compares what
+//    it took with the page's own count. "Took" is observable without sending
+//    any mail: every donor here has an address that is not one, so a row the
+//    job takes is marked `invalid-email`; a row it does not take is untouched.
+//    The job's own line "N queued row(s) processed" counts what it SELECTED,
+//    including rows it then skipped, which is how the old fault shows.
+$siteRow = $db->query('SELECT MIN(`siteID`) AS `s` FROM `tblSites` WHERE `isActive` = 1')->fetch_assoc();
+$liveOrg = (int) ($siteRow['s'] ?? 0);
+$db->query("INSERT INTO `tblSites` (`siteName`, `siteKey`, `isActive`) VALUES ('zz selftest 820 retired', 'zz-selftest-820', 0)");
+$retiredOrg = (int) $db->insert_id;
+$db->query("INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`) VALUES ('Selftest 820 donor', 'not an address 820', 1)");
+$donor820 = (int) $db->insert_id;
+$putRow = static function (int $site, string $period, string $queuedAgo, ?string $emailed, ?string $error) use ($db, $donor820): int {
+    $stmt = $db->prepare(
+        'INSERT INTO `tblGivingStatementLog` (`siteID`, `donorID`, `periodKey`, `fromDate`, `toDate`, `pdfPath`, `queuedAt`, `emailedAt`, `errorMsg`) '
+        . "VALUES (?, ?, ?, '2026-01-01', '2026-03-31', '', "
+        . ($queuedAgo === '' ? 'NULL' : 'UTC_TIMESTAMP() - INTERVAL ' . (int) $queuedAgo . ' MINUTE') . ', ?, ?)'
+    );
+    $stmt->bind_param('iisss', $site, $donor820, $period, $emailed, $error);
+    $stmt->execute();
+    $id = (int) $stmt->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+$errorOf = static function (int $logId) use ($db): ?string {
+    $r = $db->query('SELECT `errorMsg` FROM `tblGivingStatementLog` WHERE `logID` = ' . $logId)->fetch_assoc();
+
+    return $r === null ? '(row gone)' : $r['errorMsg'];
+};
+$waitingCount = static function () use ($db): int {
+    $r = $db->query(\Portal\Core\PortalCheck::JOB_WORK_WAITING['cron/giving-statements'])->fetch_assoc();
+
+    return (int) ($r['howMany'] ?? -1);
+};
+$processed = static function (string $body): int {
+    return preg_match('/— (\d+) queued row\(s\) processed/u', $body, $m) === 1 ? (int) $m[1] : -1;
+};
+$setSetting('giving.cron_token', $token);
+// A cap of 4 rows a run (batchPerRun × 4), so the LIMIT fault can be shown.
+// The seeded value is put back at the end of the section.
+$batchBefore = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` = 'giving.statements.batchPerRun'")->fetch_assoc();
+$setSetting('giving.statements.batchPerRun', '1');
+
+// Four rows of a RETIRED organisation, queued EARLIER than the one live row,
+// so a job that takes them uses all four of its places on them.
+$retired = [];
+foreach ([50, 49, 48, 47] as $i => $ago) {
+    $retired[] = $putRow($retiredOrg, 'zz820-r' . $i, (string) $ago, null, null);
+}
+$live      = $putRow($liveOrg, 'zz820-live', '10', null, null);
+$failed820 = $putRow($liveOrg, 'zz820-failed', '60', null, 'send-failed');
+$notQueued = $putRow($liveOrg, 'zz820-notq', '', null, null);
+$sent      = $putRow($liveOrg, 'zz820-sent', '70', '2026-04-01 10:00:00', null);
+
+check('K0 premise: the page counts exactly ONE statement waiting (the live, queued, unsent, unfailed row)',
+    $waitingCount(), 1);
+$answer = $get('/cron/giving-statements?key=' . $token);
+check('K1 the real job answers 200 to the right token', $answer['code'], 200);
+check('K2 it SELECTED exactly what the page counts: one row, not the retired organisation\'s four',
+    $processed($answer['body']), 1);
+check('K3 and the live row is the one it took (marked invalid-email: its donor has no real address)',
+    $errorOf($live), 'invalid-email');
+check('K4 the retired organisation\'s rows are untouched, and did not use up its places',
+    array_map($errorOf, $retired), [null, null, null, null]);
+check('K5 a row whose send FAILED is not taken by the job (failures are retried by hand only)',
+    $errorOf($failed820), 'send-failed');
+check('K6 a row never queued, and a row already e-mailed, are not taken either',
+    [$errorOf($notQueued), $errorOf($sent)], [null, null]);
+check('K7 and afterwards the page counts nothing waiting, which is what the job left', $waitingCount(), 0);
+
+// The Retry a treasurer presses (giving/statements-generate.php, action
+// "retry") clears `errorMsg`; this is its statement, so the job must then
+// take the row. Driving the button itself needs a signed-in treasurer, which
+// this test has no world for; it is the same UPDATE, recorded as such.
+$stmt = $db->prepare('UPDATE `tblGivingStatementLog` SET `errorMsg` = NULL WHERE `logID` = ? AND `errorMsg` <> ?');
+$waitingWord = \Portal\Core\Giving::MAIL_WAITING;
+$stmt->bind_param('is', $failed820, $waitingWord);
+$stmt->execute();
+$stmt->close();
+check('K8 once a treasurer\'s Retry clears the failure, the page counts it as waiting again', $waitingCount(), 1);
+$answer = $get('/cron/giving-statements?key=' . $token);
+check('K9 and the job takes it on its next run', [$processed($answer['body']), $errorOf($failed820)], [1, 'invalid-email']);
+
+$db->query("DELETE FROM `tblGivingStatementLog` WHERE `periodKey` LIKE 'zz820-%'");
+$db->query('DELETE FROM `tblUsers` WHERE `userID` = ' . $donor820);
+$db->query('DELETE FROM `tblSites` WHERE `siteID` = ' . $retiredOrg);
+if ($batchBefore === null) {
+    $db->query("DELETE FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` = 'giving.statements.batchPerRun'");
+} else {
+    $setSetting('giving.statements.batchPerRun', (string) $batchBefore['settingValue']);
+}
 
 echo "\n=== Summary ===\n";
 echo "{$passed} passed, {$failed} failed.\n";

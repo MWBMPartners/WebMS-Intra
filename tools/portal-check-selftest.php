@@ -82,6 +82,9 @@ require PORTAL_CORE . $sep . 'AppRegistry.php';
 require PORTAL_CORE . $sep . 'MailRoutes.php';
 require PORTAL_CORE . $sep . 'MailQueue.php';
 require PORTAL_CORE . $sep . 'ScheduledJobs.php';
+// #820: PortalCheck::JOB_WORK_WAITING is built from Giving::STATEMENTS_THE_JOB_SENDS,
+// so the class must be here (the lesson above, a third time, caught before it bit).
+require PORTAL_CORE . $sep . 'Giving.php';
 require PORTAL_CORE . $sep . 'PortalCheck.php';
 
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
@@ -886,27 +889,34 @@ $db->query("UPDATE `tblGivingStatementLog` SET `emailedAt` = UTC_TIMESTAMP() WHE
 check('Q7c once that statement has gone, Giving off means nothing to do again: not reported',
     $named($pageFor($db), 'can never run'), null);
 
-// The work-waiting query must be the JOB's own selection. Two copies of one
-// condition drift (the round-2 fault was exactly a page and a job disagreeing
-// about what the job would do), so the job's WHERE clause and the class's are
-// compared as text, backticks aside.
-$jobPage = (string) file_get_contents(PORTAL_APPS . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR
-    . 'giving-statements.php');
-$jobWhere = preg_match("/'WHERE (queuedAt[^']*?) '/", $jobPage, $m) === 1 ? $m[1] : '(not found)';
-// The class adds ONE condition the job's WHERE clause does not carry — that
-// the organisation is active — because the job skips such rows a step later
-// (`Site::forceContext()` refuses them). It is taken off before comparing, and
-// Q8b requires it to be there; Q9c/Q9d drive it.
-$classFull  = str_replace('`', '', PortalCheck::JOB_WORK_WAITING['cron/giving-statements']);
-$activeOnly = str_replace('`', '', PortalCheck::JOB_WORK_WAITING_ACTIVE_ONLY);
-$classWhere = preg_match('/WHERE (.*)$/', str_replace($activeOnly, '', $classFull), $m) === 1
-    ? $m[1] : '(not found)';
-check('Q8 the page counts waiting statements by exactly the condition the giving job sends them by',
-    [$classWhere, $jobWhere],
-    ['queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL',
-     'queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL']);
-check('Q8b and the class adds exactly one condition beyond it: the organisation is active',
-    str_ends_with($classFull, $activeOnly) && $activeOnly === ' AND siteID IN (SELECT siteID FROM tblSites WHERE isActive = 1)',
+// The work-waiting query must be the JOB's own selection (#820).
+// ⚠️ THIS USED TO COMPARE THE TWO AS TEXT, AND THAT COULD NOT SEE A CHANGE TO
+//    THE SELECTION: the job builds its query in pieces, so a JOIN put before
+//    its WHERE, or an extra `AND …` after it, changed what it sends while the
+//    WHERE clauses still matched (measured by #793's round-3 check, 78 of 78
+//    green). There is now ONE copy, Giving::STATEMENTS_THE_JOB_SENDS, which
+//    both read; what the job really TAKES is driven, against rows in every
+//    state, by section G of tools/scheduled-jobs-selftest.php, which compares
+//    it with this class's count. These two only pin that both still read the
+//    one constant — Q8b by PHP's tokeniser, so a comment naming it does not count.
+check('Q8 the page counts waiting statements by the one selection the giving job uses',
+    PortalCheck::JOB_WORK_WAITING['cron/giving-statements'],
+    'SELECT COUNT(*) AS `howMany` FROM `tblGivingStatementLog` WHERE ' . \Portal\Core\Giving::STATEMENTS_THE_JOB_SENDS);
+$jobCode = '';
+foreach (token_get_all((string) file_get_contents(PORTAL_APPS . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR
+    . 'giving-statements.php')) as $tok) {
+    if (is_array($tok) === true && in_array($tok[0], [T_COMMENT, T_DOC_COMMENT, T_WHITESPACE], true) === true) {
+        continue;
+    }
+    $jobCode .= is_array($tok) === true ? $tok[1] : $tok;
+}
+check('Q8b and the job\'s own query is built from that same constant, once, after its WHERE',
+    substr_count($jobCode, "'WHERE '.Giving::STATEMENTS_THE_JOB_SENDS") === 1
+        && substr_count($jobCode, 'STATEMENTS_THE_JOB_SENDS') === 1,
+    true);
+check('Q8c and that selection takes only rows of an ACTIVE organisation (#793 round 3)',
+    str_contains(\Portal\Core\Giving::STATEMENTS_THE_JOB_SENDS,
+        'AND `siteID` IN (SELECT `siteID` FROM `tblSites` WHERE `isActive` = 1)'),
     true);
 
 // ── Q9. An INACTIVE organisation using Giving does not make the job needed ──

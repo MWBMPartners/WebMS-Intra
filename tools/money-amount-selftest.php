@@ -63,6 +63,12 @@
  *   I  the asset import: "£1,234.56", "1,000" and "GBP 7.50" import exactly;
  *      a sign that is not read as GBP here is refused saying so (convert, do
  *      not relabel), and a misplaced comma with its reason.
+ *   J  expense claims (#1013), over all three doors — the claim form, the
+ *      edit page and the JSON API (a JSON NUMBER as well as text): "abc",
+ *      "1e5", "12.345", a figure over the DECIMAL(10,2) column, a quantity of
+ *      2.5, a line or claim total that would not fit, and a converted amount
+ *      with a third decimal are each refused with the reason and nothing is
+ *      stored; an ordinary claim through each door IS stored exactly.
  *
  * WHAT IT CANNOT SHOW, said plainly:
  *   - several handlers moved onto the converter are NOT driven here with a
@@ -1831,6 +1837,133 @@ check('I2 signs that are not read as GBP here ("€5.00", "$5.00", D-165) are re
     && str_contains($preview, 'Purchase Cost "$5.00": ' . otherCur('GBP')) === true
     && str_contains($preview, 'Purchase Cost "0,500": ' . noted(BAD_COMMAS, false)) === true && count($assetCosts()) === 3,
     mb_substr(preg_replace('/\s+/', ' ', strip_tags($preview)) ?? '', 0, 600));
+
+// =============================================================================
+// J. Expense claims (#1013): every typed figure read strictly, over all three doors
+// =============================================================================
+// ⚠️ WHAT WAS WRONG (#1013). ExpenseRules::expenseLine() read a unit cost with
+//    `is_numeric($unit) === true ? (float) $unit : 0.0` and multiplied through
+//    a float; the API did `round((float) …, 2)`; the edit page `(int)` and
+//    `round((float) …, 2)`. So "abc" became 0.00 without a word, "1e5" was
+//    taken as 100,000.00, "12.345" was rounded for the claimant, a quantity of
+//    "2.5" became 2, and a figure past what DECIMAL(10,2) holds reached the
+//    database. Each door is driven here with those values; each is refused
+//    with the reason and NOTHING is stored, and an ordinary claim through each
+//    IS stored exactly (so "nothing stored" is a refusal, not a dead fixture).
+head('Section J — expense claims (#1013): the claim form, the edit page and the API refuse "abc", "1e5", "12.345" and a figure over the column, and store an ordinary one exactly');
+const TOO_LARGE_DEC = 'That amount is too large: the most that can be stored here is £99,999,999.99.';
+const QTY_WORDS     = 'A quantity must be a whole number of 1 or more, written in figures, for example 3.';
+run($db, "INSERT INTO `tblDepts` (`siteID`, `deptName`, `isActive`) VALUES (?, 'Money selftest dept', 1)", 'i', [$site]);
+$dept = (int) $db->insert_id;
+register_shutdown_function(static function () use ($db, $dept): void {
+    try {
+        foreach (rows($db, "SELECT `claimID` FROM `tblExpenseClaims` WHERE `claimTitle` LIKE 'Money selftest claim%'") as $r) {
+            run($db, 'DELETE FROM `tblExpenseClaimItems` WHERE `claimID` = ?', 'i', [(int) $r['claimID']]);
+            run($db, 'DELETE FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [(int) $r['claimID']]);
+        }
+        run($db, 'DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [$dept]);
+    } catch (Throwable $e) {
+        echo "  ! the expense clean-up could not finish ({$e->getMessage()}).\n";
+    }
+});
+$setting('org.currency', 'GBP');
+$claims = static fn (): array => rows($db,
+    "SELECT `c`.`claimID`, `c`.`claimTitle`, `c`.`totalAmount`, `i`.`quantity`, `i`.`unitCost`, `i`.`lineTotal`, `i`.`quotedLineTotal` "
+    . "FROM `tblExpenseClaims` `c` LEFT JOIN `tblExpenseClaimItems` `i` ON `i`.`claimID` = `c`.`claimID` "
+    . "WHERE `c`.`claimTitle` LIKE 'Money selftest claim%' ORDER BY `c`.`claimID`, `i`.`itemID`");
+$claimPost = static fn (string $title, array $lines): array => [
+    'csrf_token' => $freshToken('/expenses/submit'), 'deptID' => (string) $dept, 'claimTitle' => $title,
+    'itemDesc' => array_column($lines, 0), 'itemQty' => array_column($lines, 1), 'itemUnit' => array_column($lines, 2),
+    'itemCurrency' => array_column($lines, 3), 'itemConverted' => array_column($lines, 4),
+];
+$formCases = [
+    'a unit cost that is not a figure ("abc")' => [[['Money line', '1', 'abc', '', '']], 'Unit cost of "Money line": ' . FIGURES_ONLY],
+    'a power of ten ("1e5")'                   => [[['Money line', '1', '1e5', '', '']], 'Unit cost of "Money line": ' . POWER_OF_TEN],
+    'a third decimal ("12.345")'               => [[['Money line', '1', '12.345', '', '']], 'Unit cost of "Money line": ' . TOO_PRECISE],
+    'a unit cost over the column ("100000000.00")' => [[['Money line', '1', '100000000.00', '', '']], 'Unit cost of "Money line": ' . TOO_LARGE_DEC],
+    'a quantity that is not whole ("2.5")'     => [[['Money line', '2.5', '10.00', '', '']], 'Quantity of "Money line": ' . QTY_WORDS],
+    'a line whose total passes the column (2 × 99,999,999.99)' => [[['Money line', '2', '99999999.99', '', '']],
+        'The total of "Money line" (2 at that unit cost) is too large: the most one line can hold is £99,999,999.99.'],
+    'a claim whose lines each fit but whose total does not' => [[['Money line', '1', '60000000.00', '', ''], ['Money line two', '1', '60000000.00', '', '']],
+        'The claim\'s total is too large: the most one claim can hold is £99,999,999.99. Split it into two claims.'],
+    'a converted amount with a third decimal (a dollar line, "8.005")' => [[['Money line', '1', '10.00', 'USD', '8.005']], 'Cost in GBP of "Money line": ' . TOO_PRECISE],
+    'a converted amount that is not a figure (a dollar line, "abc")' => [[['Money line', '1', '10.00', 'USD', 'abc']], 'Cost in GBP of "Money line": ' . FIGURES_ONLY],
+];
+$n = 0;
+foreach ($formCases as $what => [$lines, $sentence]) {
+    $n++;
+    $before = $claims();
+    $page   = $flashAfter($http('POST', '/expenses/submit/save', $claimPost('Money selftest claim refused', $lines)));
+    check(sprintf('J%02d the claim form refuses %s with "%s", and no claim is stored', $n, $what, $sentence),
+        str_contains($page, $sentence) === true && $claims() === $before,
+        'message found: ' . var_export(str_contains($page, $sentence), true) . '; claims: ' . json_encode($claims())
+        . (preg_match('/alert-danger[^>]*>\s*([^<]*)/', $page, $mm) === 1 ? '; said: ' . trim($mm[1]) : ''));
+}
+$http('POST', '/expenses/submit/save', $claimPost('Money selftest claim ordinary', [['Money line', '3', '19.99', '', ''], ['Money line two', '1', '0.01', '', '']]));
+$stored = $claims();
+check('J10 an ordinary claim through the form IS stored exactly: 3 × 19.99 = 59.97, plus 0.01, total 59.98 (the float path\'s classic 59.969999…)',
+    count($stored) === 2 && $stored[0]['quantity'] === 3 && $stored[0]['unitCost'] === '19.99' && $stored[0]['lineTotal'] === '59.97'
+    && $stored[0]['quotedLineTotal'] === '59.97' && $stored[1]['lineTotal'] === '0.01' && $stored[0]['totalAmount'] === '59.98',
+    json_encode($stored));
+$ordinaryId = (int) ($stored[0]['claimID'] ?? 0);
+
+// The edit page: the claim above, posted back with each refused figure.
+$editPost = static fn (string $unit, string $qty = '1'): array => ['csrf_token' => $freshToken('/expenses/edit?id=' . $ordinaryId),
+    'claimID' => (string) $ordinaryId, 'claimTitle' => 'Money selftest claim edited', 'deptID' => (string) $dept,
+    'itemDesc' => ['Money line'], 'itemQty' => [$qty], 'itemUnit' => [$unit], 'itemCurrency' => [''], 'itemConverted' => ['']];
+foreach (['J11' => ['abc', '1', 'Unit cost of "Money line": ' . FIGURES_ONLY], 'J12' => ['1e5', '1', 'Unit cost of "Money line": ' . POWER_OF_TEN],
+          'J13' => ['12.345', '1', 'Unit cost of "Money line": ' . TOO_PRECISE], 'J14' => ['100000000.00', '1', 'Unit cost of "Money line": ' . TOO_LARGE_DEC],
+          'J15' => ['10.00', '2.5', 'Quantity of "Money line": ' . QTY_WORDS]] as $label => [$unit, $qty, $sentence]) {
+    $before = $claims();
+    $page   = $flashAfter($http('POST', '/expenses/edit/save', $editPost($unit, $qty)));
+    check($label . ' the edit page refuses unit "' . $unit . '", quantity "' . $qty . '" with "' . $sentence . '", and the claim is unchanged',
+        str_contains($page, $sentence . ' Nothing has been changed.') === true && $claims() === $before,
+        'claims: ' . json_encode($claims()) . (preg_match('/alert-[a-z]+[^>]*>\s*([^<]*)/', $page, $mm) === 1 ? '; said: ' . trim($mm[1]) : ''));
+}
+$http('POST', '/expenses/edit/save', $editPost('1234.56', '2'));
+$edited = rows($db, 'SELECT `c`.`claimTitle`, `c`.`totalAmount`, `i`.`unitCost`, `i`.`lineTotal` FROM `tblExpenseClaims` `c` JOIN `tblExpenseClaimItems` `i` ON `i`.`claimID` = `c`.`claimID` WHERE `c`.`claimID` = ?', 'i', [$ordinaryId]);
+check('J16 an ordinary edit IS stored exactly: 2 × 1234.56 = 2469.12',
+    count($edited) === 1 && $edited[0]['claimTitle'] === 'Money selftest claim edited' && $edited[0]['unitCost'] === '1234.56'
+    && $edited[0]['lineTotal'] === '2469.12' && $edited[0]['totalAmount'] === '2469.12', json_encode($edited));
+
+// The API, which receives JSON: a NUMBER as well as a string of figures.
+$postJson = static function (string $path, array $body) use ($port, $jar): array {
+    $handle = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+        CURLOPT_POSTFIELDS => json_encode($body, JSON_PRESERVE_ZERO_FRACTION),
+    ]);
+    $raw     = (string) curl_exec($handle);
+    $decoded = json_decode($raw, true);
+
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'message' => is_array($decoded) === true ? (string) ($decoded['message'] ?? '') : $raw];
+};
+$apiBody = static fn (string $title, mixed $unit, mixed $qty = 1): array => ['csrf_token' => $freshToken('/expenses/submit'),
+    'deptID' => $dept, 'claimTitle' => $title, 'claimDate' => date('Y-m-d'),
+    'items' => [['itemName' => 'Money api line', 'unitCost' => $unit, 'quantity' => $qty]]];
+$apiCases = [
+    'J17' => ['"abc" as text', 'abc', 1, 'Unit cost of "Money api line": ' . FIGURES_ONLY],
+    'J18' => ['"1e5" as text', '1e5', 1, 'Unit cost of "Money api line": ' . POWER_OF_TEN],
+    'J19' => ['12.345 as a JSON number', 12.345, 1, 'Unit cost of "Money api line": ' . TOO_PRECISE],
+    'J20' => ['100000000 as a JSON number (over the column)', 100000000, 1, 'Unit cost of "Money api line": ' . TOO_LARGE_DEC],
+    'J21' => ['184467440737095557.12 as a JSON number (past PHP\'s integer range)', 184467440737095557.12, 1, 'Unit cost of "Money api line": ' . TOO_LARGE_DEC],
+    'J22' => ['a quantity of 2.5', '10.00', 2.5, 'Quantity of "Money api line": ' . QTY_WORDS],
+];
+foreach ($apiCases as $label => [$what, $unit, $qty, $sentence]) {
+    $before = $claims();
+    $answer = $postJson('/api/expenses/create', $apiBody('Money selftest claim api refused', $unit, $qty));
+    check($label . ' the API refuses ' . $what . ' with 400 and "' . $sentence . '", and no claim is stored',
+        $answer['status'] === 400 && $answer['message'] === 'items[0]: ' . $sentence && $claims() === $before,
+        'HTTP ' . $answer['status'] . '; said: ' . $answer['message']);
+}
+$answer = $postJson('/api/expenses/create', $apiBody('Money selftest claim api', 12.5, 3));
+$viaApi = rows($db, "SELECT `c`.`totalAmount`, `i`.`unitCost`, `i`.`quantity`, `i`.`lineTotal` FROM `tblExpenseClaims` `c` JOIN `tblExpenseClaimItems` `i` ON `i`.`claimID` = `c`.`claimID` WHERE `c`.`claimTitle` = 'Money selftest claim api'");
+check('J23 an ordinary API claim (12.5 as a JSON number, quantity 3) IS stored exactly: 37.50',
+    $answer['status'] === 201 && count($viaApi) === 1 && $viaApi[0]['unitCost'] === '12.50' && $viaApi[0]['quantity'] === 3
+    && $viaApi[0]['lineTotal'] === '37.50' && $viaApi[0]['totalAmount'] === '37.50',
+    'HTTP ' . $answer['status'] . ' ' . $answer['message'] . '; ' . json_encode($viaApi));
 
 echo "\n{$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

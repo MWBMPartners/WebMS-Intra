@@ -933,6 +933,67 @@ check('H2 and Manage giving says how many it left out — the unrecorded one inc
     && str_contains(preg_replace('/\s+/', ' ', $leftOutPage), 'recorded in another currency than pounds, or with no currency recorded. Gift Aid is a UK scheme claimed in pounds') === true,
     'note: ' . ($mm[1] ?? '(none)') . ', expected ' . $notPounds);
 
+// ── #999: two overlapping declarations, and a statement's Gift Aid figure ──
+// ⚠️ ONE GIFT, ONE ROW. hmrcRows() joined EVERY active declaration covering a
+//    gift's date, so a donor with two overlapping declarations put the same
+//    gift in the claim file twice — claimed twice from HMRC — and Manage
+//    giving's "left out" count counted their other-currency gifts twice. A
+//    second declaration, started more recently and still open, overlaps the
+//    first for every gift above. The claim file must hold the pounds gift
+//    ONCE, under the NEWER declaration's address (the one the donor most
+//    recently gave), and the left-out count must not move.
+run($db, "INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `status`, `validFrom`, `address`, `postcode`) VALUES (?, ?, 'active', DATE_SUB(CURDATE(), INTERVAL 6 MONTH), '9 Newer Lane', 'AB1 9ZZ')",
+    'ii', [$site, CU_ADMIN]);
+$claimFile2 = $http('GET', '/giving/hmrc-export?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'));
+$donorRows  = array_values(array_filter(explode("\n", trim($claimFile2['body'])),
+    static fn (string $l): bool => str_contains($l, '7 Selftest Road') === true || str_contains($l, '9 Newer Lane') === true));
+check('H2b with TWO overlapping active declarations the claim file still holds the pounds gift ONCE (#999), under the newer declaration\'s address',
+    $claimFile2['status'] === 200 && count($donorRows) === 1 && str_contains($donorRows[0], '9 Newer Lane') === true
+    && str_ends_with(trim($donorRows[0]), ',30.00') === true,
+    'HTTP ' . $claimFile2['status'] . '; rows: ' . json_encode($donorRows));
+$leftOutPage2 = $http('GET', '/giving/manage?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'))['body'];
+check('H2c and Manage giving\'s "left out" count is still one per gift (' . $notPounds . '), not one per declaration',
+    preg_match('/data-hmrc-left-out="(\d+)"/', $leftOutPage2, $mm) === 1 && (int) $mm[1] === $notPounds,
+    'note: ' . ($mm[1] ?? '(none)') . ', expected ' . $notPounds);
+// ⚠️ A STATEMENT'S "GIFT AID ELIGIBLE" IS POUNDS ONLY (#999). It used to add
+//    every currency's gifts covered by a declaration, so a donor who gave in
+//    euros was told part of it was Gift Aid eligible — money the claim file
+//    (pounds only) can never claim. The statements page shows each donor's
+//    eligible figure from the same rule the statement document and its log
+//    row use (Giving::giftAidEligibleSql()); this donor gave in euros, dollars,
+//    pounds and none, so only the 30.00 in pounds may appear there.
+$statementsPage = html_entity_decode($http('GET', '/giving/statements?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'))['body'], ENT_QUOTES, 'UTF-8');
+preg_match_all('/Gift Aid: ([^<]*)</u', $statementsPage, $gaFigures);
+$gaFigures = array_map('trim', $gaFigures[1] ?? []);
+check('H2d the statements page gives this donor a Gift Aid figure of £30.00 — the pounds gift only — and no figure anywhere in another currency',
+    in_array('£30.00', $gaFigures, true) === true
+    && array_filter($gaFigures, static fn (string $f): bool => preg_match('/€|\$|[A-Z]{3} /u', $f) === 1) === [],
+    json_encode($gaFigures));
+// The statement DOCUMENT is a PDF made by dompdf, which this test copy does not
+// ship, so its words are read from the method that writes them (private, so by
+// reflection: the real method, never a copy of it — #647).
+$totalsHtml = new ReflectionMethod(\Portal\Core\Giving::class, 'statementTotalsHtml');
+$docWords   = (string) $totalsHtml->invoke(null, ['EUR' => 12000, 'GBP' => 3000], ['GBP' => 3000], 'EUR',
+    static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'));
+$docWords = html_entity_decode(strip_tags(str_replace('</p>', "\n", $docWords)), ENT_QUOTES, 'UTF-8');
+check('H2e the statement document names a Gift Aid figure only beside the POUNDS total, and says beside the euro total that Gift Aid does not apply',
+    str_contains($docWords, 'Total given: £30.00 · of which Gift Aid eligible: £30.00') === true
+    && str_contains($docWords, 'Total given: €120.00 · ' . \Portal\Core\Giving::GIFT_AID_NOT_THIS_CURRENCY) === true
+    && preg_match('/eligible: €/u', $docWords) !== 1,
+    $docWords);
+// The ONE eligibility rule itself (Giving::giftAidEligibleSql(), private, so by
+// reflection), asked of the real database over this donor's real gifts: it
+// decides the statement document's per-gift "Yes", its eligible total, and the
+// statements preview and log's `giftAidPence`. A planted rule that dropped the
+// pounds condition left H2d green, because the preview also keeps only a
+// pounds total for display — so the rule is asked here directly, and must
+// count the 30.00 in pounds and nothing in euros, dollars or none.
+$eligibleSql = new ReflectionMethod(\Portal\Core\Giving::class, 'giftAidEligibleSql');
+$eligible    = rows($db, 'SELECT COALESCE(SUM(CASE WHEN ' . (string) $eligibleSql->invoke(null, '`e`') . ' THEN `e`.`amountPence` ELSE 0 END), 0) AS `p`, '
+    . 'COUNT(*) AS `n` FROM `tblGivingEntry` `e` WHERE `e`.`siteID` = ? AND `e`.`donorID` = ?', 'ii', [$site, CU_ADMIN]);
+check('H2f the one eligibility rule counts only this donor\'s gift in POUNDS (3000 hundredths) of their ' . (int) ($eligible[0]['n'] ?? 0) . ' gifts, though two declarations cover them all',
+    (int) ($eligible[0]['p'] ?? -1) === 3000 && (int) ($eligible[0]['n'] ?? 0) >= 4, json_encode($eligible));
+
 // Reconciliation: a statement in EUR, a closed count in USD and one in EUR.
 run($db, "INSERT INTO `tblBankImports` (`siteID`, `filename`, `currency`, `fileHash`) VALUES (?, 'selftest.csv', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(32))]);
 $import = (int) $db->insert_id;

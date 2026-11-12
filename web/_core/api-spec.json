@@ -1011,12 +1011,12 @@
             "format": "double",
             "minimum": 0,
             "example": 12.5,
-            "description": "The price of ONE of this thing, in whole currency units and hundredths — **12.50 means twelve and a half units, not twelve and a half hundredths**. In the currency named by `quotedCurrency`, which is the claim's own when that is left out. Rounded to two decimal places by the portal. Must be a number and not negative; zero is allowed."
+            "description": "The price of ONE of this thing, in whole currency units and hundredths — **12.50 means twelve and a half units, not twelve and a half hundredths**. In the currency named by `quotedCurrency`, which is the claim's own when that is left out. Must not be negative; zero is allowed. Read strictly, never rounded (#1013): at most two decimal places (12.345 is refused with 400, not rounded), at most 99,999,999.99 (the most the column holds), and a quantity times this must fit the same limit. A JSON number or a string of figures is accepted; a string must be figures only, with no commas, currency sign or power of ten (\"1e5\" is refused). A JSON number written with an exponent cannot be told apart from the same number written out once it is decoded, so it is read as that number."
           },
           "quantity": {
             "type": "integer",
             "minimum": 1,
-            "description": "How many of the thing were bought. Multiplied by `unitCost` by the portal to give this line's total. **Must be at least 1 — zero is refused.**"
+            "description": "How many of the thing were bought. Multiplied by `unitCost` by the portal to give this line's total. **Must be at least 1 — zero is refused.** Must be a WHOLE number: 2.5, \"abc\" and \"1e3\" are refused with 400 rather than cut to 2 or read as 1 (#1013); a JSON 3.0 is three. At most 2,147,483,647."
           },
           "purchaseDate": {
             "type": "string",
@@ -1040,7 +1040,7 @@
             "type": "number",
             "format": "double",
             "example": 29.6,
-            "description": "What the whole line really cost in the CLAIM's currency, as the claimant's card or bank statement shows it, in whole units and hundredths. **Required, and more than zero, when `quotedCurrency` differs from the claim's currency** (refused with 400 otherwise); ignored when it is the same. This is the figure added to the claim's total, approved and paid. The portal looks up no exchange rate: the rate shown on the claim is worked out from the two figures."
+            "description": "What the whole line really cost in the CLAIM's currency, as the claimant's card or bank statement shows it, in whole units and hundredths. **Required, and more than zero, when `quotedCurrency` differs from the claim's currency** (refused with 400 otherwise); ignored when it is the same. This is the figure added to the claim's total, approved and paid. The portal looks up no exchange rate: the rate shown on the claim is worked out from the two figures. Read by the same strict rule as `unitCost`: at most two decimal places, at most 99,999,999.99, figures only (#1013). The claim's total, the sum of these, must also be at most 99,999,999.99, or the claim is refused with 400."
           }
         }
       },

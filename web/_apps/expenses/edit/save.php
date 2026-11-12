@@ -139,12 +139,9 @@ if ($claimTitle === '' || $deptID === 0) {
 // `expenses/api/create.php` both do the same, and this is the third door onto
 // the same table, so it follows the same rule.
 //
-// Each line is checked the way `api/create.php` checks it — a unit cost of 0
-// or more and a quantity of 1 or more. The web submit handler checks NEITHER
-// and only tests that the TOTAL is positive, so a claim filed through that
-// page can hold a line of quantity -5 (#650 item 4). A new handler is not
-// shipping with a fault that is already written up, so the stricter rule is
-// here, and #650 brings the submit page up to it.
+// Each line is checked by the one rule the other two doors ask,
+// ExpenseRules::expenseLine() — a unit cost of 0 or more, read strictly, and
+// a whole quantity of 1 or more (#650 item 4, #1013).
 $descRaw = $_POST['itemDesc'] ?? [];
 $qtyRaw  = $_POST['itemQty']  ?? [];
 $unitRaw = $_POST['itemUnit'] ?? [];
@@ -175,16 +172,16 @@ foreach ($descRaw as $i => $descEntry) {
     if (is_scalar($qtyEntry) === false || is_scalar($unitEntry) === false) {
         $refuse('One of the claim lines could not be read, so nothing has been changed.', $claimID);
     }
-    if (is_numeric($unitEntry) === false || (float) $unitEntry < 0) {
-        $refuse('A unit price cannot be negative. Nothing has been changed.', $claimID);
-    }
-    $qty = (int) $qtyEntry;
-    if ($qty < 1) {
-        $refuse('A quantity must be at least 1. Nothing has been changed.', $claimID);
-    }
 
+    // 🔢 The quantity and unit cost are judged by ExpenseRules::expenseLine()
+    //    below, with the rest of the line (#1013). This page used to test them
+    //    here with `is_numeric()` and `(float)`, so "1e5" passed as 100,000.00,
+    //    "12.345" was rounded and "2.5" became a quantity of 2. One rule now
+    //    reads all three doors' figures, strictly and never through a float —
+    //    and it is asked AFTER the claim is known to be this person's (#648),
+    //    so even a refused figure tells a stranger nothing.
     $rawLines[] = [
-        'desc' => $desc, 'qty' => $qty, 'unit' => round((float) $unitEntry, 2),
+        'desc' => $desc, 'qty' => $qtyEntry, 'unit' => $unitEntry,
         'currency' => is_string($curRaw[$i] ?? null) === true ? $curRaw[$i] : '',
         'converted' => is_scalar($convRaw[$i] ?? null) === true ? $convRaw[$i] : '',
     ];
@@ -271,18 +268,23 @@ if ($earlyReason !== ExpenseRules::EDIT_ALLOWED) {
 //    Currency::onEdit() with nothing posted: the claim's own, by the one rule.
 $claimCurrency = is_array($claim) === true ? \Portal\Core\Currency::onEdit((string) $claim['currency'], null) : '';
 $items = [];
-$total = 0.0;
 foreach ($rawLines as $raw) {
     $judged = ExpenseRules::expenseLine($raw['desc'], $raw['qty'], $raw['unit'], $raw['currency'], $raw['converted'], $claimCurrency);
     if (is_string($judged) === true) {
         $refuse($judged . ' Nothing has been changed.', $claimID);
     }
     $items[] = $judged;
-    $total  += $judged['lineTotal'];
 }
-$total = round($total, 2);
+// 🧮 Added up in whole hundredths, and refused when the claim's total would
+//    not fit its DECIMAL(10,2) column (#1013), by the same rule as the form
+//    and the API. `$total` is the column's text, bound as 's', never a float.
+$totalHundredths = ExpenseRules::claimTotal($items, $claimCurrency);
+if (is_string($totalHundredths) === true) {
+    $refuse($totalHundredths . ' Nothing has been changed.', $claimID);
+}
+$total = \Portal\Core\Currency::hundredthsToDecimal($totalHundredths);
 
-if (count($items) === 0 || $total <= 0) {
+if (count($items) === 0 || $totalHundredths <= 0) {
     $refuse('A claim needs at least one line, and a total of more than zero. Nothing has been changed.', $claimID);
 }
 
@@ -399,7 +401,7 @@ try {
         throw new \RuntimeException('Failed to prepare claim update: ' . $mysqli->error);
     }
     $pending = 'Pending';
-    $updStmt->bind_param('sidiis', $claimTitle, $deptID, $total, $claimID, $siteId, $pending);
+    $updStmt->bind_param('sisiis', $claimTitle, $deptID, $total, $claimID, $siteId, $pending);
     if ($updStmt->execute() === false) {
         $updError = $updStmt->error;
         $updStmt->close();
@@ -435,7 +437,7 @@ try {
         throw new \RuntimeException('Failed to prepare item insert: ' . $mysqli->error);
     }
     foreach ($items as $it) {
-        $itemStmt->bind_param('isiddssd', $claimID, $it['desc'], $it['qty'], $it['unit'], $it['lineTotal'],
+        $itemStmt->bind_param('isisssss', $claimID, $it['desc'], $it['qty'], $it['unit'], $it['lineTotal'],
             $it['currency'], $it['quotedCurrency'], $it['quotedLineTotal']);
         if ($itemStmt->execute() === false) {
             $itemError = $itemStmt->error;

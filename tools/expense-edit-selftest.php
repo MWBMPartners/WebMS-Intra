@@ -583,8 +583,8 @@ check(
     'a posted total is a number the sender chose'
 );
 check(
-    'C10. it works the total out from the lines instead',
-    str_contains($saveTight, '$total+=$line') === true || str_contains($saveTight, '$total=round($total,2)') === true
+    'C10. it works the total out from the lines instead, in whole hundredths (#1013)',
+    str_contains($saveTight, '$totalHundredths=ExpenseRules::claimTotal($items,$claimCurrency);') === true
 );
 
 // 🔢 The type-confusion guards the other money handlers carry (#642).
@@ -603,14 +603,21 @@ check(
     str_contains($saveTight, 'WHEREclaimID=?ANDsiteID=?ANDstatus=?') === true
 );
 
-// 🧾 Per-line validation, which the submit page still lacks (#650 item 4).
+// 🧾 Per-line validation: since #1013 the ONE rule, ExpenseRules::expenseLine(),
+//    reads the unit cost strictly (a negative is refused there) and the
+//    quantity as a whole number of 1 or more, for all three doors. These pin
+//    that the page hands it the RAW posted figures, never a float or an `(int)`
+//    it made first (which is how "1e5" passed and "2.5" became 2). The refusals
+//    themselves are driven over HTTP by section J of tools/money-amount-selftest.php.
 check(
-    'C14. a negative unit price is refused',
-    str_contains($saveTight, '(float)$unitEntry<0') === true
+    'C14. the unit price goes to the one rule as it was posted, not through a float',
+    str_contains($saveTight, "'qty'=>\$qtyEntry,'unit'=>\$unitEntry,") === true
+        && str_contains($saveTight, '(float)$unitEntry') === false
 );
 check(
-    'C15. a quantity below 1 is refused',
-    str_contains($saveTight, '$qty<1') === true
+    'C15. and so does the quantity, never cut by an (int) first',
+    str_contains($saveTight, '(int)$qtyEntry') === false
+        && str_contains($saveTight, 'ExpenseRules::expenseLine($raw[\'desc\'],$raw[\'qty\'],$raw[\'unit\'],') === true
 );
 
 // 🗂️ The trail.

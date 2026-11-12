@@ -160,9 +160,11 @@ if ($deptID === 0 || $claimTitle === '') {
 //    D-139): it keeps the QUOTED amount and currency and the CONVERTED
 //    amount in the claim's currency, which is what the total adds up — the
 //    claim's currency is the organisation's, today.
+// 🔢 Every figure is read strictly by that rule, never through a float (#1013):
+//    "abc", "1e5", "12.345" and a figure too large for its column are refused
+//    with the reason, and the total is added up in whole hundredths.
 $claimCurrency = \Portal\Core\Currency::ofSite();
 $claimLines    = [];
-$totalAmt      = 0.0;
 foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
     if (is_string($desc) === false || trim($desc) === '') {
         continue;
@@ -170,7 +172,9 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
     $line = ExpenseRules::expenseLine(
         trim($desc),
         $_POST['itemQty'][$i] ?? 1,
-        $_POST['itemUnit'][$i] ?? 0,
+        // No unit cost sent at all is "No amount was entered", never 0.00
+        // (#1013: it used to default to 0, a free item nobody typed).
+        $_POST['itemUnit'][$i] ?? '',
         $_POST['itemCurrency'][$i] ?? '',
         $_POST['itemConverted'][$i] ?? '',
         $claimCurrency
@@ -179,12 +183,16 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
         $sendBack($line, true);
     }
     $claimLines[] = $line;
-    $totalAmt    += $line['lineTotal'];
 }
-$totalAmt = round($totalAmt, 2);
-if ($totalAmt <= 0) {
+$totalHundredths = ExpenseRules::claimTotal($claimLines, $claimCurrency);
+if (is_string($totalHundredths) === true) {
+    $sendBack($totalHundredths, true);
+}
+if ($totalHundredths <= 0) {
     $sendBack('Total must be greater than zero.', true);
 }
+// The DECIMAL text `totalAmount` takes, bound as text ('s'), never a float.
+$totalAmt = \Portal\Core\Currency::hundredthsToDecimal($totalHundredths);
 
 $siteId = Site::id();
 
@@ -301,7 +309,7 @@ try {
     if ($stmt === false) {
         throw new \RuntimeException('Failed to prepare claim insert: ' . $mysqli->error);
     }
-    $stmt->bind_param('iisdis', $userId, $deptID, $claimTitle, $totalAmt, $siteId, $claimCurrency);
+    $stmt->bind_param('iissis', $userId, $deptID, $claimTitle, $totalAmt, $siteId, $claimCurrency);
     $stmt->execute();
     $claimID = $stmt->insert_id;
     $stmt->close();
@@ -313,7 +321,7 @@ try {
     }
     foreach ($claimLines as $cl) {
         $itemStmt->bind_param(
-            'isiddssd',
+            'isisssss',
             $claimID, $cl['desc'], $cl['qty'], $cl['unit'], $cl['lineTotal'],
             $cl['currency'], $cl['quotedCurrency'], $cl['quotedLineTotal']
         );

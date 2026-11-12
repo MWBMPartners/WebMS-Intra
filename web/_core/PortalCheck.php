@@ -174,12 +174,10 @@ final class PortalCheck
      * 📬 For a job in JOB_NEEDS_FEATURE: how to count the work it would still
      * do with its feature switched off.
      *
-     * Each is the job's OWN selection, copied from its page:
-     * `cron/giving-statements` sends every `tblGivingStatementLog` row with
-     * `queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL`, and
-     * never looks at `giving.enabled`. `tools/portal-check-selftest.php`
-     * section Q holds the two conditions together, so a change to the job's
-     * selection that is not made here fails there.
+     * Each is the job's OWN selection, never a copy of it:
+     * `cron/giving-statements` sends every `tblGivingStatementLog` row
+     * matching `Giving::STATEMENTS_THE_JOB_SENDS`, and never looks at
+     * `giving.enabled`. This count is built from that same constant (#820).
      *
      * `cron/discipleship-sweep` has no entry on purpose: it skips every
      * organisation whose own switch is off (`Discipleship::isEnabledFor()`,
@@ -189,23 +187,25 @@ final class PortalCheck
      * @var array<string, string> job address => a query answering `howMany`
      */
     //
-    // ⚠️ THE JOB'S WHERE CLAUSE IS NOT THE WHOLE OF ITS SELECTION (#793 round
-    //    3). For each row `cron/giving-statements` calls
-    //    `Site::forceContext($siteId)`, which refuses an organisation that is
-    //    not active, and the job then skips the row — so a statement queued for
-    //    an organisation that has since been switched off is never sent. Counted
-    //    here anyway, it made the page report a PROBLEM that never cleared (the
-    //    rows never go), on the very set-up the guide recommends. So only rows
-    //    whose organisation is ACTIVE count. Q8 compares the job's WHERE clause
-    //    with everything here before that last condition; Q9c/Q9d drive the
-    //    condition itself. (With multisite switched off `forceContext` also
-    //    refuses any organisation but the current one; such rows cannot be
-    //    queued through any page, so that case is left to the job's own skip.)
-    public const JOB_WORK_WAITING_ACTIVE_ONLY = ' AND `siteID` IN (SELECT `siteID` FROM `tblSites` WHERE `isActive` = 1)';
+    // ⚠️ IT USED TO BE A COPY, AND A COPY CAN DRIFT (#820). Until #820 this
+    //    held its own WHERE clause, and `tools/portal-check-selftest.php`'s Q8
+    //    compared it with the job's as TEXT — so a JOIN put before the job's
+    //    WHERE, or an `AND …` after it, changed what the job sends with Q8
+    //    green (measured by #793's round-3 check). The two now read one
+    //    constant, and `tools/scheduled-jobs-selftest.php` RUNS the job against
+    //    rows in every state and compares what it took with this count.
+    //
+    //    The constant includes "the organisation is active" (#793 round 3):
+    //    the job's Site::forceContext() refuses an inactive organisation, so a
+    //    statement queued for one is never sent, and counting it made the page
+    //    report a PROBLEM that never cleared. The job's own query used to leave
+    //    that condition out, and spent its LIMIT places on such rows. (With
+    //    multisite switched off `forceContext` also refuses any organisation
+    //    but the current one; such rows cannot be queued through any page, so
+    //    that case is left to the job's own skip.)
     public const JOB_WORK_WAITING = [
-        'cron/giving-statements' => 'SELECT COUNT(*) AS `howMany` FROM `tblGivingStatementLog` '
-            . 'WHERE `queuedAt` IS NOT NULL AND `emailedAt` IS NULL AND `errorMsg` IS NULL'
-            . self::JOB_WORK_WAITING_ACTIVE_ONLY,
+        'cron/giving-statements' => 'SELECT COUNT(*) AS `howMany` FROM `tblGivingStatementLog` WHERE '
+            . Giving::STATEMENTS_THE_JOB_SENDS,
     ];
 
     /**
