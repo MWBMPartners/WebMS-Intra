@@ -964,6 +964,156 @@ class Events
     }
 
     /**
+     * ⏱️ The soonest `$limit` events by their REAL moment, never by their
+     *    readings — the ONE place a list that picks "the next N events" across
+     *    clocks decides its order (#898 for the public door; #811 for the
+     *    rest).
+     *
+     * WHY. A stored start is a READING on its event's own clock, so
+     * `ORDER BY startDateTime` compares readings from DIFFERENT clocks:
+     * Auckland 20:00 happens before New York 10:00 on the same date but sorts
+     * after it. With a `LIMIT` the sooner event can be the one cut off, and
+     * without one the list is simply out of order. A real moment in SQL needs
+     * `CONVERT_TZ()`, which shared hosting rarely supports, so the order is
+     * decided here, over a window of readings PROVED wide enough:
+     *
+     *   1. read the first `$limit` rows in READING order;
+     *   2. if there were fewer, they are every row: done;
+     *   3. otherwise let T be the latest real moment among them. At least
+     *      `$limit` rows start at or before T, so every row of the soonest
+     *      `$limit` starts at or before T too, and its reading is at most T
+     *      plus its clock's offset. So read again every row whose reading is
+     *      at most T plus the HIGHEST offset any zone in use has ever had
+     *      (`maxOffsetOfZones()`); nothing in the answer can be outside it;
+     *   4. order those by the real moment (`I18n::wallClockInstant()`, the
+     *      instant the public door prints as `startsAt`), then by reading and
+     *      the event's number, and keep the first `$limit`.
+     *
+     * The second read happens only when there are at least `$limit` rows, and
+     * it is bounded by time (about a day past T), not by the calendar's size.
+     * A row whose reading cannot be placed on a clock sorts LAST.
+     *
+     * WHAT THE CALLER GIVES. `$read(?string $upTo, ?int $max)` runs the
+     * caller's own statement — with all its own conditions — adding
+     * `AND startDateTime <= CAST(? AS DATETIME)` when `$upTo` is not null and
+     * `LIMIT ?` when `$max` is not null, ordered by `startDateTime` then
+     * `eventID`, and returns the rows. Each row must carry `startDateTime`,
+     * `timezone` and `eventID`. Keeping the statement in the caller is what
+     * lets a reader that must hold every database read itself (the public
+     * door, `check_public_door_reads.py`) use this too.
+     *
+     * WHAT IT CANNOT DO: page through a list with OFFSET. The window needs the
+     * whole head of the list; a paged list (the calendar's list view) still
+     * orders by reading within and across pages.
+     *
+     * @param mysqli   $db     For the zones in use (`zonesInUse()`).
+     * @param int|null $siteId One organisation's zones and fallback clock, or
+     *                         null for every organisation's zones and the
+     *                         request's organisation's clock.
+     * @param int      $limit  How many to return (none for less than 1).
+     * @param callable(?string, ?int): list<array<string,mixed>> $read
+     *
+     * @return list<array<string,mixed>> The rows, soonest real moment first.
+     */
+    public static function soonestByRealStart(mysqli $db, ?int $siteId, int $limit, callable $read): array
+    {
+        if ($limit < 1) {
+            return [];
+        }
+        $rows = $read(null, $limit);
+        if (count($rows) >= $limit) {
+            $latest = null;
+            foreach ($rows as $row) {
+                $m = self::realStartOf($row, $siteId);
+                if ($m !== null && ($latest === null || $m > $latest)) {
+                    $latest = $m;
+                }
+            }
+            if ($latest !== null) {
+                $upTo = gmdate('Y-m-d H:i:s', $latest + self::maxOffsetOfZones(self::zonesInUse($db, $siteId), $siteId));
+                $rows = $read($upTo, null);
+            }
+        }
+
+        return array_slice(self::sortByRealStart($rows, $siteId), 0, $limit);
+    }
+
+    /**
+     * Rows ordered by their REAL start, soonest first; ties (and rows with
+     * the same moment) by reading, then by the event's number; a row whose
+     * reading cannot be placed on a clock goes last. For a list already
+     * complete (no `LIMIT` cutting it), so only the order is wrong.
+     *
+     * @param list<array<string,mixed>> $rows Each with startDateTime, timezone and eventID.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function sortByRealStart(array $rows, ?int $siteId): array
+    {
+        $keyed = [];
+        foreach ($rows as $row) {
+            $keyed[] = [self::realStartOf($row, $siteId), $row];
+        }
+        usort($keyed, static function (array $a, array $b): int {
+            if ($a[0] !== $b[0]) {
+                if ($a[0] === null) {
+                    return 1;
+                }
+                if ($b[0] === null) {
+                    return -1;
+                }
+
+                return $a[0] <=> $b[0];
+            }
+
+            return [(string) $a[1]['startDateTime'], (int) $a[1]['eventID']] <=> [(string) $b[1]['startDateTime'], (int) $b[1]['eventID']];
+        });
+
+        return array_map(static fn (array $pair): array => $pair[1], $keyed);
+    }
+
+    /**
+     * The real moment (UNIX seconds) a row's start reading stands for on its
+     * own clock — `I18n::wallClockInstant()`, the instant the public door
+     * prints — or null when it cannot be placed. A zone text PHP cannot open
+     * reads the organisation's clock (`Site::zoneFor()`), as every page that
+     * shows the event does.
+     *
+     * @param array<string,mixed> $row With startDateTime and timezone.
+     */
+    public static function realStartOf(array $row, ?int $siteId): ?int
+    {
+        $instant = I18n::wallClockInstant((string) ($row['startDateTime'] ?? ''), Site::zoneFor((string) ($row['timezone'] ?? ''), $siteId));
+
+        return $instant === null ? null : $instant->getTimestamp();
+    }
+
+    /**
+     * The HIGHEST offset from UTC, in seconds, that any of these zones (or
+     * the organisation's own clock, for a zone PHP cannot open) has EVER had,
+     * and never less than 0. Moved here from `PublicDoor` (#811) so the door
+     * and every other "next N" list share it.
+     *
+     * @param list<string> $zoneTexts As `zonesInUse()` returns them.
+     */
+    public static function maxOffsetOfZones(array $zoneTexts, ?int $siteId): int
+    {
+        $max = 0;
+        foreach (array_merge($zoneTexts, ['']) as $text) {
+            $zone   = Site::zoneFor($text, $siteId);
+            $states = $zone->getTransitions();
+            $max    = max($max, (int) $zone->getOffset(new \DateTimeImmutable('now')));
+            if (is_array($states) === true) {
+                foreach ($states as $state) {
+                    $max = max($max, (int) $state['offset']);
+                }
+            }
+        }
+
+        return $max;
+    }
+
+    /**
      * UTC "now" moved by `$shift` (a `modify()` phrase such as `'-1 day'`), as
      * `Y-m-d H:i:s` text -- ONLY for a LOOSE bound beside
      * `nowOnItsOwnClock()`, so a query can still use the `startDateTime`
@@ -1547,5 +1697,100 @@ class Events
             'eventSlug'     => (string) $row['eventSlug'],
             'startDateTime' => (string) $row['startDateTime'],
         ];
+    }
+
+    /**
+     * 🏷️ Why an event's category or event type cannot be stored, or null when
+     *    both may be — the ONE place a writer of `tblEvents.categoryID` /
+     *    `typeID` asks (#885).
+     *
+     * WHAT WAS WRONG. The events API (create and update), the Manage Events
+     * form, a series' bulk edit and the public suggestion form each bound a
+     * POSTED number straight into the INSERT or UPDATE. The database's link
+     * only asks whether SOME row has that number, so:
+     *
+     *   - a number no row has was refused by the database, and the refusal
+     *     escaped as a bare HTTP 500 (the API) or a "not saved" message with
+     *     the reason in the error log (the form);
+     *   - a number belonging to ANOTHER ORGANISATION's category was ACCEPTED,
+     *     linking this organisation's event to a category it cannot see or
+     *     manage — and the two different answers told a caller which numbers
+     *     exist elsewhere in the installation.
+     *
+     * NOW a number counts only when it is THIS organisation's, and "another
+     * organisation's" and "nobody's" get the SAME sentence, so the answer says
+     * nothing about other organisations (the existence-leak rule). A category
+     * or type switched off (`isActive = 0`) is still this organisation's and
+     * is accepted: an event may already carry one, and refusing it would
+     * refuse a save that changes nothing. The CSV import already looks
+     * categories and types up by NAME within the organisation, so it never
+     * holds a number from outside and does not ask this.
+     *
+     * Null means "none chosen" and is always allowed. The caller decides how a
+     * posted value becomes a number; this judges the number.
+     *
+     * @param mysqli   $db         The connection.
+     * @param int      $siteId     The organisation the event belongs to.
+     * @param int|null $categoryId The category to store, or null for none.
+     * @param int|null $typeId     The event type to store, or null for none.
+     *
+     * @return string|null A plain sentence that also names the field
+     *                     (`categoryID` or `typeID`) for an API caller, and says
+     *                     what to do, without "nothing was saved" (the caller
+     *                     knows which verb is true).
+     */
+    public static function whyCategoryOrTypeRefused(mysqli $db, int $siteId, ?int $categoryId, ?int $typeId): ?string
+    {
+        $belongs = static function (string $sql, int $id) use ($db, $siteId): bool {
+            $ask = $db->prepare($sql);
+            if ($ask === false) {
+                // Only reachable if the reporting mode ever stops throwing.
+                throw new \RuntimeException('the question "is this category or type this organisation\'s" could not be prepared');
+            }
+            try {
+                $ask->bind_param('ii', $id, $siteId);
+                $ask->execute();
+                $row = $ask->get_result()->fetch_row();
+            } finally {
+                $ask->close();
+            }
+
+            return $row !== null;
+        };
+
+        if ($categoryId !== null
+            && $belongs('SELECT 1 FROM `tblEventCategories` WHERE `categoryID` = ? AND `siteID` = ? LIMIT 1', $categoryId) === false) {
+            return 'The category given (categoryID) is not one of this organisation\'s event categories. Choose one of its own, or none.';
+        }
+        if ($typeId !== null
+            && $belongs('SELECT 1 FROM `tblEventTypes` WHERE `typeID` = ? AND `siteID` = ? LIMIT 1', $typeId) === false) {
+            return 'The event type given (typeID) is not one of this organisation\'s event types. Choose one of its own, or none.';
+        }
+
+        return null;
+    }
+
+    /**
+     * 🔢 A posted category or type number, read strictly (#885): null for
+     *    "none" (missing, null, empty text or 0), a whole number for a whole
+     *    number, and FALSE for anything else — `"abc"`, `1.5`, `true`, a list.
+     *
+     * `(int)` used to decide this, so `"abc"` became 0 and `[7]` became 1:
+     * the second stored a category nobody asked for. A caller refuses false
+     * with its own words rather than guessing.
+     */
+    public static function postedIdOrNone(mixed $raw): int|false|null
+    {
+        if ($raw === null || $raw === '' || $raw === 0 || $raw === '0') {
+            return null;
+        }
+        if (is_int($raw) === true && $raw > 0) {
+            return $raw;
+        }
+        if (is_string($raw) === true && preg_match('/\A[1-9][0-9]{0,9}\z/', $raw) === 1 && (int) $raw <= 2147483647) {
+            return (int) $raw;
+        }
+
+        return false;
     }
 }

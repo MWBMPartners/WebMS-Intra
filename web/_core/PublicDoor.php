@@ -633,7 +633,7 @@ final class PublicDoor
      *       soonest `$limit` starts at or before T too, and its reading is at
      *       most T plus its clock's offset. So read again every listed row
      *       whose reading is at most T plus the HIGHEST offset any zone in use
-     *       has ever had (`maxOffsetOfZones()`), and nothing in the answer can
+     *       has ever had (`Events::maxOffsetOfZones()`), and nothing in the answer can
      *       be outside them;
      *    4. order those by the real moment — `I18n::wallClockInstant()`, the
      *       very instant printed as `startsAt`, so the order and the feed can
@@ -687,46 +687,11 @@ final class PublicDoor
 
             return $got;
         };
-        // The real moment of a row's start, or null when its reading cannot
-        // be placed on a clock (such a row sorts last, rather than first).
-        $momentOf = static function (array $row) use ($siteId): ?int {
-            $instant = I18n::wallClockInstant((string) $row['startDateTime'], Site::zoneFor((string) $row['timezone'], $siteId));
-
-            return $instant === null ? null : $instant->getTimestamp();
-        };
-
-        $rows = $read(null, $limit);
-        if (count($rows) >= $limit) {
-            $latest = null;
-            foreach ($rows as $row) {
-                $m = $momentOf($row);
-                if ($m !== null && ($latest === null || $m > $latest)) {
-                    $latest = $m;
-                }
-            }
-            if ($latest !== null) {
-                $upTo = gmdate('Y-m-d H:i:s', $latest + self::maxOffsetOfZones(Events::zonesInUse($db, $siteId), $siteId));
-                $rows = $read($upTo, null);
-            }
-        }
-        foreach ($rows as $i => $row) {
-            $rows[$i]['__moment'] = $momentOf($row);
-        }
-        usort($rows, static function (array $a, array $b): int {
-            if ($a['__moment'] !== $b['__moment']) {
-                if ($a['__moment'] === null) {
-                    return 1;
-                }
-                if ($b['__moment'] === null) {
-                    return -1;
-                }
-
-                return $a['__moment'] <=> $b['__moment'];
-            }
-
-            return [(string) $a['startDateTime'], (int) $a['eventID']] <=> [(string) $b['startDateTime'], (int) $b['eventID']];
-        });
-        $rows = array_slice($rows, 0, $limit);
+        // ⏱️ Steps 1 to 4 above are `Events::soonestByRealStart()` since #811:
+        //    the same window and the same order, shared with every other "next
+        //    N events" list so the door and they cannot disagree. The
+        //    statement stays HERE, in `$read`.
+        $rows = Events::soonestByRealStart($db, $siteId, $limit, $read);
 
         $events = [];
         foreach ($rows as $row) {
@@ -857,31 +822,8 @@ final class PublicDoor
         return self::instantText($basis->modify('+1 day')->format('Y-m-d') . ' 00:00:00', $zone);
     }
 
-    /**
-     * The highest offset from UTC, in seconds, that any of these zone texts
-     * has EVER had (its whole history, as PHP knows it) — never below zero,
-     * so it is a safe distance to look ahead in readings. Used only to size
-     * `events()`'s second read; a zone PHP cannot open is the organisation's,
-     * as `Site::zoneFor()` decides everywhere.
-     *
-     * @param list<string> $zoneTexts
-     */
-    private static function maxOffsetOfZones(array $zoneTexts, int $siteId): int
-    {
-        $max = 0;
-        foreach (array_merge($zoneTexts, ['']) as $text) {
-            $zone   = Site::zoneFor($text, $siteId);
-            $states = $zone->getTransitions();
-            $max    = max($max, (int) $zone->getOffset(new \DateTimeImmutable('now')));
-            if (is_array($states) === true) {
-                foreach ($states as $state) {
-                    $max = max($max, (int) $state['offset']);
-                }
-            }
-        }
-
-        return $max;
-    }
+    // (`maxOffsetOfZones()` lived here until #811 moved it, unchanged, to
+    //  `Events::maxOffsetOfZones()`, beside the window it sizes.)
 
     /**
      * The organisation's posters on the public website TODAY on its own

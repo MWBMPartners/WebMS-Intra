@@ -215,17 +215,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    $bulkCategoryID = trim($_POST['bulkCategoryID'] ?? '');
-    if ($bulkCategoryID !== '') {
-        $catVal = ((int) $bulkCategoryID) ?: null;
+    // 🏷️ A category or type set on every chosen date must be THIS
+    //    organisation's (#885): `Events::whyCategoryOrTypeRefused()` is the ONE
+    //    place that decides. `(int)` of the posted text used to be bound
+    //    straight in, so another organisation's number was stored on every
+    //    chosen date. "" is "no change" and "0" is "none", as the two first
+    //    options of each box say; anything else must be a number of ours.
+    $bulkCategoryRaw = $_POST['bulkCategoryID'] ?? '';
+    $bulkTypeRaw     = $_POST['bulkTypeID'] ?? '';
+    $catVal  = $bulkCategoryRaw === '' ? null : \Portal\Core\Events::postedIdOrNone($bulkCategoryRaw);
+    $typeVal = $bulkTypeRaw === '' ? null : \Portal\Core\Events::postedIdOrNone($bulkTypeRaw);
+    $bulkTaxonomyRefusal = ($catVal === false || $typeVal === false)
+        ? 'The category or type sent is not a number the calendar knows.'
+        : \Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, $siteId, $catVal, $typeVal);
+    if ($bulkTaxonomyRefusal !== null) {
+        $_SESSION['flash_msg']  = $bulkTaxonomyRefusal . ' Nothing was changed.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
+        exit();
+    }
+    if ($bulkCategoryRaw !== '') {
         $setClauses[]  = 'categoryID = ?';
         $paramTypes   .= 'i';
         $paramValues[] = $catVal;
     }
-
-    $bulkTypeID = trim($_POST['bulkTypeID'] ?? '');
-    if ($bulkTypeID !== '') {
-        $typeVal = ((int) $bulkTypeID) ?: null;
+    if ($bulkTypeRaw !== '') {
         $setClauses[]  = 'typeID = ?';
         $paramTypes   .= 'i';
         $paramValues[] = $typeVal;

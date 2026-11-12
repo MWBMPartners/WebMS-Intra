@@ -384,12 +384,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-row" id="event-<?php echo (int) $ev['eventID']; ?>">
                     <div class="portal-data-row-main text-break" style="flex: 1 1 auto; min-width: 0;">
                         <strong><?php echo $esc($ev['eventName']); ?></strong>
-                        <?php if ((int) $ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts($ev['importSource'] === null ? null : (string) $ev['importSource'], $copiedRule) === true): ?>
+                        <?php // 🌐 #853: "On the public website" is the website's OWN rule, asked by
+                              //    FeedAdmin::events() of EventVisibility::where() in website mode
+                              //    (`onWebsite`) — so a paused calendar or a stale stored answer no
+                              //    longer carries the badge while the website leaves the event out. ?>
+                        <?php if ((int) $ev['onWebsite'] === 1): ?>
                             <span class="badge bg-info text-dark ms-1" data-website-badge="on">On the public website</span>
-                        <?php elseif ((int) $ev['importWebsite'] === 1): ?>
+                        <?php elseif ((int) $ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts($ev['importSource'] === null ? null : (string) $ev['importSource'], $copiedRule) === false): ?>
                             <?php // 🌐 #493 P1: the yes came from the calendar or a rule, which counts for
                                   //    nothing under "one tick per event" — say so rather than claim it. ?>
                             <span class="badge bg-light text-dark border ms-1" data-website-badge="inert">Website box ticked, but not on the website under "one tick per event"</span>
+                        <?php elseif ((int) $ev['importWebsite'] === 1): ?>
+                            <?php // #853: the tick counts, but the website leaves the event out for now —
+                                  //    the calendar is paused, or the stored answer has run out and waits
+                                  //    for the next refresh. Said, never claimed as "on". ?>
+                            <span class="badge bg-light text-dark border ms-1" data-website-badge="held"><?php
+                                echo $isOn === false
+                                    ? 'Website box ticked, but not on the website while this calendar is paused'
+                                    : ($ev['stale'] === true
+                                        ? 'Website box ticked, but not on the website until the scheduled refresh'
+                                        : 'Website box ticked, but not on the website at the moment'); ?></span>
                         <?php endif; ?>
                         <?php if ((int) $ev['importApiOptOut'] === 1): ?>
                             <span class="badge bg-secondary ms-1">Not sent to API keys</span>

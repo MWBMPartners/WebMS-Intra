@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 289;  // + thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 294;  // + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3334,6 +3334,99 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'count with both ' . json_encode($withBoth) . ', without Auckland ' . json_encode($withNy) . ', without either ' . json_encode($withNone)
     );
     q('DELETE FROM tblEvents WHERE eventID IN (960906, 960907)');
+
+    // ---- #811 item 1: "next" by the REAL moment, not by the readings --------
+    // Two events whose READINGS sort the opposite way to their real moments:
+    // an Auckland event at a UTC moment about thirty hours ahead, and a New
+    // York event four real hours LATER. Auckland's reading is many hours
+    // later on the page than New York's, so `ORDER BY startDateTime` listed
+    // New York first although Auckland's happens first.
+    $realFirst = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('+30 hours');
+    $aklNext   = $realFirst->setTimezone($aklZone)->format('Y-m-d H:i:00');
+    $nyNext    = $realFirst->modify('+4 hours')->setTimezone($nyZone)->format('Y-m-d H:i:00');
+    $aklNextName = 'Selftest zones next 960950 Auckland first';
+    $nyNextName  = 'Selftest zones next 960951 New York second';
+    q('DELETE FROM tblEvents WHERE eventID IN (960950, 960951, 960952, 960953)');
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES "
+        . "(960950, 1, 'selftest-zones-next-960950', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'Pacific/Auckland', 'published', 1, 0), "
+        . "(960951, 1, 'selftest-zones-next-960951', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'America/New_York', 'published', 1, 0)",
+        'ssssss', [$aklNextName, $aklNext, $aklNext, $nyNextName, $nyNext, $nyNext]
+    );
+    ok(
+        'X20 premise (#811): New York\'s READING sorts BEFORE Auckland\'s, while Auckland\'s real moment comes FIRST -- so reading order and real order disagree, and nothing below is vacuous',
+        strcmp($nyNext, $aklNext) < 0
+            && (new DateTimeImmutable($aklNext, $aklZone))->getTimestamp() < (new DateTimeImmutable($nyNext, $nyZone))->getTimestamp(),
+        'Auckland reading ' . $aklNext . ', New York reading ' . $nyNext
+    );
+    $firstOf = static function (string $text) use ($aklNextName, $nyNextName): string {
+        $a = strpos($text, $aklNextName);
+        $n = strpos($text, $nyNextName);
+        if ($a === false || $n === false) {
+            return 'not both listed';
+        }
+
+        return $a < $n ? 'Auckland first' : 'New York first';
+    };
+    $remindNext = req($adminJar, 'GET', '/admin/calendar/reminders');
+    ok(
+        'X21 the reminder preview lists the two in their REAL order, Auckland first (#811: by reading it put New York first)',
+        $remindNext['status'] === 200 && $firstOf(words($remindNext['body'])) === 'Auckland first',
+        said($remindNext) . '; ' . $firstOf(words($remindNext['body']))
+    );
+    setting('newsletter.enabled', '1');
+    q("INSERT INTO tblNewsletter (siteID, title, subject, status) VALUES (1, 'Selftest zones newsletter 811', 'Selftest zones newsletter 811', 'draft')");
+    $news811 = (int) one("SELECT newsletterID FROM tblNewsletter WHERE title = 'Selftest zones newsletter 811'")['newsletterID'];
+    q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'events', 0, '{\"days\":7}')", 'i', [$news811]);
+    $letterNext = req($adminJar, 'GET', '/newsletter/preview?id=' . $news811);
+    q('DELETE FROM tblNewsletter WHERE newsletterID = ?', 'i', [$news811]);
+    setting('newsletter.enabled', (string) $newsletterWas);
+    ok(
+        'X22 the newsletter\'s "Upcoming events" lists the two in their REAL order, Auckland first (#811)',
+        $letterNext['status'] === 200 && $firstOf(words($letterNext['body'])) === 'Auckland first',
+        said($letterNext) . '; ' . $firstOf(words($letterNext['body']))
+    );
+    $icsNext = req($adminJar, 'GET', '/calendar/export?all=1');
+    ok(
+        'X23 the "all upcoming" calendar download lists the two in their REAL order, Auckland first -- the order its 200-event cut is taken in (#811; the cut itself, which needs over 200 events, is not exercised here)',
+        $icsNext['status'] === 200 && $firstOf((string) str_replace("\r\n ", '', $icsNext['body'])) === 'Auckland first',
+        said($icsNext) . '; ' . $firstOf((string) str_replace("\r\n ", '', $icsNext['body']))
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960950, 960951)');
+
+    // ---- #811 item 2: an end at exactly midnight is not on the next day -----
+    // The week view's day columns drew an evening event ending at 00:00:00 as
+    // a 15-minute sliver at the top of the NEXT day's column, while the month
+    // grid and the register (I18n::wallClockDaySpan(), #806) leave that day
+    // out. 960953 ends at 00:30 and MUST still reach the next day: it holds
+    // the rule down from over-reaching.
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES "
+        . "(960952, 1, 'selftest-zones-midnight-960952', 'Selftest zones midnight 960952', '2030-06-04 19:00:00', '2030-06-05 00:00:00', 'Pacific/Auckland', 'published', 1, 0), "
+        . "(960953, 1, 'selftest-zones-midnight-960953', 'Selftest zones half past 960953', '2030-06-04 22:00:00', '2030-06-05 00:30:00', 'Pacific/Auckland', 'published', 1, 0)"
+    );
+    $weekGrid = req($adminJar, 'GET', '/calendar?view=week&date=2030-06-04');
+    $colOf = static function (string $html, string $day): ?string {
+        $at = strpos($html, '<div class="portal-cal-col" data-date="' . $day . '">');
+        if ($at === false) {
+            return null;
+        }
+        $next = strpos($html, '<div class="portal-cal-col" data-date="', $at + 10);
+
+        return substr($html, $at, $next === false ? 20000 : $next - $at);
+    };
+    $col4 = $colOf($weekGrid['body'], '2030-06-04');
+    $col5 = $colOf($weekGrid['body'], '2030-06-05');
+    $inCol = static fn (?string $col, string $slug): ?bool => $col === null ? null : str_contains($col, 'slug=' . $slug . '"');
+    ok(
+        'X24 the week view draws the 19:00-to-midnight event on its own day and NOT as a sliver on the next; the one ending at 00:30 still reaches the next day (#811)',
+        $weekGrid['status'] === 200
+            && $inCol($col4, 'selftest-zones-midnight-960952') === true && $inCol($col5, 'selftest-zones-midnight-960952') === false
+            && $inCol($col4, 'selftest-zones-midnight-960953') === true && $inCol($col5, 'selftest-zones-midnight-960953') === true,
+        said($weekGrid) . '; midnight on the 4th/5th: ' . json_encode([$inCol($col4, 'selftest-zones-midnight-960952'), $inCol($col5, 'selftest-zones-midnight-960952')])
+            . ', 00:30 on the 4th/5th: ' . json_encode([$inCol($col4, 'selftest-zones-midnight-960953'), $inCol($col5, 'selftest-zones-midnight-960953')])
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960952, 960953)');
 
     // ---- #783: "still to come" on the organisation's clock ------------------
     $fresh = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);

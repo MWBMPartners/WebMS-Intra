@@ -473,6 +473,17 @@ final class FeedAdmin
      * default is wrong for a diary — this is by START time, earliest
      * first, the order the calendar page reads like a diary.
      *
+     * 🌐 `onWebsite` (#853) is 1 when the public website shows the event NOW,
+     *    asked of `EventVisibility::where()` in "website" mode — the ONE rule
+     *    the public door, the sitemap and an event page's search-engine markup
+     *    use (D-089) — with this organisation's copied-in rule
+     *    (`PublicWebsite::copiedRuleFor()`, D-080, D-081) and its own "today".
+     *    The page's "On the public website" badge used to ask only the website
+     *    box and which tick counts, so an event of a SWITCHED-OFF calendar, or
+     *    one whose stored answer had run out, carried the badge while the
+     *    website left it out. Nothing about the badge is worked out here any
+     *    more: the rule is asked, not copied.
+     *
      * @return array{rows: list<array<string,mixed>>, total: int}
      */
     public static function events(\mysqli $db, int $feedId, int $siteId, int $page): array
@@ -489,16 +500,24 @@ final class FeedAdmin
         );
         $total = (int) ($totalRow['n'] ?? 0);
 
+        // The organisation's "today", as the public door reads it (the
+        // website's dates follow the organisation's calendar).
+        $websiteToday = (new \DateTimeImmutable('now', new \DateTimeZone(Site::timezone($siteId))))->format('Y-m-d');
+        $onWebsite    = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $websiteToday, PublicWebsite::copiedRuleFor($db, $siteId));
+
         $stmt = $db->prepare(
             'SELECT eventID, eventName, startDateTime, endDateTime, timezone, isAllDay, categoryID, importLevel, '
             . 'importDetail, importWebsite, importApiOptOut, importAudienceType, importAudienceID, importSource, '
             . 'importSourceID, importRecheckAt, (externalUidHash IS NOT NULL) AS hasIdentity, '
             . "(externalRecurrenceKey <> '') AS inSeries, "
-            . '(importRecheckAt IS NOT NULL AND importRecheckAt <= UTC_TIMESTAMP()) AS stale '
-            . 'FROM tblEvents WHERE externalFeedID = ? AND siteID = ? AND isDeleted = 0 '
+            . '(importRecheckAt IS NOT NULL AND importRecheckAt <= UTC_TIMESTAMP()) AS stale, '
+            // COALESCE: a column the rule compares may be empty (an answer not
+            // worked out yet), and "unknown" must read as "not on it".
+            . 'COALESCE((1 = 1' . $onWebsite['sql'] . '), 0) AS onWebsite '
+            . 'FROM tblEvents e WHERE externalFeedID = ? AND siteID = ? AND isDeleted = 0 '
             . 'ORDER BY startDateTime, eventID LIMIT ? OFFSET ?'
         );
-        $stmt->bind_param('iiii', $feedId, $siteId, $perPage, $offset);
+        $stmt->bind_param($onWebsite['types'] . 'iiii', ...array_merge($onWebsite['params'], [$feedId, $siteId, $perPage, $offset]));
         $stmt->execute();
         $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
@@ -2373,7 +2392,11 @@ final class FeedAdmin
      *      for the "other dates" sentence (fix round 12). Reading them
      *      before the lock is safe: they are what the date IS — the
      *      importer finds an event by them and never rewrites either.
-     *   5. Per calendar, `inFeedLock()`.
+     *   5. Per calendar, `inFeedLock()` — which since #855 RE-WORKS the
+     *      calendar under the rules in force BEFORE any item is decided, so
+     *      an item whose request those rules would no longer make (made
+     *      under the other copied-in rule, or under a rule that has since
+     *      run out) is "changed", never decided on its old request.
      *
      * ONE LOCK PER CALENDAR, SO NOT ALL-OR-NOTHING ACROSS CALENDARS (plan
      * section 4.1). If a later calendar fails — its lock times out, or the
@@ -2550,7 +2573,16 @@ final class FeedAdmin
                     }
 
                     return ['ok' => true, 'status' => 'saved', 'decidedIds' => $decidedIds, 'changedHere' => $changedHere];
-                });
+                }, null, true);
+                // ⚖️ `true`: re-work the calendar under the copied-in rule in
+                //    force NOW, under the same lock, BEFORE deciding (#855).
+                //    A request made under the other rule, left waiting because
+                //    the re-work after the rule changed failed for this
+                //    calendar, is replaced by it, so approving the old one
+                //    claims nothing ("had changed since you opened the page")
+                //    and can never be reused later to publish the dates under
+                //    words that said the website box did nothing. See
+                //    inFeedLock()'s `$resolveFirst`.
                 // No after-resolve step any more (fix round 12): decide()
                 // no longer reads what became of other dates. The hook
                 // stays in inFeedLock() for saveChoice() and saveRule().
@@ -2866,14 +2898,42 @@ final class FeedAdmin
      * Whatever it throws rolls the whole write back, like anything else
      * inside.
      *
+     * `$resolveFirst` (#855) ALSO re-works the calendar under the lock BEFORE
+     * `$work` runs, inside the same transaction. `decide()` asks for it: a
+     * waiting request was fingerprinted under the copied-in rule in force when
+     * it was made (`FeedResolver::requestHash()` records the website box AS IT
+     * COUNTS under that rule), and when a later re-work under a changed rule
+     * FAILED for this calendar the request was left waiting with the old
+     * fingerprint. Approving it then stored an approval whose request counts
+     * the website — given under words, on the approvals page, saying the box
+     * did nothing — and it was reused to publish the dates if the rule was
+     * later loosened again. Re-working first under the rule in force NOW
+     * replaces such a request (its fingerprint no longer matches), so the
+     * decision on it claims nothing and is reported "changed since you opened
+     * the page", and the administrator sees the request as it stands today.
+     * A request still matching the rules in force is left exactly as it was,
+     * so the ordinary decision is unaffected. ⚠️ THE SAME HAPPENS to any
+     * request the rules in force would no longer make — above all one whose
+     * rule's last day has passed since the last refresh: until #855 such a
+     * request could still be decided (and the re-work after it withdrew its
+     * other dates); now it is replaced first and the decision reports it
+     * "changed". That is deliberate — one rule, "a decision is made on the
+     * request as it stands now" — and D20 of feed-admin-selftest pins it.
+     *
      * @param callable(): array<string,mixed>                          $work
      * @param (callable(array<string,mixed>): array<string,mixed>)|null $afterResolve
      *
      * @return array<string,mixed>
      */
-    private static function inFeedLock(\mysqli $db, int $feedId, int $siteId, callable $work, ?callable $afterResolve = null): array
+    private static function inFeedLock(\mysqli $db, int $feedId, int $siteId, callable $work, ?callable $afterResolve = null, bool $resolveFirst = false): array
     {
         self::allowTimeForLockedWork();
+
+        // The ONE call of the resolver in this class, wrapped so the optional
+        // re-work before `$work` (#855) and the re-work after it are the same.
+        $resolve = static fn (?array $savedChoice): array => FeedResolver::resolveFeed(
+            $db, $feedId, FeedResolver::databaseNowUtc($db), $savedChoice
+        );
 
         $db->begin_transaction();
         try {
@@ -2888,6 +2948,10 @@ final class FeedAdmin
                 return ['ok' => false, 'status' => 'not_found', 'message' => self::NOT_FOUND_CALENDAR];
             }
 
+            if ($resolveFirst === true) {
+                $resolve(null);
+            }
+
             $result = $work();
             if (($result['ok'] ?? false) === false) {
                 $db->rollback();
@@ -2895,9 +2959,7 @@ final class FeedAdmin
                 return $result;
             }
 
-            $result['resolved'] = FeedResolver::resolveFeed(
-                $db, $feedId, FeedResolver::databaseNowUtc($db), $result['savedChoice'] ?? null
-            );
+            $result['resolved'] = $resolve($result['savedChoice'] ?? null);
             if ($afterResolve !== null) {
                 $extra = $afterResolve($result);
                 foreach ($extra as $name => $unused) {

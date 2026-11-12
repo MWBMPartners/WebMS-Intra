@@ -811,26 +811,41 @@ class Newsletter
                 //    inside SQL, so `LIMIT 20` is filled from the right rows;
                 //    the expression appears twice, so its values are bound twice.
                 $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
-                $stmt = $db->prepare(
-                    'SELECT e.eventName, e.startDateTime FROM tblEvents e '
-                    . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
-                    . 'AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL ? DAY) '
-                    . 'AND e.status = "published"'
-                    . $visibility['sql'] . ' '
-                    . 'ORDER BY e.startDateTime LIMIT 20'
-                );
-                if ($stmt !== false) {
+                // ⏱️ SOONEST BY THE REAL MOMENT (#811). `ORDER BY startDateTime`
+                //    compared readings from different clocks, so an Auckland
+                //    20:00 was listed after a New York 10:00 on the same date
+                //    although it happens first — and with `LIMIT 20` the sooner
+                //    one could be the one left out of an e-mail that cannot be
+                //    corrected once sent. `Events::soonestByRealStart()` is the
+                //    ONE place that orders a "next N" list; the statement stays
+                //    here, with an optional upper bound and limit.
+                $read = static function (?string $upTo, ?int $max) use ($db, $siteId, $nowOnClock, $days, $visibility): array {
+                    // The rule from EventVisibility::where() above (bulk-members
+                    // mode) is appended to this statement as `$visibility['sql']`.
+                    $stmt = $db->prepare(
+                        'SELECT e.eventID, e.eventName, e.startDateTime, e.timezone FROM tblEvents e '
+                        . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+                        . 'AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL ? DAY) '
+                        . ($upTo === null ? '' : 'AND `e`.`startDateTime` <= CAST(? AS DATETIME) ')
+                        . 'AND e.status = "published"'
+                        . $visibility['sql'] . ' '
+                        . 'ORDER BY e.startDateTime, e.eventID' . ($max === null ? '' : ' LIMIT ?')
+                    );
+                    if ($stmt === false) {
+                        return [];
+                    }
                     $stmt->bind_param(
-                        'i' . $nowOnClock['types'] . $nowOnClock['types'] . 'i' . $visibility['types'],
-                        ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], [$days], $visibility['params'])
+                        'i' . $nowOnClock['types'] . $nowOnClock['types'] . 'i' . ($upTo === null ? '' : 's') . $visibility['types'] . ($max === null ? '' : 'i'),
+                        ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], [$days], $upTo === null ? [] : [$upTo],
+                            $visibility['params'], $max === null ? [] : [$max])
                     );
                     $stmt->execute();
-                    $rs = $stmt->get_result();
-                    while ($r = $rs->fetch_assoc()) {
-                        $items[] = $r;
-                    }
+                    $got = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                     $stmt->close();
-                }
+
+                    return $got;
+                };
+                $items = Events::soonestByRealStart($db, $siteId, 20, $read);
                 if ($items === []) {
                     return '';
                 }

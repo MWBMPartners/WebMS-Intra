@@ -103,7 +103,6 @@ if ($isLoggedIn === false && $requireCap === true && $captchaUsable === false) {
 $eventName       = trim((string) ($_POST['eventName']      ?? ''));
 $startRaw        = trim((string) ($_POST['startDateTime']  ?? ''));
 $endRaw          = trim((string) ($_POST['endDateTime']    ?? ''));
-$categoryId      = (int)         ($_POST['categoryID']     ?? 0);
 $locationName    = trim((string) ($_POST['locationName']   ?? ''));
 $description     = trim((string) ($_POST['description']    ?? ''));
 $submitterName   = trim((string) ($_POST['submitterName']  ?? ''));
@@ -221,7 +220,16 @@ if ($submitterEmail !== '' && filter_var($submitterEmail, FILTER_VALIDATE_EMAIL)
 
 $siteId      = Site::id();
 $submitterId = $isLoggedIn === true ? (int) $_SESSION['user_id'] : null;
-$categoryArg = $categoryId > 0 ? $categoryId : null;
+$categoryArg = Events::postedIdOrNone($_POST['categoryID'] ?? null);
+// 🏷️ THE CATEGORY MUST BE THIS ORGANISATION'S (#885). The form offers only its
+//    own, but anything can be posted: another organisation's number used to be
+//    STORED on the suggestion, and a number nobody has made the database refuse
+//    the save. `Events::whyCategoryOrTypeRefused()` decides, with one answer
+//    for both, so a stranger learns nothing about other organisations.
+if ($categoryArg === false || Events::whyCategoryOrTypeRefused($mysqli, $siteId, $categoryArg, null) !== null) {
+    header('Location: ' . Site::url('calendar/submit') . '?err=category', true, 302);
+    exit();
+}
 $locArg      = $locationName !== '' ? $locationName : null;
 $descArg     = $description  !== '' ? $description  : null;
 $nameArg     = $isLoggedIn === true ? null : $submitterName;

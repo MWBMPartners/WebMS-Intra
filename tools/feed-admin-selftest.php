@@ -9459,17 +9459,29 @@ foreach ($cases20 as $what20 => [$decision20, $series20, $dates20, $clockMoved20
     $verb20    = ($decision20 === 'approved') ? 'Approved' : 'Declined';
     $want20    = $verb20 . ' ' . $series20 . '.' . ($series20 === 1 ? MSG_OTHER_ONE : MSG_OTHER_MANY);
     if ($clockMoved20 === true) {
-        // One rule: the other dates' rows are withdrawn and nothing waits.
+        // ⚖️ #855 CHANGED WHAT THESE EXPECT, ON PURPOSE. A decision now
+        //    re-works the calendar under the rules in force FIRST (inFeedLock's
+        //    `$resolveFirst`), so a request whose rule has run out is replaced
+        //    BEFORE the decision is made: nothing is decided, every item is
+        //    reported "had changed since you opened the page", and the page
+        //    then shows the dates as they stand now. Until #855 the decision
+        //    went through on the old request, and the re-work AFTER it
+        //    withdrew the other dates. The same rule now covers a request
+        //    made under the other copied-in rule (#855's own case), which is
+        //    why it is not special-cased for an ended rule.
+        // One rule: every date's row is withdrawn and nothing waits.
         // Two rules, one ended: the request changed, so every date of the
         // series waits again under the new request — 3 in the inbox.
+        $want20        = $verb20 . ' 0. ' . $series20 . ' had changed since you opened the page; please review '
+            . ($series20 === 1 ? 'it' : 'them') . ' again.';
         $wantWaiting20 = ($secondRule20 === true) ? $dates20 : 0;
         $wantSt20      = ($secondRule20 === true)
             ? array_fill(0, $series20, array_fill(0, $dates20, 'pending'))
-            : array_fill(0, $series20, array_merge([$decision20], array_fill(0, $dates20 - 1, 'withdrawn')));
+            : array_fill(0, $series20, array_fill(0, $dates20, 'withdrawn'));
         pa_ok(
-            'D20 ' . $what20 . ' — the rule\'s last day has passed since the last refresh: decided ' . $series20 . ', ' . $wantWaiting20
+            'D20 ' . $what20 . ' — the rule\'s last day has passed since the last refresh: decided 0 (#855: re-worked first, so the old request is gone), ' . $wantWaiting20
             . ' date(s) waiting afterwards, every date where it should be, and exactly "' . $want20 . '"',
-            ($rr20['ok'] ?? false) === true && $d20['decided'] === $series20
+            ($rr20['ok'] ?? false) === true && $d20['decided'] === 0
             && $waiting20 === $wantWaiting20 && $st20 === $wantSt20 && $d20['message'] === $want20,
             pa_show([$d20['message'] ?? null, 'waiting' => $waiting20, $st20])
         );
@@ -9529,17 +9541,25 @@ foreach (['approved', 'declined'] as $decision20q) {
     $newest20q  = array_map(static fn (int $e): array => pa_one('SELECT approvalID, status, reason FROM tblExternalEventApprovals WHERE eventID = ? ORDER BY approvalID DESC LIMIT 1', 'i', [$e]) ?? [], $w20q);
     $waiting20q = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalEventApprovals WHERE feedID = ? AND status = 'pending'", 'i', [FA1])['n'];
     $verb20q    = ($decision20q === 'approved') ? 'Approved' : 'Declined';
-    $want20q    = $verb20q . ' 2.' . MSG_OTHER_ONE;
+    // ⚖️ #855: the calendar is re-worked BEFORE the decision, so W0's and
+    //    W1's old request (both rules) is replaced by the request W2 already
+    //    has (the second rule alone) — new rows for W0 and W1 waiting under
+    //    it. W0's decision, sent with the OLD request, is "changed"; W2's goes
+    //    through, and the re-work after it carries the decision to the new
+    //    rows of W0 and W1 under the same request. Until #855 both items were
+    //    decided against the old requests and W1 followed (series_match).
+    $want20q    = $verb20q . ' 1. 1 had changed since you opened the page; please review it again.' . MSG_OTHER_ONE;
     pa_ok(
-        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together — set-up: the hall dates wait under one request and the chapel date under another, and afterwards W1\'s old row is withdrawn and a NEW row for W1 carries the decision, as following another date (series_match)',
-        $set20q === true && pa_status((int) $old20q[1]['approvalID']) === 'withdrawn'
+        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together — set-up: the hall dates wait under one request and the chapel date under another, and afterwards W0\'s and W1\'s old rows are withdrawn and NEW rows for both carry the decision (#855: re-worked before the decision)',
+        $set20q === true && pa_status((int) $old20q[0]['approvalID']) === 'withdrawn' && pa_status((int) $old20q[1]['approvalID']) === 'withdrawn'
+        && (int) ($newest20q[0]['approvalID'] ?? 0) > (int) $old20q[0]['approvalID']
         && (int) ($newest20q[1]['approvalID'] ?? 0) > (int) $old20q[1]['approvalID']
-        && ($newest20q[1]['status'] ?? '') === $decision20q && ($newest20q[1]['reason'] ?? '') === 'series_match',
+        && ($newest20q[0]['status'] ?? '') === $decision20q && ($newest20q[1]['status'] ?? '') === $decision20q,
         pa_show([$set20q, $newest20q])
     );
     pa_ok(
-        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 2, changed 0, nothing waiting, every date\'s newest row "' . $decision20q . '", exactly "' . $want20q . '" (one repeating event, singular)',
-        $d20q['decided'] === 2 && ($d20q['changed'] ?? -1) === 0 && $waiting20q === 0
+        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 1 (W2), changed 1 (W0\'s old request), nothing waiting, every date\'s newest row "' . $decision20q . '", exactly "' . $want20q . '" (one repeating event, singular)',
+        $d20q['decided'] === 1 && ($d20q['changed'] ?? -1) === 1 && $waiting20q === 0
         && array_column($newest20q, 'status') === [$decision20q, $decision20q, $decision20q]
         && $d20q['message'] === $want20q,
         pa_show([$d20q['message'] ?? null, 'waiting' => $waiting20q, $newest20q])
@@ -9682,13 +9702,19 @@ $src21 = (string) file_get_contents(dirname(__DIR__) . '/web/_core/FeedAdmin.php
 $from21 = strpos($src21, 'private static function inFeedLock(');
 $body21 = ($from21 === false) ? '' : substr($src21, $from21, (int) strpos($src21, "\n    }\n", $from21) - $from21);
 $at21 = static fn (string $needle): int => ($body21 !== '' && substr_count($body21, $needle) === 1) ? (int) strpos($body21, $needle) : -1;
-$posResolve = $at21('FeedResolver::resolveFeed(');
-$posHook    = $at21('$afterResolve($result)');
-$posCommit  = $at21('$db->commit();');
+// #855: the resolver is called through ONE local closure (`$resolve`), so the
+// optional re-work BEFORE the work and the re-work after it are the same call.
+// So the text `FeedResolver::resolveFeed(` (still exactly once) is the
+// closure, and the ORDER pinned is that of the after-work call, `$result['resolved'] = $resolve(`.
+$posResolveDef = $at21('FeedResolver::resolveFeed(');
+$posResolve    = $at21('$result[\'resolved\'] = $resolve(');
+$posWork       = $at21('$result = $work();');
+$posHook       = $at21('$afterResolve($result)');
+$posCommit     = $at21('$db->commit();');
 pa_ok(
-    'D21 in inFeedLock()\'s own source: the resolve, then the after-resolve step, then the commit — each exactly once',
-    $posResolve > 0 && $posHook > $posResolve && $posCommit > $posHook,
-    pa_show([$posResolve, $posHook, $posCommit])
+    'D21 in inFeedLock()\'s own source: the work, then the resolve, then the after-resolve step, then the commit — each exactly once',
+    $posResolveDef > 0 && $posWork > $posResolveDef && $posResolve > $posWork && $posHook > $posResolve && $posCommit > $posHook,
+    pa_show([$posResolveDef, $posWork, $posResolve, $posHook, $posCommit])
 );
 // …and it may only ADD result keys. A step that tries to replace one (here
 // `resolved`) is refused with a LogicException, and the whole write — the

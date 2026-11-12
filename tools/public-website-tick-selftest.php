@@ -138,7 +138,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 277; // 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 296; // + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -654,6 +654,7 @@ $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'PWT %'");
 $db->query("DELETE FROM `tblExternalEventApprovals` WHERE `snapTitle` LIKE 'PWT approval %'");
 $db->query("DELETE FROM `tblExternalFeedRules` WHERE `name` = 'PWT rule'");
 $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` = 'PWT outside calendar'");
+$db->query("DELETE FROM `tblExternalFeeds` WHERE `name` LIKE 'PWT K %'");
 
 $startServer();
 $waitForServer();
@@ -3490,6 +3491,247 @@ check('W20 the settings editor names the right page per key — a link where the
 $pwClean();
 
 // =============================================================================
+echo "G. A category or type of another organisation; the website badge; a choice for every date; an approval under the other rule (#885, #853, #854, #855)\n";
+// =============================================================================
+// ── #885: a category or event type must be THIS organisation's ───────────────
+// The events API bound `(int)` of whatever was sent: a number nobody has made
+// the database refuse its link (a bare 500), and ANOTHER organisation's
+// category was STORED. The Manage Events form and a series' bulk edit did the
+// same from a posted number. `Events::whyCategoryOrTypeRefused()` decides now,
+// with the SAME words for "another organisation's" and "nobody's".
+$db->query("DELETE FROM `tblEventCategories` WHERE `categorySlug` LIKE 'pwt-k-%'");
+$db->query("DELETE FROM `tblEventTypes` WHERE `typeSlug` LIKE 'pwt-k-%'");
+$db->query("INSERT INTO `tblEventCategories` (`siteID`, `categoryName`, `categorySlug`) VALUES ({$siteOne}, 'PWT K own', 'pwt-k-own')");
+$kOwnCat = (int) $db->insert_id;
+$db->query("INSERT INTO `tblEventCategories` (`siteID`, `categoryName`, `categorySlug`) VALUES ({$siteTwo}, 'PWT K other', 'pwt-k-other')");
+$kOtherCat = (int) $db->insert_id;
+$db->query("INSERT INTO `tblEventTypes` (`siteID`, `typeName`, `typeSlug`) VALUES ({$siteTwo}, 'PWT K other type', 'pwt-k-other-type')");
+$kOtherType = (int) $db->insert_id;
+$kNobodysCat = (int) ($db->query('SELECT MAX(`categoryID`) AS `m` FROM `tblEventCategories`')->fetch_assoc()['m'] ?? 0) + 1000;
+$apiWords = static fn (array $r): string => (string) (json_decode($r['body'], true)['message'] ?? '');
+
+$scnApiOtherCategory = static function () use ($api, $keyBase, $evByName, $kOtherCat, $kNobodysCat, $apiWords): array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` IN ('PWT K nobodys', 'PWT K others')");
+    $nobodys = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K nobodys', 'categoryID' => $kNobodysCat]);
+    $others  = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K others', 'categoryID' => $kOtherCat]);
+    return [
+        'no such category'                => [$nobodys['status'], $evByName('PWT K nobodys')],
+        'another organisation\'s category' => [$others['status'], $evByName('PWT K others')],
+        'the same words for both'         => $apiWords($nobodys) !== '' && $apiWords($nobodys) === $apiWords($others),
+    ];
+};
+check('G1 the events API refuses a category nobody has AND another organisation\'s with 422, creates nothing, and says the same thing for both (#885: a 500, and the other organisation\'s was stored)',
+    $scnApiOtherCategory(),
+    ['no such category' => [422, null], 'another organisation\'s category' => [422, null], 'the same words for both' => true]);
+$r = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K own', 'categoryID' => $kOwnCat]);
+$kOwnRow = $db->query("SELECT `categoryID` FROM `tblEvents` WHERE `eventName` = 'PWT K own'")->fetch_assoc();
+check('G2 ...and still stores the organisation\'s OWN category (the refusal does not over-reach)', [$r['status'], (int) ($kOwnRow['categoryID'] ?? 0)], [201, $kOwnCat]);
+$kOwnId = (int) ($db->query("SELECT `eventID` FROM `tblEvents` WHERE `eventName` = 'PWT K own'")->fetch_assoc()['eventID'] ?? 0);
+$scnApiUpdateOtherType = static function () use ($api, $kOwnId, $kOtherType, $db): array {
+    $r   = $api('/api/events/update?id=' . $kOwnId, ['eventID' => $kOwnId, 'typeID' => $kOtherType]);
+    $bad = $api('/api/events/update?id=' . $kOwnId, ['eventID' => $kOwnId, 'categoryID' => 'abc']);
+    $row = $db->query("SELECT `typeID` FROM `tblEvents` WHERE `eventID` = {$kOwnId}")->fetch_assoc();
+    return ['another organisation\'s type' => $r['status'], 'not a number' => $bad['status'],
+        'stored type' => is_array($row) === true && array_key_exists('typeID', $row) === true ? $row['typeID'] : 'missing'];
+};
+check('G3 the events API\'s UPDATE refuses another organisation\'s event type (422, nothing stored), and a category that is not a number',
+    $scnApiUpdateOtherType(), ['another organisation\'s type' => 422, 'not a number' => 422, 'stored type' => null]);
+$scnFormOtherCategory = static function () use ($formPost, $base, $evByName, $kOtherCat): ?array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K form other'");
+    $formPost('orgadmin', $base + ['action' => 'create', 'eventName' => 'PWT K form other', 'categoryID' => (string) $kOtherCat]);
+    return $evByName('PWT K form other');
+};
+check('G4 the Manage Events form saves nothing for another organisation\'s category (#885: it was stored)', $scnFormOtherCategory(), null);
+// A series' bulk edit: one date of an own series, and another organisation's
+// category set on it through the bulk box.
+$db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` = 'pwt-k-series'");
+$db->query("INSERT INTO `tblEventSeries` (`siteID`, `seriesName`, `seriesSlug`) VALUES ({$siteOne}, 'PWT K series', 'pwt-k-series')");
+$kSeries = (int) $db->insert_id;
+$kSeriesEv = $makeEvent('PWT K series date', $siteOne, '2030-09-01 10:00:00', ['seriesID' => (string) $kSeries]);
+$scnBulkOtherCategory = static function () use ($signIn, $http, $tokenOn, $kSeries, $kSeriesEv, $kOtherCat, $db): mixed {
+    $db->query("UPDATE `tblEvents` SET `categoryID` = NULL WHERE `eventID` = {$kSeriesEv}");
+    $signIn('orgadmin');
+    $url   = '/calendar/manage/series-edit?seriesID=' . $kSeries;
+    $token = $tokenOn($http('GET', $url)['body']);
+    $http('POST', $url, ['csrf_token' => $token, 'seriesID' => (string) $kSeries, 'eventIDs' => [(string) $kSeriesEv], 'bulkCategoryID' => (string) $kOtherCat]);
+    $row = $db->query("SELECT `categoryID` FROM `tblEvents` WHERE `eventID` = {$kSeriesEv}")->fetch_assoc();
+    return is_array($row) === true && array_key_exists('categoryID', $row) === true ? $row['categoryID'] : 'missing';
+};
+check('G5 a series\' bulk edit does not set another organisation\'s category on its dates (#885)', $scnBulkOtherCategory(), null);
+$scnSubmitOtherCategory = static function () use ($signIn, $http, $tokenOn, $evByName, $kOtherCat): array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K submitted'");
+    $signIn('member');
+    $token = $tokenOn($http('GET', '/calendar/submit')['body']);
+    $r = $http('POST', '/calendar/submit-save', ['csrf_token' => $token, 'eventName' => 'PWT K submitted', 'startDateTime' => '2030-08-02T10:00',
+        'categoryID' => (string) $kOtherCat]);
+    return ['stored' => $evByName('PWT K submitted'), 'sent back with a reason' => str_contains($r['location'], 'err=category')];
+};
+check('G6 the public suggestion form stores nothing for another organisation\'s category, and says why (#885)',
+    $scnSubmitOtherCategory(), ['stored' => null, 'sent back with a reason' => true]);
+
+// ── #853: the "On the public website" badge asks the website's own rule ──────
+// Under "one box per calendar" the calendar-ticked copied-in event IS on the
+// website (V2). Paused, or with its stored answer run out, the website leaves
+// it out (R7's door read, and the sitemap) — and the badge used to say "On the
+// public website" all the same.
+$impRowBadge = static function () use ($signIn, $http, $feedId, $impId): string {
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/calendar/feeds/view?id=' . $feedId)['body'];
+    $at   = strpos($page, 'id="event-' . $impId . '"');
+    if ($at === false) {
+        return 'row not drawn';
+    }
+    $row = substr($page, $at, 4000);
+    foreach (['on', 'inert', 'held'] as $kind) {
+        if (str_contains($row, 'data-website-badge="' . $kind . '"') === true) {
+            return $kind;
+        }
+    }
+    return 'no badge';
+};
+$scnBadgeFollowsWebsite = static function () use ($db, $setRule, $countdownNext, $impRowBadge, $impId, $feedId): array {
+    $setRule('calendar', null);
+    $db->query("UPDATE `tblEvents` SET `importSource` = 'calendar', `importWebsite` = 1, `importLevel` = 'public', `importRecheckAt` = NULL WHERE `eventID` = {$impId}");
+    $out = ['switched on' => [$countdownNext() === $impId, $impRowBadge()]];
+    $db->query("UPDATE `tblExternalFeeds` SET `isActive` = 0 WHERE `feedID` = {$feedId}");
+    $out['paused'] = [$countdownNext() === $impId, $impRowBadge()];
+    $db->query("UPDATE `tblExternalFeeds` SET `isActive` = 1 WHERE `feedID` = {$feedId}");
+    $db->query("UPDATE `tblEvents` SET `importRecheckAt` = '2020-01-01 00:00:00' WHERE `eventID` = {$impId}");
+    $out['answer run out'] = [$countdownNext() === $impId, $impRowBadge()];
+    $db->query("UPDATE `tblEvents` SET `importRecheckAt` = NULL WHERE `eventID` = {$impId}");
+    $setRule('event', null);
+    return $out;
+};
+check('G7 the event\'s website badge says "on" exactly when the website shows it: not while its calendar is paused, not once its stored answer has run out — it says why instead (#853)',
+    $scnBadgeFollowsWebsite(),
+    ['switched on' => [true, 'on'], 'paused' => [false, 'held'], 'answer run out' => [false, 'held']]);
+
+// ── #854: a NEW choice for every date starts with nothing chosen ─────────────
+// A calendar at "Selected groups and people" with nobody on its list (so its
+// dates are seen by administrators only), a repeating event of two dates, and
+// one date opened to Members by a choice of its own. The choice form for EVERY
+// date used to start from the OPENED date's Members, so a Save pressed
+// without touching anything made every date of the series Members.
+// (A calendar itself cannot be "Only administrators": its column has no such
+// value. And not Everyone for the opened date: a new Everyone choice is
+// already refused until its website question is answered, so it could not
+// show this fault on an untouched Save.)
+$db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
+    . "VALUES ({$siteOne}, 'PWT K hidden calendar', 'https://calendar.selftest.invalid/pwt-k.ics', 'groups', 0, 1)");
+$kFeed = (int) $db->insert_id;
+$kDateA = $makeEvent('PWT K series A', $siteOne, '2030-10-01 10:00:00');
+$kDateB = $makeEvent('PWT K series B', $siteOne, '2030-10-08 10:00:00');
+foreach ([$kDateA => ['20301001T100000Z', 'members', 'date'], $kDateB => ['20301008T100000Z', 'groups', 'calendar']] as $kId => [$kKey, $kLevel, $kSource]) {
+    $db->query("UPDATE `tblEvents` SET `externalFeedID` = {$kFeed}, `externalUidHash` = UNHEX(SHA2('pwt-k-series@selftest', 256)), "
+        . "`externalRecurrenceKey` = '{$kKey}', `importLevel` = '{$kLevel}', `importDetail` = 'full', `importWebsite` = 0, `importSource` = '{$kSource}', "
+        . "`importRecheckAt` = NULL, `isPublic` = 0 WHERE `eventID` = {$kId}");
+}
+/** The form exactly as a browser would send it untouched: its hidden fields, and only the radios and boxes the page drew ticked. */
+$untouchedPost = static function (string $html): array {
+    $fields = [];
+    if (preg_match('#<form[^>]*id="choice-form"[^>]*>(.*?)</form>#s', $html, $form) !== 1) {
+        return $fields;
+    }
+    preg_match_all('#<input\b[^>]*>#s', $form[1], $inputs);
+    foreach ($inputs[0] as $input) {
+        $name  = preg_match('/\bname="([^"]+)"/', $input, $n) === 1 ? html_entity_decode($n[1], ENT_QUOTES, 'UTF-8') : '';
+        $value = preg_match('/\bvalue="([^"]*)"/', $input, $v) === 1 ? html_entity_decode($v[1], ENT_QUOTES, 'UTF-8') : '';
+        $type  = preg_match('/\btype="([^"]+)"/', $input, $t) === 1 ? $t[1] : 'text';
+        if ($name === '' || (in_array($type, ['radio', 'checkbox'], true) === true && preg_match('/\bchecked\b/', $input) !== 1)) {
+            continue;
+        }
+        if (str_ends_with($name, '[]') === true) {
+            $fields[substr($name, 0, -2)][] = $value;
+        } else {
+            $fields[$name] = $value;
+        }
+    }
+    return $fields;
+};
+$scnSeriesUntouched = static function () use ($db, $signIn, $http, $kDateA, $kDateB, $kFeed, $untouchedPost): array {
+    // The opened date's own Members, and the other date's calendar answer, set
+    // HERE as well as put back below: a re-work of every calendar (G10, or a
+    // plant posting the rule) puts the opened date back to its calendar's
+    // answer, since no choice of its own is really stored.
+    $db->query("DELETE FROM `tblExternalEventChoices` WHERE `feedID` = {$kFeed}");
+    $db->query("UPDATE `tblEvents` SET `importLevel` = 'members', `importDetail` = 'full', `importSource` = 'date' WHERE `eventID` = {$kDateA}");
+    $db->query("UPDATE `tblEvents` SET `importLevel` = 'groups', `importSource` = 'calendar' WHERE `eventID` = {$kDateB}");
+    $url = '/admin/calendar/feeds/choice?event=' . $kDateA . '&scope=series';
+    $signIn('orgadmin');
+    $page = $http('GET', $url);
+    $chosen = preg_match('/<input[^>]*name="audienceLevel"[^>]*\bchecked\b/s', $page['body']) === 1
+        || preg_match('/<input[^>]*name="detailLevel"[^>]*\bchecked\b/s', $page['body']) === 1;
+    $post = $untouchedPost($page['body']);
+    $r    = $http('POST', $url, $post);
+    $out  = [
+        'page drawn'          => $page['status'] === 200 && $post !== [],
+        'anything pre-chosen' => $chosen,
+        'choices saved'       => (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblExternalEventChoices` WHERE `feedID` = {$kFeed}")->fetch_assoc()['n'],
+        'the other date'      => (string) $db->query("SELECT `importLevel` FROM `tblEvents` WHERE `eventID` = {$kDateB}")->fetch_assoc()['importLevel'],
+        'told to choose'      => $r['status'] === 200 && str_contains($r['body'], 'Choose who can see it.'),
+    ];
+    $db->query("DELETE FROM `tblExternalEventChoices` WHERE `feedID` = {$kFeed}");
+    $db->query("UPDATE `tblEvents` SET `importLevel` = 'members', `importSource` = 'date' WHERE `eventID` = {$kDateA}");
+    $db->query("UPDATE `tblEvents` SET `importLevel` = 'groups', `importSource` = 'calendar' WHERE `eventID` = {$kDateB}");
+    return $out;
+};
+check('G8 a NEW choice for every date starts with no audience and no detail chosen, so a Save pressed without touching anything saves nothing and opens no date (#854)',
+    $scnSeriesUntouched(),
+    ['page drawn' => true, 'anything pre-chosen' => false, 'choices saved' => 0, 'the other date' => 'groups', 'told to choose' => true]);
+$scnDateStillPrefilled = static function () use ($signIn, $http, $kDateA): string {
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/calendar/feeds/choice?event=' . $kDateA . '&scope=date')['body'];
+    return preg_match('/<input[^>]*name="audienceLevel"[^>]*id="choice-level-([a-z]+)"[^>]*\bchecked\b/s', $page, $m) === 1 ? $m[1] : 'none';
+};
+check('G9 a new choice for ONE date still starts from that date\'s own audience (it is what the date shows now, so an untouched Save cannot widen it)',
+    $scnDateStillPrefilled(), 'members');
+
+// ── #855: an approval request made under one copied-in rule ─────────────────
+// Under "one box per calendar", a rule ticking the website and opening a
+// Members calendar's event to Everyone files a request that COUNTS the
+// website. The rule is then tightened to "one tick per event" and — standing
+// for a re-work that FAILED for this calendar — nothing is re-worked. An
+// administrator approving the old request, from a page describing its
+// website box as doing nothing, used to store an approval counting the
+// website, reused to publish if the rule was loosened again.
+$db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
+    . "VALUES ({$siteOne}, 'PWT K members calendar', 'https://calendar.selftest.invalid/pwt-k2.ics', 'members', 0, 1)");
+$kFeed2 = (int) $db->insert_id;
+$kEv855 = $makeEvent('PWT K855 open evening', $siteOne, '2030-11-01 19:00:00');
+$db->query("UPDATE `tblEvents` SET `externalFeedID` = {$kFeed2}, `externalUidHash` = UNHEX(SHA2('pwt-k855@selftest', 256)), `externalRecurrenceKey` = '', "
+    . "`importLevel` = 'members', `importDetail` = 'basic', `importWebsite` = 0, `importSource` = 'calendar', `importRecheckAt` = NULL, `isPublic` = 0 WHERE `eventID` = {$kEv855}");
+$db->query("INSERT INTO `tblExternalFeedRules` (`siteID`, `feedID`, `name`, `audienceLevel`, `detailLevel`, `websiteOptIn`, `isActive`, `createdAt`) "
+    . "VALUES ({$siteOne}, {$kFeed2}, 'PWT K rule', 'public', 'full', 1, 1, UTC_TIMESTAMP())");
+$kRule = (int) $db->insert_id;
+$db->query("INSERT INTO `tblExternalRuleConditions` (`ruleID`, `isException`, `matchField`, `matchType`, `matchValue`) VALUES ({$kRule}, 0, 'title', 'contains', 'pwt k855')");
+$scnStaleApproval = static function () use ($db, $setRule, $rulePost, $signIn, $http, $tokenOn, $kFeed2, $kEv855): array {
+    // Filed under the looser rule: saving the rule re-works every calendar.
+    $setRule('event', null);
+    $rulePost('root', 'installation', 'calendar');
+    $req = $db->query("SELECT `approvalID`, `requestHash`, `contentHash`, `requestedWebsite` FROM `tblExternalEventApprovals` "
+        . "WHERE `eventID` = {$kEv855} AND `status` = 'pending' ORDER BY `approvalID` DESC LIMIT 1")->fetch_assoc();
+    $out = ['a waiting request counting the website' => (int) ($req['requestedWebsite'] ?? -1)];
+    // Tightened, and the re-work "failed": the stored rule changes, nothing else.
+    $setRule('event', null);
+    $signIn('orgadmin');
+    $token = $tokenOn($http('GET', '/admin/calendar/feeds/view?id=' . $kFeed2)['body']);
+    $requestHash = (string) ($req['requestHash'] ?? '');
+    $contentHash = (string) ($req['contentHash'] ?? '');
+    $http('POST', '/admin/calendar/feeds/approvals/act', ['csrf_token' => $token, 'back' => 'feed', 'feed' => (string) $kFeed2, 'decision' => 'approved',
+        'approvalID' => (string) ($req['approvalID'] ?? 0), 'requestHash' => $requestHash, 'contentHash' => $contentHash]);
+    $out['that request approved'] = (string) ($db->query('SELECT `status` FROM `tblExternalEventApprovals` WHERE `approvalID` = ' . (int) ($req['approvalID'] ?? 0))->fetch_assoc()['status'] ?? 'gone') === 'approved';
+    $out['any approval counting the website'] = (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblExternalEventApprovals` WHERE `eventID` = {$kEv855} AND `status` = 'approved' AND `requestedWebsite` = 1")->fetch_assoc()['n'];
+    $page = (string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($http('GET', '/admin/calendar/feeds/view?id=' . $kFeed2)['body']), ENT_QUOTES, 'UTF-8'));
+    $out['told it had changed'] = str_contains($page, 'had changed since you opened the page');
+    $db->query("DELETE FROM `tblExternalEventApprovals` WHERE `eventID` = {$kEv855}");
+    $db->query("UPDATE `tblEvents` SET `importLevel` = 'members', `importWebsite` = 0, `importSource` = 'calendar', `importSourceID` = NULL WHERE `eventID` = {$kEv855}");
+    return $out;
+};
+check('G10 an approval request made under "one box per calendar", left waiting when the rule was tightened, cannot be approved as if it still counted the website: nothing is approved, and the page says it changed (#855)',
+    $scnStaleApproval(),
+    ['a waiting request counting the website' => 1, 'that request approved' => false, 'any approval counting the website' => 0, 'told it had changed' => true]);
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
@@ -3561,8 +3803,10 @@ $p = $plant('_apps/admin/calendar/feeds-website-rule.php', 'PublicWebsite::saveR
 check('P13 with the handler\'s "organisation\'s global administrator" gate gone, an ordinary administrator stores the organisation\'s rule', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicWebsite.php', 'return $stored === EventVisibility::COPIED_BY_CALENDAR;', 'return $stored !== EventVisibility::COPIED_BY_EVENT;', $scnGarbageRule);
 check('P14 with "anything not exactly \'event\' is looser", an unreadable rule lets the copied-in event onto the door\'s events feed', [$p['applied'], $p['result']], [true, false]);
+// #853: the badge asks the website's own rule (`onWebsite`) now, so "no
+// longer asking the rule" is the badge on the website box alone.
 $p = $plant('_apps/admin/calendar/feeds-view.php',
-    "<?php if ((int) \$ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts(\$ev['importSource'] === null ? null : (string) \$ev['importSource'], \$copiedRule) === true): ?>",
+    "<?php if ((int) \$ev['onWebsite'] === 1): ?>",
     "<?php if ((int) \$ev['importWebsite'] === 1): ?>",
     static fn (): bool => ($scnWordsStrict()['event badge on'] ?? null) === false);
 check('P15 with the event badge no longer asking the rule, it claims the website under "one tick per event"', [$p['applied'], $p['result']], [true, false]);
@@ -4022,6 +4266,36 @@ check('P90 with Website Set-up given the usual sentence, the Roles page tells an
     [$p['applied'], str_starts_with((string) $p['result'], 'WRONG')], [true, true]);
 $foyerWorld();
 $setEv($cEvent, ['showOnWebsite' => '0']);
+// ── Section G's guards (#885, #853, #854, #855) ─────────────────────────────
+$kApiWant = ['no such category' => [422, null], 'another organisation\'s category' => [422, null], 'the same words for both' => true];
+$p = $plant('_apps/events/api/create.php', '$taxonomyRefusal = Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $categoryId, $typeId);',
+    '$taxonomyRefusal = null;', static fn (): bool => $scnApiOtherCategory() === $kApiWant);
+check('PG1 with the events API no longer asking whose category it is, another organisation\'s is stored and a missing one is a 500 again (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/Events.php', "'SELECT 1 FROM `tblEventCategories` WHERE `categoryID` = ? AND `siteID` = ? LIMIT 1'",
+    "'SELECT 1 FROM `tblEventCategories` WHERE `categoryID` = ? AND ? > 0 LIMIT 1'", static fn (): bool => $scnApiOtherCategory() === $kApiWant);
+check('PG2 with the ONE rule asking only whether the category exists, another organisation\'s is accepted and the two answers differ (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/events/api/update.php', "        if (\$taxonomyRefusal !== null) {\n            ApiResponse::error(\$taxonomyRefusal . ' Nothing was changed.', 422);",
+    "        if (false) {\n            ApiResponse::error(\$taxonomyRefusal . ' Nothing was changed.', 422);",
+    static fn (): bool => ($scnApiUpdateOtherType()['another organisation\'s type'] ?? null) === 422);
+check('PG3 with the update\'s refusal gone, another organisation\'s event type is stored (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/save.php', 'if ($taxonomyRefusal !== null) {', 'if (false) {', static fn (): bool => $scnFormOtherCategory() === null);
+check('PG4 with the form\'s refusal gone, the Manage Events form stores another organisation\'s category (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/series-edit.php', 'if ($bulkTaxonomyRefusal !== null) {', 'if (false) {', static fn (): bool => $scnBulkOtherCategory() === null);
+check('PG5 with the bulk edit\'s refusal gone, a series\' dates take another organisation\'s category (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/submit-save.php', 'if ($categoryArg === false || Events::whyCategoryOrTypeRefused($mysqli, $siteId, $categoryArg, null) !== null) {',
+    'if ($categoryArg === false) {', static fn (): bool => ($scnSubmitOtherCategory()['stored'] ?? 'x') === null);
+check('PG6 with the suggestion form no longer asking whose category it is, a suggestion stores another organisation\'s (#885)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/admin/calendar/feeds-view.php', "<?php if ((int) \$ev['onWebsite'] === 1): ?>",
+    "<?php if ((int) \$ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts(\$ev['importSource'] === null ? null : (string) \$ev['importSource'], \$copiedRule) === true): ?>",
+    static fn (): bool => ($scnBadgeFollowsWebsite()['paused'][1] ?? null) === 'held' && ($scnBadgeFollowsWebsite()['answer run out'][1] ?? null) === 'held');
+check('PG7 with the badge back on the website box and the tick rule alone (the code before #853), a paused calendar\'s event and a stale one say "On the public website"', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/admin/calendar/feeds-choice.php', "\$newForEveryDate = (\$scope === 'series');", '$newForEveryDate = false;',
+    static fn (): bool => ($scnSeriesUntouched()['the other date'] ?? null) === 'groups');
+check('PG8 with a new choice for every date pre-filled from the opened date again (the code before #854), an untouched Save opens every date to Members', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/FeedAdmin.php', '}, null, true);', '});',
+    static fn (): bool => ($scnStaleApproval()['that request approved'] ?? null) === false);
+check('PG9 with the decision no longer re-working the calendar first (the code before #855), the request made under the looser rule is approved as if it still counted the website', [$p['applied'], $p['result']], [true, false]);
+
 check('P11 with every plant removed again, the unticked event is off the door\'s events feed once more', $scnUnticked(), true);
 
 // 🚪 #493 P4b: every read of the door's events feed must have ANSWERED. A read
@@ -4088,6 +4362,13 @@ $db->query("DELETE FROM `tblEmailLog` WHERE (`toRecipients` LIKE '%@selftest.inv
 $db->query("DELETE FROM `tblExternalEventApprovals` WHERE `snapTitle` LIKE 'PWT approval %'");
 $db->query("DELETE FROM `tblExternalFeedRules` WHERE `name` = 'PWT rule'");
 $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` = 'PWT outside calendar'");
+// Section G's rows (#885, #854, #855): its events went with every 'PWT %' event above.
+$db->query("DELETE FROM `tblExternalEventApprovals` WHERE `feedID` IN (SELECT `feedID` FROM `tblExternalFeeds` WHERE `name` LIKE 'PWT K %')");
+$db->query("DELETE FROM `tblExternalEventChoices` WHERE `feedID` IN (SELECT `feedID` FROM `tblExternalFeeds` WHERE `name` LIKE 'PWT K %')");
+$db->query("DELETE FROM `tblExternalFeeds` WHERE `name` LIKE 'PWT K %'");
+$db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` = 'pwt-k-series'");
+$db->query("DELETE FROM `tblEventCategories` WHERE `categorySlug` LIKE 'pwt-k-%'");
+$db->query("DELETE FROM `tblEventTypes` WHERE `typeSlug` LIKE 'pwt-k-%'");
 $setRule($ruleWas ?? 'event', null);
 $db->query("DELETE FROM `tblSettings` WHERE `siteID` = {$siteTwo}");
 // Section S's rows (#493 P2b).

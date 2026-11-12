@@ -13,6 +13,10 @@
  *                   isPublic, isFeatured, and (#493 P1) showOnWebsite,
  *                   websiteFrom, websiteUntil.
  *
+ * A categoryID or typeID must be this organisation's own (or null for none);
+ * anything else is refused with 422 and the same words whether the number is
+ * another organisation's or nobody's (#885).
+ *
  * THE PUBLIC WEBSITE FIELDS are judged by `PublicWebsite::judgeEventFields()`,
  * the same judgement as the Manage Events form, against what is STORED: a
  * value equal to the stored one is not a change and needs no permission; a
@@ -33,6 +37,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\EventCancelReason;
+use Portal\Core\Events;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\PublicWebsite;
@@ -160,7 +165,26 @@ foreach ($columnMap as $col => $type) {
         $value = (bool) $value === true ? 1 : 0;
     }
     if (in_array($col, ['categoryID', 'typeID'], true) === true) {
-        $value = $value === null || $value === '' ? null : (int) $value;
+        // 🏷️ This organisation's own, or 422 (#885) — see create.php and
+        //    `Events::whyCategoryOrTypeRefused()`, the ONE place that decides.
+        //    `(int)` of whatever was sent used to go straight into the UPDATE:
+        //    a number nobody has was a bare 500, another organisation's was
+        //    stored. Only a field that ARRIVED is judged (this loop skips the
+        //    rest), so an event already carrying a category is not re-judged
+        //    by a request that does not touch it.
+        $value = Events::postedIdOrNone($value);
+        if ($value === false) {
+            ApiResponse::error($col . ' must be a whole number, or null for none. Nothing was changed.', 422);
+        }
+        $taxonomyRefusal = Events::whyCategoryOrTypeRefused(
+            $db,
+            $siteId,
+            $col === 'categoryID' ? $value : null,
+            $col === 'typeID' ? $value : null
+        );
+        if ($taxonomyRefusal !== null) {
+            ApiResponse::error($taxonomyRefusal . ' Nothing was changed.', 422);
+        }
     }
 
     $set[]    = $col . ' = ?';

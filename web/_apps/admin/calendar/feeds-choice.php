@@ -284,12 +284,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 // 📖 What to draw: the saved choice (if any), the dates it covers, and the
 //    values for the form — what was typed after a refusal, else the saved
-//    choice, else, for a new choice, the date's CURRENT audience and detail
-//    with the website question unanswered (see below). Saving a new choice
-//    untouched is NOT a no-op: its audience and detail are the opened date's,
-//    which for a choice for every date may differ from the other dates
-//    (#854), and an Everyone choice is refused until the website question is
-//    answered.
+//    choice, else, for a new choice for ONE date, that date's CURRENT audience
+//    and detail with the website question unanswered, and for a new choice
+//    for EVERY date nothing chosen at all (#854; see below). So an untouched
+//    Save of a new choice for every date saves nothing — FeedAdmin refuses a
+//    missing audience ("Choose who can see it.") and a missing detail — and
+//    an Everyone choice is refused until the website question is answered.
 $existing = FeedAdmin::choiceFor($mysqli, $event, $scope);
 // 🌐 #493 P1, round 13: a form drawn as NEW that was refused for ANY reason is
 //    judged again here, on the very read this page is drawn from. saveChoice()
@@ -340,10 +340,26 @@ if ($typed !== null) {
     //    refuses it; at Only administrators it is never refused; at Selected
     //    groups and people it is refused because no group is ticked. None of
     //    this is about the website answer.) A choice already SAVED
-    //    shows its own stored answer, exactly (above). The audience and the
-    //    detail are still pre-filled from the date (#854).
+    //    shows its own stored answer, exactly (above).
+    //
+    // 👥 #854: A NEW CHOICE FOR EVERY DATE STARTS WITH NO AUDIENCE AND NO
+    //    DETAIL CHOSEN, for the same reason as the website question. The
+    //    audience and the detail used to be pre-filled from the OPENED date
+    //    (`importLevel` / `importDetail`) — which is that one date's answer,
+    //    perhaps from a choice of its own or a rule that matches it alone, not
+    //    what the series shows. One date set to Everyone, the calendar and its
+    //    other dates at Members: an untouched Save then made a choice for
+    //    EVERY date at Everyone and approved every date listed, opening the
+    //    whole series. Nothing is inferred now, so an untouched Save is
+    //    refused by FeedAdmin ("Choose who can see it.") and by the handler
+    //    above for the detail, and saves nothing.
+    //    A choice for ONE date still starts from that date's own answer: it
+    //    is exactly what that date shows now, so an untouched Save cannot
+    //    widen it.
+    $newForEveryDate = ($scope === 'series');
     $v = [
-        'audienceLevel' => (string) ($event['importLevel'] ?? 'members'), 'detailLevel' => (string) ($event['importDetail'] ?? 'basic'),
+        'audienceLevel' => $newForEveryDate === true ? '' : (string) ($event['importLevel'] ?? 'members'),
+        'detailLevel'   => $newForEveryDate === true ? '' : (string) ($event['importDetail'] ?? 'basic'),
         'websiteOptIn' => '', 'apiOptOut' => '0',
         'fromDate' => '', 'toDate' => '', 'note' => '', 'overridesPrivateMark' => '0', 'audience' => [],
     ];

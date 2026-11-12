@@ -4685,11 +4685,13 @@ $p = $plant('_core/PublicDoor.php', '$noEnd  = PublicWebsiteSetup::noEndListingF
     static fn (): array => [$nClockAt('PDS N clock 25-hour day', ['2026-10-25 23:45:00']), $nClockAt('PDS N clock 23-hour day', ['2027-03-28 23:15:00'])]);
 check('PN6 with "the end of its day" taken as 24 real hours, the 25-hour day drops it before its midnight and the 23-hour day keeps it past it (N12 and N13 catch it)',
     [$p['applied'], $p['result']], [true, [['2026-10-25 23:45:00' => false], ['2027-03-28 23:15:00' => true]]]);
-$p = $plant('_core/PublicDoor.php', 'usort($rows, static function (array $a, array $b): int {', 'if (false) usort($rows, static function (array $a, array $b): int {',
+// #811: the order moved, unchanged, to Events::sortByRealStart(), which the door now asks.
+$p = $plant('_core/Events.php', 'usort($keyed, static function (array $a, array $b): int {', 'if (false) usort($keyed, static function (array $a, array $b): int {',
     static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
 check('PN7 (#898) with the order left as the READINGS\' (the code before #898), the limited list gives the later event and drops the sooner (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
-$p = $plant('_core/PublicDoor.php', '$latest + self::maxOffsetOfZones(Events::zonesInUse($db, $siteId), $siteId)', '$latest',
+// #811: the window moved, unchanged, to Events::soonestByRealStart().
+$p = $plant('_core/Events.php', '$latest + self::maxOffsetOfZones(self::zonesInUse($db, $siteId), $siteId)', '$latest',
     static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
 check('PN8 (#898) with the second read\'s window not widened by the clocks\' offsets, the sooner event on the clock furthest ahead is never read (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
@@ -4710,20 +4712,22 @@ $p = $plant('_core/PublicDoor.php', "'(((e.`isAllDay` = 1 OR e.`endDateTime` IS 
 check('PN11 with the fixed time\'s rule forgetting all-day events, an all-day event with no end time vanishes while a fixed time is chosen (N06 catches it)',
     [$p['applied'], $p['result']], [true, []]);
 // Round 1 of #882's check: three faults that left every check above green.
+// (#811 moved `maxOffsetOfZones()`, unchanged, from PublicDoor to Events, so
+// PN12 and PN16-PN18 plant it there.)
 $nLoop = "                foreach (\$states as \$state) {\n";
-$p = $plant('_core/PublicDoor.php', "            if (is_array(\$states) === true) {\n" . $nLoop . "                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
+$p = $plant('_core/Events.php', "            if (is_array(\$states) === true) {\n" . $nLoop . "                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
     '', $nWindows);
 check('PN12 (plant A) with the second read\'s window built from each zone\'s CURRENT offset only, the sooner event is never read and the later one is given (N20 and N21 catch it)',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
 // Round 2 of #882's check: three more wrong windows, which the first version
 // of N20 (held up by Pago Pago's +12:37 local mean time) let through.
-$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, 1) as \$state) {\n", $nWindows);
+$p = $plant('_core/Events.php', $nLoop, "                foreach (array_slice(\$states, 0, 1) as \$state) {\n", $nWindows);
 check('PN16 (V1) with only the FIRST entry of each zone\'s history read (its local mean time), both sooner events are missed (N20 and N21 catch it)',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
-$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, intdiv(count(\$states), 2)) as \$state) {\n", $nWindows);
+$p = $plant('_core/Events.php', $nLoop, "                foreach (array_slice(\$states, 0, intdiv(count(\$states), 2)) as \$state) {\n", $nWindows);
 check('PN17 (V3) with only the FIRST HALF of each zone\'s history read: London\'s 1941 +2 is in its first half, so N20 rightly still passes; the Azores\' 1993 +1 is in its second half, so N21 catches it',
     [$p['applied'], $p['result']], [true, [['PDS N historic London'], ['PDS N late New York']]]);
-$p = $plant('_core/PublicDoor.php', '            $states = $zone->getTransitions();',
+$p = $plant('_core/Events.php', '            $states = $zone->getTransitions();',
     "            \$states = \$zone->getName() === 'Europe/London' ? false : \$zone->getTransitions();", $nWindows);
 check('PN18 (V5) with London\'s history ignored (its offset today only), N20 catches it; N21, with no London in it, is rightly unaffected',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late Azores']]]);

@@ -330,27 +330,40 @@ if ($eventId > 0) {
     //    200-event `LIMIT` is filled from the right rows; the loose bound is
     //    only for the `startDateTime` index.
     $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
+    // ⏱️ WHICH 200 (#811): the soonest 200 by their REAL moment, through
+    //    `Events::soonestByRealStart()` — `ORDER BY startDateTime LIMIT 200`
+    //    compared readings from different clocks, so on a full calendar an
+    //    event on a clock ahead of the others could be cut off although it
+    //    comes sooner. The statement itself is unchanged apart from the
+    //    optional upper bound and limit that helper asks for.
     // The rule from EventVisibility::where() above (anonymous mode) is
     // appended to this statement as `$visibility['sql']`.
-    $stmt = $db->prepare(sprintf(
-        'SELECT `e`.`eventID`, `e`.`seriesID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
-        . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, `e`.`locationName`, '
-        . '`e`.`locationAddress`, `e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`status`, `e`.`updatedAt`, %s '
-        . 'FROM `tblEvents` `e` WHERE `e`.`isDeleted` = 0 AND `e`.`startDateTime` >= ? AND `e`.`startDateTime` >= %s AND `e`.`siteID` = ? AND `e`.`status` = \'published\'',
-        $fullDetail['sql'],
-        $nowOnClock['sql']
-    ) . $visibility['sql'] . ' ORDER BY e.startDateTime LIMIT 200');
-    if ($stmt !== false) {
+    $readUpcoming = static function (?string $upTo, ?int $max) use ($db, $siteId, $fullDetail, $nowOnClock, $visibility): array {
+        $stmt = $db->prepare(sprintf(
+            'SELECT `e`.`eventID`, `e`.`seriesID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
+            . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, `e`.`locationName`, '
+            . '`e`.`locationAddress`, `e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`status`, `e`.`updatedAt`, %s '
+            . 'FROM `tblEvents` `e` WHERE `e`.`isDeleted` = 0 AND `e`.`startDateTime` >= ? AND `e`.`startDateTime` >= %s AND `e`.`siteID` = ? AND `e`.`status` = \'published\'',
+            $fullDetail['sql'],
+            $nowOnClock['sql']
+        ) . ($upTo === null ? '' : ' AND `e`.`startDateTime` <= CAST(? AS DATETIME)')
+          . $visibility['sql'] . ' ORDER BY e.startDateTime, e.eventID' . ($max === null ? '' : ' LIMIT ?'));
+        if ($stmt === false) {
+            return [];
+        }
         $stmt->bind_param(
-            $fullDetail['types'] . 's' . $nowOnClock['types'] . 'i' . $visibility['types'],
-            ...array_merge($fullDetail['params'], [Events::looseUtcBound('-1 day')], $nowOnClock['params'], [$siteId], $visibility['params'])
+            $fullDetail['types'] . 's' . $nowOnClock['types'] . 'i' . ($upTo === null ? '' : 's') . $visibility['types'] . ($max === null ? '' : 'i'),
+            ...array_merge($fullDetail['params'], [Events::looseUtcBound('-1 day')], $nowOnClock['params'], [$siteId],
+                $upTo === null ? [] : [$upTo], $visibility['params'], $max === null ? [] : [$max])
         );
         $stmt->execute();
-        $result = $stmt->get_result();
-        while ($r = $result->fetch_assoc()) {
-            $events[] = $r;
-        }
+        $got = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
+
+        return $got;
+    };
+    foreach (Events::soonestByRealStart($db, $siteId, 200, $readUpcoming) as $r) {
+        $events[] = $r;
     }
 }
 
@@ -786,7 +799,7 @@ foreach ($events as $ev) {
     if ($eventId <= 0 && $sid > 0) {
         if (isset($seenSeriesIds[$sid]) === true) {
             // Already emitted this series' master VEVENT from its earliest
-            // row (rows are fetched ORDER BY startDateTime) — the rest of
+            // row (rows come soonest first: by their real moment for the "all upcoming" download since #811, by reading otherwise) — the rest of
             // this series' rows fold into that VEVENT's RRULE.
             continue;
         }
