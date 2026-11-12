@@ -430,6 +430,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   an account `GdprEraser::emptiedAccountSql()` calls erased, a global administrator included; pages that change an
   account without `check()` ask `AccountGuard::checkNotErased()`. Test: section M of `tools/erasure-pages-selftest.php`.
   **A visitor (no account) is erased only by a `visitor_address` request (#964; D-140, D-148 to D-150):** `GdprEraser::fileVisitorAddressRequest()` / `executeVisitorAddress()` — this organisation's suggestions, pre-#963 activity records and approval e-mails only, never an account.
+  **A worker's download lists the records carrying their name (#929; D-142, D-151):** `GdprEraser::recordsCarryingYourName()` is the ONE place — kind, day and organisation only; other organisations counted; hard gate `check_worker_records_listed.py`.
 - **Currency (#966; D-133, D-139).** `Portal\Core\Currency` is the ONE place: the organisation's currency
   (`org.currency`, own row else the installation's, else none = plain numbers, never "£"; changeable), what a
   country suggests, how an amount is written, and the one list of money tables (`OWN_TABLES`, `CHILD_TABLES`):

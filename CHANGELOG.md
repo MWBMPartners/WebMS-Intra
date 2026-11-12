@@ -4,6 +4,22 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A worker's own data download lists the records that carry their name (#929; D-142, D-151)
+
+- Since #703 a pastoral visit, a pastoral care case, a DBS check
+  and a child's check-in or check-out keep the name and account number of the
+  worker who made them, and the worker's download left them out. My data (the
+  page and its JSON download) and the full data copy (`account/data-export`)
+  now list each such record by its kind, the DAY it was made (not the time),
+  the organisation that holds it, and a fixed sentence saying the person's
+  name and number are on it. Nothing else from the record is given: no other
+  person's name, no notes, no case category or summary, no DBS reference or
+  type, and no record number. Records in an organisation the person cannot
+  open here (one they have left, or one switched off) are counted, not listed
+  (D-151). A DBS check has no organisation and is always listed. When a part
+  cannot be read the page says so; it never shows "none" instead.
+- New hard gate `tools/audit-checks/check_worker_records_listed.py`. Follow-ups #1011, #1012. Codex has not reviewed this.
+
 ### An erasure can reach somebody without an account who suggested an event (#964; D-140, D-148 to D-150; migration 286)
 
 - An administrator files a request for the visitor's e-mail address on Erasure requests, after ticking that they

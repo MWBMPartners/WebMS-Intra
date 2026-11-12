@@ -1325,6 +1325,10 @@ another repo, ever**.
 - Currency: one per organisation (`org.currency`), suggested from the country, changeable; every money record
   keeps its own (`Currency::OWN_TABLES`, `CHILD_TABLES`); totals per currency; unrecorded amounts can be labelled.
 - Expenses: a line may be quoted in another currency, with the converted amount from the claimant's statement.
+- My data and Data Export: a "Records that carry your name as the person who
+  made them" list (pastoral visits, care cases opened, DBS checks recorded,
+  children checked in and out): kind, day and organisation only (#929, D-142).
+  Records in organisations the member cannot open here are counted (D-151).
 - Erasure request for a visitor's e-mail address (no account): event suggestions' name and address, the pre-#963
   activity records naming it, and the approval e-mail's send-log and mail-queue rows, at the filing organisation only,
   after a required tick and note on how the person was checked (#964; D-140, D-148 to D-150).

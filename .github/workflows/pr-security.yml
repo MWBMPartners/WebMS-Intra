@@ -2039,6 +2039,18 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_currency_writes.py
 
+      # 🗂️ A worker's data download lists every record that keeps their name
+      #    as the worker (#929, D-142): each `retain` instruction on a worker
+      #    column in GdprEraser::catalogue() must be in
+      #    recordsCarryingYourName()'s list, and the list must hold nothing
+      #    else. Asks PHP (set up above) for the real instruction list and
+      #    reads the method through PHP's tokeniser. Its self-test runs in the
+      #    step below with every other audit self-test (#919).
+      - name: 'A worker download lists records carrying their name (hard gate)'
+        id: worker_records_listed
+        if: always()
+        run: python3 -I tools/audit-checks/check_worker_records_listed.py
+
       # 🧪 EVERY AUDIT CHECK'S OWN SELF-TEST, FOUND RATHER THAN LISTED (#919).
       #
       # Several checks above carry a self-test (planted faults each must report,

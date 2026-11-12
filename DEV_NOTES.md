@@ -23801,3 +23801,69 @@ still read under the lock, and only an administrator with the form token can sen
 - Test: section N of `tools/erasure-pages-selftest.php` (it loads the real form, N3a), section 24 of
   `tools/gdpr-coverage-selftest.php`.
 
+### A worker's download lists records carrying their name (#929; D-142, D-151)
+
+- `GdprEraser::recordsCarryingYourName()` is the ONE place these records are
+  found and worded. Both downloads ask it; do not write a second query in a
+  page. `tools/audit-checks/check_worker_records_listed.py` (a hard gate with
+  `--self-test`) fails BOTH ways when a `retain` instruction on a worker column
+  (`...ByID`) in `GdprEraser::catalogue()` is not in its list, or the list reads
+  a column that is not such an instruction. It reads the method with its
+  comments removed by PHP's tokeniser (round 2's raw-text reader counted a
+  kind wrapped in `/* ... */` as listed; measured on 54ef8ce9). It knows a
+  worker column only by the `ByID` ending (all five kept today). Worker
+  columns named otherwise exist (`performedByUserID`, `uploadedByUserID`,
+  `assignedToID`, `followUpAssignedToID`...), all emptied on erasure today;
+  keeping one would not be seen. Widening the pattern would catch a person's
+  OWN records (`bookedByID`, `requestedByID`). The catalogue pointers and the
+  check's header both say so.
+- What it hands over is decided by what it SELECTS: each query reads the date
+  and the organisation and nothing else, so no later code can leak what was
+  never read.
+- The DAY only, cut from the stored text as text. D-142 says "its date"; a time
+  to the second beside the organisation nearly identifies the record, the same
+  reason the record number is left out. Never a strtotime() round trip: on the
+  night the clocks go forward at 23:00 (America/Nuuk, 28 March 2026) a 23:30
+  reading moves to the next day. Section O sets organisation A to
+  America/Nuuk for that reason; Europe/London would not do, because there the
+  round trip moves the hour and never the day (measured with PHP's own zone
+  data, and asked again by O1).
+- Organisations (D-151): the same rule as `SiteGate`
+  (`Site::organisationsFor()`: an active membership of an active
+  organisation; with one organisation only, every record is). A record
+  elsewhere — left, or switched off while still a member — is counted, with
+  words true of both ("organisations you cannot open here"). DBS checks are
+  listed whatever the organisation because `tblDbsChecks` has no organisation
+  column; deciding by the checked person's memberships would read that
+  person's details.
+- Order: day, then kind, then organisation name; entries still tied are
+  identical in every field shown.
+- Failures, all driven by section O: if the person's organisations cannot be
+  read it fails CLOSED (organisation-held kinds neither listed nor counted,
+  named in `couldNotRead`; DBS still listed). If one kind cannot be read it is
+  named in `couldNotRead`; only error 1146 (no such table: app not installed)
+  means none - also driven, by renaming `tblCareVisit` away for the moment
+  (that view also switches organisation C on, which is the only view that
+  reaches the singular "1 more record" sentence). The page's "could not be
+  read" sentence is pinned.
+- Section O renames a column and a table of `tblCareVisit` while it runs.
+  `putSectionOBack()` puts both back at the start of a run and in cleanup(),
+  as `putClaimColumnBack()` does for #927: a `finally` does not run when the
+  SIGINT/SIGTERM handler ends the run with exit(). Measured: a database left
+  with the column renamed passes the next run (177/177) and ends with
+  `visitedAt` back. The table-rename repair was not driven on its own.
+- Round 1's check found: the time check could not fail (the test organisation
+  was on UTC); the lookup and per-kind failure paths and the page sentence were
+  untested; "organisations you no longer belong to" was untrue of a switched-off
+  one; "These records are about somebody else" was untrue under D-112 (a
+  worker's own case, or a DBS check they recorded for themselves) — now
+  "usually about somebody else".
+- On 6a9cc07a a failing organisations lookup already returned before any read
+  (`git show 6a9cc07a:web/_core/GdprEraser.php`, the `catch` in
+  `recordsCarryingYourName()`), so it listed nothing rather than everything;
+  that was by reading only, never driven. Round 2 makes it list the DBS checks
+  still, and drives it.
+- My data's new card uses no `<code>` table name in its rows, because the
+  rendered pins on My data find the inventory rows by theirs.
+- No JSON Schema exists for either download (neither had one before); the
+  shape of each entry is pinned by section O instead (exact values and keys).
