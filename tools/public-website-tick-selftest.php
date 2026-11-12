@@ -48,7 +48,10 @@
  *      rejection, no address, a bad address and a signed-in member's
  *      suggestion send none; a route that THROWS still approves. #972: a
  *      visitor's line breaks in the event's name or their own name are made
- *      ONE line, stored so, shown so and e-mailed so (E23, E24); the Pending
+ *      ONE line, stored so, shown so and e-mailed so (E23, E24), Unicode
+ *      line breaks and spaces included (E28); direction overrides are removed
+ *      while joiners and marks are kept (E29, #1020); text that is not UTF-8
+ *      has its broken bytes stored as "?" (E30); the Pending
  *      count and Reject both leave a deleted suggestion alone, and the page
  *      shows only its own result (E25-E27).
  *   K  who may publish, asked of the real `PublicWebsite::mayPublish()` in the
@@ -142,7 +145,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 326; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 333; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2147,6 +2150,66 @@ $scnOwnKey = static function () use ($signIn, $http, $tokenOn, $makeEvent, $site
 };
 check('E27 the moderation page shows only its OWN result (`moderation_result`): a message another page left in the shared flash is not shown there, and is still waiting for its own page',
     $scnOwnKey(), ['the other page left a message' => true, 'moderation shows it' => false]);
+
+// (7) #972 round 2 and #1020: the REST of oneLine()'s rule, each half driven
+//     through the real form and the real approval. Round 2 of the check found
+//     the Unicode half pinned by nothing: narrowing the rule to control
+//     characters alone left every check green, because E23 used only CR, LF
+//     and TAB. And #1020: characters that change the ORDER a line reads in.
+/**
+ * A visitor suggests an event on the real form with the given event name and
+ * own name, an administrator approves it, and this answers what was stored
+ * and whether the approval e-mail says both exactly as stored.
+ *
+ * @return array{stored: array{0:string,1:string}, e-mail says: bool}
+ */
+$scnTyped = static function (string $eventName, string $name, string $address, string $wantEvent, string $wantName)
+    use ($db, $http, $tokenOn, $jar, $moderate, $handedTo, $capturedSoFar, $routeNotSetUp): array {
+    $routeNotSetUp();
+    $db->query("DELETE FROM `tblEvents` WHERE `submitterEmail` = '" . $db->real_escape_string($address) . "'");
+    $from = $capturedSoFar();
+    @unlink($jar); // signed out: a visitor
+    $form = $http('GET', '/calendar/submit')['body'];
+    $http('POST', '/calendar/submit-save', [
+        'csrf_token' => $tokenOn($form), 'eventName' => $eventName, 'startDateTime' => '2030-08-11T10:30',
+        'submitterName' => $name, 'submitterEmail' => $address,
+    ]);
+    $row = $db->query("SELECT `eventID`, `eventName`, `submitterName` FROM `tblEvents` WHERE `submitterEmail` = '" . $db->real_escape_string($address) . "'")->fetch_assoc();
+    if ($row === null) {
+        return ['stored' => ['(not stored)', ''], 'e-mail says' => false];
+    }
+    $moderate((int) $row['eventID'], 'approve');
+    $body = (string) (($handedTo($address, $from)[0] ?? [])['body'] ?? '');
+    $db->query('DELETE FROM `tblEvents` WHERE `eventID` = ' . (int) $row['eventID']);
+    return [
+        'stored'      => [(string) $row['eventName'], (string) $row['submitterName']],
+        'e-mail says' => str_contains($body, 'Hello ' . $wantName . ',') && str_contains($body, '"' . $wantEvent . '"'),
+    ];
+};
+// Unicode line and paragraph separators, the no-break space and other Unicode
+// spaces: each run becomes ONE ordinary space, as a browser shows them.
+$uniEvent  = "PWT E unicode\u{2028}Click\u{2029}https://evil.example/u\u{00A0}one\u{2003}two\u{3000}three\u{2009}four";
+$uniName   = "Pat\u{2028}\u{00A0} Visit\u{2029}now";
+$uniWantEv = 'PWT E unicode Click https://evil.example/u one two three four';
+$uniWantNm = 'Pat Visit now';
+$scnUnicodeSpaces = static fn (): array => $scnTyped($uniEvent, $uniName, 'unicode.spaces@selftest.invalid', $uniWantEv, $uniWantNm);
+check('E28 (#972) U+2028, U+2029, the no-break space and other Unicode spaces in a visitor\'s event name and own name are stored as ONE ordinary space each run, and e-mailed so',
+    $scnUnicodeSpaces(), ['stored' => [$uniWantEv, $uniWantNm], 'e-mail says' => true]);
+// #1020, BOTH directions: the embeddings, overrides and isolates go (an
+// override makes "Pat" read "taP"); the zero-width joiner and non-joiner and
+// the right-to-left mark STAY, because emoji, Persian and Arabic need them.
+$dirEvent  = "PWT E direction \u{202E}tap\u{202C} \u{2066}x\u{2069} \u{202B}y\u{202A}z\u{2067}w\u{2068}v";
+$dirWantEv = 'PWT E direction tap x yzwv';
+$dirName   = "Ali \u{200F}\u{0639}\u{0644}\u{064A} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}";
+$scnDirection = static fn (): array => $scnTyped($dirEvent, $dirName, 'direction.controls@selftest.invalid', $dirWantEv, $dirName);
+check('E29 (#1020) direction overrides, embeddings and isolates are REMOVED from a visitor\'s event name, while the zero-width joiner, the zero-width non-joiner and the right-to-left mark in their name are KEPT exactly',
+    $scnDirection(), ['stored' => [$dirWantEv, $dirName], 'e-mail says' => true]);
+// Text that is not UTF-8 at all (a request made by hand): broken byte
+// sequences become "?", by the same rule as every other input.
+$bytesWantEv = 'PWT E bytes ?( end';
+$scnBytes = static fn (): array => $scnTyped("PWT E bytes \xC3\x28 end", "Pat \xE2\x80", 'broken.bytes@selftest.invalid', $bytesWantEv, 'Pat ?');
+check('E30 a visitor\'s text that is not UTF-8 has each broken byte sequence stored as "?", and is e-mailed so',
+    $scnBytes(), ['stored' => [$bytesWantEv, 'Pat ?'], 'e-mail says' => true]);
 
 // The mail rows go back as they were. The words-watching line stays in the
 // copy's Mailer until the end of this section's plants (they read the HTML).
@@ -4242,6 +4305,19 @@ $p = $plant('_apps/admin/calendar/moderation.php',
     "\$result    = \$_SESSION['moderation_result'] ?? (isset(\$_SESSION['flash_msg']) ? ['type' => 'info', 'words' => (string) \$_SESSION['flash_msg']] : null);", $scnOwnKey);
 check('P135 with the moderation page reading the SHARED flash, it shows a message another page left (E27 goes red)',
     [$p['applied'], $p['result']['moderation shows it'] ?? null], [true, true]);
+// #972 round 2 and #1020: each half of oneLine()'s rule, taken out in turn.
+$p = $plant('_core/EventSuggestions.php', "preg_replace('/[\\p{Cc}\\p{Z}]+/u', ' ', (string) \$flat);", "preg_replace('/[\\p{Cc}]+/u', ' ', (string) \$flat);", $scnUnicodeSpaces);
+check('P136 with the rule narrowed to control characters alone, U+2028, U+2029 and the Unicode spaces are stored as typed (E28 goes red)',
+    [$p['applied'], ($p['result']['stored'][0] ?? null) === $uniWantEv], [true, false]);
+$p = $plant('_core/EventSuggestions.php', "preg_replace('/[\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]+/u', '', \$valid);", '$valid;', $scnDirection);
+check('P137 with the direction controls no longer removed, an override is stored and e-mailed (E29 goes red)',
+    [$p['applied'], ($p['result']['stored'][0] ?? null) === $dirWantEv], [true, false]);
+$p = $plant('_core/EventSuggestions.php', "preg_replace('/[\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]+/u', '', \$valid);", "preg_replace('/\\p{Cf}+/u', '', \$valid);", $scnDirection);
+check('P138 with EVERY format character removed instead (all of \\p{Cf}), the joiners and the right-to-left mark in a name are lost (E29 goes red the other way)',
+    [$p['applied'], ($p['result']['stored'][1] ?? null) === $dirName], [true, false]);
+$p = $plant('_core/EventSuggestions.php', "\$valid = mb_scrub(\$text, 'UTF-8');", '$valid = $text;', $scnBytes);
+check('P139 with text that is not UTF-8 no longer repaired first, the rule refuses it and the suggestion is not stored as written (E30 goes red)',
+    [$p['applied'], ($p['result']['stored'][0] ?? null) === $bytesWantEv], [true, false]);
 // The words-watching line comes out of the copy's Mailer now, and every mail
 // row goes back as it was.
 file_put_contents($mailerPath, $mailerWas);

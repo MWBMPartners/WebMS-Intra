@@ -346,9 +346,10 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-header"><h2 class="h6 mb-0">Newsletter</h2></div>
         <div class="card-body">
             <div class="form-check form-switch py-2">
-                <?php /* #875: "this form drew the newsletter choice". Without it the
-                         handler leaves the member's choice exactly as stored. */
-                      echo Newsletter::choiceShownMarker(); ?>
+                <?php /* #875: "this form drew the newsletter choice, for this
+                         organisation". Without it, or for another organisation,
+                         the handler leaves the member's choice as stored. */
+                      echo Newsletter::choiceShownMarker($siteId); ?>
                 <input class="form-check-input" type="checkbox" role="switch"
                        name="newsletterOptedIn" value="1" id="np-newsletterOptedIn"
                        <?php echo $newsletterOptedIn === true ? 'checked' : ''; ?>>

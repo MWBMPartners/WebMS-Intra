@@ -153,10 +153,14 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //    so a member was unsubscribed from a list they were never shown a choice
 //    about. The page draws Newsletter::choiceShownMarker() beside the box,
 //    and Newsletter::choiceFromPost() answers null when it did not arrive.
+//    The marker also names the organisation the box was drawn for, and a
+//    marker for any other organisation changes nothing (round 2 of #875's
+//    check): this request writes the subscription of the organisation it is
+//    in NOW, which a switch in another tab can have changed.
 $newsletterOn     = (string) (App::settings()['newsletter']['enabled'] ?? '0');
-$newsletterChoice = Newsletter::choiceFromPost($_POST);
+$siteId           = Site::id();
+$newsletterChoice = Newsletter::choiceFromPost($_POST, $siteId);
 if (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice !== null) {
-    $siteId       = Site::id();
     $optedIn      = $newsletterChoice === true ? 1 : 0;
     $freshToken   = bin2hex(random_bytes(20));
     $nlStmt = $mysqli->prepare(

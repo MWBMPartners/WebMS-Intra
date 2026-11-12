@@ -41,7 +41,8 @@ class Newsletter
 {
     /**
      * 📰 The hidden field a form draws beside the newsletter choice to say
-     * "this form showed the member that choice" (#875).
+     * "this form showed the member that choice, for THIS organisation" (#875).
+     * Its value is the organisation's number.
      */
     public const CHOICE_SHOWN_FIELD = 'newsletterShown';
 
@@ -52,18 +53,20 @@ class Newsletter
      * 📰 The hidden "this form drew the newsletter choice" marker (#875).
      * Printed beside the tick box and ONLY there, the way
      * NotifyPrefs::shownMarker() is printed beside each notification switch
-     * (#667).
+     * (#667). It carries the number of the organisation whose newsletter the
+     * box was about, because a subscription belongs to one organisation and
+     * the tick box says nothing about which.
      */
-    public static function choiceShownMarker(): string
+    public static function choiceShownMarker(int $siteId): string
     {
-        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="1">';
+        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="' . $siteId . '">';
     }
 
     /**
-     * 📰 What a posted form asks for the member's newsletter choice (#875):
-     * true (stay subscribed, or subscribe), false (unsubscribe), or NULL
-     * when the form never showed the choice — and NULL means "change
-     * nothing".
+     * 📰 What a posted form asks for the member's newsletter choice in
+     * organisation `$siteId` (#875): true (stay subscribed, or subscribe),
+     * false (unsubscribe), or NULL - "change nothing" - when the form never
+     * showed the choice FOR THAT ORGANISATION.
      *
      * WHY THE MARKER AND NOT THE TICK BOX. An unticked box is not sent at
      * all, so "the box did not arrive" is the same post as "the box was never
@@ -72,14 +75,26 @@ class Newsletter
      * switched ON wrote "opted out" for a member who was never shown a
      * choice. Ask whether the field ARRIVED, never what it contains (#677).
      *
+     * WHY THE ORGANISATION (round 2 of #875's check). The save writes the
+     * subscription of the organisation the request is in when it is POSTED,
+     * which need not be the one the page was drawn for: with the organisation
+     * chosen per session, a member can switch organisation in another tab. A
+     * box drawn for one organisation must never set another's choice, so a
+     * marker naming any other organisation answers null. Through the real
+     * switch page the open form's token is also spent by the switch, so that
+     * post is refused before it gets here (measured, section D of
+     * tools/notify-prefs-selftest.php); this is the second line, and it does
+     * not depend on how the form token is handled.
+     *
      * EXACTLY '1' is a tick, nothing looser, as NotifyPrefs::changesFromPost()
      * decided for the switches.
      *
-     * @param array<string,mixed> $post Normally `$_POST`.
+     * @param array<string,mixed> $post   Normally `$_POST`.
+     * @param int                 $siteId The organisation the save would write for.
      */
-    public static function choiceFromPost(array $post): ?bool
+    public static function choiceFromPost(array $post, int $siteId): ?bool
     {
-        if (array_key_exists(self::CHOICE_SHOWN_FIELD, $post) === false) {
+        if (($post[self::CHOICE_SHOWN_FIELD] ?? null) !== (string) $siteId) {
             return null;
         }
 

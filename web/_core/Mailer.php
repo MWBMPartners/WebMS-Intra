@@ -195,21 +195,25 @@ class Mailer
      * once and wrapped in the layout, footer and all.
      *
      * WHY IT NAMES REAL ELEMENTS. Until #971 the guess was "a `<`, a letter,
-     * then a `>` somewhere later", which ordinary text satisfies. An
-     * organisation called `St Ann's <x> & Co` (the name is the organisation's
-     * own, typed on a settings page) made every plain message naming it
-     * "HTML": the `&` went out unescaped, the line breaks were lost and the
-     * footer disappeared — on the e-mail page's test message, the backup
-     * alert and the "a password was added" notice alike. Now the tag must be
-     * a real element's (`<p`, `</strong`, `<br/` …) or a doctype, followed by
-     * a space, `/` or `>`; `<x>`, `<Supper>` and `<sup` at the start of
-     * `<Supper>` are not.
+     * then a `>` somewhere later", which ordinary text satisfies. A plain
+     * message whose BODY held such a name - the e-mail page's test message
+     * names the organisation (`site.name`, typed on a settings page), and the
+     * "a password was added" notice names the product (`product.name`, chosen
+     * at install) - was taken for "HTML" when that name was, say,
+     * `St Ann's <x> & Co`: the `&` went out unescaped, the line breaks were
+     * lost and the footer disappeared. (The backup alert names the
+     * organisation in its SUBJECT only, which this guess never sees, so it was
+     * never affected.) Now the tag must be a real element's (`<p`, `</strong`,
+     * `<br/` …) or a doctype, followed by a space, `/` or `>`; `<x>`,
+     * `<Supper>` and `<sup` at the start of `<Supper>` are not.
      *
-     * WHAT IT STILL CANNOT DO: tell an organisation's name such as
-     * `<b>Bold</b>` from markup, because that IS markup. Anything typed by
-     * somebody outside the organisation must never reach this guess at all:
-     * such a caller passes `bodyIsText` (#859), and so do the callers whose
-     * plain text names the organisation.
+     * WHAT IT STILL CANNOT DO: tell a name that HAPPENS to be an element from
+     * markup. `St <Mark> & Co`, `<Main Hall>` and `<Title>` all name real
+     * elements (`mark`, `main`, `title`), so text holding them is still taken
+     * for HTML. That is why a caller whose body is plain text says so with
+     * `bodyIsText` (#859, #971) rather than relying on this guess - and why
+     * anything typed by somebody outside the organisation must never reach it
+     * at all.
      */
     public static function looksLikeHtml(string $body): bool
     {
@@ -450,9 +454,11 @@ class Mailer
         //    using send() directly get the auto-wrap behaviour.
         // 🛡️ `bodyIsText` (#859): the caller KNOWS the body is plain text, so
         //    no guess is made. The guess is a pattern, and a pattern is
-        //    satisfied by text a stranger typed ("Fish & Chips <Supper>", or
-        //    a name carrying `<a href=…>`), which would then be sent as
-        //    written. Callers who leave it out keep the guess unchanged.
+        //    satisfied by text a stranger typed (a name carrying `<a href=…>`,
+        //    or one that merely names a real element, such as `St <Mark> & Co`),
+        //    which would then be sent as written. Before #971 even
+        //    "Fish & Chips <Supper>" was. Callers who leave it out keep the
+        //    guess (looksLikeHtml()).
         //    The guess itself is looksLikeHtml(), the one place it is made (#971).
         $bodyIsText    = ($options['bodyIsText'] ?? false) === true;
         $looksLikeHtml = $bodyIsText === false && self::looksLikeHtml($body) === true;

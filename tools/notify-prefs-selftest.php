@@ -28,7 +28,9 @@
  *      either), and the Sabbath choice when its buttons were not drawn; and a
  *      tick counts only when it is exactly '1'; and (#875) the newsletter
  *      choice is saved only from a form that DREW it, so a page opened while
- *      the newsletter was off cannot unsubscribe anybody once it is on
+ *      the newsletter was off cannot unsubscribe anybody once it is on, and
+ *      a box drawn for one organisation cannot set another's choice after
+ *      the member switches organisation (D14-D17, the real switch page)
  *   E  a stored value that is valid JSON but not a set of named choices is
  *      replaced by the keys just saved, and the replacement is RECORDED — on
  *      BOTH pages
@@ -43,7 +45,7 @@
  *      shared one would let both read at once, deadlock, and lose a save
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
- *   H  THE PLANTS: thirteen faults, each put into a COPY of the code, each of
+ *   H  THE PLANTS: fourteen faults, each put into a COPY of the code, each of
  *      which must turn the check that guards it RED, and all green again after
  *
  * NOT DRIVEN: `merge()` also checks each `execute()`'s answer, so that its
@@ -103,7 +105,7 @@ $passed = 0;
 $failed = 0;
 // Everything the clean-up must undo, in one place, so the shutdown function
 // and a Ctrl-C reach the same list (see "Putting things back" below).
-$state  = ['proc' => null, 'child' => null, 'workers' => [], 'a' => null, 'db' => null, 'newsletterTouched' => false];
+$state  = ['proc' => null, 'child' => null, 'workers' => [], 'a' => null, 'db' => null, 'newsletterTouched' => false, 'multisiteWas' => null, 'siteB' => null];
 
 function refuse(string $why): never
 {
@@ -193,6 +195,8 @@ if ($tables < 100) {
 //     and any worker, which the
 //     operating system may leave running — stop them by hand;
 //   - `newsletter.enabled` set to '1' if the kill landed inside D8/D9;
+//   - inside D14-D17, the two `multisite.*` rows and organisation 987875 are
+//     put back by the shutdown function, but not after a `kill -9`;
 //   - the test member and their rows, which the next run removes first.
 register_shutdown_function(static function () use (&$state): void {
     if ($state['a'] instanceof mysqli) {
@@ -224,6 +228,18 @@ register_shutdown_function(static function () use (&$state): void {
         ];
         if ($state['newsletterTouched'] === true) {
             $sqls[] = "UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL";
+        }
+        // D14-D17 (#875): the organisation chosen per session, and organisation B.
+        if (is_array($state['multisiteWas']) === true) {
+            foreach ($state['multisiteWas'] as $was) {
+                $sqls[] = "UPDATE `tblSettings` SET `settingValue` = '" . $state['db']->real_escape_string((string) $was['settingValue'])
+                    . "' WHERE `settingKey` = '" . $state['db']->real_escape_string((string) $was['settingKey']) . "' AND `siteID` IS NULL";
+            }
+        }
+        if (is_int($state['siteB']) === true) {
+            $sqls[] = 'DELETE FROM `tblNewsletterSubscription` WHERE `siteID` = ' . $state['siteB'];
+            $sqls[] = 'DELETE FROM `tblUserSites` WHERE `siteID` = ' . $state['siteB'];
+            $sqls[] = 'DELETE FROM `tblSites` WHERE `siteID` = ' . $state['siteB'];
         }
         foreach ($sqls as $sql) {
             try {
@@ -924,6 +940,136 @@ check('D12 (#875) ...and writes no "opted out" row for a member who had never ch
 check('D13 a page that DREW the box, saved with it unticked, does unsubscribe (the choice still works)',
     $okDrawn, $detailDrawn);
 
+/**
+ * D14-D17 (#875, round 2 of its check): a box drawn for ONE organisation must
+ * never set ANOTHER organisation's newsletter choice. The save writes the
+ * subscription of the organisation the request is in when it is POSTED; with
+ * the organisation chosen per session, a member can switch in another tab
+ * between drawing the page and pressing Save.
+ *
+ * The world: the organisation chosen per session (`multisite.*`), a second
+ * organisation B of this test's own, the member in both, the newsletter on,
+ * and a subscription row (opted IN) in each. The member switches through the
+ * REAL switch page.
+ *
+ * Two posts of the SAME form, drawn for A, after switching to B:
+ *   - with the form's OWN token. The switch spent that token (every accepted
+ *     form replaces it), so this post is refused before the newsletter is
+ *     reached. Measured, not assumed; it is D15, and it passes on the code
+ *     before round 2 too.
+ *   - with a CURRENT token, standing for any way the token on an open page
+ *     can be renewed. Then only the organisation in the marker stands between
+ *     A's box and B's subscription: D16, which goes red on the old marker
+ *     (plant H15).
+ *
+ * @return array<string, mixed>
+ */
+$siteB = 987875;
+$scenarioOtherOrganisation = static function () use (&$state, $db, $http, $formOn, $userId, $siteId, $siteB, $fmt): array {
+    $tokenOn = static fn (string $html): string => preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+    $switchTo = static function (int $site) use ($http, $tokenOn): int {
+        $page = $http('GET', '/site/choose');
+        return $http('POST', '/site/switch', ['csrf_token' => $tokenOn($page['body']), 'site_id' => (string) $site])['status'];
+    };
+    $markerOn = static fn (string $html): string => preg_match('/name="newsletterShown" value="([^"]*)"/', $html, $m) === 1 ? $m[1] : '(none)';
+    $subs = static function () use ($db, $userId, $siteId, $siteB): array {
+        $out = [];
+        foreach ([$siteId => 'A', $siteB => 'B'] as $site => $label) {
+            $row = $db->query("SELECT `optedIn` FROM `tblNewsletterSubscription` WHERE `userID` = {$userId} AND `siteID` = {$site}")->fetch_assoc();
+            $out[$label] = $row === null ? null : (int) $row['optedIn'];
+        }
+        return $out;
+    };
+    $setSubs = static function () use ($db, $userId, $siteId, $siteB): void {
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        foreach ([$siteId, $siteB] as $site) {
+            $token = bin2hex(random_bytes(20));
+            $db->query("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES ({$site}, {$userId}, 1, '{$token}')");
+        }
+    };
+
+    // Remember the two installation-wide multisite rows exactly, so the clean-up
+    // (and a Ctrl-C, through the shutdown function) can put them back.
+    $state['multisiteWas'] = $db->query("SELECT `settingKey`, `settingValue` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` IN ('multisite.enabled', 'multisite.detectionMode')")->fetch_all(MYSQLI_ASSOC);
+    $state['siteB'] = $siteB;
+    $state['newsletterTouched'] = true;
+    $db->query("UPDATE `tblSettings` SET `settingValue` = 'true' WHERE `settingKey` = 'multisite.enabled' AND `siteID` IS NULL");
+    $db->query("UPDATE `tblSettings` SET `settingValue` = 'session' WHERE `settingKey` = 'multisite.detectionMode' AND `siteID` IS NULL");
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+    $db->query("INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `isActive`) VALUES ({$siteB}, 'selftest-notify-b', 'Notify Prefs Organisation B', 1)");
+    $db->query("INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES ({$siteB}, {$userId}, 1)");
+    try {
+        $out = [];
+        // ── A page drawn for A, saved after switching to B with its own token ──
+        $setSubs();
+        $out['switch to A'] = $switchTo($siteId);
+        $pageA = $http('GET', '/account/notifications')['body'];
+        $out['marker on A\'s page'] = $markerOn($pageA);
+        $formA = $formOn($pageA, 'account/notifications/save');
+        $fieldsA = $formA['fields'];
+        unset($fieldsA['newsletterOptedIn']); // unticked on A's page
+        $out['switch to B'] = $switchTo($siteB);
+        $out['marker on B\'s page'] = $markerOn($http('GET', '/account/notifications')['body']);
+        $out['own token: answer'] = $http('POST', $formA['action'], $fieldsA)['status'];
+        $out['own token: subscriptions'] = $subs();
+        $out['own token: told expired'] = str_contains($http('GET', '/account/notifications')['body'], 'Invalid or expired form token.');
+        // ── The same fields, with a CURRENT token ──
+        $setSubs();
+        $fresh = $formOn($http('GET', '/account/notifications')['body'], 'account/notifications/save');
+        $out['current token: answer'] = $http('POST', $formA['action'], ['csrf_token' => $fresh['fields']['csrf_token'] ?? ''] + $fieldsA)['status'];
+        $out['current token: subscriptions'] = $subs();
+        // ── B's own page, unticked, in B: B's choice changes, A's does not ──
+        $setSubs();
+        $fieldsB = $fresh['fields'];
+        $fieldsB['csrf_token'] = $formOn($http('GET', '/account/notifications')['body'], 'account/notifications/save')['fields']['csrf_token'] ?? '';
+        unset($fieldsB['newsletterOptedIn']);
+        $out['B\'s own page: answer'] = $http('POST', $fresh['action'], $fieldsB)['status'];
+        $out['B\'s own page: subscriptions'] = $subs();
+        $switchTo($siteId);
+        return $out;
+    } finally {
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        $db->query("DELETE FROM `tblUserSites` WHERE `siteID` = {$siteB}");
+        $rs = $db->query("SELECT `TABLE_NAME`, `COLUMN_NAME` FROM `information_schema`.`KEY_COLUMN_USAGE` WHERE `TABLE_SCHEMA` = DATABASE() AND `REFERENCED_TABLE_NAME` = 'tblSites'");
+        while ($fk = $rs->fetch_assoc()) {
+            try {
+                $db->query('DELETE FROM `' . $fk['TABLE_NAME'] . '` WHERE `' . $fk['COLUMN_NAME'] . "` = {$siteB}");
+            } catch (Throwable $e) {
+                // A table whose own parent has already gone, or another shape.
+            }
+        }
+        try {
+            $db->query("DELETE FROM `tblActivityLogs` WHERE `siteID` = {$siteB}");
+        } catch (Throwable $e) {
+            // Removed with the other rows that name B above, if the column links.
+        }
+        $db->query("DELETE FROM `tblSites` WHERE `siteID` = {$siteB}");
+        foreach ($state['multisiteWas'] as $was) {
+            $u = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+            $u->bind_param('ss', $was['settingValue'], $was['settingKey']);
+            $u->execute();
+            $u->close();
+        }
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $state['multisiteWas'] = null;
+        $state['siteB'] = null;
+        $state['newsletterTouched'] = false;
+    }
+};
+$both = ['A' => 1, 'B' => 1];
+$other = $scenarioOtherOrganisation();
+check('D14 (the premise) the organisation really is chosen per session: the page drawn in A marks the newsletter box for A, and after the real switch it marks it for B',
+    ($other['marker on A\'s page'] ?? null) === (string) $siteId && ($other['marker on B\'s page'] ?? null) === (string) $siteB, $fmt($other));
+check('D15 a form drawn for A, posted with its own token after switching to B, is refused and changes neither subscription (the switch spent that token: measured, and true before this check existed too)',
+    ($other['own token: told expired'] ?? null) === true && ($other['own token: subscriptions'] ?? null) === $both,
+    $fmt([$other['own token: answer'] ?? null, $other['own token: told expired'] ?? null, $other['own token: subscriptions'] ?? null]));
+check('D16 (#875) a form drawn for A, posted in B with a CURRENT token, does NOT change B\'s newsletter choice (or A\'s): its box was about A',
+    ($other['current token: answer'] ?? null) === 302 && ($other['current token: subscriptions'] ?? null) === $both, $fmt([$other['current token: answer'] ?? null, $other['current token: subscriptions'] ?? null]));
+check('D17 ...while B\'s own page, saved unticked in B, does unsubscribe from B and leaves A alone (the marker still works)',
+    ($other['B\'s own page: answer'] ?? null) === 302 && ($other['B\'s own page: subscriptions'] ?? null) === ['A' => 1, 'B' => 0], $fmt([$other['B\'s own page: answer'] ?? null, $other['B\'s own page: subscriptions'] ?? null]));
+// Every section below runs as the member signed in afresh, in one organisation.
+$signIn();
+
 // =============================================================================
 echo "\nE. A stored value that is not a set of named choices, on BOTH pages\n";
 // =============================================================================
@@ -1397,8 +1543,8 @@ $plants['H11 the lock made SHARED instead of exclusive turns F5 RED (a deadlock 
 // #875: the newsletter choice saved only from a form that drew it.
 $plants['H13 the handler no longer asking whether the newsletter box was DRAWN (the old isset) turns D11 RED'] = $plant(
     '_apps/auth/account/notifications-save.php',
-    "if ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice !== null) {\n    \$siteId       = Site::id();\n    \$optedIn      = \$newsletterChoice === true ? 1 : 0;",
-    "if (\$newsletterOn === '1' || \$newsletterOn === 'true') {\n    \$siteId       = Site::id();\n    \$optedIn      = isset(\$_POST['newsletterOptedIn']) === true ? 1 : 0;",
+    "if ((\$newsletterOn === '1' || \$newsletterOn === 'true') && \$newsletterChoice !== null) {\n    \$optedIn      = \$newsletterChoice === true ? 1 : 0;",
+    "if (\$newsletterOn === '1' || \$newsletterOn === 'true') {\n    \$optedIn      = isset(\$_POST['newsletterOptedIn']) === true ? 1 : 0;",
     static function () use ($scenarioNewsletter): array {
         $r = $scenarioNewsletter(false, true);
         return [$r[0], $r[1]];
@@ -1406,11 +1552,23 @@ $plants['H13 the handler no longer asking whether the newsletter box was DRAWN (
 );
 $plants['H14 the page no longer drawing the "drawn" marker beside the box turns D13 RED (unsubscribing stops working)'] = $plant(
     '_apps/auth/account/notifications.php',
-    'echo Newsletter::choiceShownMarker(); ?>',
+    'echo Newsletter::choiceShownMarker($siteId); ?>',
     '?>',
     static function () use ($scenarioNewsletter): array {
         $r = $scenarioNewsletter(true, true);
         return [$r[0], $r[1]];
+    }
+);
+
+$plants['H15 the newsletter marker no longer naming the organisation (any marker read as "drawn") turns D16 RED: A\'s box sets B\'s choice'] = $plant(
+    '_core/Newsletter.php',
+    "        if ((\$post[self::CHOICE_SHOWN_FIELD] ?? null) !== (string) \$siteId) {",
+    "        if (array_key_exists(self::CHOICE_SHOWN_FIELD, \$post) === false) {",
+    static function () use ($scenarioOtherOrganisation, $signIn): array {
+        $r = $scenarioOtherOrganisation();
+        $signIn();
+        $ok = ($r['current token: subscriptions'] ?? null) === ['A' => 1, 'B' => 1];
+        return [$ok, 'current token: subscriptions ' . json_encode($r['current token: subscriptions'] ?? null)];
     }
 );
 
@@ -1433,7 +1591,12 @@ check('H12 with the plants removed, every scenario they broke is green again',
     && $scenarioBoth()[0] === true
     && $scenarioEFull()[0] === true && $scenarioECard()[0] === true && $scenarioRefused()[0] === true && $scenarioTick()[0] === true
     && $scenarioOnlyUnsettable()[0] === true
-    && $scenarioNewsletter(false, true)[0] === true && $scenarioNewsletter(true, true)[0] === true);
+    && $scenarioNewsletter(false, true)[0] === true && $scenarioNewsletter(true, true)[0] === true
+    && (static function () use ($scenarioOtherOrganisation, $signIn): bool {
+        $r = $scenarioOtherOrganisation();
+        $signIn();
+        return ($r['current token: subscriptions'] ?? null) === ['A' => 1, 'B' => 1];
+    })());
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
 $db->query("DELETE FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'");
