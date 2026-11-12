@@ -24031,3 +24031,57 @@ thought of.
   whichever differs, and asserts both "today listed" and "yesterday not", so one
   half fails on the old code at any hour. Both halves were driven by moving the
   test server's `time_zone`.
+
+## Events and outside calendars (#885, #853, #854, #855, #811)
+
+- "Ordering by real moment is one helper" — `Events::soonestByRealStart()` is the ONE place; a caller keeps its
+  statement in a `$read(?string $upTo, ?int $max)` closure; it cannot page with OFFSET (the calendar list view still
+  orders by reading — see Found).
+- `Events::whyCategoryOrTypeRefused()` is the ONE place a category/type number is judged; round 2 of its check found
+  it pinned one way only (four writers could refuse the organisation's OWN numbers with every check green) — every
+  writer now has a "still accepts its own" case, with an own type whose number is not a category number; round 3
+  added another organisation's TYPE for every writer (it had been pinned on the update API only).
+- "A decision is made as it stands now (D-180, #855)": `decide()` resolves BEFORE and AFTER the decisions in one
+  lock. The count is the rows claimed directly. A named date whose claim failed is "changed"; whether it is worded
+  "now follows your decision" or "please review it again" depends only on whether the second resolve REPORTS writing
+  a follower row for that date following a row this call claimed (`resolveFeed()`'s `followers`). Lessons: a
+  condition that can never fail is not a guard; a count that includes "changed" dates contradicts the decision; and
+  a text test on a column a person can also type into is not a structural fact (round 3's `decisionNote` test).
+
+## Mail, event suggestions and the newsletter choice (#971, #972, #875, #1020)
+
+- `Mailer::looksLikeHtml()` is the ONE place the "is this HTML" guess is made; `send()` and
+  `renderBase()` both ask it (there were three copies of the pattern). It needs a real element name
+  (`Mailer::HTML_ELEMENTS`) or a doctype, followed by a space, `/` or `>`.
+- A body that looks like HTML is sent exactly as written, with NO branded layout and so no footer.
+  A name that happens to be an element (`St <Mark> & Co`) still trips it, so a caller whose body is
+  plain text passes `bodyIsText` (#859): the e-mail page's test (both branches; `testSmtp()` passes
+  `true` to `renderBase()`), `cron/backup-check`, `auth/account/add-password-save` and the event
+  broadcast.
+- **Test the CALLER with a name the guess treats as HTML.** Round 1 drove the callers with
+  `St <x> & "Co"`, which the new guess already treats as text, so taking the option out of any caller
+  left every check green (round 2 of the check). P15 now drives each caller with `St <Mark> & Co`.
+- Test trap: `tools/mail-pages-selftest.php` ran PHP's built-in server WITH opcache (it is
+  `opcache.enable`, not `enable_cli`, that governs the `cli-server` SAPI), so a planted line could go
+  unseen by the page. It now starts the server with `opcache.enable=0`.
+- The non-SMTP "Send test" cannot reach Microsoft from a test: P15 fills the route with made-up values
+  and leaves the hourly limit no room, so the message is KEPT in the queue, built exactly as it would
+  be sent, and the stored HTML is decrypted and read back.
+
+- `EventSuggestions::oneLine()` is the ONE rule; `calendar/submit-save.php` applies it to `eventName`
+  and `submitterName` before storing, and `approvalMessage()` applies it again to the row. Three
+  steps: `mb_scrub()` (substitute set to "?" in the method and the server's setting put back - E31
+  sets it to "*" first; plants P141 and P142 go red); remove U+202A–U+202E and U+2066–U+2069;
+  every run of `\p{Cc}` and `\p{Z}` to one space, then trim. It does NOT remove all of `\p{Cf}`
+  (joiners and marks stay). E29's fixtures hold EVERY removed character and EVERY kept one, because a
+  fixture with one example of each kind let a wrong range pass (round 3); plants P137, P138 and P140
+  pin both directions.
+
+- `Newsletter::choiceShownMarker($siteId, $drawnTicked)` is drawn beside the tick box; its value is
+  "<organisation>:<1 or 0>". `Newsletter::choiceShownHere()` says whether the posted form showed the
+  choice for THIS organisation (used for the "not changed" sentence), and
+  `Newsletter::choiceFromPost()` answers what to WRITE: null unless shown here AND the member moved
+  the box away from how it was drawn. When it answers, the choice is saved whether or not the
+  newsletter is switched on at that moment. A box left as drawn writes nothing, so an old page
+  cannot resubscribe somebody who left by a newsletter's own unsubscribe link. #677's rule (ask whether
+  a field ARRIVED) and #667's marker shape, for the one choice not stored in `tblUsers.notifyPrefs`.

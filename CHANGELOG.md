@@ -4,6 +4,44 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events and outside calendars: five faults a member or administrator would see (#885, #853, #854, #855, #811; D-180)
+
+- The events API refuses a category or event type that is not the organisation's own with 422 and a plain reason,
+  instead of answering 500; another organisation's number is no longer stored, by the API, the Manage Events form,
+  a series' bulk edit or the public suggestion form, and the two cases cannot be told apart (#885).
+- An outside calendar's page no longer shows "On the public website" for an event the website leaves out (calendar
+  paused, or its stored answer waiting for the next refresh); it says why instead (#853).
+- A new "who sees every date" choice starts with nothing chosen, so saving it untouched can no longer open every
+  date of a series to the audience of the one date it was opened from (#854).
+- Approving or declining an outside-calendar date now decides it as it stands now (D-180): its calendar is re-worked
+  under the rules in force first, so a request made under the other copied-in rule, or under a rule that has since
+  run out, is reported "changed" rather than decided on its old basis; when such a date ends carrying the decision
+  through another date of the same repeating event, the message says so instead of asking for a review (#855).
+- "Next" lists — the newsletter's upcoming events, the reminder preview and the "all upcoming" calendar download —
+  are ordered by each event's real moment, not by readings on different clocks; and an event ending at exactly
+  midnight is no longer drawn as a 15-minute sliver on the next day in the day and week views (#811).
+
+### Mail, event suggestions and the newsletter choice (#971, #972, #875, #1020)
+
+- **Mail (#971).** A plain message is no longer mistaken for HTML because a name in it holds "<".
+  `Mailer::looksLikeHtml()` is now the one guess, and it counts only a real HTML element. A name that
+  happens to be one (`St <Mark> & Co`, `<Main Hall>`, `<Title>`) still would be, so the callers that
+  send plain text now say so: the e-mail page's test message (both routes), the "password sign-in
+  added" notice and the backup alert. Before this an organisation named, say, `St <x> & Co` turned the
+  test message into raw HTML with no footer, and a product named so did the same to the "password
+  added" notice. The event broadcast is sent as plain text, so it now carries the organisation's
+  layout and footer (it had none); it was never escaped twice.
+- **Event suggestions (#972, #1020).** A visitor's event name and own name are stored as one line
+  each (Unicode line breaks and spaces included), with any characters that reverse the order text
+  reads in removed, so the approval e-mail says them exactly as the moderation page shows them.
+- **Notification preferences (#875).** Saving the page no longer unsubscribes a member from the
+  newsletter when the page was opened before the newsletter was switched on, or was drawn for another
+  organisation: the choice is saved only when the member changed the box on a form that showed it
+  for this organisation (even if the newsletter has since been switched off), and an old page left
+  as drawn cannot undo an unsubscribe made by a newsletter's own link, nor a subscription made
+  elsewhere. When the newsletter is on and the form did not show the choice for this organisation,
+  the page says the newsletter choice was not changed; every other save says plain "Preferences saved."
+
 ### Anonymous prayer requests name nobody, and an e-mail-address erasure reaches them (#988, #1009; D-176, D-178)
 
 - **The anonymous prayer form no longer ties a request to a signed-in member's account (#988).** Its activity records

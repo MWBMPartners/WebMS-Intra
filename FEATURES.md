@@ -1345,6 +1345,12 @@ another repo, ever**.
 - Erasure, accounts (#977): an account erased on request shows on Admin → Users as "Erased on request, cannot be changed" and cannot be edited, switched back on, placed into an organisation, added to one or offboarded.
 - No country is built in (#942, D-133): the installer asks for the installation's country (suggested from the browser's time zone, sending nothing), and each organisation chooses its own on Admin, Settings, Organisation. Every installer answer sends a strict Content Security Policy.
 - Duty Roster: upcoming duties are listed by the organisation's own date (#987). The assets API changes only the fields it was sent; a change made by somebody else at the same time is kept (#1001).
+- Newsletter / notification preferences: "The newsletter choice is saved only from a form that showed
+  it, for the same organisation (#875)."
+- Calendar suggestions: "A visitor's event name and name are stored on one line, with
+  order-reversing characters removed (#972, #1020)."
+- Mail: "A plain message is told from HTML by real HTML elements only (`Mailer::looksLikeHtml()`,
+  #971), and plain-text senders say so; event broadcasts carry the organisation's footer."
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 

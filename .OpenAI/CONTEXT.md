@@ -1458,6 +1458,14 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `ics-reader-selftest.php`, `safefetch-selftest.php` and
     `import-notifier-selftest.php`. The technical record is DEV_NOTES.md,
     "Outside calendars (#514)".
+    `Events::whyCategoryOrTypeRefused()` is the ONE judge of an event's category/type number (#885);
+    `Events::soonestByRealStart()` the ONE order for a "next N events" list (#811); a decision on a
+    waiting imported date re-works its calendar first (`inFeedLock($resolveFirst)`, D-180, #855), and
+    which dates "now follow your decision" comes only from `resolveFeed()`'s `followers`, never from note text.
+    `Mailer::looksLikeHtml()` is the ONE place a body is guessed to be HTML (#971): a real element only,
+    which a name can still be, so a caller sending plain text says `bodyIsText`; `EventSuggestions::oneLine()`
+    is the ONE rule for a visitor's one-line values (#972, #1020); the newsletter choice is saved only when
+    `Newsletter::choiceFromPost()` sees its marker for this organisation AND the member changed the box (#875).
 
     **Changing a repeating series' pattern (#669, migration 232).**
     `Portal\Core\SeriesRepattern` is the ONE place that decides what a
