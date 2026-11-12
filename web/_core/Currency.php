@@ -633,6 +633,16 @@ final class Currency
     public const FILE_REASON_UNREADABLE     = 'That amount could not be read.';
     /** A minus where a file's amount may NOT be negative (the asset import). */
     public const FILE_REASON_MINUS_NOT_HERE = 'A minus sign has no place here: the amount cannot be negative.';
+    /**
+     * Added to FILE_REASON_UNREADABLE and its advice where no negative is
+     * allowed (the asset import) and the cell carries a minus ANYWHERE (round
+     * 18). Without it "-R3", "-3GBP", "-£3.00DR" or "-abc" were told only to
+     * write the amount in figures, and a reader who dropped the minus would
+     * store a POSITIVE cost where the file said a negative one. It is a
+     * statement about this place, true for every such cell — it does not say
+     * that the cell IS negative ("R-rated", "-P.O. 1234").
+     */
+    public const FILE_REASON_NOT_NEGATIVE_HERE = 'Amounts here cannot be negative.';
 
     /** The other refusals, each worded for the one shape it is given (#1004). */
     public const REFUSED_POWER_OF_TEN = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
@@ -842,13 +852,15 @@ final class Currency
         //    file, commas). Anything else is refused with the reason for ITS shape.
         $shape = $fromFile === true ? '/^[0-9,]*(\.[0-9]*)?$/D' : '/^[0-9]*(\.[0-9]*)?$/D';
         if (preg_match($shape, $text) !== 1) {
-            return self::whyNotAnAmount($text, $code, $fromFile, $allowNegative);
+            return self::withNoNegativeNote(self::whyNotAnAmount($text, $code, $fromFile, $allowNegative), $typed, $fromFile, $allowNegative);
         }
         $point    = strpos($text, '.');
         $whole    = $point === false ? $text : substr($text, 0, $point);
         $fraction = $point === false ? '' : substr($text, $point + 1);
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
-            return $fromFile === true ? self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code, $allowNegative) : self::REFUSED_NO_FIGURES;
+            return $fromFile === true
+                ? self::withNoNegativeNote(self::FILE_REASON_UNREADABLE . ' ' . self::fileAdvice($code, $allowNegative), $typed, true, $allowNegative)
+                : self::REFUSED_NO_FIGURES;
         }
         if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
             return self::REFUSED_COMMAS;
@@ -873,6 +885,22 @@ final class Currency
         $hundredths = (int) $figures;
 
         return $negative === true ? -$hundredths : $hundredths;
+    }
+
+    /**
+     * Adds FILE_REASON_NOT_NEGATIVE_HERE to a FILE's "could not be read"
+     * refusal where no negative is allowed and the cell as given (`$typed`)
+     * carries a minus anywhere (round 18). Every other refusal is returned as
+     * it is. It changes words only: the cell is refused either way.
+     */
+    private static function withNoNegativeNote(string $refusal, string $typed, bool $fromFile, bool $allowNegative): string
+    {
+        if ($fromFile === true && $allowNegative === false && str_contains($typed, '-') === true
+            && str_starts_with($refusal, self::FILE_REASON_UNREADABLE) === true) {
+            return $refusal . ' ' . self::FILE_REASON_NOT_NEGATIVE_HERE;
+        }
+
+        return $refusal;
     }
 
     /**
