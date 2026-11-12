@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 294;  // + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 299;  // + five in part X (#824: X18m-X18q) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3292,6 +3292,78 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'X18l (#819) with no active pathway anywhere, the scheduled sweep finishes normally -- OK, swept 0, recorded ok -- rather than calling itself switched off',
         $activeElsewhere === 0 && $okRun($runI) === true && is_array($sweptI) === true && ($sweptI['sitesSwept'] ?? null) === 0,
         'other active pathways: ' . $activeElsewhere . '; ' . $tell($runI)
+    );
+
+    // ---- #824: a step is completed only for somebody who still BELONGS -----
+    // None of the sweep's three rules asked whether the person was still one
+    // of the organisation's own, so somebody who had LEFT (their membership
+    // switched off) went on having steps completed from their attendance and
+    // RSVPs: permanent rows their former organisation's leaders read. The
+    // sweep now asks the ONE rule (`Site::isOwnOrganisation()` with several
+    // organisations; the account's own switch with one) before any rule runs.
+    //
+    // A second person is enrolled in organisation 1's pathway with a going
+    // RSVP to organisation 1's own event: OTHER, who is a member of
+    // organisation two ONLY. With several organisations OTHER is not one of
+    // organisation 1's, so the step is not completed; with ONE organisation
+    // nobody needs a membership row, so it is -- which is what makes OTHER
+    // the control for the single-organisation checks below.
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) VALUES (1, ?, ?, 'active')", 'ii', [$path812One, OTHER]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (960907, ?, 1, 'going', 'confirmed')", 'i', [OTHER]);
+    $xMultisiteWas = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL")['settingValue'] ?? null;
+    $memberOneRow  = static fn (): ?array => one('SELECT isActive FROM tblUserSites WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    $enrolment824  = static fn (int $userId): ?string => one('SELECT status FROM tblPathwayEnrolments WHERE pathwayID = ? AND userID = ?', 'ii', [$path812One, $userId])['status'] ?? null;
+
+    // With SEVERAL organisations, through the scheduled job.
+    setting('multisite.enabled', 'true');
+    $run824a   = $sweepOnce();
+    $otherOneA = $doneIn($path812One, OTHER);
+    ok(
+        'X18m premise (#824): with several organisations and everybody where they belong, the scheduled sweep completes the member\'s step in organisation 1 and OTHER\'s in organisation two -- so the empty answers below are not the sweep failing to run',
+        (int) ($memberOneRow()['isActive'] ?? 0) === 1 && $okRun($run824a) === true && $bothSwept($run824a) === true,
+        'member\'s organisation 1 row ' . json_encode($memberOneRow()) . '; ' . $tell($run824a)
+    );
+    ok(
+        'X18n (#824) OTHER -- enrolled in organisation 1\'s pathway with a going RSVP to its event, but a member of organisation two only -- has NO step completed there (the old sweep never asked, and completed it)',
+        $otherOneA === [] && one('SELECT userID FROM tblUserSites WHERE userID = ? AND siteID = 1', 'i', [OTHER]) === null,
+        'OTHER completed in organisation 1: ' . json_encode($otherOneA)
+    );
+    q('UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    $run824b = $sweepOnce();
+    ok(
+        'X18o (#824) once the member has LEFT organisation 1 (membership switched off, isActive 0), the scheduled sweep completes NOTHING for them there, still completes OTHER\'s step in organisation two, records ok -- and leaves the member\'s enrolment exactly as it was',
+        (int) ($memberOneRow()['isActive'] ?? -1) === 0 && $okRun($run824b) === true
+            && $run824b['one'] === [] && $run824b['two'] === ['Selftest 819 organisation two'] && $enrolment824(MEMBER) === 'active',
+        'enrolment ' . json_encode($enrolment824(MEMBER)) . '; ' . $tell($run824b) . ' (the old sweep completed ["Selftest 812 own organisation"] for the member who had left)'
+    );
+    q('UPDATE tblUserSites SET isActive = 1 WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    if ($xMultisiteWas === null) {
+        q("DELETE FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL");
+    } else {
+        setting('multisite.enabled', (string) $xMultisiteWas);
+    }
+
+    // With ONE organisation, through the administrator's roster page, which
+    // sweeps ONE pathway (the other way the sweep is reached). Here the
+    // account's own switch is the whole question.
+    $clearProgress();
+    q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [MEMBER]);
+    $roster824a = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $memberOneC = $doneIn($path812One, MEMBER);
+    $otherOneC  = $doneIn($path812One, OTHER);
+    q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [MEMBER]);
+    ok(
+        'X18p (#824) with ONE organisation, the roster page\'s sweep completes NOTHING for a member whose account is switched off, and DOES complete OTHER\'s step although OTHER has no organisation 1 membership row (with one organisation nobody needs one)',
+        $xMultisiteWas !== 'true' && $roster824a['status'] === 200 && $memberOneC === [] && $otherOneC === ['Selftest 812 own organisation'],
+        'multisite was ' . json_encode($xMultisiteWas) . '; ' . said($roster824a) . '; member completed ' . json_encode($memberOneC) . ', OTHER completed ' . json_encode($otherOneC)
+            . ' (the old sweep completed the switched-off member\'s step too)'
+    );
+    $roster824b = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $memberOneD = $doneIn($path812One, MEMBER);
+    ok(
+        'X18q (#824) once the account is switched back on, the next sweep completes the step its evidence earns -- leaving was not recorded as anything',
+        $roster824b['status'] === 200 && $memberOneD === ['Selftest 812 own organisation'],
+        said($roster824b) . '; member completed ' . json_encode($memberOneD)
     );
     q("DELETE FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
 
