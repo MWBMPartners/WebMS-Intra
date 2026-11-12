@@ -1253,6 +1253,15 @@ curl_multi_remove_handle($multi, $edit);
 curl_multi_close($multi);
 check('T2 a repair in EUR recorded WHILE the edit waited makes the edit refuse once it gets the lock: the asset is still EUR, agreeing with its repair',
     $assetCurrency($stand) === 'EUR', var_export($assetCurrency($stand), true));
+// T2b: the WORDS of a refusal under the asset's lock (round 7). The page used to
+// blame "the asset tag code" for every failed update; a currency refusal found under
+// the lock is now said as such. T2's race left a message for the asset page; read it
+// now, before another page shows (and so uses up) the message.
+$standFlash = html_entity_decode($http('GET', '/assets/edit?id=' . $stand)['body'], ENT_QUOTES, 'UTF-8');
+// Only the MESSAGE is judged: the page's own form has an "Asset tag code" field.
+$standMessage = preg_match('/<div class="alert alert-danger">(.*?)<\/div>/s', $standFlash, $mm) === 1 ? trim($mm[1]) : '';
+check('T2b the asset page says WHY the raced edit was refused — a record in another currency than USD — and does not blame the asset tag code',
+    str_contains($standMessage, 'in another currency than USD') === true && str_contains($standMessage, 'tag code') === false, $standMessage);
 
 /**
  * Run one real request in the web server while this test holds a lock in its own
@@ -1261,10 +1270,13 @@ check('T2 a repair in EUR recorded WHILE the edit waited makes the edit refuse o
  * holding connection); then let go and wait for the request to finish. Answers
  * whether the request was seen waiting.
  */
-$raceRequest = static function (string $path, array $post, mysqli $holder, string $waitsOn, callable $meanwhile) use ($port, $jar, $db): bool {
+$raceLast = ['status' => 0, 'body' => ''];
+$raceRequest = static function (string $path, array $post, mysqli $holder, string $waitsOn, callable $meanwhile, bool $asJson = false) use ($port, $jar, $db, &$raceLast): bool {
     $multi = curl_multi_init();
     $req = curl_init('http://127.0.0.1:' . $port . $path);
-    curl_setopt_array($req, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($post),
+    curl_setopt_array($req, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $asJson === true ? json_encode($post) : http_build_query($post),
+        CURLOPT_HTTPHEADER => $asJson === true ? ['Content-Type: application/json', 'X-CSRF-TOKEN: ' . (string) ($post['csrf_token'] ?? '')] : [],
         CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
     curl_multi_add_handle($multi, $req);
     $seen = false;
@@ -1283,6 +1295,7 @@ $raceRequest = static function (string $path, array $post, mysqli $holder, strin
             curl_multi_select($multi, 1.0);
         }
     } while ($running > 0);
+    $raceLast = ['status' => (int) curl_getinfo($req, CURLINFO_HTTP_CODE), 'body' => (string) curl_multi_getcontent($req)];
     curl_multi_remove_handle($multi, $req);
     curl_multi_close($multi);
     return $seen;
@@ -1348,6 +1361,119 @@ check('T5 the premise: the claim edit was seen WAITING on the claim row this tes
 check('T6 the claim was given a currency while the edit waited, so the edit REFUSED: the title is unchanged and no line was written in the old answer',
     ($raceClaimAfter[0]['claimTitle'] ?? '') === 'Currency selftest raced claim' && ($raceClaimAfter[0]['currency'] ?? '') === 'EUR' && (int) ($raceLines[0]['n'] ?? -1) === 0,
     json_encode([$raceClaimAfter, $raceLines]));
+
+// T2c: the API's words for a refusal under the asset's lock (round 7; T2b, the
+// page's, runs straight after T2, before any other page uses up its message).
+run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`) VALUES (?, 'Currency selftest stool', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(16))]);
+$stool = (int) $db->insert_id;
+$made['assets'][] = $stool;
+$stoolHolder = $holdRow('tblAssets', 'assetID', $stool);
+$stoolWaited = $raceRequest('/api/assets/update', ['assetID' => $stool, 'currency' => 'USD', 'csrf_token' => $freshToken('/assets/edit?id=' . $stool)],
+    $stoolHolder, 'tblAssets',
+    static function (bool $waiting) use ($stoolHolder, $site, $stool): void {
+        $r = $stoolHolder->prepare("INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest stool repair', 300, 'EUR')");
+        $r->bind_param('ii', $site, $stool);
+        $r->execute();
+        $r->close();
+        $stoolHolder->commit();
+        $stoolHolder->close();
+    }, true);
+$stoolAnswer = json_decode($raceLast['body'], true);
+check('T2c the API, raced the same way, answers 409 with the currency reason (not the tag code), and the asset is still EUR',
+    $stoolWaited === true && $raceLast['status'] === 409 && str_contains((string) json_encode($stoolAnswer), 'in another currency than USD') === true
+    && str_contains($raceLast['body'], 'tag code') === false && $assetCurrency($stool) === 'EUR',
+    'waited ' . var_export($stoolWaited, true) . '; HTTP ' . $raceLast['status'] . ' ' . mb_substr($raceLast['body'], 0, 200));
+
+// X1-X3: the invoice BALANCE is checked under the invoice's lock (round 6 moved it
+// there; round 7 of the check found nothing tested it: `false &&` left 84/84).
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$balanceInvoice = (int) $db->insert_id;
+$made['invoices'][] = $balanceInvoice;
+$payPost = static fn (int $id, string $amount): array => ['csrf_token' => $freshToken('/venues/invoice?id=' . $id), 'action' => 'add', 'invoiceID' => (string) $id,
+    'amount' => $amount, 'paidDate' => date('Y-m-d'), 'method' => 'bank-transfer'];
+$paidOn = static fn (int $id): array => array_map('intval', array_column(rows($db, 'SELECT `amountPence` FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ? ORDER BY `payID`', 'i', [$id]), 'amountPence'));
+$balanceHolder = $holdRow('tblVenueInvoices', 'invoiceID', $balanceInvoice);
+$payWaited = $raceRequest('/venues/invoice-payment-save', $payPost($balanceInvoice, '20.00'), $balanceHolder, 'tblVenueInvoices',
+    static function (bool $waiting) use ($balanceHolder, $site, $balanceInvoice): void {
+        $p = $balanceHolder->prepare("INSERT INTO `tblVenueInvoicePayments` (`siteID`, `invoiceID`, `paidDate`, `amountPence`, `currency`) VALUES (?, ?, CURDATE(), 2000, 'EUR')");
+        $p->bind_param('ii', $site, $balanceInvoice);
+        $p->execute();
+        $p->close();
+        $balanceHolder->commit();
+        $balanceHolder->close();
+    });
+check('X1 the premise: the payment request was seen WAITING on the invoice row this test held', $payWaited === true);
+check('X2 a full payment recorded while it waited makes the waiting full payment REFUSED under the lock: one payment, and the total paid stays the invoice\'s 20.00',
+    $paidOn($balanceInvoice) === [2000], json_encode($paidOn($balanceInvoice)));
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$stepInvoice = (int) $db->insert_id;
+$made['invoices'][] = $stepInvoice;
+$http('POST', '/venues/invoice-payment-save', $payPost($stepInvoice, '15.00'));
+$http('POST', '/venues/invoice-payment-save', $payPost($stepInvoice, '6.00'));
+$http('POST', '/venues/invoice-payment-save', $payPost($stepInvoice, '5.00'));
+check('X3 on an invoice of 20.00: 15.00 is accepted, 6.00 (over by 1.00) is refused, 5.00 is accepted — two payments, 15.00 and 5.00',
+    $paidOn($stepInvoice) === [1500, 500], json_encode($paidOn($stepInvoice)));
+
+// A1/A2: an allocation that fails says WHY truly (round 7): the same booking twice is
+// "already allocated"; any other failure — here an amount too large for the column,
+// which the database refuses — is not.
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$allocInvoice = (int) $db->insert_id;
+$made['invoices'][] = $allocInvoice;
+$allocate = static fn (string $amount): array => $http('POST', '/venues/invoice-save', ['csrf_token' => $freshToken('/venues/invoice?id=' . $allocInvoice), 'action' => 'allocate',
+    'invoiceID' => (string) $allocInvoice, 'bookingID' => (string) $booking, 'amount' => $amount]);
+$allocate('99999999999.00');
+$tooBig = html_entity_decode($http('GET', '/venues/invoice?id=' . $allocInvoice)['body'], ENT_QUOTES, 'UTF-8');
+$allocate('10.00');
+$allocate('10.00');
+$twice = html_entity_decode($http('GET', '/venues/invoice?id=' . $allocInvoice)['body'], ENT_QUOTES, 'UTF-8');
+check('A1 an allocation the database refuses for another reason (an amount too large for the column) is NOT reported as "already allocated"',
+    str_contains($tooBig, 'could not be allocated just now') === true && str_contains($tooBig, 'already allocated') === false);
+check('A2 allocating the same booking twice IS reported as "already allocated", and only one line exists',
+    str_contains($twice, 'already allocated to this invoice') === true
+    && (int) (rows($db, 'SELECT COUNT(*) AS `n` FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ?', 'i', [$allocInvoice])[0]['n'] ?? 0) === 1);
+
+// F1-F3: an invoice's FILE (round 7 of the check: attaching the FIRST file to an
+// invoice that had none took the no-file UPDATE, said "Invoice saved." and left the
+// stored PDF named by no row). Driven with real multipart uploads; the row and the
+// disk are read back.
+$uploadDir = $state['child'] . $sep . 'web' . $sep . '_uploads' . $sep . 'venues' . $sep . 'invoices' . $sep;
+$pdfOf = static function (string $label) use ($sep): string {
+    $f = sys_get_temp_dir() . $sep . 'currency-selftest-' . bin2hex(random_bytes(4)) . '.pdf';
+    file_put_contents($f, "%PDF-1.4\n% " . $label . "\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n");
+    return $f;
+};
+$saveWithFile = static function (int $id, ?string $file) use ($port, $jar, $freshToken, $venue): int {
+    $fields = ['csrf_token' => $freshToken('/venues/invoice?id=' . $id), 'action' => 'save', 'invoiceID' => (string) $id,
+        'venueID' => (string) $venue, 'issueDate' => date('Y-m-d'), 'amount' => '20.00', 'currency' => 'EUR'];
+    if ($file !== null) {
+        $fields['file'] = new CURLFile($file, 'application/pdf', basename($file));
+    }
+    $h = curl_init('http://127.0.0.1:' . $port . '/venues/invoice-save');
+    curl_setopt_array($h, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => $fields,
+        CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+    curl_exec($h);
+    return (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
+};
+$fileOf = static fn (int $id): ?string => rows($db, 'SELECT `filePath` FROM `tblVenueInvoices` WHERE `invoiceID` = ?', 'i', [$id])[0]['filePath'] ?? null;
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
+$fileInvoice = (int) $db->insert_id;
+$made['invoices'][] = $fileInvoice;
+$firstPdf = $pdfOf('first');
+$firstStatus = $saveWithFile($fileInvoice, $firstPdf);
+$firstPath = $fileOf($fileInvoice);
+check('F1 attaching the FIRST file to an invoice that had none stores it: the row names it, and the file is on disk',
+    $firstPath !== null && is_file($uploadDir . $firstPath) === true, 'HTTP ' . $firstStatus . '; filePath ' . var_export($firstPath, true));
+$secondPdf = $pdfOf('second');
+$saveWithFile($fileInvoice, $secondPdf);
+$secondPath = $fileOf($fileInvoice);
+check('F2 replacing it stores the new file and DELETES the old one from disk',
+    $secondPath !== null && $secondPath !== $firstPath && is_file($uploadDir . $secondPath) === true
+    && ($firstPath === null || is_file($uploadDir . $firstPath) === false), var_export([$firstPath, $secondPath], true));
+$saveWithFile($fileInvoice, null);
+check('F3 an edit WITHOUT a file keeps the file it has (row and disk)', $fileOf($fileInvoice) === $secondPath && is_file($uploadDir . (string) $secondPath) === true);
+@unlink($firstPdf);
+@unlink($secondPdf);
 
 // =============================================================================
 // L. The ONE locking helper, Currency::withParentLocked() (round 6)

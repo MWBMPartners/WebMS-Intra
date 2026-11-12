@@ -94,7 +94,7 @@ ON_PURPOSE = {
     ('web/_apps/giving/reconcile/import.php', '<file>', 'tblBankTxns'):
         "the import row was INSERTed just above with $currency, and every bank line is bound with it",
     ('web/_core/AssetRegister.php', 'addMaintenance', 'tblAssetMaintenance'):
-        "the repair's currency is the asset row's own value, read by lockAssetCurrency() under the asset's lock in the same function",
+        "the repair's currency is the asset row's own value, the one Currency::withParentLocked() read under the asset's lock and handed to the work in the same function",
 }
 
 # (path under the repository, function) that must call Currency::withParentLocked(.

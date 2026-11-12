@@ -3369,7 +3369,13 @@ class Venues
                         $newData['currency'] = $currency;
                         $old = self::getInvoice($invoiceId, $siteId);
                         $oldFilePath = $old['filePath'] ?? null;
-                        if ($filePath !== null && $oldFilePath !== null) {
+                        // 📎 A file was uploaded: write its columns whether or not the
+                        //    invoice had one before (#966 round 7). This used to ask
+                        //    for an OLD file as well, so attaching the FIRST file to an
+                        //    invoice took the no-file UPDATE, answered "Invoice saved."
+                        //    and left the stored PDF named by no row. $oldFilePath is
+                        //    only for deleting a file this one REPLACES, after commit.
+                        if ($filePath !== null) {
                             $stmt = $db->prepare(
                                 'UPDATE tblVenueInvoices SET agreementID = ?, invoiceRef = ?, description = ?, periodStart = ?, '
                                 . 'periodEnd = ?, issueDate = ?, dueDate = ?, amountPence = ?, currency = ?, notes = ?, '

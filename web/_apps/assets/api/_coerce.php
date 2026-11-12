@@ -284,7 +284,12 @@ function assets_api_build_data(array $body, ?array $existing): array
             }
         }
     } else {
-        $currency = $existing !== null ? (string) $was('currency') : null; // null ⇒ createAsset() uses the organisation's currency
+        // Not posted: NULL on an update too (#966 round 7). Writing back the
+        // value read BEFORE the asset's lock counted as a POSTED currency in
+        // updateAsset(), so a change made in between was undone; with null,
+        // Currency::onEdit() keeps the currency the lock read. On create,
+        // null ⇒ createAsset() uses the organisation's currency.
+        $currency = null;
     }
 
     // -------------------------------------------------------------------
