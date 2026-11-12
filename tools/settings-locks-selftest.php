@@ -69,7 +69,8 @@
  *   D  #845: the Settings page itself, read as the global administrator,
  *      draws no Delete button on any locked row and no Edit button except on
  *      the one row a method leaves open, and puts a note naming where the
- *      setting IS changed in their place. (It used to draw both on the
+ *      setting IS changed in their place; read again as an administrator of
+ *      this organisation only (D3, D4), where that one row is closed too. (It used to draw both on the
  *      transcription period and the currency, which were then refused.) The
  *      drawing is also the fourth path section S reads.
  *   P  plants, in a COPY of the portal: the transcription refusal taken out of
@@ -111,10 +112,11 @@
  *   - A key locked only by a rule the methods do not express (for example a
  *     prefix written with a different function) is found only if its name is
  *     in the database or written in the method's body.
- *   - Section D reads the Settings page as a GLOBAL administrator only. What
- *     an administrator of one organisation is shown for an installation-wide
- *     row (an Edit button the save handler then refuses, for a reason that is
- *     not a lock) is not judged here.
+ *   - Section D reads the Settings page as a global administrator AND (D3,
+ *     D4) as an administrator of this organisation only, but judges only the
+ *     LOCKED rows. What that second administrator is shown for an ordinary
+ *     installation-wide row (an Edit button the save handler then refuses,
+ *     for a reason that is not a lock) is not judged here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_locks SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         [SELFTEST_WEB_PORT=9836] php tools/settings-locks-selftest.php
@@ -150,6 +152,9 @@ declare(strict_types=1);
 
 /** The made-up global administrator. Nothing else in tools/ uses 9368xx. */
 const SL_ADMIN = 936801;
+// #845 round 2: an administrator of THIS ORGANISATION only (a site administrator,
+// no installation-wide flag), for section D's second pass.
+const SL_ORGADMIN = 936802;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -691,7 +696,7 @@ $removePerson = static function () use ($db): void {
         foreach (rows($db, "SELECT c.`TABLE_NAME` AS `t` FROM `information_schema`.`COLUMNS` c JOIN `information_schema`.`TABLES` t "
             . "ON t.`TABLE_SCHEMA` = c.`TABLE_SCHEMA` AND t.`TABLE_NAME` = c.`TABLE_NAME` AND t.`TABLE_TYPE` = 'BASE TABLE' "
             . "WHERE c.`TABLE_SCHEMA` = DATABASE() AND c.`COLUMN_NAME` = 'userID'") as $row) {
-            run($db, 'DELETE FROM `' . $row['t'] . '` WHERE `userID` = ?', 'i', [SL_ADMIN]);
+            run($db, 'DELETE FROM `' . $row['t'] . '` WHERE `userID` IN (?, ?)', 'ii', [SL_ADMIN, SL_ORGADMIN]);
         }
     } finally {
         $db->query('SET FOREIGN_KEY_CHECKS = 1');
@@ -736,7 +741,7 @@ $cleanUp = static function () use (&$cleanedUp, $restore, &$added, $db, $removeP
     }
     run($db, "DELETE FROM `tblSettings` WHERE `settingKey` LIKE 'selftest836.ordinary.%'");
     $removePerson();
-    run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` = ?', 's', ['selftest-settings-locks']);
+    run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` IN (?, ?)', 'ss', ['selftest-settings-locks', 'selftest-settings-locks-org']);
 };
 register_shutdown_function(static function () use ($cleanUp): void {
     try {
@@ -754,14 +759,23 @@ run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?,
 run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` = ?', 's', ['selftest-settings-locks']);
 run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
     'iss', [SL_ADMIN, 'selftest-settings-locks', password_hash($password, PASSWORD_DEFAULT)]);
+// #845 round 2: the organisation's own administrator — isAdmin and isRootAdmin
+// both 0 on the account, isSiteAdmin on its membership of this organisation.
+run($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`, `createdAt`) VALUES (?, ?, ?, 1, 0, 0, NOW())',
+    'iss', [SL_ORGADMIN, 'Selftest settings locks (organisation)', 'settings-locks-org@selftest.invalid']);
+run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 1, 0)', 'ii', [$site, SL_ORGADMIN]);
+run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` = ?', 's', ['selftest-settings-locks-org']);
+run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
+    'iss', [SL_ORGADMIN, 'selftest-settings-locks-org', password_hash($password, PASSWORD_DEFAULT)]);
 
-$signIn = static function () use ($http, $tokenOn, $jar, $password): void {
+/** Sign in, as the global administrator unless another sign-in name is given. */
+$signIn = static function (string $username = 'selftest-settings-locks') use ($http, $tokenOn, $jar, $password): void {
     @unlink($jar);
     $token = $tokenOn($http('GET', '/login')['body']);
     if ($token === '') {
         refuse('the sign-in page carried no form token');
     }
-    $in = $http('POST', '/login', ['csrf_token' => $token, 'username' => 'selftest-settings-locks', 'password' => $password]);
+    $in = $http('POST', '/login', ['csrf_token' => $token, 'username' => $username, 'password' => $password]);
     if ($in['status'] !== 302 && $in['status'] !== 303) {
         refuse("signing in did not answer a redirect (HTTP {$in['status']})");
     }
@@ -796,10 +810,10 @@ foreach (array_keys($locked) as $key) {
 }
 
 /** Would the save handler refuse to CHANGE this row? Asked of the methods exactly as the handler asks them. */
-$changeLocked = static function (array $row) use ($methods): bool {
+$changeLocked = static function (array $row, bool $globalAdmin = true) use ($methods): bool {
     foreach ($methods as $m) {
         $callable = [$m['class'], $m['method']];
-        $answer   = count($m['params']) === 1 ? $callable((string) $row['settingKey']) : $callable((string) $row['settingKey'], $row['siteID'] === null, true);
+        $answer   = count($m['params']) === 1 ? $callable((string) $row['settingKey']) : $callable((string) $row['settingKey'], $row['siteID'] === null, $globalAdmin);
         if ($answer === true) {
             return true;
         }
@@ -1062,7 +1076,7 @@ $drawn = static function () use ($http): array {
     return ['status' => $answer['status'], 'whole' => str_contains($body, '</html>'), 'rows' => $rows];
 };
 /** Every snapshot row judged against what was drawn. @return list<string> one line per row drawn wrongly */
-$drawnWrong = static function (array $page) use (&$snapshot, $changeLocked, $site): array {
+$drawnWrong = static function (array $page, bool $globalAdmin = true) use (&$snapshot, $changeLocked, $site): array {
     $wrong = [];
     foreach ($snapshot as $row) {
         $id    = (int) $row['settingID'];
@@ -1075,7 +1089,7 @@ $drawnWrong = static function (array $page) use (&$snapshot, $changeLocked, $sit
         if ($seen['delete'] === true) {
             $wrong[] = $row['settingKey'] . " ({$level}): a DELETE button is drawn";
         }
-        if ($changeLocked($row) === false) {
+        if ($changeLocked($row, $globalAdmin) === false) {
             // The one row a method leaves open to a global administrator: Edit IS offered.
             if ($seen['edit'] === false) {
                 $wrong[] = $row['settingKey'] . " ({$level}): left open by its method, yet no Edit button";
@@ -1107,6 +1121,23 @@ check('D1 every one of the ' . count($snapshot) . ' locked rows draws no Delete 
 check('D2 PREMISE (#845\'s own key): transcription.retentionDays and the currency are among the rows judged',
     isset($locked['transcription.retentionDays']) === true && array_filter(array_keys($locked), static fn ($k): bool => \Portal\Core\Currency::lockedInGeneralEditor((string) $k)) !== [],
     'locked: ' . implode(', ', array_keys($locked)));
+// #845 round 2: the same page, read by an administrator of THIS ORGANISATION
+// only. Nobody but a global administrator is offered Delete at all, so what
+// this pass adds is Edit and the note: every locked row draws no Edit button —
+// the giving-records hold included, which is open only to a GLOBAL
+// administrator — and names where it is changed. The control row (this
+// organisation's own) must still carry Edit, so a page that drew nothing at
+// all cannot pass.
+$signIn('selftest-settings-locks-org');
+$orgPage    = $drawn();
+$orgControl = $orgPage['rows'][$controlId] ?? null;
+check('D3 PREMISE: an administrator of this organisation only sees the page whole, and the ordinary row carries an Edit button (and, being no global administrator, no Delete button)',
+    $orgPage['status'] === 200 && $orgPage['whole'] === true && $orgControl !== null && $orgControl['edit'] === true && $orgControl['delete'] === false,
+    'HTTP ' . $orgPage['status'] . ', control row: ' . json_encode($orgControl));
+$orgWrong = $drawnWrong($orgPage, false);
+check('D4 ...and every one of the ' . count($snapshot) . ' locked rows draws no Edit and no Delete button for that administrator, with a note naming where it is changed',
+    $orgWrong === [], implode('; ', $orgWrong));
+$signIn();
 run($db, 'DELETE FROM `tblSettings` WHERE `settingID` = ?', 'i', [$controlId]);
 
 // =============================================================================
@@ -1220,6 +1251,23 @@ check('P9 with the currency\'s note branch taken out, the plant applied AND sect
     $p9['applied'] === true && count(array_filter($p9['result'] ?? [], static fn (string $l): bool => str_contains($l, 'no note naming'))) > 0,
     'applied: ' . var_export($p9['applied'], true) . '; D reported: ' . implode('; ', $p9['result'] ?? []));
 
+// #845 round 2: the drawing asking the giving-records method as if every viewer
+// were a global administrator — the hold row then offers Edit to an
+// administrator of one organisation, which the save handler refuses.
+$p10 = $plant($copyOf('index.php'), [
+    "GivingRetention::lockedInGeneralEditor((string) \$row['settingKey'], \$row['siteID'] === null, \$isRoot);"
+        => "GivingRetention::lockedInGeneralEditor((string) \$row['settingKey'], \$row['siteID'] === null, true);",
+], static function () use ($signIn, $drawn, $drawnWrong): array {
+    $signIn('selftest-settings-locks-org');
+    $wrong = $drawnWrong($drawn(), false);
+    $signIn();
+
+    return $wrong;
+});
+check('P10 with the drawing judging every viewer as a global administrator, the plant applied AND section D4 names a row drawn with an EDIT button',
+    $p10['applied'] === true && count(array_filter($p10['result'] ?? [], static fn (string $l): bool => str_contains($l, 'an EDIT button is drawn'))) > 0,
+    'applied: ' . var_export($p10['applied'], true) . '; D4 reported: ' . implode('; ', $p10['result'] ?? []));
+
 // Section S's own plants, in memory.
 $plantedIndex = str_replace(
     "\\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$lockedKey['settingKey'])",
@@ -1263,8 +1311,8 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 $cleanUp();
 
 // S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
-// per key, D0 to D2, P1 to P3, P6a/b, P7, P8, P9, P4, P4c, P4b, P5.
-$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 3 + 3 + 2 + 1 + 2 + 1 + 2 + 1;
+// per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5.
+$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

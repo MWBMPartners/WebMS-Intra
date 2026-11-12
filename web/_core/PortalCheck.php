@@ -937,8 +937,12 @@ final class PortalCheck
                 //    one per case, so neither is assembled from pieces.
                 $runs = (int) ($facts['unfinishedRuns'] ?? 1);
                 if ($runs > 1) {
-                    $diedPart[] = $words . ' — its last ' . $runs . ' runs each started and never finished, '
-                        . 'and none has finished since the first of them started '
+                    // ⚠️ "none … has finished", never "each … never finished":
+                    //    the newest of these runs may be going at this moment,
+                    //    so only "has not finished" is known about it (#817
+                    //    round 2 of its check).
+                    $diedPart[] = $words . ' — none of its last ' . $runs . ' runs has finished, '
+                        . 'the first of them started '
                         . ScheduledJobs::howLongAgo((int) ($facts['unfinishedSeconds'] ?? $facts['seconds']));
                 } else {
                     $diedPart[] = $words . ' — started '
@@ -1240,10 +1244,16 @@ final class PortalCheck
                 //    every run — each run's fresh start kept it "part-way" for
                 //    ever. ScheduledJobs::state() now counts from the OLDEST run
                 //    with no finish, so it is true, and is worded to say so.
+                //    "The time allowed for it" — the job's ALLOWANCE, which is
+                //    what state() measures, NOT its expected gap between runs:
+                //    since D-076 an allowance is at least three times the gap,
+                //    so "longer than its own expected gap" was untrue for a
+                //    mail queue unfinished for ten minutes (gap 5, allowance 15).
+                //    The same words the all-clear uses.
                 'why'      => 'Each of these recorded a start and has not yet recorded a finish, '
                     . 'and not enough time has passed for that to be a worry. Usually it means '
-                    . 'the job is running at this moment. If one of them goes longer than its '
-                    . 'own expected gap without any run finishing — however many times it is '
+                    . 'the job is running at this moment. If one of them goes longer than the '
+                    . 'time allowed for it without any run finishing — however many times it is '
                     . 'started again in between — it will be reported as having started and '
                     . 'never finished, which IS a problem.',
                 'todo'     => 'Nothing. Reload this page in a few minutes to see whether they '

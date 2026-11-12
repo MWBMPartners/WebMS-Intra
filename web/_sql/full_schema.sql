@@ -10782,7 +10782,7 @@ CREATE TABLE IF NOT EXISTS `tblScheduledJobRun` (
     `finishedAtUtc` DATETIME        NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this job last finished its work. EMPTY means the newest run began and never reached the end, which is what distinguishes a job dying part-way from one that is not being called at all',
     `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok, refused (it was called and deliberately did nothing) or failed (it tried and could not). NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
     `unfinishedSinceUtc` DATETIME NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC (#817): when the OLDEST run in the current unbroken streak of runs with no finish began. EMPTY whenever the newest run has finished. began() never clears it while runs keep failing to finish, so a job that dies on EVERY run is judged by how long it has gone without finishing anything, not by its newest start',
-    `unfinishedRuns`     SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many runs in a row, the newest included, have begun and not recorded a finish (#817). 0 once a run finishes. Shown on the Check this portal page as the last N runs each started and never finished',
+    `unfinishedRuns`     SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many runs in a row, the newest included, have begun and not recorded a finish (#817). 0 once a run finishes. Shown on the Check this portal page as: none of its last N runs has finished',
     PRIMARY KEY (`jobKey`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Whether each scheduled job has actually run (#775). Read by the Check this portal page.';

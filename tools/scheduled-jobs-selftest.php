@@ -1918,10 +1918,36 @@ MailQueue::forget();
 $found = $pageSays();
 check('J6 the page reports it as a PROBLEM: started and never finished',
     $severityOf($found, 'started and never finished'), \Portal\Core\PortalCheck::PROBLEM);
-check('J7 ...saying its last 3 runs each started and never finished, not "started a moment ago"',
-    str_contains($allText($found), 'its last 3 runs each started and never finished, and none has finished since the first of them started'), true);
+// "none … has finished", never "each … never finished": the newest of the three
+// is the run started a moment ago, which may well still be going.
+check('J7 ...saying none of its last 3 runs has finished and when the first started, not "started a moment ago"',
+    preg_match('/ — none of its last 3 runs has finished, the first of them started [0-9a-z ]+ ago/', $allText($found)), 1);
+check('J7b ...and never claims each of them "never finished" (the newest may be running now)',
+    str_contains($allText($found), 'runs each started and never finished'), false);
 check('J8 ...and the all-clear is gone', $severityOf($found, 'has run recently enough'), null);
 check('J9 ...and it is NOT also listed as part-way through', $severityOf($found, 'part-way through when this page was drawn'), null);
+
+// The part-way note, in the state its promise is about: the mail queue's oldest
+// unfinished run began TEN minutes ago — past its five-minute gap between runs,
+// inside its fifteen-minute allowance. state() still says part-way (it judges
+// the ALLOWANCE), so the note must not promise a report after the "gap".
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+ScheduledJobs::began($db, 'cron/mail-queue');
+$db->query("UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL 600 SECOND, "
+    . "`unfinishedSinceUtc` = UTC_TIMESTAMP() - INTERVAL 600 SECOND WHERE `jobKey` = 'cron/mail-queue'");
+ScheduledJobs::began($db, 'cron/mail-queue');
+MailQueue::forget();
+$pageSaysRunning = $pageSays();
+check('J7c PREMISE: ten minutes with no finish is still part-way for the mail queue (allowance ' . ScheduledJobs::OVERDUE_MAIL_QUEUE . ' s)',
+    [ScheduledJobs::state($db)['cron/mail-queue']['status'], $severityOf($pageSaysRunning, 'part-way through when this page was drawn')],
+    [ScheduledJobs::RUNNING_NOW, \Portal\Core\PortalCheck::NOTE]);
+check('J7d ...and the note promises a report after the time ALLOWED for the job, never after its expected gap (D-076: an allowance is at least three times the gap)',
+    [str_contains($allText($pageSaysRunning), 'longer than the time allowed for it without any run finishing'),
+        str_contains($allText($pageSaysRunning), 'expected gap')], [true, false]);
 
 // The single unfinished run keeps its old words exactly.
 $db->query('DELETE FROM `tblScheduledJobRun`');
@@ -1935,7 +1961,7 @@ $db->query("UPDATE `tblScheduledJobRun` SET `unfinishedSinceUtc` = `startedAtUtc
 $found = $pageSays();
 check('J10 ONE run that died keeps its own wording ("started … ago and never finished")',
     preg_match('/ — started [0-9a-z ]+ ago and never finished/', $allText($found)), 1);
-check('J10b ...and never says "its last 1 runs"', str_contains($allText($found), 'its last 1 runs'), false);
+check('J10b ...and never says "its last 1 runs"', str_contains($allText($found), 'last 1 runs'), false);
 
 // Before migration 287 has run: the class still records, and reads as before.
 $db->query('DROP TABLE `tblScheduledJobRun`');

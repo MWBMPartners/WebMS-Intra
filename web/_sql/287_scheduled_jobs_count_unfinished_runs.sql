@@ -61,7 +61,7 @@ SET @c := (
       AND `COLUMN_NAME`  = 'unfinishedRuns'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblScheduledJobRun` ADD COLUMN `unfinishedRuns` SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT ''How many runs in a row, the newest included, have begun and not recorded a finish (#817). 0 once a run finishes. Shown on the Check this portal page as the last N runs each started and never finished'' AFTER `unfinishedSinceUtc`',
+    'ALTER TABLE `tblScheduledJobRun` ADD COLUMN `unfinishedRuns` SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT ''How many runs in a row, the newest included, have begun and not recorded a finish (#817). 0 once a run finishes. Shown on the Check this portal page as: none of its last N runs has finished'' AFTER `unfinishedSinceUtc`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
