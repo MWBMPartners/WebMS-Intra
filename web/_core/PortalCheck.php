@@ -1256,6 +1256,14 @@ final class PortalCheck
                 //    the clock, so a job that dies on every run is NEVER
                 //    reported, and "however many times it is started again"
                 //    would be untrue in exactly that state.
+                //    ⚠️ AND IT SAYS ONLY WHAT IS CERTAIN. Round 3 added "so a job
+                //    that fails every time it runs is not reported here", and it
+                //    was untrue on the same page: a run that records a FAILED
+                //    outcome is reported ("ran and could not finish their work"),
+                //    and so is one that dies and is not started again ("started
+                //    3 days ago and never finished"). A sentence about what is NOT
+                //    reported has to be true of every other finding too, so this
+                //    one makes no such claim.
                 'why'      => ScheduledJobs::countsUnfinishedRuns($db) === true
                     ? 'Each of these recorded a start and has not yet recorded a finish, '
                         . 'and not enough time has passed for that to be a worry. Usually it means '
@@ -1267,9 +1275,7 @@ final class PortalCheck
                         . 'and not enough time has passed for that to be a worry. Usually it means '
                         . 'the job is running at this moment. If one of them goes longer than the '
                         . 'time allowed for it since it last started, it will be reported as having '
-                        . 'started and never finished, which IS a problem. Until the waiting database '
-                        . 'upgrade has been run, each new start begins that time again, so a job that '
-                        . 'fails every time it runs is not reported here.',
+                        . 'started and never finished, which IS a problem.',
                 'todo'     => 'Nothing. Reload this page in a few minutes to see whether they '
                     . 'finished.',
                 'count'    => count($running),

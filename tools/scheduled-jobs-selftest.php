@@ -1970,12 +1970,21 @@ foreach (array_keys(ScheduledJobs::JOBS) as $job) {
 ScheduledJobs::began($db, 'cron/mail-queue');
 MailQueue::forget();
 $pageSaysBefore287 = $pageSays();
-check('J7f PREMISE: before migration 287 the class says it does not count unfinished runs, and a just-started job is part-way',
+// ⚠️ FORGOTTEN FIRST, so the answer is ASKED of the database here rather than
+//    being whatever state() and began() happened to remember above — a version
+//    answering from that memory, or guessing when there is none, goes red.
+ScheduledJobs::forgetTableCheck();
+check('J7f PREMISE: before migration 287 the class says it does not count unfinished runs (asked afresh), and a just-started job is part-way',
     [ScheduledJobs::countsUnfinishedRuns($db), $severityOf($pageSaysBefore287, 'part-way through when this page was drawn')],
     [false, \Portal\Core\PortalCheck::NOTE]);
-check('J7g ...and the note does NOT promise a report however many times a job is started again, and says one failing every run is not reported',
-    [str_contains($allText($pageSaysBefore287), 'however many times'),
-        str_contains($allText($pageSaysBefore287), 'so a job that fails every time it runs is not reported here')], [false, true]);
+// It says only what is certain then: the promise, and no claim about what is
+// NOT reported — round 3's "a job that fails every time it runs is not reported
+// here" was untrue on the same page (a FAILED outcome and a run that died and
+// was not started again are both reported).
+check('J7g ...and the note promises a report after the time allowed since a job LAST started, and claims nothing about what is not reported',
+    [str_contains($allText($pageSaysBefore287), 'If one of them goes longer than the time allowed for it since it last started, it will be reported as having started and never finished, which IS a problem.'),
+        str_contains($allText($pageSaysBefore287), 'however many times'),
+        str_contains($allText($pageSaysBefore287), 'is not reported')], [true, false, false]);
 $db->query('DROP TABLE `tblScheduledJobRun`');
 $db->query($grab[0]);
 $apply287();
