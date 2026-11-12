@@ -252,8 +252,9 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     //    currency markers, decimals, commas, points, a misplaced minus, too
     //    large, nothing entered, or a marker while no currency is chosen. A
     //    cell starting with a currency marker the converter RECOGNISES (a sign
-    //    listed in Currency::SIGNS_OF, capitals joined to one, or a known code
-    //    followed by an amount or a sign) that is not read as the import's
+    //    listed in Currency::SIGNS_OF with a symbol in it, capitals joined to
+    //    one, or a known code followed by an amount or a sign — never a
+    //    letters-only sign such as "R" or "Rs") that is not read as the import's
     //    currency is told it is not read as that currency HERE — a claim about
     //    the portal, not about the currency — and to convert the figure rather
     //    than put our code in front of it (rounds 10-12,
