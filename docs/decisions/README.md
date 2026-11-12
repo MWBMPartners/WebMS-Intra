@@ -229,7 +229,10 @@ appended with its real date and a note that it was added later.
 | [D-171](171-rota-swap-requests-have-configurable-limits.md) | 2026-11-12 | Rota swap requests have configurable limits, per duty and per day, set at installation and organisation level | in force |
 | [D-172](172-the-single-gift-ceiling-is-configurable.md) | 2026-11-12 | The single-gift ceiling is configurable at installation and organisation level | in force |
 | [D-173](173-outside-provider-spending-is-recorded-in-the-providers-own-currency.md) | 2026-11-12 | Outside-provider spending is recorded in the provider's own currency | in force |
+| [D-174](174-an-errors-words-have-e-mail-addresses-removed-when-written.md) | 2026-11-12 | An error's own words have any e-mail address removed before they are stored | in force |
+| [D-175](175-the-support-address-is-still-recorded-in-the-activity-log.md) | 2026-11-12 | The organisation's support e-mail address is still recorded in the activity log when it is changed | in force |
+| [D-176](176-an-anonymous-prayer-request-is-erased-by-a-visitor-address-request.md) | 2026-11-12 | An anonymous prayer request is erased by the same visitor-address request as an event suggestion, and its network address is kept until then | in force |
 
-*173 decisions. This index is checked against the folder by
+*176 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
