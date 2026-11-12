@@ -3497,9 +3497,9 @@ class GdprEraser
                 'filed',
                 'tblErasureRequest',
                 null,
-                'Filed by the administrator with account #' . $adminId . ' for an e-mail address that has no account: '
-                . 'somebody who suggested an event or sent an anonymous prayer request without signing in (D-140, '
-                . 'D-176). The administrator states that they '
+                'Filed by the administrator with account #' . $adminId . ' for an e-mail address, to reach the event '
+                . 'suggestions and the anonymous-form prayer requests sent with it, whether or not the address also '
+                . 'belongs to an account (D-140, D-176). The administrator states that they '
                 . 'checked, outside the portal, that the request comes from the person who uses this address, and '
                 . 'noted how (D-148): "' . $note . '". No e-mail was sent to it (D-149). Nothing has been erased by '
                 . 'this: the request is at pending review, and an administrator still has to run it. It reaches this '
@@ -3595,11 +3595,16 @@ class GdprEraser
      * WHAT IT DELIBERATELY DOES NOT DO
      * -------------------------------------------------------------------------
      * - It touches NO ACCOUNT and no row found through one — even when a member
-     *   uses the same address. The person who asked has no account; a member
-     *   with the same address asks for their own erasure from their account,
-     *   and that request is checked by the e-mail link sent to them. A visitor
-     *   request reaching an account would let an administrator's say-so empty
-     *   a member's records.
+     *   uses the same address. The person who asked MAY have an account: a
+     *   request a member sent through the anonymous prayer form while signed in
+     *   carries none (#988), so this request is the only route to it, and the
+     *   address it is filed for is then usually theirs (#1009 round 2 tells
+     *   administrators to file it for them). What is found THROUGH an account
+     *   is left to that member's own erasure, which is checked by the e-mail
+     *   link sent to them; a request by address reaching an account would let an
+     *   administrator's say-so empty a member's records. Nothing here looks the
+     *   address up in tblUsers, so nothing here may say it has no account (the
+     *   filed line said so until #1009 round 3).
      * - It reaches only THIS ORGANISATION's suggestions, prayer requests and
      *   mail. Another
      *   organisation on the same installation may be a different party whose
@@ -3842,8 +3847,10 @@ class GdprEraser
      * `updatedAt` is written back as it was.
      *
      * WHAT IT CANNOT REACH: a request sent without an e-mail address. Nothing
-     * on it says whose it is, so a request by address cannot find it; its
-     * network address stays until the request is deleted by hand.
+     * on it says whose it is, so a request by address cannot find it, and its
+     * network address is kept with no end date: nothing under web/ deletes a
+     * prayer request (no DELETE of tblPrayerRequests anywhere), so it stays
+     * until #1019 sets a keeping period for stored network addresses (D-178).
      *
      * Exactly one audit line, including when nothing matched. A failure is a
      * FAILED step, not a crash; the fault's own words are not recorded.

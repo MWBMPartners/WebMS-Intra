@@ -10,10 +10,12 @@
  *
  * SIX actions. The first files a NEW request, so it names none:
  *   file_visitor
- *            file a request for a VISITOR's e-mail address - somebody who
- *            suggested an event or sent an anonymous prayer request without
- *            signing in and has no account (#964, #1009,
- *            D-140). Only after the administrator ticks that they checked,
+ *            file a request for an E-MAIL ADDRESS, to reach the event
+ *            suggestions and anonymous-form prayer requests sent with it -
+ *            whether or not the address also belongs to an account: a member
+ *            who used the anonymous form while signed in has one, and their own
+ *            erasure cannot reach that request (#964, #1009, #988,
+ *            D-140, D-176). Only after the administrator ticks that they checked,
  *            outside the portal, that it is really that person, and writes a
  *            short note on how (D-148). Filed at
  *            "pending review"; nothing is erased until Execute is pressed.
@@ -102,7 +104,7 @@ if ($action === 'file_visitor') {
     $filedId = (int) $filed['requestID'];
     if ($filed['outcome'] === 'filed') {
         Logger::activity('GdprErasureVisitorFiled', 'Filed erasure request #' . $filedId
-            . ' for the e-mail address of somebody without an account', $adminId);
+            . ' for an e-mail address, to reach event suggestions and anonymous-form prayer requests sent with it', $adminId);
         $_SESSION['flash_msg']  = 'Erasure request #' . $filedId . ' is filed for that address and is at pending review. '
             . 'Nothing has been erased yet: press Execute when you are ready. It reaches only, at this organisation, '
             . 'the name and address given with event suggestions, the anonymous prayer requests sent with that '

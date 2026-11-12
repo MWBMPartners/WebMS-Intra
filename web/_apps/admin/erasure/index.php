@@ -68,9 +68,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <p class="text-secondary">UK GDPR Article 17 requests. Process within one month of confirmation.</p>
 
 <?php
-// 🧾 #964, D-140; #1009, D-176. Somebody who suggested an event or sent an
-//    anonymous prayer request WITHOUT signing in has no account, so they cannot ask from "Request data erasure" and an ordinary
-//    request cannot find them. They ask the organisation some other way, and
+// 🧾 #964, D-140; #1009, D-176. An event suggested WITHOUT signing in, and a
+//    prayer request sent through the anonymous form (signed in or not, #988),
+//    carry no account, so an ordinary request cannot find them - even when the
+//    person who sent one HAS an account, as a member who used the anonymous
+//    form does. Nothing here asks whether the address belongs to an account,
+//    so nothing here says it does not. They ask the organisation some other way, and
 //    an administrator files it here by their e-mail address. The tick-box is
 //    the identity check the portal can record: it cannot check who is asking
 //    itself, so it makes the administrator say they have and, since D-148,

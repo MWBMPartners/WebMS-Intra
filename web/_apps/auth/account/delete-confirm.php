@@ -28,9 +28,14 @@
  *    request is the only thing that ever empties an account.
  *
  * One difference from the old page that people may notice: leadership-only
- * prayer requests used to be deleted here. The erasure engine keeps the text
- * of every prayer request and removes the name, email address and sender
- * address from it.
+ * prayer requests used to be deleted here. The erasure engine keeps each
+ * prayer request the person made from their account as the record that one
+ * was made, and empties its subject, its body, the network address it came
+ * from and any prayer partner's note (#715, D-016). (This said it "keeps the
+ * text of every prayer request" until #1009 round 3, which #715 had made
+ * untrue.) A request sent through the anonymous prayer form holds no account,
+ * so this erasure does not reach it at all; only a request filed by its
+ * e-mail address does (#988, #1009, D-176).
  *
  * THE TYPED PHRASE IS THE CONFIRMATION (Salem874, 11 October 2026). The
  * person is signed in and has typed DELETE MY ACCOUNT, so the request is filed

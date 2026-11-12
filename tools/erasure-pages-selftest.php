@@ -229,7 +229,11 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 214; // #988/#1009 check round 1 added five: the
+const EXPECTED_CHECKS = 215; // #988/#1009 check round 2 added one: the
+                            // filed request's sealed line and its activity
+                            // record, read back whole for an address that IS a
+                            // member's (N42). 215.
+                            // #988/#1009 check round 1 added five: the
                             // signed-in notice and the visitor's note on the
                             // anonymous form, the prayer help's two sections and
                             // the erasure page's visitor card, each pinned as
@@ -4138,6 +4142,34 @@ ok('N3 an administrator who ticks the box and notes how they checked files ONE r
         && str_contains((string) ($filedLine['details'] ?? ''), 'checked, outside the portal') === true
         && str_contains((string) ($filedLine['details'] ?? ''), 'noted how (D-148): "P964 replied from that address".') === true,
     json_encode($vReq) . ' | ' . $filed['message'] . ' | ' . $again['message'] . ' | ' . json_encode($filedLine));
+
+// ── N42. What the two records of the filing say, for a MEMBER's address ─────
+// #1009 round 3: the sealed line said the address "has no account" and the
+// activity record said it was "somebody without an account" - untrue as soon
+// as round 2 told administrators to file this request for a member's own
+// anonymous-form request, and nothing looks the address up in tblUsers. The
+// address filed in N3 IS May's account address, so this reads both records
+// back WHOLE, as written, for exactly the case where the old words were false.
+$n1009MayAddress = (string) (one('SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [MAY])['emailAddress'] ?? '');
+$n1009Filed      = (string) ($filedLine['details'] ?? '');
+$n1009Activity   = q("SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `logID` > ? AND `activityType` = 'GdprErasureVisitorFiled'", 'i', [$activityBefore]);
+$n1009FiledWant  = 'Filed by the administrator with account #' . ADM . ' for an e-mail address, to reach the event '
+    . 'suggestions and the anonymous-form prayer requests sent with it, whether or not the address also '
+    . 'belongs to an account (D-140, D-176). The administrator states that they '
+    . 'checked, outside the portal, that the request comes from the person who uses this address, and '
+    . 'noted how (D-148): "P964 replied from that address". No e-mail was sent to it (D-149). Nothing has been erased by '
+    . 'this: the request is at pending review, and an administrator still has to run it. It reaches this '
+    . 'organisation (D-150): the name and address given with event suggestions here, the name, address, '
+    . 'network address and words of anonymous prayer requests sent here with it, activity records '
+    . 'written before #963 that quote the address, and the approval e-mails sent to it - including a '
+    . 'send-log row recorded under no organisation, which cannot be told apart from this one\'s; no '
+    . 'account is touched, even one using the same address.';
+ok('N42 THE PREMISE AND THE TWO RECORDS: the address filed for in N3 IS a member\'s account address, and the request\'s sealed line and its activity record are read back WHOLE, saying it was filed for an e-mail address "whether or not the address also belongs to an account" - never that it has none (#1009 round 3, D-176)',
+    mb_strtolower($n1009MayAddress) === mb_strtolower(VERA_ADDR)
+        && $n1009Filed === $n1009FiledWant
+        && $n1009Activity === [['userID' => ADM, 'activityDescription' => 'Filed erasure request #' . $vId
+            . ' for an e-mail address, to reach event suggestions and anonymous-form prayer requests sent with it']],
+    'May\'s address ' . $n1009MayAddress . ' | sealed line: ' . $n1009Filed . ' | activity: ' . json_encode($n1009Activity));
 
 // ── N4. The list page, and the one button that must not apply ───────────────
 $listNow  = req($jar['adm'], 'GET', '/admin/erasure-requests')['body'];
