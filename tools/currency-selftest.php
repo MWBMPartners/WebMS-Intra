@@ -57,6 +57,12 @@
  *     SELFTEST_DB_USER=… SELFTEST_DB_PASS=…] [SELFTEST_WEB_PORT=9966]
  *         php tools/currency-selftest.php
  * It needs curl and proc_open, and REFUSES rather than skipping without them.
+ * It also needs performance_schema ON (`@@performance_schema = 1`, OFF by
+ * default on MariaDB) and readable by SELFTEST_DB_USER: every race asks
+ * performance_schema.data_lock_waits, data_locks and threads which row a
+ * request is waiting on. Without it the test REFUSES before section T,
+ * rather than letting each race wait out its ten seconds and report the
+ * portal as at fault.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -1200,6 +1206,25 @@ $http('POST', '/expenses/edit/save', ['csrf_token' => $freshToken('/expenses/edi
 $oldClaimPage = html_entity_decode($http('GET', '/expenses/edit?id=' . $oldClaim)['body'], ENT_QUOTES, 'UTF-8');
 check('H13e editing an UNRECORDED claim with a line in dollars is refused in words that name the CLAIM ("this claim has no currency recorded"), not the organisation, which has one',
     str_contains($oldClaimPage, 'this claim has no currency recorded') === true && str_contains($oldClaimPage, 'this organisation has no currency chosen') === false);
+
+// 🔎 What every race below asks of the database, checked ONCE before the first:
+//    performance_schema must be ON and its three tables readable by this user.
+//    Otherwise $waitingOnRow() could only ever answer "not waiting", each race
+//    would wait out its ten seconds, and seven premise checks would go red
+//    blaming the portal (measured: MySQL 8.0.36 with --performance-schema=OFF
+//    gave 93 of 100, MariaDB 11.4.13 92 of 100). A refusal names the cause.
+$psOn = (string) (rows($db, 'SELECT @@performance_schema AS `on`')[0]['on'] ?? '0');
+if ($psOn !== '1') {
+    refuse('the race checks (sections T, X and Z) need performance_schema ON, and this server has @@performance_schema = ' . $psOn
+        . ' (it is OFF by default on MariaDB; start the server with --performance-schema=ON)');
+}
+foreach (['data_lock_waits', 'data_locks', 'threads'] as $psTable) {
+    try {
+        rows($db, 'SELECT 1 FROM `performance_schema`.`' . $psTable . '` LIMIT 1');
+    } catch (Throwable $e) {
+        refuse('the race checks need to read performance_schema.' . $psTable . ', and ' . $dbUser . ' cannot (' . $e->getMessage() . ')');
+    }
+}
 
 /**
  * 🔎 THE PREMISE OF EVERY RACE (round 8): is some transaction WAITING on a lock that
