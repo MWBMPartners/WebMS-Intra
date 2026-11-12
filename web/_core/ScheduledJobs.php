@@ -882,6 +882,22 @@ final class ScheduledJobs
     }
 
     /**
+     * Whether runs are judged by the whole streak of unfinished runs (#817) —
+     * true once migration 287's two columns are there. Before that a job is
+     * timed from its NEWEST start, so one that dies on every run is never
+     * reported, and the check page must not promise otherwise. Public for that
+     * one sentence; the answer is asked of the database, never assumed.
+     */
+    public static function countsUnfinishedRuns(mysqli $db): bool
+    {
+        if (self::tableExists($db) === false) {
+            return false;
+        }
+
+        return self::streakColumnsThere($db);
+    }
+
+    /**
      * Whether migration 287's two streak columns are there (#817).
      *
      * ⚠️ ASKED, NEVER INFERRED FROM A CAUGHT ERROR, for the reason the table

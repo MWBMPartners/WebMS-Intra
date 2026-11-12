@@ -1250,12 +1250,26 @@ final class PortalCheck
                 //    so "longer than its own expected gap" was untrue for a
                 //    mail queue unfinished for ten minutes (gap 5, allowance 15).
                 //    The same words the all-clear uses.
-                'why'      => 'Each of these recorded a start and has not yet recorded a finish, '
-                    . 'and not enough time has passed for that to be a worry. Usually it means '
-                    . 'the job is running at this moment. If one of them goes longer than the '
-                    . 'time allowed for it without any run finishing — however many times it is '
-                    . 'started again in between — it will be reported as having started and '
-                    . 'never finished, which IS a problem.',
+                //    ⚠️ TWO COMPLETE SENTENCES, chosen by what the database can
+                //    hold (#817 round 3 of its check). Before migration 287 has
+                //    run there is no streak to time from: each new start resets
+                //    the clock, so a job that dies on every run is NEVER
+                //    reported, and "however many times it is started again"
+                //    would be untrue in exactly that state.
+                'why'      => ScheduledJobs::countsUnfinishedRuns($db) === true
+                    ? 'Each of these recorded a start and has not yet recorded a finish, '
+                        . 'and not enough time has passed for that to be a worry. Usually it means '
+                        . 'the job is running at this moment. If one of them goes longer than the '
+                        . 'time allowed for it without any run finishing — however many times it is '
+                        . 'started again in between — it will be reported as having started and '
+                        . 'never finished, which IS a problem.'
+                    : 'Each of these recorded a start and has not yet recorded a finish, '
+                        . 'and not enough time has passed for that to be a worry. Usually it means '
+                        . 'the job is running at this moment. If one of them goes longer than the '
+                        . 'time allowed for it since it last started, it will be reported as having '
+                        . 'started and never finished, which IS a problem. Until the waiting database '
+                        . 'upgrade has been run, each new start begins that time again, so a job that '
+                        . 'fails every time it runs is not reported here.',
                 'todo'     => 'Nothing. Reload this page in a few minutes to see whether they '
                     . 'finished.',
                 'count'    => count($running),

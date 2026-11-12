@@ -1920,8 +1920,15 @@ check('J6 the page reports it as a PROBLEM: started and never finished',
     $severityOf($found, 'started and never finished'), \Portal\Core\PortalCheck::PROBLEM);
 // "none … has finished", never "each … never finished": the newest of the three
 // is the run started a moment ago, which may well still be going.
-check('J7 ...saying none of its last 3 runs has finished and when the first started, not "started a moment ago"',
-    preg_match('/ — none of its last 3 runs has finished, the first of them started [0-9a-z ]+ ago/', $allText($found)), 1);
+// ⚠️ THE AGE IS WRITTEN OUT, NOT MATCHED BY A PATTERN (#817 round 3 of its
+//    check). `[0-9a-z ]+ ago` was satisfied by "less than a minute ago", so a
+//    page timing the streak from the NEWEST start passed J6, J7 and J7b. The
+//    oldest run above began OVERDUE_MAIL_QUEUE + 120 = 1020 seconds ago, which
+//    howLongAgo() says as "17 minutes ago" from 1020 to 1079 seconds — so a
+//    slow run cannot move it, and the newest start (under a minute) never
+//    gives it. Typed by hand, never asked of howLongAgo() (#795).
+check('J7 ...saying none of its last 3 runs has finished, the first of them started 17 minutes ago — the OLDEST run, not the newest',
+    str_contains($allText($found), ' — none of its last 3 runs has finished, the first of them started 17 minutes ago'), true);
 check('J7b ...and never claims each of them "never finished" (the newest may be running now)',
     str_contains($allText($found), 'runs each started and never finished'), false);
 check('J8 ...and the all-clear is gone', $severityOf($found, 'has run recently enough'), null);
@@ -1948,6 +1955,31 @@ check('J7c PREMISE: ten minutes with no finish is still part-way for the mail qu
 check('J7d ...and the note promises a report after the time ALLOWED for the job, never after its expected gap (D-076: an allowance is at least three times the gap)',
     [str_contains($allText($pageSaysRunning), 'longer than the time allowed for it without any run finishing'),
         str_contains($allText($pageSaysRunning), 'expected gap')], [true, false]);
+check('J7e ...and, with migration 287 run, says a job is reported however many times it is started again',
+    str_contains($allText($pageSaysRunning), 'however many times it is started again in between'), true);
+
+// The same note BEFORE migration 287 has run: a new start resets the clock
+// then, so a job dying on every run is never reported and the note must say so.
+$db->query('DROP TABLE `tblScheduledJobRun`');
+$db->query($grab[0]);
+ScheduledJobs::forgetTableCheck();
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+ScheduledJobs::began($db, 'cron/mail-queue');
+MailQueue::forget();
+$pageSaysBefore287 = $pageSays();
+check('J7f PREMISE: before migration 287 the class says it does not count unfinished runs, and a just-started job is part-way',
+    [ScheduledJobs::countsUnfinishedRuns($db), $severityOf($pageSaysBefore287, 'part-way through when this page was drawn')],
+    [false, \Portal\Core\PortalCheck::NOTE]);
+check('J7g ...and the note does NOT promise a report however many times a job is started again, and says one failing every run is not reported',
+    [str_contains($allText($pageSaysBefore287), 'however many times'),
+        str_contains($allText($pageSaysBefore287), 'so a job that fails every time it runs is not reported here')], [false, true]);
+$db->query('DROP TABLE `tblScheduledJobRun`');
+$db->query($grab[0]);
+$apply287();
+ScheduledJobs::forgetTableCheck();
 
 // The single unfinished run keeps its old words exactly.
 $db->query('DELETE FROM `tblScheduledJobRun`');
