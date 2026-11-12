@@ -389,7 +389,11 @@ class Geocoder
     {
         foreach ([$lat, $lng] as $part) {
             // `is_numeric()` is true for an int, a float, or text that reads
-            // wholly as a number; false for '', null, 'abc', an array, a bool.
+            // as a number apart from spaces around it (PHP 8 allows leading
+            // AND trailing whitespace, so ' 52.2 ' passes and `(float)` reads
+            // it as 52.2, which is what was meant); false for '', null, 'abc',
+            // '52abc', an array or a bool. Both coordinates are asked, each in
+            // its own right: a good latitude never vouches for the longitude.
             if (is_numeric($part) === false) {
                 return null;
             }
@@ -535,13 +539,6 @@ class Geocoder
                 return null;
             }
 
-            $upd = $db->prepare('UPDATE tblGeocodeCache SET hitCount = hitCount + 1, lastUsedAt = NOW() WHERE queryHash = ?');
-            if ($upd !== false) {
-                $upd->bind_param('s', $hash);
-                $upd->execute();
-                $upd->close();
-            }
-
             // 📐 Built by answer(), the same as a fresh answer (#1034). A row
             //    with no coordinates used to come back as 0,0; it now reads as
             //    a miss, so the provider is asked again and the row is
@@ -550,12 +547,27 @@ class Geocoder
             //    the Earth. reverse() also reads here; the rows it writes carry
             //    the coordinates it was asked about, already checked, so it is
             //    unaffected.
-            return self::answer(
+            $answer = self::answer(
                 $row['latitude'],
                 $row['longitude'],
                 $row['formatted'] !== null ? (string) $row['formatted'] : null,
                 (string) $row['provider']
             );
+            if ($answer === null) {
+                // Not counted as a hit: the row was found but not USED. The
+                // count was taken before this test in the first version of
+                // #1034, which counted a row nobody could use as a hit.
+                return null;
+            }
+
+            $upd = $db->prepare('UPDATE tblGeocodeCache SET hitCount = hitCount + 1, lastUsedAt = NOW() WHERE queryHash = ?');
+            if ($upd !== false) {
+                $upd->bind_param('s', $hash);
+                $upd->execute();
+                $upd->close();
+            }
+
+            return $answer;
         } catch (\Throwable $e) {
             return null;
         }

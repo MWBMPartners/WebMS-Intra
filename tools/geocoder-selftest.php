@@ -34,6 +34,13 @@
  *      kept
  *   H  a cache row with no coordinates is not served as 0,0; the provider is
  *      asked and the row is overwritten
+ *   J  the LONGITUDE is judged in its own right (a good latitude with an
+ *      empty, wordy, off-the-Earth or infinite longitude), and every bad
+ *      latitude and longitude is ALSO tried on the Google leg alone, with the
+ *      key set, so each leg is shown to judge its own answer
+ *   K  the too-strict direction: real positions with a negative latitude, a
+ *      negative longitude, and the exact edges ±90 / ±180, on both legs, are
+ *      kept; just outside the edges (by 0.0000001) is refused
  *   I  the country a look-up is limited to is part of the cache key (#1035):
  *      the same address limited to Great Britain and to the US is asked of
  *      the provider twice and cached twice; "GB" and "gb" share one row
@@ -333,6 +340,22 @@ elseif (str_contains($asked, 'wordjunk'))   { $pos = ['abc', 'def']; }
 elseif (str_contains($asked, 'offearth'))   { $pos = $leg === 'google' ? [200, 500] : ['95', '0']; }
 elseif (str_contains($asked, 'infinite'))   { $pos = ['1e999', '0']; }
 elseif (str_contains($asked, 'nullisland')) { $pos = $leg === 'google' ? [0, 0] : ['0.0000000', '0.0000000']; }
+
+// `pos[<lat>,<lng>]` in the address: answer exactly that, on both legs — or,
+// with `gonly` in the address too, on the GOOGLE leg only, so Nominatim gives
+// its ordinary place and a Google answer is judged on its own. Google sends
+// numbers as JSON numbers (anything that is not a finite number stays text,
+// as a broken answer would); Nominatim always sends text.
+if (preg_match('/pos\[([^,\]]*),([^\]]*)\]/', $asked, $m) === 1
+    && ($leg === 'google' || str_contains($asked, 'gonly') === false)) {
+    $pos = [$m[1], $m[2]];
+    if ($leg === 'google') {
+        $pos = array_map(
+            static fn ($v) => (is_numeric($v) === true && is_finite((float) $v) === true) ? (float) $v : $v,
+            $pos
+        );
+    }
+}
 
 if ($leg === 'google') {
     echo json_encode(['status' => 'OK', 'results' => [[
@@ -696,6 +719,13 @@ echo "G. Over-reach guard: exactly 0,0 from the provider is a real place\n";
 $zero = $lookup(GT_MARK . ' nullisland Point');
 check('G1 it is an answer, not "not found"', $zero['ok'] ?? null, true);
 check('G2 ...of 0,0', [isset($zero['lat']) ? (float) $zero['lat'] : null, isset($zero['lng']) ? (float) $zero['lng'] : null], [0.0, 0.0]);
+$setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+$stubReset();
+$zeroG = $lookup(GT_MARK . ' nullisland Google Point');
+check('G3 ...and from Google too: only Google asked, and its 0,0 kept',
+    [$stubCalls(), $zeroG['source'] ?? null, isset($zeroG['lat']) ? (float) $zeroG['lat'] : null, isset($zeroG['lng']) ? (float) $zeroG['lng'] : null],
+    [['google'], 'google', 0.0, 0.0]);
+$setSetting('geo.google.apiKey', '');
 
 // ── H ────────────────────────────────────────────────────────────────────────
 echo "H. A cache row with no coordinates is a miss, not 0,0\n";
@@ -717,6 +747,88 @@ check('H2 the answer is the provider\'s position, not 0,0',
     [isset($hollow['lat']) ? (float) $hollow['lat'] : null, isset($hollow['lng']) ? (float) $hollow['lng'] : null], [52.2053, 0.1218]);
 check('H3 ...and the row now holds it', $cacheRow($addrH),
     ['latitude' => '52.2053000', 'longitude' => '0.1218000', 'provider' => 'nominatim']);
+// The row started at hitCount 1 and was then overwritten once (cachePut adds
+// 1). A row nobody could USE is not a hit, so cacheGet() must not add one.
+$hitsH = (int) ($db->query("SELECT `hitCount` FROM `tblGeocodeCache` WHERE `queryHash` = '" . $db->real_escape_string($hashH) . "'")->fetch_assoc()['hitCount'] ?? -1);
+check('H4 an unusable row was not counted as a hit (1 at the start, +1 when overwritten)', $hitsH, 2);
+
+/** A lookup's position as two floats, or [null, null]. */
+$posOf = static fn (?array $a): array => [
+    isset($a['lat']) === true ? (float) $a['lat'] : null,
+    isset($a['lng']) === true ? (float) $a['lng'] : null,
+];
+
+// ── J ────────────────────────────────────────────────────────────────────────
+echo "J. Each coordinate is judged in its own right, on each leg\n";
+// A good latitude (52.2) with a bad longitude, then a good longitude with a
+// bad latitude. The first set is what the earlier fixtures never tried: every
+// one of them broke the LATITUDE, so a check on the latitude alone passed.
+$badPairs = [
+    'J1' => ['52.2', '',      'an empty longitude'],
+    'J2' => ['52.2', 'abc',   'a longitude that is a word'],
+    'J3' => ['52.2', '500',   'a longitude off the Earth'],
+    'J4' => ['52.2', '-500',  'a negative longitude off the Earth'],
+    'J5' => ['52.2', '1e999', 'an infinite longitude'],
+    'J6' => ['',     '0.5',   'an empty latitude'],
+    'J7' => ['abc',  '0.5',   'a latitude that is a word'],
+    'J8' => ['200',  '500',   'both off the Earth'],
+    'J9' => ['1e999', '0.5',  'an infinite latitude'],
+];
+foreach ($badPairs as $id => [$la, $ln, $what]) {
+    $addr = GT_MARK . " {$id} pos[{$la},{$ln}]";
+    $setSetting('geo.google.apiKey', '');
+    $stubReset();
+    $a = $lookup($addr);
+    check("{$id}a {$what}, from Nominatim: not found, and not cached",
+        [$stubCalls(), $a['ok'] ?? null, $a['reason'] ?? null, $rowsFor($addr)], [['nominatim'], false, 'not_found', 0]);
+    $setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+    $stubReset();
+    $g = $lookup(GT_MARK . " {$id} gonly pos[{$la},{$ln}]");
+    check("{$id}b {$what}, from GOOGLE (key set): refused, so Nominatim's place is used",
+        [$stubCalls(), $g['source'] ?? null, $posOf($g)], [['google', 'nominatim'], 'nominatim', [52.2053, 0.1218]]);
+}
+$setSetting('geo.google.apiKey', '');
+
+// ── K ────────────────────────────────────────────────────────────────────────
+echo "K. Real positions anywhere on the Earth are kept; just outside it is not\n";
+// Every earlier GOOD fixture had a positive latitude between 39 and 53 and a
+// longitude near 0, so a rule refusing the southern half of the world, or
+// anything east of 10 degrees, passed. These are the too-strict direction.
+$goodPairs = [
+    'K1' => [-33.8688, 151.2093, 'Sydney: southern and far east'],
+    'K2' => [40.7128, -74.006, 'New York: west'],
+    'K3' => [-34.6037, -58.3816, 'Buenos Aires: south and west'],
+    'K4' => [90.0, 180.0, 'the exact edges 90 and 180'],
+    'K5' => [-90.0, -180.0, 'the exact edges -90 and -180'],
+    'K6' => [90.0, -180.0, 'the exact edges 90 and -180'],
+    'K7' => [-90.0, 180.0, 'the exact edges -90 and 180'],
+];
+foreach ($goodPairs as $id => [$la, $ln, $what]) {
+    $setSetting('geo.google.apiKey', '');
+    $stubReset();
+    $n = $lookup(GT_MARK . " {$id} pos[{$la},{$ln}]");
+    check("{$id}a {$what}, from Nominatim: kept as given",
+        [$stubCalls(), $n['source'] ?? null, $posOf($n)], [['nominatim'], 'nominatim', [(float) $la, (float) $ln]]);
+    $setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+    $stubReset();
+    $g = $lookup(GT_MARK . " {$id} google pos[{$la},{$ln}]");
+    check("{$id}b {$what}, from Google: kept as given, and Nominatim never asked",
+        [$stubCalls(), $g['source'] ?? null, $posOf($g)], [['google'], 'google', [(float) $la, (float) $ln]]);
+}
+$setSetting('geo.google.apiKey', '');
+$justOutside = [
+    'K8'  => ['90.0000001', '0.5', 'a latitude 0.0000001 above 90'],
+    'K9'  => ['-90.0000001', '0.5', 'a latitude 0.0000001 below -90'],
+    'K10' => ['10.5', '180.0000001', 'a longitude 0.0000001 above 180'],
+    'K11' => ['10.5', '-180.0000001', 'a longitude 0.0000001 below -180'],
+];
+foreach ($justOutside as $id => [$la, $ln, $what]) {
+    $a = $lookup(GT_MARK . " {$id} pos[{$la},{$ln}]");
+    check("{$id} {$what}: not found", [$a['ok'] ?? null, $a['reason'] ?? null], [false, 'not_found']);
+}
+$vK = $saveVenue(GT_MARK . ' Venue K south-east', GT_MARK . ' K12 pos[-33.8688,151.2093]');
+check('K12 a venue at a southern, eastern position stores it as given',
+    [$vK['saved'] ?? false, $vK['latitude'] ?? null, $vK['longitude'] ?? null], [true, '-33.8688000', '151.2093000']);
 
 // ── I ────────────────────────────────────────────────────────────────────────
 echo "I. The country a look-up is limited to is part of the cache key (#1035)\n";

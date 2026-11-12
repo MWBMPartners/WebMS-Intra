@@ -85,10 +85,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-earth-europe me-2"></i>Geocoding Integration</h1>
 <p class="text-secondary">
-    Converts an address to coordinates (and back). Provider chain: <strong>Google</strong> when a key
-    is set below, otherwise <strong>OpenStreetMap Nominatim</strong> — throttled to one request per
-    second and cached, so a given address is only ever geocoded once.
+    Converts an address to coordinates (and back). When a key is set below, <strong>Google</strong> is
+    asked first; if it has no answer, or its answer is not a usable map position, <strong>OpenStreetMap
+    Nominatim</strong> is asked instead. With no key, only Nominatim is asked. Nominatim is asked at most once a second.
+    A usable answer is kept, so the same address limited to the same country is looked up only once;
+    an address that got no usable answer is asked again the next time.
 </p>
+<?php
+// 📝 #1034 (12 November 2026): this used to say "Google when a key is set,
+//    otherwise Nominatim" and "a given address is only ever geocoded once".
+//    Neither was true: a failed or unusable Google answer falls through to
+//    Nominatim, an answer that is not a real position is never kept (so it is
+//    asked again), and since #1035 the same address is kept once per country.
+?>
 
 <div class="alert alert-info small">
     Nominatim's usage policy requires a descriptive User-Agent identifying this install and an admin
