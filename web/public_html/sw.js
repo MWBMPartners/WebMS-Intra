@@ -101,9 +101,15 @@
  * installed worker fetch that page again.
  *
  * What is guarded by a test: tools/offline-page-selftest.mjs drives this
- * file and the offline page in a real browser — that nothing marked
- * "private" is kept (mayKeepCopy()), and that the offline page tries again
- * by itself. Loosening the "private" refusal fails it.
+ * file and the offline page in a real browser. For mayKeepCopy() it sends
+ * pages and stylesheets whose Cache-Control has "private" FIRST, AFTER
+ * another directive ("no-store, private", as the foyer screen sends), as a
+ * SECOND header line (as Auth.php adds it), and in capitals, and a
+ * stylesheet marked "no-store" — so removing either refusal, matching
+ * "private" only at the start, or dropping the lower-casing each fails it
+ * (each planted and seen red). It cannot judge a refusal rewritten to look
+ * for some OTHER spelling it does not send. It also pins that the offline
+ * page tries again by itself, and no sooner than about a minute.
  *
  * Also handles Web Push (#322): `push` shows a notification for every
  * message (a push with an unparseable/missing body still shows a generic

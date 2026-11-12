@@ -12,9 +12,10 @@
  * counts a guest's answer reads tblEventRSVPInvites. (This header used to
  * say an anonymous tblEventRSVPs row was inserted too. The first version,
  * 37b1b07a, tried to, and the insert was taken out in 83b0ae72 because it
- * could never succeed -- `git log -S"INSERT INTO tblEventRSVPs" -- <this
- * file>` names both -- see the note at the POST handler. Corrected under
- * #824.)
+ * could never succeed -- `git log --oneline -S"INSERT INTO tblEventRSVPs"
+ * 83b0ae72 -- <this file>` names exactly those two (the end commit keeps
+ * later edits of this very comment, which quote the text, out of the
+ * answer) -- see the note at the POST handler. Corrected under #824.)
  *
  * Single-file landing + POST handler.
  *

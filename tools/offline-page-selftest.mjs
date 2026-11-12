@@ -30,8 +30,9 @@
  *   O  The premise: the real worker installs, takes control, and stores the
  *      offline page — or nothing below means anything.
  *   P  A page marked "X-Offline-Copy: allow" is kept, and the SAME page also
- *      marked "Cache-Control: private" is NOT; a stylesheet is kept, and one
- *      marked "Private, max-age=60" is NOT. With the network gone, the private
+ *      marked private is NOT -- "private" alone, after another directive,
+ *      and on a second header line; a stylesheet is kept, and one marked
+ *      private (the same three ways, one in capitals) or "no-store" is NOT. With the network gone, the private
  *      page is answered by the offline page, never by a stored copy. The two
  *      kept controls are what make the two refusals mean something: a worker
  *      that kept nothing at all would pass a "not kept" check alone.
@@ -42,6 +43,8 @@
  *   B  The "Try Again" button and the browser's "online" event each try at
  *      once — and, in that part, nothing reloads by itself within the wait,
  *      so it is the button (or the event) that did it.
+ *   T  On the real clock the retry waits about a minute: no reload before 49
+ *      seconds, and the page back by itself within 80.
  *   D  The dark theme is applied without an error. It used to be applied
  *      from <head>, before <body> existed, and threw.
  *
@@ -50,7 +53,8 @@
  * part R a script added to every new page BEFORE the page's own scripts run
  * (`Page.addScriptToEvaluateOnNewDocument`) makes any `setTimeout` of ten
  * seconds or longer fire a hundred times sooner. The offline page's own
- * code is untouched, and parts B and D run with the clock left alone.
+ * code is untouched; parts B, T and D run with the clock left alone, and
+ * T is what pins the minute itself.
  *
  * WHAT IT CANNOT DO, said plainly
  * -------------------------------
@@ -115,9 +119,7 @@ const WEB = webArg !== -1 && typeof process.argv[webArg + 1] === 'string'
     ? path.resolve(process.argv[webArg + 1])
     : path.join(ROOT, 'web');
 
-/* The cache name sw.js uses, READ OUT OF sw.js rather than typed here, so a
-   future version bump cannot leave this test looking in an empty store and
-   reporting "nothing kept" for the wrong reason. */
+/* The offline page's own <title>, which is how a check tells it apart. */
 const OFFLINE_TITLE = 'Offline — Portal';
 
 let passed = 0;
@@ -251,6 +253,9 @@ async function main() {
         process.exit(2);
     }
     const swSource = await readFile(swPath, 'utf8');
+    /* The cache name sw.js uses, READ OUT OF sw.js rather than typed here, so
+       a future version bump cannot leave this test looking in an empty store
+       and reporting "nothing kept" for the wrong reason. */
     const cacheName = (swSource.match(/var CACHE_VERSION = '([^']+)'/) || [])[1];
     if (typeof cacheName !== 'string') {
         console.error(`REFUSED: could not read CACHE_VERSION out of ${swPath}.`);
@@ -307,11 +312,33 @@ async function main() {
                 // would be tested by nothing.
                 return send(200, 'text/html; charset=utf-8', html('Private', 'PRIVATE-COPY'),
                     { 'X-Offline-Copy': 'allow', 'Cache-Control': 'private' });
+            /* "private" NOT FIRST, and on a SECOND header line (round 2 of
+               #865's check). The first version sent "private" only at the
+               start of the value, so a refusal rewritten to look only THERE
+               (`indexOf('private') === 0`) left every check green -- while the
+               foyer screen really sends "no-store, private" and Auth.php
+               adds "Cache-Control: private" as a second line beside a page's
+               own value. An array here makes node send two header lines; the
+               browser joins them with ", " before the worker reads them. */
+            case '/kept-private-after':
+                return send(200, 'text/html; charset=utf-8', html('Private after', 'PRIVATE-AFTER-COPY'),
+                    { 'X-Offline-Copy': 'allow', 'Cache-Control': 'no-store, private' });
+            case '/kept-private-two-lines':
+                return send(200, 'text/html; charset=utf-8', html('Private two lines', 'PRIVATE-TWO-COPY'),
+                    { 'X-Offline-Copy': 'allow', 'Cache-Control': ['no-cache, must-revalidate', 'private'] });
             case '/static/ok.css':
                 return send(200, 'text/css', 'body{}');
             case '/static/private.css':
                 // Capitals and a second directive, as a real server may send.
                 return send(200, 'text/css', 'p{}', { 'Cache-Control': 'Private, max-age=60' });
+            case '/static/private-after.css':
+                return send(200, 'text/css', 'a{}', { 'Cache-Control': 'max-age=60, private' });
+            case '/static/private-two-lines.css':
+                return send(200, 'text/css', 'b{}', { 'Cache-Control': ['max-age=60', 'private'] });
+            case '/static/no-store.css':
+                // The OTHER refusal for a static file. Pages are not refused
+                // for "no-store" (PHP sends it on every page), files are.
+                return send(200, 'text/css', 'i{}', { 'Cache-Control': 'no-store' });
             default:
                 return send(404, 'text/plain', 'not found');
         }
@@ -392,9 +419,14 @@ async function main() {
         console.log('P. sw.js refuses to keep a response marked "private"');
         await go('/kept-allowed');
         await browser.waitFor(`var w = (function(){${WHERE}})(); return w.marker === 'ALLOWED-COPY';`, 10000);
-        await go('/kept-private');
-        await browser.waitFor(`var w = (function(){${WHERE}})(); return w.marker === 'PRIVATE-COPY';`, 10000);
-        await browser.evaluate(`await fetch('/static/ok.css'); await fetch('/static/private.css'); return true;`);
+        for (const [where, marker] of [['/kept-private', 'PRIVATE-COPY'], ['/kept-private-after', 'PRIVATE-AFTER-COPY'],
+            ['/kept-private-two-lines', 'PRIVATE-TWO-COPY']]) {
+            await go(where);
+            await browser.waitFor(`var w = (function(){${WHERE}})(); return w.marker === ${JSON.stringify(marker)};`, 10000);
+        }
+        const twoLines = await browser.evaluate(`var r = await fetch('/static/ok.css'); await fetch('/static/private.css');
+            await fetch('/static/private-after.css'); await fetch('/static/no-store.css');
+            var t = await fetch('/static/private-two-lines.css'); return t.headers.get('Cache-Control');`);
         /* The worker stores a copy WITHOUT waiting for it (keepCopy() is fire
            and forget), so wait for the two that SHOULD be kept, and only then
            ask about the two that should not — by then a write of either would
@@ -406,12 +438,21 @@ async function main() {
         check('P1 premise: a page marked "X-Offline-Copy: allow" IS kept, and so is an ordinary stylesheet '
             + '(without these two, a worker that kept nothing would pass P2 and P3)',
             allowedKept === true, `both kept: ${JSON.stringify(allowedKept)}`);
-        const privatePage = await stored('/kept-private');
-        check('P2 a page carrying the same "allow" marker AND "Cache-Control: private" is NOT kept',
-            privatePage === false, `kept: ${JSON.stringify(privatePage)}`);
-        const privateCss = await stored('/static/private.css');
-        check('P3 a stylesheet marked "Private, max-age=60" is NOT kept',
-            privateCss === false, `kept: ${JSON.stringify(privateCss)}`);
+        check('P1b premise: two Cache-Control lines reach the worker as one value, "private" last '
+            + '(so P2c and P3c test a SECOND header line, as Auth.php sends it)',
+            twoLines === 'max-age=60, private', `the page read ${JSON.stringify(twoLines)}`);
+        for (const [label, where] of [
+            ['P2 a page carrying the same "allow" marker AND "Cache-Control: private"', '/kept-private'],
+            ['P2b ... AND "no-store, private" (private AFTER another directive, as the foyer screen sends it)', '/kept-private-after'],
+            ['P2c ... AND "private" on a SECOND header line (as Auth.php adds it)', '/kept-private-two-lines'],
+            ['P3 a stylesheet marked "Private, max-age=60" (capitals)', '/static/private.css'],
+            ['P3b a stylesheet marked "max-age=60, private"', '/static/private-after.css'],
+            ['P3c a stylesheet with "private" on a second header line', '/static/private-two-lines.css'],
+            ['P3d a stylesheet marked "no-store" (the other refusal for a file)', '/static/no-store.css'],
+        ]) {
+            const kept = await stored(where);
+            check(`${label} is NOT kept`, kept === false, `kept: ${JSON.stringify(kept)}`);
+        }
 
         down = true;
         await go('/kept-private');
@@ -498,6 +539,36 @@ async function main() {
                 landed !== null && loadsBefore === 1 && shown !== null,
                 `offline page shown: ${JSON.stringify(landed)}, the tab loaded /foyer ${loadsBefore} time(s) before, then shown ${JSON.stringify(shown)}`);
         }
+
+        /* ── T. About a minute, on the real clock ────────────────────────
+           Round 2 of #865's check: the speed-up in part R makes ANY delay of
+           ten seconds or more fire quickly, so `RETRY_SECONDS = 10` (a
+           building of screens hammering a portal that has just come back)
+           left every check green. This part leaves the clock alone and
+           WAITS: nothing may reload before 49 seconds, and the page must
+           come back by itself within 80. It costs about a minute of the
+           run, which is the price of measuring the thing rather than the
+           code that sets it. */
+        console.log('T. The retry waits about a minute (real clock; this part takes about a minute)');
+        down = true;
+        await resetLoads();
+        await go('/foyer');
+        const tLanded = await browser.waitFor(`var w = (function(){${WHERE}})();
+            return w.ready === 'complete' && w.title === ${JSON.stringify(OFFLINE_TITLE)} ? Date.now() : null;`, 10000);
+        const t0 = Date.now();
+        let earlyAt = null;
+        while (Date.now() - t0 < 49000) {
+            const n = await browser.evaluate(`return Number(sessionStorage.getItem('loads')) || 0;`).catch(() => 0);
+            if (n > 1 && earlyAt === null) { earlyAt = Date.now() - t0; }
+            await sleep(1000);
+        }
+        down = false;
+        const tBack = await browser.waitFor(`var w = (function(){${WHERE}})(); return w.marker === 'FOYER-LIVE' ? Date.now() : null;`, 31000);
+        const after = tBack === null ? null : Math.round((Date.now() - t0) / 1000);
+        check('T1 on the real clock, the offline page does NOT reload within 49 seconds, and DOES bring the foyer back by itself within 80',
+            tLanded !== null && earlyAt === null && tBack !== null,
+            `landed: ${JSON.stringify(tLanded !== null)}, first early reload after ${JSON.stringify(earlyAt)} ms, `
+                + `foyer back after about ${JSON.stringify(after)} s`);
 
         /* ── D. The dark theme, without an error ────────────────────────── */
         console.log('D. The dark theme is applied without an error');

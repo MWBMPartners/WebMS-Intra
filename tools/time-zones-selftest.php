@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 299;  // + five in part X (#824: X18m-X18q) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 300;  // + six in part X (#824: X18m-X18r) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3358,13 +3358,47 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'multisite was ' . json_encode($xMultisiteWas) . '; ' . said($roster824a) . '; member completed ' . json_encode($memberOneC) . ', OTHER completed ' . json_encode($otherOneC)
             . ' (the old sweep completed the switched-off member\'s step too)'
     );
+    // Cleared first, so OTHER's step from X18p cannot answer for this run:
+    // here BOTH people are in the one list the sweep binds (round 2 of #824's
+    // check -- a sweep that bound only the FIRST person of its list passed
+    // every check, because no run had two people who both belonged).
+    $clearProgress();
     $roster824b = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
     $memberOneD = $doneIn($path812One, MEMBER);
+    $otherOneD  = $doneIn($path812One, OTHER);
     ok(
-        'X18q (#824) once the account is switched back on, the next sweep completes the step its evidence earns -- leaving was not recorded as anything',
-        $roster824b['status'] === 200 && $memberOneD === ['Selftest 812 own organisation'],
-        said($roster824b) . '; member completed ' . json_encode($memberOneD)
+        'X18q (#824) once the account is switched back on, the next sweep completes the step its evidence earns -- leaving was not recorded as anything -- and it completes it for BOTH people in the one list it binds, not only the first',
+        $roster824b['status'] === 200 && $memberOneD === ['Selftest 812 own organisation'] && $otherOneD === ['Selftest 812 own organisation'],
+        said($roster824b) . '; member completed ' . json_encode($memberOneD) . ', OTHER completed ' . json_encode($otherOneD)
     );
+
+    // More people than one slice holds. The sweep binds its list 500 at a
+    // time (`Discipleship::SWEEP_SLICE`); with two people there is only ever
+    // ONE slice, so a loop that ran only the first slice passed everything.
+    // 520 more accounts, switched on, enrolled, each with a going RSVP to
+    // organisation 1's own event, take the list to 522: a second slice of 22.
+    // One organisation, so nobody needs a membership row (X18p).
+    q("INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) "
+        . "WITH RECURSIVE `n` (`i`) AS (SELECT 0 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 519) "
+        . "SELECT 970000 + `i`, CONCAT('Selftest 824 bulk ', `i`), CONCAT('bulk', `i`, '.824.zones@selftest.invalid'), 1, 0, 0 FROM `n`");
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) SELECT 1, ?, `userID`, 'active' FROM `tblUsers` WHERE `userID` BETWEEN 970000 AND 970519", 'i', [$path812One]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) SELECT 960907, `userID`, 1, 'going', 'confirmed' FROM `tblUsers` WHERE `userID` BETWEEN 970000 AND 970519");
+    $clearProgress();
+    $roster824c = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $bulkDone   = (int) (one(
+        "SELECT COUNT(*) AS n FROM tblPathwayProgress pr JOIN tblPathwaySteps s ON s.stepID = pr.stepID WHERE s.pathwayID = ? AND s.name = 'Selftest 812 own organisation' AND pr.userID BETWEEN 970000 AND 970519",
+        'i', [$path812One]
+    )['n'] ?? -1);
+    $lastBulk   = $doneIn($path812One, 970519);
+    ok(
+        'X18r (#824) with 522 people enrolled -- more than one slice of 500 -- the sweep completes the step for all of them, the last one included (a loop that ran only the first slice left the last 22 out)',
+        $roster824c['status'] === 200 && $bulkDone === 520 && $lastBulk === ['Selftest 812 own organisation'],
+        said($roster824c) . '; of the 520 extra people, ' . $bulkDone . ' completed; the last one: ' . json_encode($lastBulk)
+    );
+    q('DELETE FROM tblPathwayProgress WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblPathwayEnrolments WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblEventRSVPs WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblUsers WHERE userID BETWEEN 970000 AND 970519');
     q("DELETE FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
 
     // Put everything back. Nothing below reads these rows; event 960908 goes
