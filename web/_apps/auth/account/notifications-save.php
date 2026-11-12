@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Newsletter;
 use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 
@@ -145,13 +146,18 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //    row keeps the token it already has, so unsubscribe links already sent out
 //    in earlier newsletters keep working.
 //
-//    Only touched when the Newsletter app is switched on for this site — the
-//    checkbox is not shown otherwise, and an absent checkbox must not be read
-//    as "unsubscribe me".
-$newsletterOn = (string) (App::settings()['newsletter']['enabled'] ?? '0');
-if ($newsletterOn === '1' || $newsletterOn === 'true') {
+//    Only touched when the Newsletter app is switched on for this site AND
+//    the form that was posted DREW the choice (#875). Asking only whether the
+//    newsletter is on NOW was not enough: a page opened while it was off has
+//    no tick box, and saved after it was switched on that read as "unticked",
+//    so a member was unsubscribed from a list they were never shown a choice
+//    about. The page draws Newsletter::choiceShownMarker() beside the box,
+//    and Newsletter::choiceFromPost() answers null when it did not arrive.
+$newsletterOn     = (string) (App::settings()['newsletter']['enabled'] ?? '0');
+$newsletterChoice = Newsletter::choiceFromPost($_POST);
+if (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice !== null) {
     $siteId       = Site::id();
-    $optedIn      = isset($_POST['newsletterOptedIn']) === true ? 1 : 0;
+    $optedIn      = $newsletterChoice === true ? 1 : 0;
     $freshToken   = bin2hex(random_bytes(20));
     $nlStmt = $mysqli->prepare(
         'INSERT INTO tblNewsletterSubscription (siteID, userID, optedIn, unsubToken) '

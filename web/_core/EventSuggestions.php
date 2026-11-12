@@ -84,6 +84,47 @@ final class EventSuggestions
     public const APPROVAL_SUBJECT = 'Your event suggestion has been approved';
 
     /**
+     * ➖ A stranger's one-line value, made one line (#972). The ONE rule for
+     * the two things a visitor types that the approval e-mail repeats: the
+     * event's name and their own name. `calendar/submit-save.php` applies it
+     * before storing, and approvalMessage() applies it again to whatever the
+     * row holds.
+     *
+     * WHY. Both boxes are single-line on the form, but a request made by hand
+     * can carry line breaks, and the form only trimmed the ends. The e-mail is
+     * plain text, so a stranger could lay it out: a name such as
+     * "Pat\n\nClick https://… to confirm" became its own paragraph holding a
+     * link, in a message from the organisation's own mailbox. The approving
+     * administrator never saw that layout, because the moderation page shows
+     * the same text inside one heading, where a browser folds every line break
+     * and run of spaces into a single space.
+     *
+     * SO THIS DOES EXACTLY WHAT THE ADMINISTRATOR'S BROWSER DID: every run of
+     * control characters (line breaks, tabs, every C0/C1 control, \p{Cc}) and
+     * of Unicode space and line or paragraph separators (\p{Z}, which holds
+     * U+2028 and U+2029) becomes ONE space, and the ends are trimmed. The
+     * stored value, the moderation page and the e-mail then read the same,
+     * word for word. A link stays as text: the administrator sees it, on one
+     * line, before approving, which is the point.
+     *
+     * WHAT IT DOES NOT DO: remove the "format" characters (\p{Cf}), such as
+     * the right-to-left override. They change how a line READS, not how many
+     * lines there are, and stripping them would also break the zero-width
+     * joiners some scripts and emoji need. Text that is not valid UTF-8 has
+     * its single-byte controls replaced instead, because the Unicode pattern
+     * refuses it outright.
+     */
+    public static function oneLine(string $text): string
+    {
+        $flat = preg_replace('/[\p{Cc}\p{Z}]+/u', ' ', $text);
+        if ($flat === null) {
+            $flat = (string) preg_replace('/[\x00-\x20\x7F]+/', ' ', $text);
+        }
+
+        return trim($flat);
+    }
+
+    /**
      * ✉️ The subject and the plain-text body of the e-mail.
      *
      * THE SUBJECT NAMES NOTHING, deliberately. The send log keeps a message's
@@ -132,7 +173,13 @@ final class EventSuggestions
         string $name
     ): array {
         $when = I18n::formatClockDateTime($startReading, $isAllDay === true ? 'l j F Y' : 'l j F Y \a\t H:i');
-        $hello = trim($name) === '' ? 'Hello,' : 'Hello ' . trim($name) . ',';
+        // ➖ #972: the two things a stranger typed, one line each, exactly as
+        //    the moderation page showed them (see oneLine()). Asked here too,
+        //    not only at the form, because a row can reach approval having been
+        //    written some other way.
+        $eventName = self::oneLine($eventName);
+        $name      = self::oneLine($name);
+        $hello = $name === '' ? 'Hello,' : 'Hello ' . $name . ',';
 
         if ($isPublic === true) {
             $body = $hello . "\n\n"

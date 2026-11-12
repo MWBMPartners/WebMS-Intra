@@ -239,7 +239,11 @@ try {
         . "had still works.\n\n"
         . "If you did this, there is nothing to do.\n\n"
         . "If you did NOT do this, somebody else may have been signed in as you. Please tell whoever "
-        . "looks after the portal for your organisation straight away.\n"
+        . "looks after the portal for your organisation straight away.\n",
+        [],
+        // `bodyIsText` (#971): plain text naming the product, whose name is
+        //    chosen at install and may hold a "<". Escaped once, footer kept.
+        ['bodyIsText' => true]
     );
     $mailWaiting = Mailer::lastIsWaiting();
 } catch (\Throwable $problem) {

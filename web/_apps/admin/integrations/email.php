@@ -239,7 +239,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $routeName = Mailer::sendingRoute()['label'];
             try {
-                $ok        = Mailer::send($to, $subject, $text);
+                // `bodyIsText` (#971): the test message is plain text naming the
+                //    organisation, whose name may hold a "<". Told, Mailer escapes
+                //    it once and keeps the footer, whatever the name says.
+                $ok        = Mailer::send($to, $subject, $text, [], ['bodyIsText' => true]);
                 // ⏳ "true" is also the answer for a message that was only
                 //    KEPT in the mail queue (the hourly limit has no room,
                 //    say). The route did not accept that one, and this used

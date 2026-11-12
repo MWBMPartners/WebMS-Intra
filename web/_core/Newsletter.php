@@ -40,6 +40,53 @@ use mysqli;
 class Newsletter
 {
     /**
+     * 📰 The hidden field a form draws beside the newsletter choice to say
+     * "this form showed the member that choice" (#875).
+     */
+    public const CHOICE_SHOWN_FIELD = 'newsletterShown';
+
+    /** The newsletter choice's own tick box. Its value, when ticked, is exactly '1'. */
+    public const CHOICE_FIELD = 'newsletterOptedIn';
+
+    /**
+     * 📰 The hidden "this form drew the newsletter choice" marker (#875).
+     * Printed beside the tick box and ONLY there, the way
+     * NotifyPrefs::shownMarker() is printed beside each notification switch
+     * (#667).
+     */
+    public static function choiceShownMarker(): string
+    {
+        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="1">';
+    }
+
+    /**
+     * 📰 What a posted form asks for the member's newsletter choice (#875):
+     * true (stay subscribed, or subscribe), false (unsubscribe), or NULL
+     * when the form never showed the choice — and NULL means "change
+     * nothing".
+     *
+     * WHY THE MARKER AND NOT THE TICK BOX. An unticked box is not sent at
+     * all, so "the box did not arrive" is the same post as "the box was never
+     * drawn". The preferences page draws it only while the newsletter is
+     * switched on, so a page opened while it was OFF and saved after it was
+     * switched ON wrote "opted out" for a member who was never shown a
+     * choice. Ask whether the field ARRIVED, never what it contains (#677).
+     *
+     * EXACTLY '1' is a tick, nothing looser, as NotifyPrefs::changesFromPost()
+     * decided for the switches.
+     *
+     * @param array<string,mixed> $post Normally `$_POST`.
+     */
+    public static function choiceFromPost(array $post): ?bool
+    {
+        if (array_key_exists(self::CHOICE_SHOWN_FIELD, $post) === false) {
+            return null;
+        }
+
+        return ($post[self::CHOICE_FIELD] ?? null) === '1';
+    }
+
+    /**
      * Render an HTML body from a newsletter's block list. Pulls dynamic
      * content (announcements / events / prayers / sermon) at render time
      * so previews stay accurate up until send.

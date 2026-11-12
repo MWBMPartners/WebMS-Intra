@@ -112,7 +112,9 @@ if ($state !== 'ok' && count($recipients) > 0) {
         try {
             // "true" is sent OR kept in the mail queue (#592): only one a
             // mail service took is an alert that was sent.
-            if (Mailer::send($to, $subject, $body) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
+            // `bodyIsText` (#971): plain text naming the organisation, escaped
+            // once with the footer kept, whatever the name holds.
+            if (Mailer::send($to, $subject, $body, [], ['bodyIsText' => true]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                 $alertsSent++;
             }
         } catch (\Throwable $e) {

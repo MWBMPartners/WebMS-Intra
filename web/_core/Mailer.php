@@ -165,6 +165,63 @@ class Mailer
     private static ?int $firstTriedAt = null;
 
     /**
+     * 🏷️ The names of real HTML elements, for looksLikeHtml() (#971).
+     *
+     * Every element of the HTML Living Standard (https://html.spec.whatwg.org/
+     * #elements-3), plus the old ones e-mail still uses (`center`, `font`,
+     * `big`, `strike`, `tt`). A tag whose name is not on this list is not HTML
+     * anybody here writes: `<x>`, `<Supper>` and `<you@example.org>` are
+     * ordinary text that happens to hold a "<".
+     */
+    private const HTML_ELEMENTS = [
+        'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big', 'blockquote',
+        'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
+        'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure',
+        'font', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i',
+        'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu', 'meta',
+        'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre',
+        'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small',
+        'source', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template',
+        'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr',
+    ];
+
+    /**
+     * 🔍 Does a body the caller did NOT describe look like HTML? The ONE place
+     * that guess is made (#971): send() and renderBase() both ask it, and
+     * there is no second copy of the pattern.
+     *
+     * A body that looks like HTML is sent EXACTLY as written: no escaping and
+     * no branded layout, so no footer either. A body that does not is escaped
+     * once and wrapped in the layout, footer and all.
+     *
+     * WHY IT NAMES REAL ELEMENTS. Until #971 the guess was "a `<`, a letter,
+     * then a `>` somewhere later", which ordinary text satisfies. An
+     * organisation called `St Ann's <x> & Co` (the name is the organisation's
+     * own, typed on a settings page) made every plain message naming it
+     * "HTML": the `&` went out unescaped, the line breaks were lost and the
+     * footer disappeared — on the e-mail page's test message, the backup
+     * alert and the "a password was added" notice alike. Now the tag must be
+     * a real element's (`<p`, `</strong`, `<br/` …) or a doctype, followed by
+     * a space, `/` or `>`; `<x>`, `<Supper>` and `<sup` at the start of
+     * `<Supper>` are not.
+     *
+     * WHAT IT STILL CANNOT DO: tell an organisation's name such as
+     * `<b>Bold</b>` from markup, because that IS markup. Anything typed by
+     * somebody outside the organisation must never reach this guess at all:
+     * such a caller passes `bodyIsText` (#859), and so do the callers whose
+     * plain text names the organisation.
+     */
+    public static function looksLikeHtml(string $body): bool
+    {
+        static $pattern = null;
+        if ($pattern === null) {
+            $pattern = '/<(?:!doctype\b|\/?(?:' . implode('|', self::HTML_ELEMENTS) . ')(?=[\s\/>]))[^>]*>/i';
+        }
+
+        return preg_match($pattern, $body) === 1;
+    }
+
+    /**
      * 🧭 Which route send() will use: ROUTE_GOOGLE, ROUTE_SMTP or ROUTE_MS365.
      *
      * `mail.provider = 'google'` means Google and `'smtp'` means SMTP. Every
@@ -334,7 +391,8 @@ class Mailer
      *
      * @param string|array $to      Recipient (single email or array)
      * @param string       $subj    Email subject line
-     * @param string       $body    Body — auto-detected as HTML if it contains `<` tags
+     * @param string       $body    Body — taken as HTML when looksLikeHtml() says so,
+     *                              unless `bodyIsText` is passed (#971)
      * @param array        $files   File paths to attach
      * @param array        $options What the caller knows about the message
      *                              (every part is optional):
@@ -395,8 +453,9 @@ class Mailer
         //    satisfied by text a stranger typed ("Fish & Chips <Supper>", or
         //    a name carrying `<a href=…>`), which would then be sent as
         //    written. Callers who leave it out keep the guess unchanged.
+        //    The guess itself is looksLikeHtml(), the one place it is made (#971).
         $bodyIsText    = ($options['bodyIsText'] ?? false) === true;
-        $looksLikeHtml = $bodyIsText === false && (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
+        $looksLikeHtml = $bodyIsText === false && self::looksLikeHtml($body) === true;
         // 🏷️ Which organisation's footer (#683). A scheduled job that walks
         //    several organisations must say which one each message belongs to,
         //    because the request's merged settings were fixed before the walk
@@ -961,7 +1020,9 @@ class Mailer
      */
     public static function testSmtp(string $to, string $subject, string $text): array
     {
-        return self::sendViaSmtp([$to], $subject, self::renderBase($text), $text, []);
+        // `true`: the test message is plain text naming the organisation, so it
+        //    is escaped once and never guessed at (#971).
+        return self::sendViaSmtp([$to], $subject, self::renderBase($text, null, true), $text, []);
     }
 
     /**
@@ -1143,9 +1204,9 @@ class Mailer
      * footerFactsFor() (#683).
      *
      * $contentIsText true (#859, send()'s `bodyIsText`): the content is plain
-     * text and is ALWAYS escaped. This method guesses too, with the same
-     * pattern as send(), so skipping send()'s guess alone was not enough:
-     * the text would have reached this one and been taken as HTML here.
+     * text and is ALWAYS escaped. This method guesses too, by asking the same
+     * looksLikeHtml() as send(), so skipping send()'s guess alone was not
+     * enough: the text would have reached this one and been taken as HTML here.
      */
     private static function renderBase(string $content, ?int $siteId = null, bool $contentIsText = false): string
     {
@@ -1158,7 +1219,7 @@ class Mailer
             // 🪞 Base template missing — return the content as-is wrapped in
             //    a minimal HTML shell so the email still renders.
             return '<!doctype html><html><body style="font-family:system-ui">'
-                 . ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+                 . ($contentIsText === false && self::looksLikeHtml($content) === true
                     ? $content
                     : '<pre style="white-space:pre-wrap">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>')
                  . '</body></html>';
@@ -1181,7 +1242,7 @@ class Mailer
         $portalUrl     = PortalAddress::absolute('', $siteId);
         $supportEmail  = $footer['support'];
         // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
-        $contentHtml = ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1)
+        $contentHtml = ($contentIsText === false && self::looksLikeHtml($content) === true)
             ? $content
             : '<p>' . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</p>';
 

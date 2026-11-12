@@ -86,6 +86,11 @@
  *        Europe/London and America/New_York, with the database connection and
  *        PHP both in the changing zone; and on the pages, the message over the
  *        limit is not sent and is listed as such, whichever route is in use.
+ *   P15  (#971) An organisation named `St <x> & "Co"`: "Send test", and a
+ *        plain message given to send() with nothing said about it, are
+ *        escaped ONCE with the footer kept; a real HTML body is still sent
+ *        as written; an event broadcast has its footer and is escaped once.
+ *        X1-X3 put each old line back in the copy and see the check go red.
  *   P8   The dashboard's "set up e-mail" step is ticked only when the portal
  *        can send; the two help pages say what is true.
  *   Last The password is in nothing the portal showed, logged or stored
@@ -158,7 +163,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 108;
+const EXPECTED_CHECKS = 115; // 108, then #971's P15 (four checks and three plants)
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-pages-selftest@@';
@@ -1082,10 +1087,13 @@ $state['mailPipe'] = $mailPipes[0] ?? null;
 //    this machine trusts": it is how this run's made-up authority is trusted
 //    without one line of the portal being changed. `max_execution_time` is
 //    raised because a busy machine can make a page slow, and a limit meant
-//    for a real web server must not decide a test.
+//    for a real web server must not decide a test. opcache is OFF (#971):
+//    part P15 puts old lines back into the copy and the page must run them —
+//    the built-in server caches compiled files, so without this a planted
+//    line can go unseen and the plant prove nothing.
 $state['proc'] = proc_open(
     [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        '-d', 'display_errors=0', '-d', 'max_execution_time=180', '-d', 'openssl.cafile=' . $standinDir . $sep . 'certs' . $sep . 'ca.pem',
+        '-d', 'display_errors=0', '-d', 'max_execution_time=180', '-d', 'opcache.enable=0', '-d', 'openssl.cafile=' . $standinDir . $sep . 'certs' . $sep . 'ca.pem',
         '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
     $quiet,
     $pipes,
@@ -2122,6 +2130,161 @@ mailSince('accept');
 $ran  = sendDirect([mailOf('third')], 'P10 no limit', 'A message.');
 $mail = mailSince('accept');
 ok('with the limit emptied again there is none: the message goes', $ran['sent'] === true && count($mail['messages']) === 1, (string) json_encode(array_diff_key($ran, ['output' => 1])));
+
+// =============================================================================
+head('P15. A "<" in the organisation\'s name, and the event broadcast: escaped once, with the footer (#971)');
+// =============================================================================
+// Mailer used to take ANY body holding "<", a letter and a later ">" for
+// finished HTML and send it exactly as written: no escaping, and no branded
+// layout, so no footer. An organisation's own name such as `St <x> & "Co"`
+// did that to every plain message naming it. Mailer::looksLikeHtml() is now
+// the one guess and asks for a REAL element; the plain-text callers also say
+// so (`bodyIsText`). The event broadcast escaped its message itself and
+// wrapped it in `<p>`, so it was sent with no footer: it is plain text now.
+//
+// Each check reads what the stand-in mail server RECEIVED: the HTML part and
+// the text part of the real message. Then X1-X3 put each old line back in the
+// scratch copy and require the right check to go red.
+$footerWords = 'This is an automated email. Please don\'t reply directly.';
+$oddName     = 'St <x> & "Co"';
+$oddEscaped  = 'St &lt;x&gt; &amp; &quot;Co&quot;';
+$escapedTwice = static fn (string $html): bool => preg_match('/&amp;(?:amp|lt|gt|quot|#0?39);/', $html) === 1;
+$nameWas     = stored('site.name')[0];
+setting('mail.provider', 'smtp');
+useServer('accept');
+forgetRouteFaults();
+
+/** P15a: the e-mail page's "Send test", with the organisation's odd name. */
+$scnSendTest = static function () use ($sendTest, $testShown, $oddName, $oddEscaped, $footerWords, $escapedTwice): array {
+    setting('site.name', $oddName);
+    mailSince('accept');
+    $answer = $sendTest(mailOf('second'), ip(1));
+    $mail   = mailSince('accept');
+    $html   = (string) ($mail['messages'][0]['html'] ?? '');
+    $text   = (string) ($mail['messages'][0]['text'] ?? '');
+    return [
+        'sent'        => $testShown($answer)['result'],
+        'messages'    => count($mail['messages']),
+        'escaped'     => str_contains($html, 'This is a test message from ' . $oddEscaped . '.'),
+        'raw in html' => str_contains($html, 'from ' . $oddName),
+        'twice'       => $escapedTwice($html),
+        'footer'      => str_contains($html, $footerWords),
+        'text'        => str_contains($text, 'This is a test message from ' . $oddName . '.'),
+    ];
+};
+$wantSendTest = ['sent' => 'sent', 'messages' => 1, 'escaped' => true, 'raw in html' => false, 'twice' => false, 'footer' => true, 'text' => true];
+
+/** P15b: Mailer::send() given a plain body naming the organisation, and told NOTHING (the guess itself). */
+$plainNaming = "Backup alert for " . $oddName . " - Fish & Chips <Supper>\n\nReview: https://portal.example.invalid/x";
+$scnGuess = static function () use ($plainNaming, $oddEscaped, $footerWords, $escapedTwice): array {
+    mailSince('accept');
+    $ran  = sendDirect([mailOf('second')], 'P15 plain text naming the organisation', $plainNaming);
+    $mail = mailSince('accept');
+    $html = (string) ($mail['messages'][0]['html'] ?? '');
+    return [
+        'outcome' => $ran['outcome'],
+        'escaped' => str_contains($html, 'Backup alert for ' . $oddEscaped . ' - Fish &amp; Chips &lt;Supper&gt;<br />'),
+        'twice'   => $escapedTwice($html),
+        'footer'  => str_contains($html, $footerWords),
+        'text'    => str_contains(str_replace("\r\n", "\n", (string) ($mail['messages'][0]['text'] ?? '')), $plainNaming),
+    ];
+};
+$wantGuess = ['outcome' => 'sent', 'escaped' => true, 'twice' => false, 'footer' => true, 'text' => true];
+
+/** P15c: the event broadcast page, with an odd event name and a message holding "&", "<b>" and a line break. */
+$broadcastBody = "Line one & <b>two</b>\nLine three";
+$scnBroadcast = static function (string $subject) use ($rootJar, $broadcastBody, $footerWords, $escapedTwice): array {
+    q('UPDATE tblEvents SET eventName = ? WHERE eventID = ?', 'si', ['Fish <x> & Chips', EVENT_ID]);
+    mailSince('accept');
+    $answer = req($rootJar, 'POST', '/calendar/event/broadcast/send', ['csrf_token' => anyToken($rootJar, ip(1)), 'eventID' => (string) EVENT_ID,
+        'segment' => 'all-rsvps', 'subject' => $subject, 'body' => $broadcastBody], ip(1));
+    $mail = mailSince('accept');
+    q('UPDATE tblEvents SET eventName = ? WHERE eventID = ?', 'si', ['Selftest mail event', EVENT_ID]);
+    $each = [];
+    // Only THIS broadcast's messages: the queue run the page makes also sends
+    // whatever earlier parts left waiting (P10 keeps some on purpose).
+    foreach ($mail['messages'] as $m) {
+        if (preg_match('/^Subject: (.*)$/mi', $m['head'], $sub) !== 1 || trim($sub[1]) !== $subject) {
+            continue;
+        }
+        $each[] = [
+            'footer'  => str_contains($m['html'], $footerWords),
+            'escaped' => str_contains($m['html'], 'Re: Fish &lt;x&gt; &amp; Chips') && str_contains($m['html'], 'Line one &amp; &lt;b&gt;two&lt;/b&gt;<br />'),
+            'twice'   => $escapedTwice($m['html']),
+            'text'    => str_contains($m['text'], "Re: Fish <x> & Chips") && str_contains($m['text'], 'Line one & <b>two</b>'),
+        ];
+    }
+    return ['went back' => $answer['status'] === 302, 'messages' => $each];
+};
+$oneBroadcast = ['footer' => true, 'escaped' => true, 'twice' => false, 'text' => true];
+$wantBroadcast = ['went back' => true, 'messages' => [$oneBroadcast, $oneBroadcast]];
+
+$got = $scnSendTest();
+ok('the e-mail page\'s "Send test", with the organisation named ' . $oddName . ': the name is escaped ONCE in the HTML, never sent raw, the footer is there, and the text part says it as written',
+    $got === $wantSendTest, (string) json_encode($got));
+$got = $scnGuess();
+ok('Mailer::send() told nothing, given plain text naming that organisation and "Fish & Chips <Supper>": NOT taken for HTML, so escaped once, line break kept, footer there',
+    $got === $wantGuess, (string) json_encode($got));
+$html = '<p>Hello <strong>there</strong> &amp; welcome</p>';
+mailSince('accept');
+sendDirect([mailOf('second')], 'P15 real HTML', $html);
+$mail = mailSince('accept');
+ok('...and a body that IS HTML (a real element) is still sent exactly as written: not escaped, and so not wrapped',
+    str_contains((string) ($mail['messages'][0]['html'] ?? ''), $html) === true && str_contains((string) ($mail['messages'][0]['html'] ?? ''), $footerWords) === false,
+    (string) mb_substr((string) ($mail['messages'][0]['html'] ?? 'no message'), 0, 160));
+$got = $scnBroadcast('P15 broadcast');
+ok('an event broadcast: each of the two messages has the footer, the event\'s name and the message escaped ONCE (line break kept), and the text part as written',
+    $got === $wantBroadcast, (string) json_encode($got));
+
+// ── X1-X3: the old lines, put back in the scratch copy ───────────────────────
+/**
+ * Replace text in a file of the scratch copy (each `$from` must be found exactly
+ * once), run `$scenario`, and put the file back byte for byte.
+ *
+ * @param array<string,string> $swaps
+ * @return array{applied:bool, result:mixed, restored:bool}
+ */
+$plantIn = static function (string $relative, array $swaps, callable $scenario) use ($child, $sep): array {
+    $path   = $child . $sep . 'web' . $sep . str_replace('/', $sep, $relative);
+    $before = (string) file_get_contents($path);
+    $after  = $before;
+    foreach ($swaps as $from => $to) {
+        if (substr_count($after, $from) !== 1) {
+            return ['applied' => false, 'result' => null, 'restored' => true];
+        }
+        $after = str_replace($from, $to, $after);
+    }
+    file_put_contents($path, $after);
+    clearstatcache(true, $path);
+    try {
+        $result = $scenario();
+    } finally {
+        file_put_contents($path, $before);
+        clearstatcache(true, $path);
+    }
+    return ['applied' => true, 'result' => $result, 'restored' => (string) file_get_contents($path) === $before];
+};
+$newGuess = "            \$pattern = '/<(?:!doctype\\b|\\/?(?:' . implode('|', self::HTML_ELEMENTS) . ')(?=[\\s\\/>]))[^>]*>/i';";
+$oldGuess = "            \$pattern = '/<[a-zA-Z][^>]*>/';";
+$p = $plantIn('_core/Mailer.php', [$newGuess => $oldGuess], $scnGuess);
+ok('X1 with the old guess ("<", a letter, then any ">") put back, the plain message naming the organisation is sent as raw HTML with NO footer (the second check goes red)',
+    $p['applied'] === true && $p['restored'] === true && is_array($p['result']) && $p['result']['footer'] === false && $p['result']['escaped'] === false,
+    (string) json_encode($p));
+$p = $plantIn('_core/Mailer.php', [$newGuess => $oldGuess, 'self::renderBase($text, null, true)' => 'self::renderBase($text)'], $scnSendTest);
+ok('X2 with the old guess AND "Send test" no longer saying its message is text, the organisation\'s name goes out raw in the HTML (the first check goes red); with the guess alone put back it stays escaped, because the message says it is text',
+    $p['applied'] === true && $p['restored'] === true && is_array($p['result']) && $p['result']['raw in html'] === true && $p['result']['escaped'] === false
+        && ($plantIn('_core/Mailer.php', [$newGuess => $oldGuess], $scnSendTest)['result']['escaped'] ?? null) === true,
+    (string) json_encode($p));
+$p = $plantIn('_apps/calendar/event-broadcast-send.php', [
+    "\$bodyText = 'Re: ' . (string) \$event['eventName'] . \"\\n\\n\" . \$body;" =>
+        "\$bodyText = '<p>' . htmlspecialchars('Re: ' . \$event['eventName'], ENT_QUOTES, 'UTF-8') . '</p>' . nl2br(htmlspecialchars(\$body, ENT_QUOTES, 'UTF-8'));",
+    ", 'sendNow' => false, 'bodyIsText' => true]);" => ", 'sendNow' => false]);",
+], static fn (): array => $scnBroadcast('P15 broadcast, the old way'));
+ok('X3 with the broadcast\'s old body put back (escaped by the page and wrapped in <p>), the messages go with NO footer, escaped once (the broadcast check goes red: this is what #971 measured)',
+    $p['applied'] === true && $p['restored'] === true && is_array($p['result']) && count($p['result']['messages']) === 2
+        && $p['result']['messages'][0]['footer'] === false && $p['result']['messages'][0]['twice'] === false,
+    (string) json_encode($p));
+setting('site.name', $nameWas);
 
 // =============================================================================
 head('P8. The dashboard and the help pages say what is true');

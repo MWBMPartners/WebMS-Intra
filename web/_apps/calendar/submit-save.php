@@ -23,6 +23,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Events;
+use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
@@ -100,12 +101,18 @@ if ($isLoggedIn === false && $requireCap === true && $captchaUsable === false) {
     );
 }
 
-$eventName       = trim((string) ($_POST['eventName']      ?? ''));
+// ➖ #972: the event's name and the visitor's own name are ONE line each,
+//    by the rule the approval e-mail uses too (EventSuggestions::oneLine()).
+//    Both boxes are single-line, but a request made by hand could carry line
+//    breaks, which laid out the approval e-mail in a way the administrator
+//    approving it never saw. Stored flattened, every page and the e-mail
+//    show the same words.
+$eventName       = EventSuggestions::oneLine((string) ($_POST['eventName']      ?? ''));
 $startRaw        = trim((string) ($_POST['startDateTime']  ?? ''));
 $endRaw          = trim((string) ($_POST['endDateTime']    ?? ''));
 $locationName    = trim((string) ($_POST['locationName']   ?? ''));
 $description     = trim((string) ($_POST['description']    ?? ''));
-$submitterName   = trim((string) ($_POST['submitterName']  ?? ''));
+$submitterName   = EventSuggestions::oneLine((string) ($_POST['submitterName']  ?? ''));
 $submitterEmail  = trim((string) ($_POST['submitterEmail'] ?? ''));
 
 if ($eventName === '' || $startRaw === '') {

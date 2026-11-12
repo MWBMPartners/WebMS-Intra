@@ -114,9 +114,14 @@ $stmt->close();
 
 // 📧 The message every recipient gets. One e-mail each, so nobody sees
 //    anybody else's address.
-$bodyHtml = nl2br(htmlspecialchars($body, ENT_QUOTES, 'UTF-8'));
-$prefix = '<p>' . htmlspecialchars('Re: ' . $event['eventName'], ENT_QUOTES, 'UTF-8') . '</p>';
-$bodyHtml = $prefix . $bodyHtml;
+//
+//    PLAIN TEXT, handed to Mailer as text (#971). This used to escape the
+//    message here and wrap it in `<p>` itself. Escaping happened once, but the
+//    `<p>` made Mailer take the body as finished HTML, so it was sent with no
+//    branded layout and NO FOOTER (measured: the message reached the mail
+//    server with neither). Now Mailer escapes it once and wraps it in the
+//    organisation's layout, footer included, like every other plain message.
+$bodyText = 'Re: ' . (string) $event['eventName'] . "\n\n" . $body;
 
 $addresses = [];
 foreach ($recipients as $rcp) {
@@ -228,7 +233,7 @@ try {
     if ($earlier === 0) {
         // 📥 Keep every message. `sendNow` false: nothing is tried here.
         foreach ($addresses as $address) {
-            $ok = Mailer::send($address, $subject, $bodyHtml, [], ['priority' => 'bulk', 'sendNow' => false]);
+            $ok = Mailer::send($address, $subject, $bodyText, [], ['priority' => 'bulk', 'sendNow' => false, 'bodyIsText' => true]);
             if (Mailer::lastQueueId() > 0) {
                 $kept[] = Mailer::lastQueueId();
             } elseif ($ok === true) {

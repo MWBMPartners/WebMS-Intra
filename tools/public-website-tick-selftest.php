@@ -46,7 +46,11 @@
  *      on the real moderation page; exactly one message to their address is
  *      in the send log, with the right words; a second press sends none; a
  *      rejection, no address, a bad address and a signed-in member's
- *      suggestion send none; a route that THROWS still approves.
+ *      suggestion send none; a route that THROWS still approves. #972: a
+ *      visitor's line breaks in the event's name or their own name are made
+ *      ONE line, stored so, shown so and e-mailed so (E23, E24); the Pending
+ *      count and Reject both leave a deleted suggestion alone, and the page
+ *      shows only its own result (E25-E27).
  *   K  who may publish, asked of the real `PublicWebsite::mayPublish()` in the
  *      copy (a separate process): an administrator made on Admin → Users with
  *      the portal-wide flag counts where they BELONG, and nowhere else.
@@ -138,7 +142,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 316; // + four in round 3 of #885 (G18-G21) and three plants (PG16-PG18); + seven in section G and six plants in round 2 of #885 (G11-G17, PG10-PG15); + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 326; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2031,6 +2035,118 @@ $scnNewYork = static fn (): bool => str_contains($scnClock('America/New_York', '
 $scnGap     = static fn (): bool => str_contains($scnClock('Europe/London', '2030-03-31 01:30:00'), 'on Sunday 31 March 2030 at 01:30. ');
 check('E21 an event on New York\'s clock, in an organisation on London\'s, is told at 10:30 — its OWN reading, not converted to the organisation\'s clock', $scnNewYork(), true);
 check('E22 an event at 01:30 on the morning London\'s clocks go forward (an hour that does not exist) is told at 01:30, as stored, not moved to 02:30', $scnGap(), true);
+
+// (5) #972: A STRANGER CANNOT LAY OUT THE E-MAIL. The event's name and the
+//     suggester's own name are single-line boxes, but a request made by hand
+//     can carry line breaks. The e-mail is plain text, so each break made a
+//     new paragraph (here: one holding a link), while the moderation page
+//     shows the same text inside ONE heading, where the administrator's
+//     browser folds every break into a space. So the administrator approved
+//     something laid out differently from what was sent.
+//     HOW THE ADMINISTRATOR SEES IT, decided: exactly as the moderation page
+//     shows it — one line, every run of line breaks, tabs, controls and
+//     spaces made one space (`EventSuggestions::oneLine()`). The form stores
+//     it so, and the e-mail asks the same rule again of whatever the row holds.
+//     A link stays as text: the administrator sees it, on one line, first.
+$laidOutEvent = "PWT E laid out\r\n\r\nClick https://evil.example/confirm\tnow";
+$laidOutName  = "Pat\n\nVisit https://evil.example/go";
+$flatEvent    = 'PWT E laid out Click https://evil.example/confirm now';
+$flatName     = 'Pat Visit https://evil.example/go';
+/** Body lines that begin with a stranger's words: none may (a line of its own is the layout #972 is about). */
+$strangerLines = static fn (string $body): int => preg_match_all('/^(?:Click|Visit|now)\b/m', $body);
+$scnLaidOut = static function () use ($db, $http, $tokenOn, $jar, $moderate, $handedTo, $capturedSoFar, $routeNotSetUp, $laidOutEvent, $laidOutName, $flatEvent, $flatName, $strangerLines): array {
+    $routeNotSetUp();
+    $address = 'laid.out@selftest.invalid';
+    $db->query("DELETE FROM `tblEvents` WHERE `submitterEmail` = '{$address}'");
+    $from = $capturedSoFar();
+    @unlink($jar); // signed out: a visitor
+    $form = $http('GET', '/calendar/submit')['body'];
+    $http('POST', '/calendar/submit-save', [
+        'csrf_token' => $tokenOn($form), 'eventName' => $laidOutEvent, 'startDateTime' => '2030-08-05T10:30',
+        'submitterName' => $laidOutName, 'submitterEmail' => $address,
+    ]);
+    $row = $db->query("SELECT `eventID`, `eventName`, `submitterName` FROM `tblEvents` WHERE `submitterEmail` = '{$address}'")->fetch_assoc();
+    if ($row === null) {
+        return ['the suggestion was not stored' => true];
+    }
+    $id    = (int) $row['eventID'];
+    $moderate($id, 'approve'); // signs in as the organisation's administrator
+    $page  = $http('GET', '/admin/calendar/moderation?status=approved')['body'];
+    $body  = (string) (($handedTo($address, $from)[0] ?? [])['body'] ?? '');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return [
+        'stored'           => [(string) $row['eventName'], (string) $row['submitterName']],
+        'moderation shows' => str_contains($page, '<h2 class="h6 mb-1">' . htmlspecialchars($flatEvent, ENT_QUOTES, 'UTF-8') . '</h2>') && str_contains($page, $flatName),
+        'e-mail says'      => str_contains($body, 'Hello ' . $flatName . ',') && str_contains($body, 'Thank you for suggesting "' . $flatEvent . '", on '),
+        'stranger lines'   => $strangerLines($body),
+    ];
+};
+$wantLaidOut = ['stored' => [$flatEvent, $flatName], 'moderation shows' => true, 'e-mail says' => true, 'stranger lines' => 0];
+check('E23 (#972) a visitor\'s event name and own name with line breaks are stored as ONE line each, shown so on the moderation page, and the approval e-mail says them in the same words with no line of the stranger\'s own',
+    $scnLaidOut(), $wantLaidOut);
+/** A suggestion row written some OTHER way (not through the form), with its line breaks still in it. */
+$scnRowLaidOut = static function () use ($makeEvent, $siteOne, $moderate, $handedTo, $capturedSoFar, $db, $routeNotSetUp, $laidOutEvent, $laidOutName, $flatEvent, $flatName, $strangerLines): array {
+    $routeNotSetUp();
+    $address = 'row.laid.out@selftest.invalid';
+    $from = $capturedSoFar();
+    $id = $makeEvent($laidOutEvent, $siteOne, '2030-08-06 10:00:00', ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending',
+        'submitterName' => $laidOutName, 'submitterEmail' => $address]);
+    $moderate($id, 'approve');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    $body = (string) (($handedTo($address, $from)[0] ?? [])['body'] ?? '');
+    return ['e-mail says' => str_contains($body, 'Hello ' . $flatName . ',') && str_contains($body, '"' . $flatEvent . '"'), 'stranger lines' => $strangerLines($body)];
+};
+check('E24 (#972) ...and a row that reached approval with its line breaks still in it (written some other way) is e-mailed on one line too',
+    $scnRowLaidOut(), ['e-mail says' => true, 'stranger lines' => 0]);
+
+// (6) #972 item 2: three moderation details that were right but pinned by
+//     nothing.
+/** The number on the moderation page's "Pending" tab. */
+$pendingCount = static function () use ($http): ?int {
+    return preg_match('/Pending\s*<span class="badge[^"]*">(\d+)<\/span>/', $http('GET', '/admin/calendar/moderation')['body'], $m) === 1 ? (int) $m[1] : null;
+};
+$scnCountsDeleted = static function () use ($makeEvent, $siteOne, $signIn, $pendingCount, $setEv, $db): array {
+    $signIn('orgadmin');
+    $id = $makeEvent('PWT E counted', $siteOne, '2030-08-08 10:00:00', ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending',
+        'submitterName' => 'Cou Nted', 'submitterEmail' => 'counted@selftest.invalid']);
+    $live = $pendingCount();
+    $setEv($id, ['isDeleted' => '1']);
+    $gone = $pendingCount();
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return ['one fewer once deleted' => $live !== null && $gone === $live - 1, 'counts' => [$live, $gone]];
+};
+$e25 = $scnCountsDeleted();
+check('E25 the "Pending" count on the moderation page leaves a DELETED suggestion out (one fewer the moment it is deleted)', $e25['one fewer once deleted'] ?? null, true);
+$scnRejectDeleted = static function () use ($makeEvent, $siteOne, $moderate, $wentBack, $moderationSays, $db): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT E deleted, rejected'");
+    $id = $makeEvent('PWT E deleted, rejected', $siteOne, '2030-08-09 10:00:00', ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending',
+        'submitterName' => 'Rej Ect', 'submitterEmail' => 'rejected.deleted@selftest.invalid', 'isDeleted' => '1']);
+    $back  = $wentBack($moderate($id, 'reject'));
+    $said  = $moderationSays();
+    $state = $db->query("SELECT `submissionStatus`, `status`, `moderatedByID` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc();
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return ['went back' => $back, 'state' => [(string) $state['submissionStatus'], (string) $state['status'], $state['moderatedByID']], 'page said' => $said];
+};
+check('E26 pressing REJECT on a deleted suggestion (a stale page) changes nothing: still pending, still a draft, nobody recorded as deciding, and the page says nothing changed',
+    $scnRejectDeleted(), ['went back' => true, 'state' => ['pending', 'draft', null],
+        'page said' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.']);
+$scnOwnKey = static function () use ($signIn, $http, $tokenOn, $makeEvent, $siteOne, $db): array {
+    $signIn('orgadmin');
+    $id   = $makeEvent('PWT E own key', $siteOne, '2030-08-10 10:00:00');
+    $page = $http('GET', '/admin/calendar/moderation')['body'];
+    // Another page leaves its message in the shared `flash_msg`: the broadcast
+    // page refuses an empty subject and sends us to ITS page, which we do not open.
+    $left = $http('POST', '/calendar/event/broadcast/send', ['csrf_token' => $tokenOn($page), 'eventID' => (string) $id, 'segment' => 'all-rsvps', 'subject' => '', 'body' => '']);
+    $mod  = $http('GET', '/admin/calendar/moderation')['body'];
+    $then = $http('GET', '/calendar/event/broadcast?eventID=' . $id)['body'];
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return [
+        'the other page left a message' => $left['status'] === 302 && str_contains($then, 'Subject and message are required.'),
+        'moderation shows it'           => str_contains($mod, 'Subject and message are required.') || str_contains($mod, 'data-moderation-result'),
+    ];
+};
+check('E27 the moderation page shows only its OWN result (`moderation_result`): a message another page left in the shared flash is not shown there, and is still waiting for its own page',
+    $scnOwnKey(), ['the other page left a message' => true, 'moderation shows it' => false]);
 
 // The mail rows go back as they were. The words-watching line stays in the
 // copy's Mailer until the end of this section's plants (they read the HTML).
@@ -4080,8 +4196,10 @@ check('P123 with the address no longer checked, something that is not an address
 $p = $plant('_core/EventSuggestions.php', ", ['siteId' => \$siteId, 'bodyIsText' => true]);", ", ['siteId' => \$siteId]);", $scnLinkName);
 check('P124 with the e-mail no longer marked as plain text, a stranger\'s link in their name goes out as a WORKING link with no footer (E15 goes red)',
     [$p['applied'], str_contains((string) (($p['result']['first message'] ?? [])['html'] ?? ''), '<a href="https://evil.example/login">')], [true, true]);
-$p = $plant('_core/Mailer.php', "\$contentHtml = (\$contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', \$content) === 1)",
-    "\$contentHtml = (preg_match('/<[a-zA-Z][^>]*>/', \$content) === 1)", $scnLinkName);
+// (#971: the guess is Mailer::looksLikeHtml() now, asked by the wrapper; the
+// plant drops the wrapper's "told it is text" half exactly as before.)
+$p = $plant('_core/Mailer.php', "\$contentHtml = (\$contentIsText === false && self::looksLikeHtml(\$content) === true)",
+    "\$contentHtml = (self::looksLikeHtml(\$content) === true)", $scnLinkName);
 check('P125 with the branded wrapper still guessing (only send() told), the link is still sent live: BOTH halves of the option are needed',
     [$p['applied'], str_contains((string) (($p['result']['first message'] ?? [])['html'] ?? ''), '<a href="https://evil.example/login">')], [true, true]);
 $p = $plant('_apps/admin/calendar/moderate.php',
@@ -4102,6 +4220,28 @@ check('P129 with the reading put through strtotime() and date(), the event in th
 $p = $plant('_core/EventSuggestions.php', '(Mailer::lastIsWaiting() === true ? self::TOLD_WAITING : self::TOLD_SENT)', 'self::TOLD_SENT', $scnKept);
 check('P130 with a kept message counted as sent, the page tells the administrator a message still in the queue "has been e-mailed" (E19 goes red)',
     [$p['applied'], $p['result']['page said'] ?? null], [true, ['Approved. The person who suggested it has been e-mailed to say so.']]);
+// #972: the stranger's names made one line, and three moderation details.
+$p = $plant('_apps/calendar/submit-save.php',
+    "\$eventName       = EventSuggestions::oneLine((string) (\$_POST['eventName']      ?? ''));",
+    "\$eventName       = trim((string) (\$_POST['eventName']      ?? ''));", $scnLaidOut);
+check('P131 with the form storing the event\'s name as typed again (ends trimmed only), its line breaks are stored (E23 goes red)',
+    [$p['applied'], ($p['result']['stored'][0] ?? null) === $flatEvent], [true, false]);
+$p = $plant('_core/EventSuggestions.php', "        \$eventName = self::oneLine(\$eventName);\n        \$name      = self::oneLine(\$name);\n", '', $scnRowLaidOut);
+check('P132 with the e-mail no longer making the two names one line, a row holding line breaks gives the stranger lines of their own (E24 goes red)',
+    [$p['applied'], ($p['result']['stranger lines'] ?? 0) > 0], [true, true]);
+$p = $plant('_apps/admin/calendar/moderation.php', "IS NOT NULL AND `isDeleted` = 0 '", "IS NOT NULL '", $scnCountsDeleted);
+check('P133 with the counts no longer leaving deleted suggestions out, the Pending count does not drop when one is deleted (E25 goes red)',
+    [$p['applied'], $p['result']['one fewer once deleted'] ?? null], [true, false]);
+$p = $plant('_apps/admin/calendar/moderate.php',
+    "AND `submissionStatus` = \"pending\" AND `isDeleted` = 0'\n    );\n}\n",
+    "AND `submissionStatus` = \"pending\"'\n    );\n}\n", $scnRejectDeleted);
+check('P134 with Reject no longer refusing a deleted suggestion, pressing it decides a row nobody can see (E26 goes red)',
+    [$p['applied'], $p['result']['state'][0] ?? null], [true, 'rejected']);
+$p = $plant('_apps/admin/calendar/moderation.php',
+    "\$result    = \$_SESSION['moderation_result'] ?? null;",
+    "\$result    = \$_SESSION['moderation_result'] ?? (isset(\$_SESSION['flash_msg']) ? ['type' => 'info', 'words' => (string) \$_SESSION['flash_msg']] : null);", $scnOwnKey);
+check('P135 with the moderation page reading the SHARED flash, it shows a message another page left (E27 goes red)',
+    [$p['applied'], $p['result']['moderation shows it'] ?? null], [true, true]);
 // The words-watching line comes out of the copy's Mailer now, and every mail
 // row goes back as it was.
 file_put_contents($mailerPath, $mailerWas);
