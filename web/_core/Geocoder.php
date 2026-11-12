@@ -19,11 +19,16 @@
  *
  * NOMINATIM POLICY COMPLIANCE (mandatory, built in from first commit):
  *   1. Descriptive User-Agent — productName/version (admin contact).
- *   2. Throttle <= 1 request/second — persisted last-call timestamp in the
- *      `geo.nominatim.lastCallAt` setting row, `usleep()`s the remainder,
- *      hard-capped at 1.2s (bounded — at most ONE geocode per request).
- *   3. Cache-once — `tblGeocodeCache` so a given address/coordinate hits
- *      Nominatim at most once, ever (only successes are cached).
+ *   2. Spacing — calls are spaced about a second apart, using a last-call
+ *      timestamp in the `geo.nominatim.lastCallAt` setting row and
+ *      `usleep()`ing the remainder, hard-capped at 1.2s. This is NOT a
+ *      guarantee of one request a second: there is no lock, so two requests
+ *      arriving together both read the old timestamp and both call within
+ *      milliseconds, and a failed read of the timestamp skips the wait.
+ *   3. Cache — `tblGeocodeCache`, so the same address limited to the same
+ *      country (#1035) is normally looked up once. Only usable answers are
+ *      kept (#1034), so an address with no usable answer is asked again,
+ *      and "Test connection" deliberately skips the cache.
  *   4. Attribution — respected at the display layer (map_attribution copy).
  *
  * No SSRF guard needed: both hosts are `const`, never caller-supplied.
@@ -31,6 +36,9 @@
  * Public methods:
  *   Geocoder::forward($address, $countryCode = null)  -> ?array{lat,lng,formatted,source}
  *   Geocoder::reverse($lat, $lng)                      -> ?array{formatted,source}
+ *     (reverse() has NEVER had a caller: `git log -S"Geocoder::reverse" -- web/`
+ *      shows only 3694c693, which added it. No page turns coordinates into an
+ *      address, and none may say it does.)
  *   Geocoder::autoEnabled()                            -> bool
  *   Geocoder::testConnection()                         -> array{success,message}
  *
@@ -100,6 +108,22 @@ class Geocoder
      */
     public static function forward(string $address, ?string $countryCode = null): ?array
     {
+        return self::lookUp($address, $countryCode, true);
+    }
+
+    /**
+     * The forward look-up itself. `$readCache` is false ONLY for
+     * testConnection(): a connection test answered from the cache reports
+     * "Connected" without contacting any provider, which is what it did until
+     * #1034 round 3 (12 November 2026) — after the first success, every press
+     * of "Test connection" was answered from the cache, so a broken key or a
+     * blocked network still read as connected. A fresh answer is still WRITTEN
+     * to the cache: it is a real answer for that address.
+     *
+     * @return array{lat: float, lng: float, formatted: ?string, source: string}|null
+     */
+    private static function lookUp(string $address, ?string $countryCode, bool $readCache): ?array
+    {
         $address = trim($address);
         if ($address === '') {
             return null;
@@ -111,9 +135,11 @@ class Geocoder
         //    and whichever was asked second was given the first one's place —
         //    for ever, because the cache is asked first. See forwardKeyText().
         $hash = self::cacheKey('forward', self::forwardKeyText($address, $countryCode));
-        $cached = self::cacheGet($hash);
-        if ($cached !== null) {
-            return $cached;
+        if ($readCache === true) {
+            $cached = self::cacheGet($hash);
+            if ($cached !== null) {
+                return $cached;
+            }
         }
 
         $result = null;
@@ -176,15 +202,19 @@ class Geocoder
     }
 
     /**
-     * Admin "Test connection" — geocodes a fixed test address through the
-     * live provider chain and reports which provider answered. Never
-     * echoes provider error text.
+     * Admin "Test connection" — looks up a fixed test address with the
+     * providers themselves, never the cache, and reports which provider
+     * answered. Never echoes provider error text.
+     *
+     * It skips the cache on purpose (#1034 round 3): through forward() it was
+     * answered from the cache after the first success, so it reported
+     * "Connected" without contacting anybody.
      *
      * @return array{success: bool, message: string}
      */
     public static function testConnection(): array
     {
-        $result = self::forward('Westminster, London, United Kingdom');
+        $result = self::lookUp('Westminster, London, United Kingdom', null, false);
         if ($result !== null) {
             return [
                 'success' => true,
@@ -419,9 +449,12 @@ class Geocoder
     }
 
     /**
-     * Enforce Nominatim's <=1 req/sec policy using a persisted last-call
-     * timestamp (`geo.nominatim.lastCallAt`, global setting). Best-effort
-     * on read/write failure — proceed without sleeping rather than fatal.
+     * Space Nominatim calls about a second apart (its policy asks for at
+     * most one a second) using a persisted last-call timestamp
+     * (`geo.nominatim.lastCallAt`, global setting). It cannot GUARANTEE that:
+     * nothing locks the row between the read and the write, so two requests
+     * at once both see the old timestamp and both call. Best-effort on
+     * read/write failure — proceed without sleeping rather than fatal.
      * Sleep is hard-capped at 1.2s (bounded — at most ONE geocode call
      * happens per request, so this never compounds).
      */

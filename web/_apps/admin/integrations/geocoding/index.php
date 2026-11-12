@@ -5,7 +5,7 @@
  * Admin — Geocoding integration settings 🌍 (#456 Chunk A)
  * -----------------------------------------------------------------------------
  * Provider chain: Google (when a key is set) -> OpenStreetMap Nominatim
- * fallback (<=1 request/second, cached, attribution required). Nominatim
+ * fallback (calls spaced about a second apart, cached, attribution required). Nominatim
  * requires a descriptive User-Agent built from the product name/version +
  * an admin contact address (`privacy.contactEmail`, falling back to
  * `mail.defaultFromAddress`).
@@ -85,11 +85,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-earth-europe me-2"></i>Geocoding Integration</h1>
 <p class="text-secondary">
-    Converts an address to coordinates (and back). When a key is set below, <strong>Google</strong> is
-    asked first; if it has no answer, or its answer is not a usable map position, <strong>OpenStreetMap
-    Nominatim</strong> is asked instead. With no key, only Nominatim is asked. Nominatim is asked at most once a second.
-    A usable answer is kept, so the same address limited to the same country is looked up only once;
-    an address that got no usable answer is asked again the next time.
+    Finds the map position (coordinates) for an address. When a key is set below, <strong>Google</strong>
+    is asked first; if it has no answer, or its answer is not a usable map position, <strong>OpenStreetMap
+    Nominatim</strong> is asked instead. With no key, only Nominatim is asked. Calls to Nominatim are
+    spaced about a second apart, as its rules ask.
+    A usable answer is kept, so the same address limited to the same country is normally looked up
+    only once; an address that got no usable answer is asked again the next time.
 </p>
 <?php
 // 📝 #1034 (12 November 2026): this used to say "Google when a key is set,
@@ -97,6 +98,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    Neither was true: a failed or unusable Google answer falls through to
 //    Nominatim, an answer that is not a real position is never kept (so it is
 //    asked again), and since #1035 the same address is kept once per country.
+//    Round 3 (12 November 2026) removed two more untrue claims: "(and back)" —
+//    nothing turns coordinates into an address, `Geocoder::reverse()` has
+//    never had a caller (`git log -S"Geocoder::reverse" -- web/` shows only
+//    3694c693) — and "at most once a second", which the spacing cannot
+//    guarantee because nothing locks it (see Geocoder::throttle()).
 ?>
 
 <div class="alert alert-info small">
@@ -141,7 +147,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <button class="btn btn-outline-secondary" type="submit">
                 <i class="fa-solid fa-plug me-1"></i>Test connection
             </button>
-            <small class="text-muted d-block mt-1">Geocodes a fixed test address through the live provider chain.</small>
+            <small class="text-muted d-block mt-1">Looks up a fixed test address with the providers themselves (never a kept answer) and says which one answered.</small>
         </form>
     </div>
 </div>

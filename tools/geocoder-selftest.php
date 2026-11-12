@@ -41,6 +41,10 @@
  *   K  the too-strict direction: real positions with a negative latitude, a
  *      negative longitude, and the exact edges ±90 / ±180, on both legs, are
  *      kept; just outside the edges (by 0.0000001) is refused
+ *   L  "Test connection" on Admin, Integrations, Geocoding really asks a
+ *      provider every time it is pressed — it used to be answered from the
+ *      cache after the first success, so it said "Connected" without
+ *      contacting anybody (#1034 round 3)
  *   I  the country a look-up is limited to is part of the cache key (#1035):
  *      the same address limited to Great Britain and to the US is asked of
  *      the provider twice and cached twice; "GB" and "gb" share one row
@@ -829,6 +833,36 @@ foreach ($justOutside as $id => [$la, $ln, $what]) {
 $vK = $saveVenue(GT_MARK . ' Venue K south-east', GT_MARK . ' K12 pos[-33.8688,151.2093]');
 check('K12 a venue at a southern, eastern position stores it as given',
     [$vK['saved'] ?? false, $vK['latitude'] ?? null, $vK['longitude'] ?? null], [true, '-33.8688000', '151.2093000']);
+
+// ── L ────────────────────────────────────────────────────────────────────────
+echo "L. \"Test connection\" asks a provider every time, never the cache\n";
+// The fixed address testConnection() looks up. A row for it may already be
+// in this database from somewhere else; it is left as found.
+$testAddress = 'Westminster, London, United Kingdom';
+$testHash    = $portalKey($testAddress, '');
+$hadTestRow  = $cacheRow($testAddress) !== null;
+$pressTest = static function () use ($http, $freshToken): array {
+    return $http('POST', '/admin/integrations/geocoding/test', ['csrf_token' => $freshToken()]);
+};
+$stubReset();
+$press1 = $pressTest();
+check('L1 the first press asks Nominatim (no Google key) and comes back to the page',
+    [$stubCalls(), $press1['status']], [['nominatim'], 302]);
+check('L2 PREMISE: the answer is now cached, so a cache-first look-up would not ask again',
+    $cacheRow($testAddress) !== null, true);
+$stubReset();
+$pressTest();
+check('L3 THE POINT: the second press asks the provider again rather than the cache',
+    $stubCalls(), ['nominatim']);
+$shown = $http('GET', '/admin/integrations/geocoding');
+check('L4 ...and the page says which provider answered',
+    str_contains($shown['body'], 'via nominatim'), true);
+if ($hadTestRow === false) {
+    $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `queryHash` = ?');
+    $st->bind_param('s', $testHash);
+    $st->execute();
+    $st->close();
+}
 
 // ── I ────────────────────────────────────────────────────────────────────────
 echo "I. The country a look-up is limited to is part of the cache key (#1035)\n";
