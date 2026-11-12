@@ -175,8 +175,12 @@ final class Currency
     ];
 
     /**
-     * 💷 English symbols that differ from the code (ICU's). Each is unique, so
-     * "$" is only ever US dollars; Canadian dollars are "CA$".
+     * 💷 English symbols that differ from the code (ICU's), used to WRITE an
+     * amount (format(), prefix()). Each is distinct within this list, so the
+     * portal never writes two currencies the same way ("$" here is US dollars,
+     * Canadian dollars are "CA$"). That is a fact about this list, not about
+     * the world: several currencies are written "$" in practice, which is what
+     * SIGNS_OF records for READING a file.
      *
      * @var array<string, string>
      */
@@ -187,37 +191,59 @@ final class Currency
     ];
 
     /**
-     * 💱 Currency signs written by SEVERAL currencies: `who` writes them, and
-     * `readFor` is the one currency, if any, whose organisation may still read
-     * the bare sign in a file. A file cell carrying any other shared sign cannot
-     * say which money it is, so file mode refuses it, saying so (D-155).
+     * 💱 The signs each currency is WRITTEN with, for reading an imported file
+     * (the owner, D-165, which supersedes D-155 and D-157): a cell's sign is read
+     * as the organisation's own currency whenever that currency is written with
+     * it — "$" is US dollars in a USD organisation and Australian dollars in an
+     * AUD one — and a sign the organisation's currency is never written with is
+     * refused, saying so. The three-letter code is always read as well.
      *
-     * Of the signs this class knows (SYMBOLS, plus "¥"), the shared ones are:
-     *   - "$" — the US dollar's entry in SYMBOLS, but written by many dollars;
-     *     read for NOBODY, not even USD (D-155);
-     *   - "¥" — the yuan and the yen; read for nobody;
-     *   - "£" — pounds sterling's entry in SYMBOLS, but also the Gibraltar,
-     *     Falkland Islands and St Helena pounds and the Egyptian, Syrian,
-     *     Lebanese and South Sudanese pounds, all currencies this class knows.
-     *     Read ONLY for a GBP organisation (the owner, D-157, keeping D-153's
-     *     "£1,234.56"); every other "£" organisation writes its code;
-     *   - "₱" — the Philippine peso's entry in SYMBOLS, but also written for
-     *     the Cuban peso (CUP), which this class knows. No decision names it;
-     *     it is treated the way D-157 treats "£" — read only for its SYMBOLS
-     *     currency (PHP), refused for any other — and that is put to the owner.
-     * Every other SYMBOLS entry belongs to one currency: "A$", "CA$", "NZ$",
-     * "HK$", "MX$", "NT$", "EC$", "R$", "CN¥", "€", "₹", "₪". Written out by
-     * hand; the lists of who writes each are the ones the decisions name, not
-     * every currency there is.
+     * WHERE IT CAME FROM (sourced, not remembered — round 5's check found a
+     * hand-written list naming "Mexican dollars" and a Cuban "₱" no source
+     * gives): ICU 79.1's English currency data, the library behind PHP's intl
+     * extension, read once on 12 November 2026 with
+     * `ResourceBundle::create('en', 'ICUDATA-curr')` — each currency's
+     * standard symbol (`Currencies/<code>/0`) and its NARROW symbol
+     * (`Currencies%narrow/<code>`), keeping each that is not just the code,
+     * for every currency choices() offers. So the Cuban peso is "$" (ICU's
+     * narrow symbol), not "₱", which ICU gives the Philippine peso alone; the
+     * Egyptian pound is "E£" and the Lebanese "L£", not a bare "£". It is
+     * written out here rather than read from intl at run time, because intl is
+     * not an extension the installer requires (as OF_COUNTRY). A currency not
+     * listed has no sign in ICU's English data, and is read by its code only.
      *
-     * @var array<string, array{who: string, readFor: string}>
+     * @var array<string, list<string>>
      */
-    private const SHARED_SIGNS = [
-        '$' => ['who' => 'US, Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars among them', 'readFor' => ''],
-        '¥' => ['who' => 'the Chinese yuan and the Japanese yen', 'readFor' => ''],
-        '£' => ['who' => 'the pound sterling and the Gibraltar, Falkland Islands, St Helena, Egyptian, Syrian, Lebanese and South Sudanese pounds', 'readFor' => 'GBP'],
-        '₱' => ['who' => 'the Philippine peso and the Cuban peso', 'readFor' => 'PHP'],
+    private const SIGNS_OF = [
+        'AFN' => ['؋'], 'AMD' => ['֏'], 'AOA' => ['Kz'], 'ARS' => ['$'], 'AUD' => ['A$', '$'], 'AZN' => ['₼'],
+        'BAM' => ['KM'], 'BBD' => ['$'], 'BDT' => ['৳'], 'BMD' => ['$'], 'BND' => ['$'], 'BOB' => ['Bs'], 'BRL' => ['R$'],
+        'BSD' => ['$'], 'BWP' => ['P'], 'BZD' => ['$'], 'CAD' => ['CA$', '$'], 'CHF' => ['Fr.'], 'CNY' => ['CN¥', '¥'],
+        'COP' => ['$'], 'CRC' => ['₡'], 'CUP' => ['$'], 'CZK' => ['Kč'], 'DKK' => ['kr'], 'DOP' => ['$'], 'EGP' => ['E£'],
+        'EUR' => ['€'], 'FJD' => ['$'], 'FKP' => ['£'], 'GBP' => ['£'], 'GEL' => ['₾'], 'GHS' => ['GH₵'],
+        'GIP' => ['£'], 'GTQ' => ['Q'], 'GYD' => ['$'], 'HKD' => ['HK$', '$'], 'HNL' => ['L'], 'HUF' => ['Ft'], 'IDR' => ['Rp'],
+        'ILS' => ['₪'], 'INR' => ['₹'], 'JMD' => ['$'], 'KGS' => ['⃀'], 'KHR' => ['៛'], 'KPW' => ['₩'], 'KYD' => ['$'],
+        'KZT' => ['₸'], 'LAK' => ['₭'], 'LBP' => ['L£'], 'LKR' => ['Rs'], 'LRD' => ['$'], 'MMK' => ['K'], 'MNT' => ['₮'],
+        'MUR' => ['Rs'], 'MXN' => ['MX$', '$'], 'MYR' => ['RM'], 'NAD' => ['$'], 'NGN' => ['₦'], 'NIO' => ['C$'],
+        'NOK' => ['kr'], 'NPR' => ['Rs'], 'NZD' => ['NZ$', '$'], 'PHP' => ['₱'], 'PKR' => ['Rs'], 'PLN' => ['zł'],
+        'RON' => ['lei'], 'RUB' => ['₽'], 'SBD' => ['$'], 'SEK' => ['kr'], 'SGD' => ['$'], 'SHP' => ['£'], 'SRD' => ['$'],
+        'SSP' => ['£'], 'STN' => ['Db'], 'SYP' => ['£'], 'THB' => ['฿'], 'TOP' => ['T$'], 'TRY' => ['₺'], 'TTD' => ['$'],
+        'TWD' => ['NT$', '$'], 'UAH' => ['₴'], 'USD' => ['$'], 'UYU' => ['$'], 'XCD' => ['EC$', '$'], 'XCG' => ['Cg.'],
+        'ZAR' => ['R'], 'ZMW' => ['ZK'],
     ];
+
+    /**
+     * 💱 The signs a currency is written with (SIGNS_OF), longest first so
+     * "CA$" is tried before "$"; [] when it has none.
+     *
+     * @return list<string>
+     */
+    public static function signsOf(string $code): array
+    {
+        $signs = self::SIGNS_OF[strtoupper(trim($code))] ?? [];
+        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+
+        return $signs;
+    }
 
     /**
      * 💳 The currencies an online payment may be taken in: two-place currencies
@@ -618,13 +644,14 @@ final class Currency
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
      *   - the record's three-letter CODE in front ("GBP 12.50", "AUD 1,234.50"),
-     *     and its SIGN only where the sign belongs to that one currency ("A$",
-     *     "CA$", "€", …) or is kept for it: "£" is read for GBP alone (D-157)
-     *     and "₱" for PHP alone (put to the owner; see SHARED_SIGNS). A sign
-     *     SHARED by several currencies ("$", "¥", "£" outside GBP, "₱" outside
-     *     PHP) is refused, saying it is shared (D-155): "AUD 12.50" reads,
-     *     "$12.50" does not. A minus may sit either side of a sign that is read
-     *     ("-£3.00", "£-3.00"). ANOTHER currency's sign is refused, saying which; and with
+     *     or any SIGN its currency is written with (SIGNS_OF, from ICU): "$" is
+     *     read as US dollars in a USD organisation and as Australian dollars in
+     *     an AUD one, "£" as Gibraltar pounds in a GIP one (the owner, D-165,
+     *     superseding D-155 and D-157). A minus may sit either side of it
+     *     ("-£3.00", "£-3.00"). The currency written TWICE ("GBP £12.50") is
+     *     refused, saying so. A sign the organisation's currency is never
+     *     written with is refused, saying which and that it is another
+     *     currency; and with
      *     NO currency chosen for the organisation, any sign is refused, saying
      *     so and what to do (D-139: an amount's money is never guessed, so
      *     "£12.50" cannot be stored as money of no known kind).
@@ -663,25 +690,32 @@ final class Currency
             $text     = substr($text, 1);
         }
         if ($fromFile === true && $code !== '') {
-            // A sign SHARED by several currencies is read only for the one
-            // currency it is kept for ("£" for GBP, D-157); "$" and "¥" for
-            // nobody (D-155). Anything else is refused below with the reason.
-            // The three-letter code always reads.
-            $prefixes = [$code];
-            $sign     = self::symbol($code);
-            if ($sign !== '' && (isset(self::SHARED_SIGNS[$sign]) === false || self::SHARED_SIGNS[$sign]['readFor'] === $code)) {
-                $prefixes[] = $sign;
-            }
+            // The code, or any sign this currency is written with (D-165):
+            // "$" is the organisation's own dollars, whichever dollars they are.
+            // Anything else is refused below with the reason.
+            $prefixes = array_merge([$code], self::signsOf($code));
             usort($prefixes, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+            $taken = '';
             foreach ($prefixes as $prefix) {
                 if (str_starts_with($text, $prefix) === true) {
-                    $text = ltrim(substr($text, strlen($prefix)), ' ');
+                    $taken = $prefix;
+                    $text  = ltrim(substr($text, strlen($prefix)), ' ');
                     break;
                 }
             }
             if ($negative === false && str_starts_with($text, '-') === true) {
                 $negative = true;
                 $text     = substr($text, 1);
+            }
+            // The currency written TWICE ("GBP £12.50", "££12.50", "EUR €5"):
+            // round 5 called that "another currency", which was untrue.
+            if ($taken !== '') {
+                foreach ($prefixes as $prefix) {
+                    if (str_starts_with($text, $prefix) === true) {
+                        return 'That amount has its currency written twice (' . $taken . ' and ' . $prefix . '). '
+                            . 'Put only one in front, for example ' . $code . ' 12.50.';
+                    }
+                }
             }
         }
 
@@ -741,17 +775,17 @@ final class Currency
                     . 'organisation, so the portal cannot tell what money it is. Choose the organisation\'s currency in '
                     . 'Admin, Settings, Organisation, then import the file again.';
             }
-            // D-155: a shared sign cannot say WHICH money, so it is refused —
-            // and never called "another currency", which is untrue when it is
-            // this organisation's own (an AUD organisation reading "$12.50").
-            if (isset(self::SHARED_SIGNS[$written]) === true && self::SHARED_SIGNS[$written]['readFor'] !== $code) {
-                return 'The sign ' . $written . ' is used by several currencies (' . self::SHARED_SIGNS[$written]['who'] . '), so the '
-                    . 'portal cannot tell which money this is. If the amount is in ' . $code . ', ' . lcfirst(self::fileAdvice($code))
-                    . ' If it is in another currency, it cannot be imported into this organisation\'s records.';
-            }
-            if ($written !== '') {
+            // A sign or code that is not this currency's (D-165). Every sign
+            // this currency IS written with was read above, so what reaches here
+            // really is another currency's.
+            if ($written !== '' && preg_match('/^[A-Z]{3}$/D', $written) === 1) {
                 return 'That amount is written in another currency (' . $written . '), not ' . $code . '. Import a file kept in '
                     . $code . ', or check the organisation\'s currency in Admin, Settings, Organisation.';
+            }
+            if ($written !== '') {
+                return 'That amount is written with the sign ' . $written . ', which ' . $code . ' is not written with, so it is '
+                    . 'in another currency. Import a file kept in ' . $code . ', or check the organisation\'s currency in '
+                    . 'Admin, Settings, Organisation.';
             }
         }
         $allowed = $fromFile === true ? '0-9.,+\-' : '0-9.+\-';
@@ -775,11 +809,20 @@ final class Currency
     }
 
     /**
-     * 📝 How to write an amount in a FILE, said the one way every file-mode
-     * refusal says it (#1004 round 5): figures, commas only between thousands
-     * if you like, and the organisation's three-letter CODE in front if you
-     * like — never a sign, because a sign is not always read (D-155, D-157).
-     * With no currency chosen, no code is offered: a code would be refused too.
+     * 📝 How to write an amount in a FILE: figures, commas only between
+     * thousands if you like, and the organisation's three-letter CODE in front
+     * if you like. The CODE is offered rather than a sign because the code is
+     * always read, for every currency, while many currencies have no sign at
+     * all (D-165). With no currency chosen, no code is offered: a code would
+     * be refused too.
+     *
+     * It ends exactly FOUR file-mode refusals — those about how the cell is
+     * written with nothing more specific to say: FILE_REASON_NOT_FIGURES,
+     * FILE_REASON_PLUS, FILE_REASON_MINUS_NOT_HERE and FILE_REASON_NO_FIGURES.
+     * Every other file-mode refusal carries its own complete instruction
+     * instead (a power of ten, commas, decimals, a misplaced minus, a negative,
+     * an empty cell, too large, the currency written twice, another currency,
+     * no currency chosen). Round 5's check found a claim that it ended them all.
      */
     public static function fileAdvice(string $code): string
     {
@@ -798,7 +841,18 @@ final class Currency
      */
     private static function currencyWrittenAtStart(string $text): string
     {
-        $signs = array_merge(array_values(self::SYMBOLS), array_keys(self::SHARED_SIGNS));
+        // Only signs with a symbol in them ("$", "£", "GH₵", "R$"): a sign made
+        // of letters alone ("R", "kr", "Fr.") would be found at the start of
+        // ordinary words ("Rent"), and called a currency, which is untrue.
+        $signs = [];
+        foreach (self::SIGNS_OF as $list) {
+            foreach ($list as $sign) {
+                if (preg_match('/[^\p{L}.]/u', $sign) === 1) {
+                    $signs[$sign] = true;
+                }
+            }
+        }
+        $signs = array_keys($signs);
         usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
         foreach ($signs as $sign) {
             if (str_starts_with($text, $sign) === true) {
