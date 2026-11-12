@@ -1333,6 +1333,10 @@ another repo, ever**.
   Records in organisations the member cannot open here are counted (D-151).
 - Full data copy: includes the member's own DBS checks (`dbsChecksAboutYou`, #1012; never who recorded them,
   D-154); My data shows a kind of record that could not be read as "could not be read", never as none.
+- Calendar list view: ordered by real start time across time zones, page by page (#1024).
+- My volunteering: soonest thirty by real start time; a day of grace on each event's own clock (#1025).
+- Rota reminders and the birthday digest follow each organisation's own date and hour (#1028).
+- Send log: a Google send lost on the network, or one that could not start, now leaves its line (#1043).
 - Erasure request for an e-mail address (whether or not it also belongs to an account): the name and address on
   event suggestions made without signing in, every prayer request sent through the anonymous form with that address
   (name, address, network address, the sender's own words and any prayer partner's note emptied; the request kept),

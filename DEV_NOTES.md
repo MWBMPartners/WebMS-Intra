@@ -24197,3 +24197,33 @@ drives the real `sw.js` and the PHP-rendered offline page in a real browser
 it found: count page LOADS in the tab, not requests at the server (Chromium
 retries a reset connection by itself, so one navigation counted three); and the
 old `<head>` theme script threw because `<body>` did not exist yet.
+
+
+## Ordering events across clocks in SQL (#1024, #1025, #1028)
+
+`Events::startAsUtcMoment()` is the ONE place a statement that pages or limits events across clocks gets its
+order: a per-zone `CASE` of reading stretches, each with the offset `I18n::wallClockInstant()` gives, bound by PHP
+(no `CONVERT_TZ()`). Order by it, then `startDateTime`, then `eventID` (the `sortByRealStart()` tie rule).
+Use `soonestByRealStart()` for a "next N" list that does not page; use this where OFFSET or COUNT must stay exact.
+Measured against `wallClockInstant()` for every half hour of two years in twelve zones, and every minute around
+spring 2026: no disagreement. A cron that runs over every organisation must read each one's clock inside its loop
+(`Site::timezone($siteId)`, `RotaSwaps::today($siteId)`): PHP's default zone is the request's organisation and
+`Site::forceContext()` does not change it (#1028).
+
+The window is `Events::momentWindow()` (inside 1900-2200, narrowed round now while the zones in use change clock more than `MOMENT_CHANGE_BUDGET` times); `zonesInUse()` binds at most `ZONE_TEXT_LIMIT` texts, live ones first, and a text left out reaches the statement's ELSE. `soonestByRealStart()`'s two-day widening at the cap is tested by nothing: it changes an answer only with over five hundred live zones.
+
+## One send-log line per attempt (#1043, #1040)
+
+**One send-log line per attempt, whichever road ends it (#1043).** The mail queue's
+`Mailer::deliverQueued()` marks the Microsoft 365 and Google routes' answer `ownLog`, and
+`logQueueAttempt()` then writes nothing, so the rule for those two routes is: every `return false`
+writes its own line, and every throw writes none (the queue's catch turns `ownLog` off and the
+queue writes it). `MailerGoogle::send()` broke the first half on its two network roads. Measured
+with the fix taken back out (`git show HEAD:web/_core/MailerGoogle.php`): a message dropped three
+times was given up on with ZERO lines, and its row read "Its own line in the send log says why".
+With the queue's early return switched off instead (the "two lines" direction), the same checks
+and the Microsoft one went red too, so they fail both ways. The stand-in (`tools/https-standin.php`)
+gained a `"drop": true` answer: it reads the request and hangs up, which libcurl reports as
+"Empty reply from server" — the one road no status code reaches. **Microsoft falling back to Google
+writes one line per route tried** when Google's half fails on the network (Microsoft's failure, then Google's).
+NOT when Google's SIGN-IN fails inside the fallback: that still writes only Microsoft's line (#1051).

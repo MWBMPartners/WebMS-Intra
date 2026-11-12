@@ -4,6 +4,30 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events, rota and mail on the right clock and in the send log (#1024, #1025, #1028, #1043, #1040)
+
+- **Lists and reminders on the right clock (#1024, #1025, #1028).** The calendar's list view now orders events by
+  the real moment each starts, so events in different time zones come out in the right order on every page
+  (it sorted by each event's own clock reading). "My volunteering" does the same, keeps the thirty genuinely
+  soonest, and its one day of grace is a day on each event's own clock (it was the database server's). Rota
+  reminders and the morning birthday digest now go by each organisation's own date and hour, not the database
+  server's date, so an organisation far from the server is no longer reminded a day early or late around midnight.
+- **Far-off and odd dates cannot disturb the order.** The span read covers live events only and is held inside 1900-2200; the offset window is narrowed round today while the zones in use would change clock more than 2000 times in it; a reading outside the window takes the nearer end's offset; a reading at 9999-12-31 can no longer become an empty value that sorted first. At most `Events::ZONE_TEXT_LIMIT` (500) zone texts are bound, texts of live events first; a text left out is read on the organisation's clock for a page and on the earliest clock on Earth for the registrations clear-out, so such a row is only ever deleted late.
+- **A message tried through Google and lost on the network is in the send log now (#1043).** When
+  `MailerGoogle::send()` could not start a connection (`curl_init()` failed) or got no answer at all,
+  it answered "not sent" and wrote NO line in the send log (`tblEmailLog`), while the mail queue —
+  told the Google route writes its own line — wrote none either. So a waiting message could be
+  tried, tried again and finally given up on with nothing recorded about any of those tries, and the
+  queue row's own words ("Its own line in the send log says why") pointed at a line that did not
+  exist. Both failures now write the route's own `failed` line (`CURL_INIT` / `CURL_FAIL`), under the
+  message's own organisation (`Mailer::queueRowSite()`, #1006). One line per attempt: a throw (the
+  sign-in getting no answer) still writes nothing in the route and the queue writes the line.
+  Microsoft 365 was checked the same way and never had the fault: it writes its failure line for any
+  answer outside 200-299, and a dropped connection reads as code 0.
+- **The send log's organisation column says what it holds (#1040, migration 288).** Its comment said
+  "NULL when sent outside site context (e.g. cron)", untrue since #683/#1006. Comment only; no row,
+  type, key or link changes.
+
 ### Money boxes read amounts strictly (#1004; D-152, D-153, D-165, D-177)
 
 - **Money boxes read amounts strictly, and never wrap an absurd one (#1004).** Every typed amount — venues, giving,
