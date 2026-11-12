@@ -393,7 +393,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 //    running" in the header). Change them only together with a check.
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
-const EXPECTED_D      = 612;  // part D: (#493 P1 adds 2 to D39: the copy's website half under both copied-in rules; and 1 to D5: the label under the stricter rule) 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
+const EXPECTED_D      = 613;  // part D: (#855 adds 1 to D20: an item really "changed" stays so beside a decided one) (#493 P1 adds 2 to D39: the copy's website half under both copied-in rules; and 1 to D5: the label under the stricter rule) 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
 const EXPECTED_W      = 315;  // part W: (#493 P1 round 12 adds 1 to W30: a save drawn as new refused under the lock) 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9); #514 part 11 adds 2 to W50 (the guide's "told" section, and the approvals help's two switches)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
@@ -9313,6 +9313,28 @@ pa_ok(
     pa_show([$rResolve20, $rStaleC])
 );
 
+// #855 (D-180), the over-reach direction of step 5's after-resolve read: an
+// item that was really "changed" must STILL be reported so when another item
+// of the same request IS decided. Two one-off dates; the second is sent with
+// a request fingerprint the page never showed. Only the first is decided, and
+// the second's row stays waiting under the one request it really has.
+pa_resetWorld();
+$mixEv1 = pa_event(FA1, 'd20-mix-1@p8', 'D20 mix one');
+$mixEv2 = pa_event(FA1, 'd20-mix-2@p8', 'D20 mix two');
+$rMix   = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 mix', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 mix']]]);
+$pMix1  = pa_pending($mixEv1);
+$pMix2  = pa_pending($mixEv2);
+$dMix   = ($rMix['ok'] !== true || $pMix1 === null || $pMix2 === null) ? ['decided' => -1, 'changed' => -1, 'message' => '']
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pMix1),
+        ['approvalID' => (int) $pMix2['approvalID'], 'requestHash' => str_repeat('a', 64), 'contentHash' => $pMix2['contentHash']]]);
+pa_ok(
+    'D20 one date decided and one sent with a fingerprint the page never showed, in ONE call: decided 1, changed 1, exactly "Approved 1. 1 had changed since you opened the page; please review it again." — the second is not counted because the first was decided (#855, step 5)',
+    $dMix['decided'] === 1 && ($dMix['changed'] ?? -1) === 1
+    && $dMix['message'] === 'Approved 1. 1 had changed since you opened the page; please review it again.'
+    && $pMix2 !== null && pa_status((int) $pMix2['approvalID']) === 'pending',
+    pa_show($dMix)
+);
+
 // B's waiting row, made through B's own real write path, decided AS A.
 pa_resetWorld();
 pa_q("UPDATE tblExternalFeeds SET audienceLevel = 'members' WHERE feedID = ?", 'i', [FB1]);
@@ -9541,14 +9563,16 @@ foreach (['approved', 'declined'] as $decision20q) {
     $newest20q  = array_map(static fn (int $e): array => pa_one('SELECT approvalID, status, reason FROM tblExternalEventApprovals WHERE eventID = ? ORDER BY approvalID DESC LIMIT 1', 'i', [$e]) ?? [], $w20q);
     $waiting20q = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalEventApprovals WHERE feedID = ? AND status = 'pending'", 'i', [FA1])['n'];
     $verb20q    = ($decision20q === 'approved') ? 'Approved' : 'Declined';
-    // ⚖️ #855: the calendar is re-worked BEFORE the decision, so W0's and
-    //    W1's old request (both rules) is replaced by the request W2 already
-    //    has (the second rule alone) — new rows for W0 and W1 waiting under
-    //    it. W0's decision, sent with the OLD request, is "changed"; W2's goes
-    //    through, and the re-work after it carries the decision to the new
-    //    rows of W0 and W1 under the same request. Until #855 both items were
-    //    decided against the old requests and W1 followed (series_match).
-    $want20q    = $verb20q . ' 1. 1 had changed since you opened the page; please review it again.' . MSG_OTHER_ONE;
+    // ⚖️ #855 (D-180): the calendar is re-worked BEFORE the decision, so
+    //    W0's and W1's old request (both rules) is replaced by the request W2
+    //    already has (the second rule alone) — new rows for W0 and W1 waiting
+    //    under it. W0's OLD row cannot be claimed; W2's is, and the re-work
+    //    after it carries the decision onto the new rows of W0 and W1. W0 was
+    //    ASKED for and ends carrying the decision asked for, so it counts as
+    //    decided and is NOT reported "changed": round 1 of #855 reported
+    //    "Approved 1. 1 had changed … please review it again" here, which was
+    //    untrue of a date that had ended approved (the independent check).
+    $want20q    = $verb20q . ' 2.' . MSG_OTHER_ONE;
     pa_ok(
         'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together — set-up: the hall dates wait under one request and the chapel date under another, and afterwards W0\'s and W1\'s old rows are withdrawn and NEW rows for both carry the decision (#855: re-worked before the decision)',
         $set20q === true && pa_status((int) $old20q[0]['approvalID']) === 'withdrawn' && pa_status((int) $old20q[1]['approvalID']) === 'withdrawn'
@@ -9558,8 +9582,8 @@ foreach (['approved', 'declined'] as $decision20q) {
         pa_show([$set20q, $newest20q])
     );
     pa_ok(
-        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 1 (W2), changed 1 (W0\'s old request), nothing waiting, every date\'s newest row "' . $decision20q . '", exactly "' . $want20q . '" (one repeating event, singular)',
-        $d20q['decided'] === 1 && ($d20q['changed'] ?? -1) === 1 && $waiting20q === 0
+        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 2 (W2 claimed, W0 carried onto its new row), changed 0, nothing waiting, every date\'s newest row "' . $decision20q . '", exactly "' . $want20q . '" (one repeating event, singular)',
+        $d20q['decided'] === 2 && ($d20q['changed'] ?? -1) === 0 && $waiting20q === 0
         && array_column($newest20q, 'status') === [$decision20q, $decision20q, $decision20q]
         && $d20q['message'] === $want20q,
         pa_show([$d20q['message'] ?? null, 'waiting' => $waiting20q, $newest20q])

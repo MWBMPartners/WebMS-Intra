@@ -174,7 +174,8 @@ foreach ($columnMap as $col => $type) {
         //    by a request that does not touch it.
         $value = Events::postedIdOrNone($value);
         if ($value === false) {
-            ApiResponse::error($col . ' must be a whole number, or null for none. Nothing was changed.', 422);
+            ApiResponse::error($col . ' must be the number of one of this organisation\'s own '
+                . ($col === 'categoryID' ? 'event categories' : 'event types') . ' (a whole number above 0), or null or 0 for none. Nothing was changed.', 422);
         }
         $taxonomyRefusal = Events::whyCategoryOrTypeRefused(
             $db,

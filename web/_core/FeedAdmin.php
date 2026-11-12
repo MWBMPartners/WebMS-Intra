@@ -2333,9 +2333,12 @@ final class FeedAdmin
     /**
      * Approve or decline one or many waiting dates. `$items` is a list of
      * `['approvalID' => int, 'requestHash' => string, 'contentHash' => string]`.
-     * Grouped by calendar; each calendar's lock is taken exactly once,
-     * every item of that calendar decided, then ONE resolve and ONE commit
-     * (challenge M2).
+     * Grouped by calendar; each calendar's lock is taken exactly once and
+     * ONE commit is made for it (challenge M2). Inside that lock there are
+     * TWO resolves since #855 (D-180): one BEFORE any item is decided, so a
+     * date is decided as it stands now, and one after, which carries the
+     * decisions to other dates (part 7's sibling rule). See step 5 for what
+     * that second resolve means for the count and the message.
      *
      * The message: "Approved N." (or "Declined N."), then any that had
      * changed ("N had changed since you opened the page; please review
@@ -2431,7 +2434,9 @@ final class FeedAdmin
      *
      * `decidedIds` (chunk P8-4) lists the approval numbers really decided,
      * so the decision handler can write one activity line per decided date
-     * (plan section 3.3) — numbers only, never a title.
+     * (plan section 3.3) — numbers only, never a title. For a date whose old
+     * row the first resolve replaced and whose new row then carried this
+     * decision (step 5, #855), it is the NEW row's number.
      *
      * @return array{ok:bool, status:string, message:string, decided:int, changed:int, notDone:int, failure:?\Throwable, decidedIds:list<int>}
      *
@@ -2495,6 +2500,7 @@ final class FeedAdmin
         //    as before the join was added.
         $feedByApproval   = [];
         $seriesByApproval = []; // approvalID => the repeating event it belongs to, for series dates only
+        $eventByApproval  = []; // approvalID => its date (step 5's after-resolve read, #855)
         if ($unique !== []) {
             $approvalIds  = array_keys($unique);
             $placeholders = implode(',', array_fill(0, count($approvalIds), '?'));
@@ -2510,6 +2516,7 @@ final class FeedAdmin
             $result = $stmt->get_result();
             while (($row = $result->fetch_assoc()) !== null) {
                 $feedByApproval[(int) $row['approvalID']] = (int) $row['feedID'];
+                $eventByApproval[(int) $row['approvalID']] = (int) $row['eventID'];
                 if ((string) ($row['externalRecurrenceKey'] ?? '') !== '') {
                     // A repeating event is its identity WITHIN its calendar
                     // (two calendars are two events, even with the same
@@ -2534,12 +2541,30 @@ final class FeedAdmin
             $byFeed[$feedByApproval[$aid]][] = $item;
         }
 
-        // 5️⃣ Per calendar: one lock, every item, one resolve, one commit.
-        //    Every item of a calendar is decided BEFORE its one resolve, so
-        //    no item can be settled by another item of this same request
-        //    (part 7's sibling rule runs only in the resolve) and then be
-        //    reported as "changed" — the guarantee of challenge M2 that
-        //    matters, kept by fix round 12.
+        // 5️⃣ Per calendar: one lock, a resolve, every item, a resolve, one
+        //    commit (#855, D-180 — the FIRST resolve is new). Every item is
+        //    decided BEFORE the second resolve, so no item is settled by
+        //    another item's decision and then decided again.
+        //
+        //    ⚠️ THE FIRST RESOLVE CAN REPLACE AN ITEM'S ROW. A date whose
+        //    request the rules in force would no longer make (a rule that has
+        //    run out, or the other copied-in rule) gets a NEW waiting row, so
+        //    its old row cannot be claimed. If another item of this same
+        //    request is a sibling date under that new request, the second
+        //    resolve then carries THIS decision onto the new row (part 7's
+        //    sibling rule). Reporting such an item "had changed … please
+        //    review it again" while its date ends carrying the very decision
+        //    asked for was untrue, and the count said "Approved 1" when both
+        //    dates ended approved (the independent check of #855, measured on
+        //    D20's two-rules case). So the after-resolve step below reads,
+        //    for every item NOT claimed directly, its date's NEWEST row: it
+        //    counts as decided only when that row is a different one, carries
+        //    this decision, by this person, and says it follows a row this
+        //    very call decided. Anything else is still "changed": the date
+        //    waits again, or ended some other way.
+        //    (Fix round 12's owner decision not to COUNT other dates that
+        //    followed is untouched: this reads only dates the administrator
+        //    asked to decide.)
         $decidedTotal  = 0;
         $notDone       = 0;
         $failure       = null;
@@ -2573,7 +2598,44 @@ final class FeedAdmin
                     }
 
                     return ['ok' => true, 'status' => 'saved', 'decidedIds' => $decidedIds, 'changedHere' => $changedHere];
-                }, null, true);
+                }, static function (array $soFar) use ($db, $siteId, $decision, $userId, $feedItems, $eventByApproval): array {
+                    // Read-only, inside the lock, after the second resolve
+                    // (see step 5). original approval number => the row now
+                    // carrying the decision.
+                    $claimed  = array_map('intval', (array) ($soFar['decidedIds'] ?? []));
+                    $followed = [];
+                    if ($claimed === []) {
+                        return ['followedIds' => $followed];
+                    }
+                    $newest = $db->prepare(
+                        'SELECT `approvalID`, `status`, `decidedByID`, `decisionNote` FROM `tblExternalEventApprovals` '
+                        . 'WHERE `eventID` = ? AND `siteID` = ? ORDER BY `approvalID` DESC LIMIT 1'
+                    );
+                    foreach ($feedItems as $item) {
+                        $aid = (int) $item['approvalID'];
+                        if (in_array($aid, $claimed, true) === true || isset($eventByApproval[$aid]) === false) {
+                            continue;
+                        }
+                        $eventId = $eventByApproval[$aid];
+                        $newest->bind_param('ii', $eventId, $siteId);
+                        $newest->execute();
+                        $row = $newest->get_result()->fetch_assoc();
+                        if ($row === null || (int) $row['approvalID'] === $aid || (string) $row['status'] !== $decision
+                            || (int) ($row['decidedByID'] ?? 0) !== $userId) {
+                            continue;
+                        }
+                        $note = (string) ($row['decisionNote'] ?? '');
+                        foreach ($claimed as $byThisCall) {
+                            if (str_ends_with($note, '(approval #' . $byThisCall . ')') === true) {
+                                $followed[$aid] = (int) $row['approvalID'];
+                                break;
+                            }
+                        }
+                    }
+                    $newest->close();
+
+                    return ['followedIds' => $followed];
+                }, true);
                 // ⚖️ `true`: re-work the calendar under the copied-in rule in
                 //    force NOW, under the same lock, BEFORE deciding (#855).
                 //    A request made under the other rule, left waiting because
@@ -2583,9 +2645,9 @@ final class FeedAdmin
                 //    and can never be reused later to publish the dates under
                 //    words that said the website box did nothing. See
                 //    inFeedLock()'s `$resolveFirst`.
-                // No after-resolve step any more (fix round 12): decide()
-                // no longer reads what became of other dates. The hook
-                // stays in inFeedLock() for saveChoice() and saveRule().
+                // The after-resolve step reads only the dates this request
+                // named (step 5); it does not count other dates that
+                // followed, which the owner retired in fix round 12.
             } catch (\Throwable $e) {
                 if ($committedAny === false) {
                     throw $e; // nothing committed yet — "nothing was changed" is true
@@ -2602,10 +2664,12 @@ final class FeedAdmin
                 continue;
             }
             $committedAny  = true;
-            $decidedTotal += count($result['decidedIds']);
-            array_push($decidedIds, ...$result['decidedIds']);
-            $changed      += (int) $result['changedHere'];
-            foreach ($result['decidedIds'] as $aid) {
+            $followedHere  = (array) ($result['followedIds'] ?? []);
+            $decidedTotal += count($result['decidedIds']) + count($followedHere);
+            // The activity log names the row that now carries the decision.
+            array_push($decidedIds, ...$result['decidedIds'], ...array_values($followedHere));
+            $changed      += (int) $result['changedHere'] - count($followedHere);
+            foreach (array_merge($result['decidedIds'], array_keys($followedHere)) as $aid) {
                 if (isset($seriesByApproval[$aid]) === true) {
                     $seriesDecided[$seriesByApproval[$aid]] = true;
                 }
@@ -2883,7 +2947,9 @@ final class FeedAdmin
      * and the "who can see it" answer after the save (`whoCanSee()`) in
      * `saveChoice()` and `saveRule()`. (`decide()` used it for "how many
      * other dates followed" until fix round 12, when the owner replaced
-     * that count with one always-true sentence; see `decide()`.)
+     * that count with one always-true sentence; since #855 it uses it
+     * again, only to read whether a date the request NAMED now carries the
+     * decision — see `decide()`, step 5.)
      *
      * ITS RULES (checker round 3, LOW 3):
      * - It must only READ. Anything it wrote would be committed WITHOUT

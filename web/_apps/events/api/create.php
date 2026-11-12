@@ -206,7 +206,8 @@ $categoryId = Events::postedIdOrNone($body['categoryID'] ?? null);
 $typeId     = Events::postedIdOrNone($body['typeID'] ?? null);
 if ($categoryId === false || $typeId === false) {
     ApiResponse::error(
-        ($categoryId === false ? 'categoryID' : 'typeID') . ' must be a whole number, or null or left out for none. Nothing was created.',
+        ($categoryId === false ? 'categoryID' : 'typeID') . ' must be the number of one of this organisation\'s own '
+        . ($categoryId === false ? 'event categories' : 'event types') . ' (a whole number above 0), or null, 0 or left out for none. Nothing was created.',
         422
     );
 }

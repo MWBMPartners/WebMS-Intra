@@ -138,7 +138,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 296; // + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 309; // + seven in section G and six plants in round 2 of #885 (G11-G17, PG10-PG15); + ten in section G (#885, #853, #854, #855: G1-G10) and nine plants PG1-PG9 on the 277 before: then 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -3569,6 +3569,86 @@ $scnSubmitOtherCategory = static function () use ($signIn, $http, $tokenOn, $evB
 check('G6 the public suggestion form stores nothing for another organisation\'s category, and says why (#885)',
     $scnSubmitOtherCategory(), ['stored' => null, 'sent back with a reason' => true]);
 
+// ── #885, the other direction: the organisation's OWN category and type are
+// still accepted by every writer. Round 1 pinned only the refusal, so a writer
+// that asked the rule with its two arguments swapped (or the category against
+// the TYPES table) refused the organisation's own numbers with every check
+// green (the independent check planted four). So the organisation gets an own
+// TYPE whose number is not one of its category numbers, and an own category
+// whose number is not one of its type numbers: a swapped argument then refuses.
+// EXPLICIT numbers, far above anything seeded: a loop over insert numbers
+// could not promise it (the first run found the own category's number, 9,
+// was also one of the organisation's seeded TYPE numbers, so a swapped
+// argument still passed and four plants stayed green).
+$kOwnCat2 = 970885;
+$kOwnType = 980885;
+$db->query("DELETE FROM `tblEventCategories` WHERE `categoryID` = {$kOwnCat2}");
+$db->query("DELETE FROM `tblEventTypes` WHERE `typeID` = {$kOwnType}");
+$db->query("INSERT INTO `tblEventCategories` (`categoryID`, `siteID`, `categoryName`, `categorySlug`) VALUES ({$kOwnCat2}, {$siteOne}, 'PWT K own two', 'pwt-k-own-two')");
+$db->query("INSERT INTO `tblEventTypes` (`typeID`, `siteID`, `typeName`, `typeSlug`) VALUES ({$kOwnType}, {$siteOne}, 'PWT K own type', 'pwt-k-own-type')");
+$kTypeIsACategory = (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblEventCategories` WHERE `categoryID` = {$kOwnType}")->fetch_assoc()['n'];
+$kCatIsAType      = (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblEventTypes` WHERE `typeID` = {$kOwnCat2}")->fetch_assoc()['n'];
+check('G11 premise: the organisation\'s own category and own type have numbers that are not each other\'s, so a swapped argument would refuse one of them',
+    [$kTypeIsACategory, $kCatIsAType], [0, 0]);
+$scnApiCreateOwnBoth = static function () use ($api, $keyBase, $db, $kOwnCat2, $kOwnType): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K own both'");
+    $r   = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K own both', 'categoryID' => $kOwnCat2, 'typeID' => (string) $kOwnType]);
+    $row = $db->query("SELECT `categoryID`, `typeID` FROM `tblEvents` WHERE `eventName` = 'PWT K own both'")->fetch_assoc();
+    return [$r['status'], (int) ($row['categoryID'] ?? 0), (int) ($row['typeID'] ?? 0)];
+};
+check('G12 the events API creates an event with the organisation\'s own category AND own type (the type sent as text), storing both',
+    $scnApiCreateOwnBoth(), [201, $kOwnCat2, $kOwnType]);
+$scnApiUpdateOwn = static function () use ($api, $kOwnId, $kOwnCat2, $kOwnType, $db): array {
+    $db->query("UPDATE `tblEvents` SET `categoryID` = NULL, `typeID` = NULL WHERE `eventID` = {$kOwnId}");
+    $a   = $api('/api/events/update?id=' . $kOwnId, ['eventID' => $kOwnId, 'typeID' => $kOwnType]);
+    $b   = $api('/api/events/update?id=' . $kOwnId, ['eventID' => $kOwnId, 'categoryID' => $kOwnCat2]);
+    $row = $db->query("SELECT `categoryID`, `typeID` FROM `tblEvents` WHERE `eventID` = {$kOwnId}")->fetch_assoc();
+    return [$a['status'], $b['status'], (int) ($row['categoryID'] ?? 0), (int) ($row['typeID'] ?? 0)];
+};
+check('G13 the events API\'s UPDATE stores the organisation\'s own type, and then its own category',
+    $scnApiUpdateOwn(), [200, 200, $kOwnCat2, $kOwnType]);
+$scnApiNotANumber = static function () use ($api, $keyBase, $evByName, $apiWords): array {
+    $GLOBALS['db']->query("DELETE FROM `tblEvents` WHERE `eventName` IN ('PWT K abc', 'PWT K minus')");
+    $abc   = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K abc', 'categoryID' => 'abc']);
+    $minus = $api('/api/events/create', $keyBase + ['eventName' => 'PWT K minus', 'typeID' => -5]);
+    return [$abc['status'], $evByName('PWT K abc'), $minus['status'], $evByName('PWT K minus'),
+        str_contains($apiWords($minus), 'a whole number above 0')];
+};
+check('G14 the events API refuses a category that is not a number and a type below 1 with 422, creates nothing, and says a number above 0 is wanted',
+    $scnApiNotANumber(), [422, null, 422, null, true]);
+$scnFormOwnBoth = static function () use ($formPost, $base, $db, $kOwnCat2, $kOwnType): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K form own'");
+    $formPost('orgadmin', $base + ['action' => 'create', 'eventName' => 'PWT K form own', 'categoryID' => (string) $kOwnCat2, 'typeID' => (string) $kOwnType]);
+    $row = $db->query("SELECT `categoryID`, `typeID` FROM `tblEvents` WHERE `eventName` = 'PWT K form own'")->fetch_assoc();
+    return [(int) ($row['categoryID'] ?? 0), (int) ($row['typeID'] ?? 0)];
+};
+check('G15 the Manage Events form stores the organisation\'s own category and own type', $scnFormOwnBoth(), [$kOwnCat2, $kOwnType]);
+$scnBulkOwn = static function () use ($signIn, $http, $tokenOn, $kSeries, $kSeriesEv, $kOwnCat2, $kOwnType, $db): array {
+    $db->query("UPDATE `tblEvents` SET `categoryID` = NULL, `typeID` = NULL WHERE `eventID` = {$kSeriesEv}");
+    $signIn('orgadmin');
+    $url  = '/calendar/manage/series-edit?seriesID=' . $kSeries;
+    $post = static fn (array $fields) => $http('POST', $url, ['csrf_token' => $tokenOn($http('GET', $url)['body']), 'seriesID' => (string) $kSeries,
+        'eventIDs' => [(string) $kSeriesEv]] + $fields);
+    $post(['bulkCategoryID' => (string) $kOwnCat2, 'bulkTypeID' => (string) $kOwnType]);
+    $set  = $db->query("SELECT `categoryID`, `typeID` FROM `tblEvents` WHERE `eventID` = {$kSeriesEv}")->fetch_assoc();
+    $post(['bulkCategoryID' => '0', 'bulkTypeID' => '0']);
+    $none = $db->query("SELECT `categoryID`, `typeID` FROM `tblEvents` WHERE `eventID` = {$kSeriesEv}")->fetch_assoc();
+    // `array_key_exists`, never `?? 'missing'`: a stored NULL is the answer wanted.
+    $col = static fn (?array $row, string $k): mixed => (is_array($row) === true && array_key_exists($k, $row) === true) ? $row[$k] : 'missing';
+    return ['set' => [(int) ($set['categoryID'] ?? 0), (int) ($set['typeID'] ?? 0)], 'None' => [$col($none, 'categoryID'), $col($none, 'typeID')]];
+};
+check('G16 a series\' bulk edit sets the organisation\'s own category and type on its dates, and "— None —" (0) clears both',
+    $scnBulkOwn(), ['set' => [$kOwnCat2, $kOwnType], 'None' => [null, null]]);
+$scnSubmitOwn = static function () use ($signIn, $http, $tokenOn, $db, $kOwnCat2): int {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT K submitted own'");
+    $signIn('member');
+    $token = $tokenOn($http('GET', '/calendar/submit')['body']);
+    $http('POST', '/calendar/submit-save', ['csrf_token' => $token, 'eventName' => 'PWT K submitted own', 'startDateTime' => '2030-08-03T10:00',
+        'categoryID' => (string) $kOwnCat2]);
+    return (int) ($db->query("SELECT `categoryID` FROM `tblEvents` WHERE `eventName` = 'PWT K submitted own'")->fetch_assoc()['categoryID'] ?? 0);
+};
+check('G17 the public suggestion form stores the organisation\'s own category', $scnSubmitOwn(), $kOwnCat2);
+
 // ── #853: the "On the public website" badge asks the website's own rule ──────
 // Under "one box per calendar" the calendar-ticked copied-in event IS on the
 // website (V2). Paused, or with its stored answer run out, the website leaves
@@ -4292,9 +4372,32 @@ check('PG7 with the badge back on the website box and the tick rule alone (the c
 $p = $plant('_apps/admin/calendar/feeds-choice.php', "\$newForEveryDate = (\$scope === 'series');", '$newForEveryDate = false;',
     static fn (): bool => ($scnSeriesUntouched()['the other date'] ?? null) === 'groups');
 check('PG8 with a new choice for every date pre-filled from the opened date again (the code before #854), an untouched Save opens every date to Members', [$p['applied'], $p['result']], [true, false]);
-$p = $plant('_core/FeedAdmin.php', '}, null, true);', '});',
+$p = $plant('_core/FeedAdmin.php', "                    return ['followedIds' => \$followed];\n                }, true);",
+    "                    return ['followedIds' => \$followed];\n                }, false);",
     static fn (): bool => ($scnStaleApproval()['that request approved'] ?? null) === false);
 check('PG9 with the decision no longer re-working the calendar first (the code before #855), the request made under the looser rule is approved as if it still counted the website', [$p['applied'], $p['result']], [true, false]);
+// Round 2 of #885's check: a writer that refuses the organisation's OWN
+// numbers, by swapping the rule's two arguments.
+$p = $plant('_apps/events/api/create.php', 'Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $categoryId, $typeId)',
+    'Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $typeId, $categoryId)', static fn (): bool => $scnApiCreateOwnBoth() === [201, $kOwnCat2, $kOwnType]);
+check('PG10 with the events API asking the rule with its arguments swapped, its own category and type are refused (G12 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/events/api/update.php', "            \$col === 'categoryID' ? \$value : null,\n            \$col === 'typeID' ? \$value : null",
+    "            \$value,\n            \$value", static fn (): bool => $scnApiUpdateOwn() === [200, 200, $kOwnCat2, $kOwnType]);
+check('PG11 with the update passing its one number as BOTH arguments, its own type is refused (G13 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/save.php', '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, Site::id(), $categoryID, $typeID)',
+    '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, Site::id(), $typeID, $categoryID)', static fn (): bool => $scnFormOwnBoth() === [$kOwnCat2, $kOwnType]);
+check('PG12 with the Manage Events form testing the category against the TYPES (arguments swapped), its own category is refused (G15 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/manage/series-edit.php', '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, $siteId, $catVal, $typeVal)',
+    '\Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, $siteId, $typeVal, $catVal)',
+    static fn (): bool => $scnBulkOwn() === ['set' => [$kOwnCat2, $kOwnType], 'None' => [null, null]]);
+check('PG13 with the bulk edit testing the category against the TYPES, its own category is refused (G16 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/submit-save.php', 'Events::whyCategoryOrTypeRefused($mysqli, $siteId, $categoryArg, null)',
+    'Events::whyCategoryOrTypeRefused($mysqli, $siteId, null, $categoryArg)', static fn (): bool => $scnSubmitOwn() === $kOwnCat2);
+check('PG14 with the suggestion form testing the category against the TYPES, its own category is refused (G17 catches it)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/Events.php', "        if (\$raw === null || \$raw === '' || \$raw === 0 || \$raw === '0') {",
+    "        if (\$raw === null || \$raw === '' || \$raw === 0) {",
+    static fn (): bool => $scnBulkOwn() === ['set' => [$kOwnCat2, $kOwnType], 'None' => [null, null]]);
+check('PG15 with "0" no longer read as none, the bulk edit\'s "— None —" is refused instead of clearing (G16 catches it)', [$p['applied'], $p['result']], [true, false]);
 
 check('P11 with every plant removed again, the unticked event is off the door\'s events feed once more', $scnUnticked(), true);
 

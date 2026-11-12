@@ -480,12 +480,12 @@
           "categoryID": {
             "type": "integer",
             "nullable": true,
-            "description": "The number of the category to file the event under (\"Worship\", \"Youth\"). **Not checked against the organisation's categories**, so a number that does not exist fails on the database link and comes back as a 500 rather than a clear refusal. Send null or an empty value for no category."
+            "description": "The number of the category to file the event under (\"Worship\", \"Youth\"). It must be one of this organisation's own categories: any other number — one that does not exist, or another organisation's — is refused with 422 and the same message either way, and nothing is saved (#885; until then it was a 500, and another organisation's category was stored). A value that is not a whole number above 0 is refused with 422 too. Send null, an empty value or 0 for no category."
           },
           "typeID": {
             "type": "integer",
             "nullable": true,
-            "description": "The number of the event type (\"Sunday Service\", a preaching-plan entry). **Not checked**, with the same 500 consequence as `categoryID`. Send null or an empty value for no type."
+            "description": "The number of the event type (\"Sunday Service\", a preaching-plan entry). The same rule as `categoryID`: one of this organisation's own event types, else 422 with the same message whether the number is another organisation's or nobody's, and nothing is saved (#885). Send null, an empty value or 0 for no type."
           },
           "status": {
             "type": "string",
