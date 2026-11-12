@@ -3560,6 +3560,11 @@ class Venues
             if ($e->getCode() === 1062) {
                 return ['lineID' => 0, 'error' => 'That booking is already allocated to this invoice.'];
             }
+            // 1264 (out of range) is the VALUE, not the moment: trying again
+            // would fail the same way, so it is not "try again" (round 8).
+            if ($e->getCode() === 1264) {
+                return ['lineID' => 0, 'error' => 'The amount is too large to store. Nothing was allocated.'];
+            }
             error_log('Venues::allocateInvoiceLine() failed: ' . $e->getMessage());
             return ['lineID' => 0, 'error' => 'The line could not be allocated just now. Please try again.'];
         }

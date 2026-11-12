@@ -45,7 +45,16 @@
  * coerced from `$body` (when the caller's JSON key was present, even if
  * `null`) or copied straight through from `$existing` (when the key was
  * absent), so an update.php caller who only sends `{"status":"in-repair"}`
- * can never accidentally wipe every other column.
+ * can never accidentally wipe every other column. ONE EXCEPTION, on
+ * purpose: `currency`. When the body leaves it out, it is NULL on an update
+ * too, never `$existing`'s value: `$existing` was read BEFORE the asset's
+ * lock, and AssetRegister::updateAsset() treats any currency it is handed
+ * as a POSTED one, so copying it through would write a stale currency back
+ * over a change made in between (#966 round 7, tested by Z1 of
+ * tools/currency-selftest.php). NULL lets Currency::onEdit() keep the
+ * currency the lock read. Do not "tidy" it back to `$was('currency')`.
+ * (Every OTHER absent field is still copied from `$existing`, read before
+ * the lock, and can overwrite a change made in between: #1001.)
  *
  * @package   Portal\API\Assets
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -315,7 +324,9 @@ function assets_api_build_data(array $body, ?array $existing): array
     // own default applies rather than a literal NULL landing in a
     // NOT-NULL column — enumOrExisting()/boolOrExisting() already return
     // PHP null for exactly that case, so array_filter() below strips them
-    // (create only; every key is always populated on update).
+    // (create only). On update every key is populated from the body or
+    // `$existing` EXCEPT `currency`, which is NULL when the body leaves it out
+    // (see the file header: a stale currency must not be written back).
     // -------------------------------------------------------------------
     $data = [
         'assetKind'          => $enumOrExisting('assetKind', \Portal\Core\AssetRegister::ASSET_KINDS, 'physical'),
@@ -360,9 +371,11 @@ function assets_api_build_data(array $body, ?array $existing): array
     // 🧹 On CREATE only, strip keys that resolved to PHP null purely
     // because the body omitted them (see the comment above) — letting
     // createAsset()'s own `?? default` fill them in rather than writing a
-    // literal NULL into a NOT-NULL ENUM column. On UPDATE every one of
-    // these keys is always populated (existing value at worst), so this
-    // is a no-op there.
+    // literal NULL into a NOT-NULL ENUM column. On UPDATE this loop does not
+    // run: every key here is populated (the existing value at worst) EXCEPT
+    // `currency`, which stays NULL when the body leaves it out — and that is
+    // right, because AssetRegister::updateAsset() reads a NULL currency as
+    // "not posted" and keeps the one its lock read (see the file header).
     if ($existing === null) {
         foreach (['assetKind', 'conditionState', 'status', 'currency', 'depreciationMethod', 'labelSymbology', 'isConfidential', 'publicPageEnabled'] as $defaultedKey) {
             if ($data[$defaultedKey] === null) {
