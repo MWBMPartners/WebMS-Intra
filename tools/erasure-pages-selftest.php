@@ -4350,7 +4350,7 @@ ok('O1 premise: Wil\'s five kinds of record, his case and visit in B, and his ca
 
 // The list D-142 asks for, written out in the test - words included - so a
 // change to any of them is a change somebody has to make here too.
-$o929About = 'These records carry your name because you made them. They are usually about somebody else - a person being cared for, a person whose DBS check was recorded, or a child - so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is held by no organisation, so none is given for it), and nothing else from the record is given (decision D-142). They keep your name and account number even if you are erased (decisions D-016, D-110 and D-111).';
+$o929About = 'These records carry your name because you made them. They are usually about somebody else - a person being cared for, a person whose DBS check was recorded, or a child - so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is not recorded against any one organisation, so none is given for it), and nothing else from the record is given (decision D-142). They keep your name and account number even if you are erased (decisions D-016, D-110 and D-111).';
 $o929Rows = [
     'dbs-check-recorded' => ['kind' => 'dbs-check-recorded', 'what' => 'DBS (safeguarding) check', 'day' => '2026-01-20', 'organisation' => null,
         'yourPart' => 'Your name and account number are on this record as the person who recorded the check.'],
@@ -4900,7 +4900,7 @@ $p1012Plants = [
     'P13d My data\'s page drawing a failed read as an ordinary row (a count of 0)' => [
         '_apps/account/my-data.php', ["<?php if ((\$row['couldNotRead'] ?? false) === true): ?>" => '<?php if (false): ?>'], 'inventory hid failure'],
     'P13 the privacy policy\'s Article 15 sentence put back as it was before #1012' => [
-        '_apps/privacy/policy.php', [' Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is held by no organisation, so none is given for it), and one held by an organisation you cannot open here is only counted.</li>' => '</li>'], 'policy wrong'],
+        '_apps/privacy/policy.php', [' Both also show the records that carry your name because you made them, such as a pastoral visit, or a DBS check you recorded for somebody else. Those are usually about somebody else, so each is listed only by its kind, the day it was made and the organisation that holds it (a DBS check is not recorded against any one organisation, so none is given for it), and one held by an organisation you cannot open here is only counted.</li>' => '</li>'], 'policy wrong'],
 ];
 foreach ($p1012Plants as $label => [$rel, $swaps, $expect]) {
     $path     = $plantFile($rel);

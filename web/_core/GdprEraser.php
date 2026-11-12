@@ -4245,11 +4245,13 @@ class GdprEraser
             // feature). There is then no request to show. Any other failure
             // is said, never shown as none (#1012).
             if (self::isNoSuchTable($problem) === false) {
+                // keepsNumber FALSE, as the read path above says: closeRequest()
+                // empties the account number on a request (#1012 check round 2).
                 $out[] = self::unreadInventoryRow([
                     'table'  => 'tblErasureRequest',
                     'action' => 'anonymise',
                     'reason' => 'Your requests to be erased, if you have made any.',
-                ]);
+                ], false);
             }
         }
 
@@ -4263,15 +4265,19 @@ class GdprEraser
     /**
      * 🚧 An inventory() row for a kind of record that could not be read
      *    (#1012). `rows` is null - not 0, which would be a claim - and
-     *    `couldNotRead` and `note` say so. `keepsNumber` is true for a kept or
-     *    anonymised kind, the cautious reading when the database could not be
-     *    asked (anonymiseKeepsNumber() needs it); the pages show the note
-     *    rather than inventoryWords() for such a row.
+     *    `couldNotRead` and `note` say so. `keepsNumber` is what the caller
+     *    knows without the database (the erasure-request row passes false,
+     *    as its read path does: closeRequest() empties the number); with
+     *    nothing given it is true for a kept or anonymised kind, the cautious
+     *    reading, because anonymiseKeepsNumber() needs the database that has
+     *    just failed. The pages show the note rather than inventoryWords()
+     *    for such a row, so this value is never worded on a page.
      *
-     * @param array<string, mixed> $entry A catalogue() instruction (table, action, reason).
+     * @param array<string, mixed> $entry       A catalogue() instruction (table, action, reason).
+     * @param bool|null            $keepsNumber Known by the caller, or null for the cautious default.
      * @return array{table: string, rows: null, action: string, reason: string, keepsNumber: bool, couldNotRead: true, note: string}
      */
-    private static function unreadInventoryRow(array $entry): array
+    private static function unreadInventoryRow(array $entry, ?bool $keepsNumber = null): array
     {
         $action = (string) ($entry['action'] ?? '');
 
@@ -4280,7 +4286,7 @@ class GdprEraser
             'rows'         => null,
             'action'       => $action,
             'reason'       => (string) ($entry['reason'] ?? ''),
-            'keepsNumber'  => $action !== 'delete',
+            'keepsNumber'  => $keepsNumber ?? ($action !== 'delete'),
             'couldNotRead' => true,
             'note'         => self::INVENTORY_COULD_NOT_READ,
         ];
@@ -4425,12 +4431,18 @@ class GdprEraser
 
         $out = [
             // "Usually" because of D-112: a worker's own case, or a DBS check
-            // they recorded for themselves, is about them.
+            // they recorded for themselves, is about them. "Not recorded
+            // against any one organisation", never "held by no organisation"
+            // (#1012 check round 2): `tblDbsChecks` has no organisation column,
+            // but admin/safeguarding/dbs.php shows a member's checks to the
+            // administrators of EVERY organisation they belong to
+            // (memberScopeSql() in AccountGuard), and a global administrator sees
+            // them all - so in practice several organisations can see one.
             'about'          => 'These records carry your name because you made them. They are usually about somebody '
                 . 'else - a person being cared for, a person whose DBS check was recorded, or a child - so each is '
                 . 'listed only by its kind, the day it was made and the organisation that holds it (a DBS check is '
-                . 'held by no organisation, so none is given for it), and nothing else from the record is given '
-                . '(decision D-142). They keep your name and account number even if you are '
+                . 'not recorded against any one organisation, so none is given for it), and nothing else from the '
+                . 'record is given (decision D-142). They keep your name and account number even if you are '
                 . 'erased (decisions D-016, D-110 and D-111).',
             'records'        => [],
             'notListed'      => 0,
