@@ -22,9 +22,13 @@ THE RULE (presence only, D-065: it reads code, it cannot run it)
 -----------------------------------------------------------------
 A PHP statement under web/ is reported when it multiplies by 100 (`* 100`,
 `100 *`, `* 100.0`) AND, in the same statement, either
-  - casts to a float: `(float)`, `(double)`, `(real)`, `floatval(`, `doubleval(`; or
+  - casts to a float: `(float)`, `(double)`, `(real)`, `floatval(`, `doubleval(`
+    (the function names in any capitals, as PHP reads them); or
   - reads a request value directly: `$_POST`, `$_GET`, `$_REQUEST`, `$_COOKIE`
-    (PHP converts such text to a number by itself, through a float).
+    (PHP converts such text to a number by itself, through a float) — except a
+    request value cast to a whole number first (`(int) $_GET[…]`,
+    `intval($_GET[…])`), which is no float: `((int) $_GET['page'] - 1) * 100`
+    is pagination, and round 2 of the check found it reported.
 Statements are cut by PHP's own tokeniser (float-money-statements.php) at `;`,
 `{` and `}`, with comments removed and string contents emptied, because every
 handler #1004 changed QUOTES the old code in a comment explaining the fix, and
@@ -35,10 +39,18 @@ piece of its CODE, with the reason. The list FAILS BOTH WAYS: an entry that no
 longer matches anything is reported, because a stale exception reads as a
 guarantee. It is EMPTY today: nothing under web/ needs the shape.
 
-WHAT IT CANNOT SEE, said plainly (measured by the self-test's "blind" cases):
+WHAT IT CANNOT SEE, said plainly (each measured by a "blind" case in the self-test):
   - the float made in one statement and multiplied in another
-    (`$f = (float) $raw;` … `$p = (int) round($f * 100);`);
-  - a multiplication by a variable or constant holding 100;
+    (`$f = (float) $raw;` … `$p = (int) round($f * 100);`) — how
+    `Giving::parseAmount()` and the count page's envelope sum were written
+    before #1004, so this gate would NOT have caught those two;
+  - money TEXT multiplied with no cast and no request variable in the same
+    statement: `(int) round(trim($raw) * 100)`,
+    `round(str_replace(',', '', $raw) * 100)`, `filter_input(…) * 100`, a
+    value from a decoded JSON body (`$body['amount'] * 100`), and
+    `$_SERVER[…] * 100` (not one of the four request arrays it names);
+  - 100 written another way: `* 1e2`, `* 1_00`, or a variable or constant
+    holding 100;
   - `bcmul()` or any other route that does not multiply by a literal 100;
   - JavaScript and markup (inline HTML is not PHP and is skipped);
   - whether a percentage that DOES cast to a float is money: such a statement
@@ -67,7 +79,17 @@ HELPER = os.path.join(HERE, 'float-money-statements.php')
 ALLOWED: dict[str, list[tuple[str, str]]] = {}
 
 TIMES_100 = re.compile(r'\*\s*100(?:\.0*)?(?![0-9.])|(?<![0-9.$\w])100(?:\.0*)?\s*\*')
-FLOAT_OR_REQUEST = re.compile(r'\(float\)|\b(?:floatval|doubleval)\s*\(|\$_(?:POST|GET|REQUEST|COOKIE)\b')
+FLOAT_CAST = re.compile(r'\(float\)|\b(?:floatval|doubleval)\s*\(', re.IGNORECASE)
+REQUEST = re.compile(r'\$_(?:POST|GET|REQUEST|COOKIE)\b')
+# A request value made a whole number first is no float; it is taken out before REQUEST is asked.
+INT_OF_REQUEST = re.compile(r'\(int\)\s*\$_(?:POST|GET|REQUEST|COOKIE)\s*\[[^\]]*\]|\bintval\s*\(\s*\$_(?:POST|GET|REQUEST|COOKIE)\s*\[[^\]]*\]\s*\)', re.IGNORECASE)
+
+
+def money_from_text(code: str) -> bool:
+    """Does one statement turn text into hundredths through a float (the rule in the header)?"""
+    if TIMES_100.search(code) is None:
+        return False
+    return FLOAT_CAST.search(code) is not None or REQUEST.search(INT_OF_REQUEST.sub('', code)) is not None
 
 
 def statements(paths: list[str]) -> dict[str, list[list]]:
@@ -98,7 +120,7 @@ def scan(paths: list[str], root: str, allowed: dict[str, list[tuple[str, str]]])
             unreadable.append(rel)
             continue
         for line, code in stmts:
-            if TIMES_100.search(code) is None or FLOAT_OR_REQUEST.search(code) is None:
+            if money_from_text(code) is False:
                 continue
             excused = False
             for piece, _reason in allowed.get(rel, []):
@@ -161,6 +183,18 @@ SELF_TEST_CASES = [
     ('a float cast times 10', "<?php\n$x = (float) $v * 10;\n", False),
     ('a cast and a * 100 in two statements (a stated blind spot)', "<?php\n$f = (float) $v;\n$p = (int) round($f * 100);\n", False),
     ('times 1001', "<?php\n$x = (float) $v * 1001;\n", False),
+    ('FLOATVAL in capitals (PHP function names ignore case)', "<?php\n$p = (int) (FLOATVAL($v) * 100);\n", True),
+    ('(integer) is not a float, but (FLOAT) in capitals is', "<?php\n$p = (int) round((FLOAT) $v * 100);\n", True),
+    ('a request value cast to int first (pagination)', "<?php\n$offset = ((int) $_GET['page'] - 1) * 100;\n", False),
+    ('intval of a request value (pagination)', "<?php\n$offset = (intval($_GET['page']) - 1) * 100;\n", False),
+    ('a request value cast to int, and ANOTHER used raw', "<?php\n$p = ((int) $_GET['a']) + $_POST['b'] * 100;\n", True),
+    ('blind: text multiplied with no cast (trim)', "<?php\n$p = (int) round(trim($raw) * 100);\n", False),
+    ('blind: text multiplied with no cast (str_replace)', "<?php\n$p = round(str_replace(',', '', $raw) * 100);\n", False),
+    ('blind: filter_input', "<?php\n$p = filter_input(INPUT_POST, 'a') * 100;\n", False),
+    ('blind: a decoded JSON body', "<?php\n$p = (int) round($body['amount'] * 100);\n", False),
+    ('blind: $_SERVER', "<?php\n$p = (int) round($_SERVER['X_AMOUNT'] * 100);\n", False),
+    ('blind: * 1e2', "<?php\n$p = (int) round((float) $v * 1e2);\n", False),
+    ('blind: * 1_00', "<?php\n$p = (int) round((float) $v * 1_00);\n", False),
 ]
 
 

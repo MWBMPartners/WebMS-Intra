@@ -515,8 +515,21 @@ final class Currency
     /** What parseAmount() answers for an empty box. A caller whose box is optional tests for '' first. */
     public const REFUSED_EMPTY = 'No amount was entered.';
 
-    /** What a typed box answers for anything but figures (D-152: figures only). */
-    public const REFUSED_NOT_FIGURES = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs or letters.';
+    /** What a typed box answers for a character that is not a figure, a point or a minus (D-152: figures only). */
+    public const REFUSED_NOT_FIGURES = 'Type the amount in figures only, for example 1234.50: no commas, spaces, currency signs, letters or other characters.';
+
+    /** What a file's amount answers for a character it cannot hold (D-152, D-153). */
+    public const REFUSED_FILE_NOT_FIGURES = 'That is not an amount: it should be figures, for example 1,234.50, with nothing else in front but the currency\'s own sign.';
+
+    /** The other refusals, each worded for the one shape it is given (#1004). */
+    public const REFUSED_POWER_OF_TEN = 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
+    public const REFUSED_PLUS         = 'Leave out the plus sign: type the amount in figures, for example 12.50.';
+    public const REFUSED_MINUS_PLACE  = 'A minus sign can only come first, for example -12.50.';
+    public const REFUSED_ONE_POINT    = 'An amount can have only one decimal point, for example 12.50.';
+    public const REFUSED_NO_FIGURES   = 'That has no figures in it: type the amount in figures, for example 12.50.';
+    public const REFUSED_COMMAS       = 'The commas in that amount are in the wrong places: a comma may only separate groups of three figures (1,234.50), and the decimals follow a point (12.50).';
+    public const REFUSED_TOO_PRECISE  = 'An amount can have at most two figures after the decimal point, for example 12.50.';
+    public const REFUSED_NEGATIVE     = 'The amount cannot be negative.';
 
     /** How every "too large" refusal begins; the rest is the column's most, written in the currency. */
     public const REFUSED_TOO_LARGE_START = 'That amount is too large: the most that can be stored here is ';
@@ -552,31 +565,33 @@ final class Currency
      *   - a leading minus, ONLY when the caller passes `$allowNegative`;
      *   - spaces at either end are ignored.
      *
-     * A FILE THE PORTAL READS (`$fromStatement = true`, the bank-statement
-     * import ONLY): D-152 leaves a statement's own number format alone, because
-     * that is how banks write it. In this mode the converter ALSO accepts
+     * A FILE THE PORTAL READS (`$fromFile = true`): the bank-statement import
+     * (D-152) and the asset import (D-153) ONLY. A file keeps the number format
+     * the program that wrote it uses, so the converter ALSO reads
      *   - commas between groups of three ("1,234.50", "1,234,567"), the first
      *     group starting 1-9, so "0,500" and "12,50" are refused, never read as
      *     500.00 or 1,250.00;
-     *   - the import's OWN currency sign or code in front ("£12.50",
-     *     "GBP 12.50", "-£3.00", "£-3.00"). The importer has always allowed a
-     *     leading sign; another currency's sign is refused, where the importer's
-     *     old pattern took "$" or "€" in a pounds import as pounds.
+     *   - the record's OWN currency sign or code in front ("£12.50",
+     *     "GBP 12.50", "-£3.00", "£-3.00"). ANOTHER currency's sign is refused,
+     *     saying which; and with NO currency chosen for the organisation, any
+     *     sign is refused, saying so and what to do (D-139: an amount's money is
+     *     never guessed, so "£12.50" cannot be stored as money of no known kind).
      *
      * In both modes it refuses an empty box, a power of ten ("1e17"), a "+"
-     * sign, anything else that is not a figure, more than two decimals, a
-     * negative where none is allowed, and anything above `$max`, which the
-     * caller sets to what its column holds (INT_COLUMN_MAX, the default;
-     * DECIMAL_10_2_MAX for a DECIMAL(10,2) column) or to what its own pattern
-     * admits (it must never be lower than a limit checked AFTER it, or that
-     * check's own message is never reached). The size test compares the
-     * FIGURES as text, so it is exact at any length. A currency not counted in
-     * hundredths is refused outright (whyNotChoosable()).
+     * sign, a misplaced minus, a second decimal point, more than two decimals,
+     * a negative where none is allowed, and anything above `$max`, which the
+     * caller sets to the most the place the value finally LANDS can hold
+     * (INT_COLUMN_MAX, the default; DECIMAL_10_2_MAX for a DECIMAL(10,2)
+     * column) or to what its own pattern admits — never lower than a limit
+     * checked AFTER it, or that check's own message is never reached. Each
+     * refusal says the TRUE reason for the shape it was given. The size test
+     * compares the FIGURES as text, so it is exact at any length. A currency
+     * not counted in hundredths is refused outright (whyNotChoosable()).
      *
      * The sentence names no box: a caller with several puts the box's name in
      * front ("Purchase cost: …"). It uses nothing but PHP.
      */
-    public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false, bool $fromStatement = false): int|string
+    public static function parseAmount(string $typed, string $currency, int $max = self::INT_COLUMN_MAX, bool $allowNegative = false, bool $fromFile = false): int|string
     {
         $code = strtoupper(trim($currency));
         if (isset(self::NOT_HUNDREDTHS[$code]) === true) {
@@ -587,15 +602,15 @@ final class Currency
             return self::REFUSED_EMPTY;
         }
 
-        // ➖ A leading minus. In a statement, the import's own sign or code may
-        //    sit either side of it: "-£3.00" and "£-3.00". The longest prefix is
+        // ➖ A leading minus. In a file, the record's own sign or code may sit
+        //    either side of it: "-£3.00" and "£-3.00". The longest prefix is
         //    tried first, so "CA$" before "$". A typed box takes no sign at all.
         $negative = false;
         if (str_starts_with($text, '-') === true) {
             $negative = true;
             $text     = substr($text, 1);
         }
-        if ($fromStatement === true && $code !== '') {
+        if ($fromFile === true && $code !== '') {
             $prefixes = [$code];
             if (self::symbol($code) !== '') {
                 $prefixes[] = self::symbol($code);
@@ -614,30 +629,22 @@ final class Currency
         }
 
         // 🔍 What is left must be figures and at most one point (and, in a
-        //    statement, commas).
-        $notAnAmount = $fromStatement === true
-            ? 'That is not an amount: it should be figures, with at most one decimal point, for example 1,234.50.'
-            : self::REFUSED_NOT_FIGURES;
-        $shape = $fromStatement === true ? '/^[0-9,]*(\.[0-9]*)?$/D' : '/^[0-9]*(\.[0-9]*)?$/D';
+        //    file, commas). Anything else is refused with the reason for ITS shape.
+        $shape = $fromFile === true ? '/^[0-9,]*(\.[0-9]*)?$/D' : '/^[0-9]*(\.[0-9]*)?$/D';
         if (preg_match($shape, $text) !== 1) {
-            if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
-                return 'Write the amount out in full figures, for example 1500.00: a power of ten such as 1e3 is not accepted.';
-            }
-
-            return $notAnAmount;
+            return self::whyNotAnAmount($text, $code, $fromFile);
         }
         $point    = strpos($text, '.');
         $whole    = $point === false ? $text : substr($text, 0, $point);
         $fraction = $point === false ? '' : substr($text, $point + 1);
         if (preg_match('/[0-9]/', $whole . $fraction) !== 1) {
-            return $notAnAmount;
+            return self::REFUSED_NO_FIGURES;
         }
         if (str_contains($whole, ',') === true && preg_match('/^[1-9][0-9]{0,2}(,[0-9]{3})+$/D', $whole) !== 1) {
-            return 'The commas in that amount are in the wrong places: a comma may only separate groups of three '
-                . 'figures (1,234.50), and the decimals follow a point (12.50).';
+            return self::REFUSED_COMMAS;
         }
         if (strlen($fraction) > 2) {
-            return 'An amount can have at most two figures after the decimal point, for example 12.50.';
+            return self::REFUSED_TOO_PRECISE;
         }
 
         // 🧮 The whole number of hundredths, as TEXT: the figures before the
@@ -648,7 +655,7 @@ final class Currency
             $figures = '0';
         }
         if ($negative === true && $figures !== '0' && $allowNegative === false) {
-            return 'The amount cannot be negative.';
+            return self::REFUSED_NEGATIVE;
         }
         if (self::figuresAbove($figures, $max) === true) {
             return self::REFUSED_TOO_LARGE_START . self::format(max(0, $max), $code) . '.';
@@ -656,6 +663,69 @@ final class Currency
         $hundredths = (int) $figures;
 
         return $negative === true ? -$hundredths : $hundredths;
+    }
+
+    /**
+     * 🗣️ Why `$text` (what is left once a leading minus and, in a file, the
+     * record's own sign are taken off) is not an amount — the TRUE reason for
+     * its shape, most specific first. Round 2 of #1004's check found one
+     * sentence ("no commas, spaces, currency signs or letters") given for
+     * "12.5.5", which holds none of those.
+     */
+    private static function whyNotAnAmount(string $text, string $code, bool $fromFile): string
+    {
+        if (preg_match('/^[0-9,]*\.?[0-9]*[eE][+-]?[0-9]+$/D', $text) === 1) {
+            return self::REFUSED_POWER_OF_TEN;
+        }
+        if ($fromFile === true) {
+            $written = self::currencyWrittenAtStart($text);
+            if ($written !== '' && $code === '') {
+                return 'That amount is written with a currency (' . $written . '), but no currency is chosen for this '
+                    . 'organisation, so the portal cannot tell what money it is. Choose the organisation\'s currency in '
+                    . 'Admin, Settings, Organisation, then import the file again.';
+            }
+            if ($written !== '') {
+                return 'That amount is written in another currency (' . $written . '), not ' . $code . '. Import a file kept in '
+                    . $code . ', or check the organisation\'s currency in Admin, Settings, Organisation.';
+            }
+        }
+        $allowed = $fromFile === true ? '0-9.,+\-' : '0-9.+\-';
+        if (preg_match('/[^' . $allowed . ']/', $text) === 1) {
+            return $fromFile === true ? self::REFUSED_FILE_NOT_FIGURES : self::REFUSED_NOT_FIGURES;
+        }
+        if (str_contains($text, '+') === true) {
+            return self::REFUSED_PLUS;
+        }
+        if (str_contains($text, '-') === true) {
+            return self::REFUSED_MINUS_PLACE;
+        }
+        if (substr_count($text, '.') > 1) {
+            return self::REFUSED_ONE_POINT;
+        }
+        // A file's comma after the decimal point ("1.234,50").
+        return self::REFUSED_COMMAS;
+    }
+
+    /**
+     * 💱 The currency sign or code a text BEGINS with ("£", "CA$", "USD"), or ''.
+     * Only for saying truthfully why a file's amount was refused: signs from
+     * SYMBOLS (longest first) and "¥", or three capital letters the portal
+     * knows as a currency, followed by a figure, a space, a minus or a point.
+     */
+    private static function currencyWrittenAtStart(string $text): string
+    {
+        $signs = array_merge(array_values(self::SYMBOLS), ['¥']);
+        usort($signs, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+        foreach ($signs as $sign) {
+            if (str_starts_with($text, $sign) === true) {
+                return $sign;
+            }
+        }
+        if (preg_match('/^([A-Z]{3})(?=[ 0-9.\-])/', $text, $m) === 1 && self::isKnown($m[1]) === true) {
+            return $m[1];
+        }
+
+        return '';
     }
 
     /**

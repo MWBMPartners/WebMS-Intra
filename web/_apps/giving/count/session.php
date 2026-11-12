@@ -232,17 +232,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="count">
                         <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
                         <input type="hidden" name="slot" value="<?php echo $slot; ?>">
+                        <?php /* 💷 The boxes are prefilled with PLAIN figures ("1234.50"),
+                                  never number_format()'s "1,234.50": a typed box takes figures
+                                  only (D-152), so a counter re-entering after a discrepancy
+                                  would be refused over a figure they never typed (#1004). */ ?>
                         <div class="col-4">
                             <label class="form-label small">Loose cash</label>
-                            <input type="text" class="form-control form-control-sm" name="cashAmount" value="<?php echo $cash !== null ? htmlspecialchars(number_format((float) $cash, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="cashAmount" value="<?php echo $cash !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $cash)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-4">
                             <label class="form-label small">Loose cheque</label>
-                            <input type="text" class="form-control form-control-sm" name="chequeAmount" value="<?php echo $cheque !== null ? htmlspecialchars(number_format((float) $cheque, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="chequeAmount" value="<?php echo $cheque !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $cheque)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-4">
                             <label class="form-label small">Envelope total</label>
-                            <input type="text" class="form-control form-control-sm" name="envelopeAmount" value="<?php echo $envelope !== null ? htmlspecialchars(number_format((float) $envelope, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="envelopeAmount" value="<?php echo $envelope !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $envelope)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-12 mt-2">
                             <button type="submit" class="btn btn-primary btn-sm w-100">

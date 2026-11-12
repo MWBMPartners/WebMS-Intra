@@ -205,7 +205,8 @@ function reconcile_count_data_rows(string $raw, string $delimiter): int
  * @param list<string|null>            $data
  * @param array<string, int|string|null> $mapping
  *
- * @return array{ok: bool, skip: bool, error: ?string, row: ?array{date: string, pence: int, desc: string, ref: ?string}}
+ * @return array{ok: bool, skip: bool, error: ?string, row: ?array{date: string, pence: int, desc: string, ref: ?string}, note?: string}
+ *         `note` is set only on a skipped debit too large to store, which is named under the skipped count (#1004).
  */
 function reconcile_parse_row(array $data, array $mapping, string $mode, int $rowNum, string $currency): array
 {
@@ -240,10 +241,12 @@ function reconcile_parse_row(array $data, array $mapping, string $mode, int $row
     }
 
     // 💷 Amount → pence (credits only; debit/zero/blank skipped), through the
-    //    ONE converter, Currency::parseAmount() (#1004), in its STATEMENT mode:
-    //    a file the portal reads keeps the bank's own number format (D-152), so
-    //    commas between groups of three and the import's own currency sign are
-    //    read; negatives are allowed so a debit can be recognised and skipped.
+    //    ONE converter, Currency::parseAmount() (#1004), in its FILE mode
+    //    (`fromFile`): a file the portal reads keeps the bank's own number
+    //    format (D-152), so commas between groups of three and the import's own
+    //    currency sign are read; another currency's sign, or any sign while the
+    //    organisation has no currency chosen, is refused with the reason and
+    //    what to do. Negatives are allowed so a debit can be recognised and skipped.
     //    It used to accept "£", "$" or "€" whatever the import's currency,
     //    commas anywhere ("12,50" became 1,250.00), and go through a float.
     //    Spaces are still taken out first, as before: banks write them.

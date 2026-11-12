@@ -9,7 +9,8 @@
  * contents replaced by nothing ('' stays as ''), so a comment or a message that
  * QUOTES the forbidden pattern is never reported. Statements are cut at `;`,
  * `{` and `}`, so the body of a closure or an `if` is its own statement.
- * A float cast is written "(float)" whatever its spelling ((double), (real)),
+ * A float cast is written "(float)" whatever its spelling ((double), (real),
+ * any capitals), and a whole-number cast "(int)" ((integer), any capitals),
  * and inline HTML (a page's own markup and scripts) is left out: it is not PHP.
  *
  * Output: {"<path>": [[<line the statement starts on>, "<its code>"], …], …}
@@ -71,6 +72,8 @@ foreach (array_slice($argv, 1) as $path) {
                 $text = '';
             } elseif ($id === T_DOUBLE_CAST) {
                 $text = '(float)';
+            } elseif ($id === T_INT_CAST) {
+                $text = '(int)';
             }
             if ($startLine === 0 && trim($text) !== '') {
                 $startLine = $line;

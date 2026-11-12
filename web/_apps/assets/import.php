@@ -323,20 +323,23 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
     }
 
     // 💷 purchaseCostPounds → purchaseCostPence through the ONE converter,
-    //    Currency::parseAmount() (#1004): FIGURES ONLY, as in a typed box
-    //    (D-152 names only the bank-statement import as reading a file's own
-    //    number format; whether a spreadsheet of assets should too is asked on
-    //    #1004). It used to strip "£", "$", "€", every comma and every space
-    //    and go through a float, so "$12" was taken as pounds, "12,50" as
-    //    1,250.00, and an absurd figure wrapped. The organisation's currency
-    //    is passed so a "too large" refusal is written in it.
+    //    Currency::parseAmount() (#1004), in its FILE mode (the owner, D-153):
+    //    a spreadsheet saved with currency formatting writes "£1,234.56", so
+    //    commas between groups of three and the asset's OWN currency sign or
+    //    code are read, exactly as the bank-statement import reads them. The
+    //    rows are made in the organisation's currency, so that is the one
+    //    passed. Another currency's sign, or any sign while the organisation
+    //    has no currency chosen, is refused with the reason. It used to strip
+    //    "£", "$", "€", every comma and every space and go through a float, so
+    //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure
+    //    wrapped.
     $costRaw           = $get('purchaseCostPounds');
     $purchaseCostPence = null;
     if ($costRaw !== '') {
         // The organisation's currency is read once per request, not once per row.
         static $importCurrency = null;
         $importCurrency ??= \Portal\Core\Currency::ofSite();
-        $cost = \Portal\Core\Currency::parseAmount($costRaw, $importCurrency);
+        $cost = \Portal\Core\Currency::parseAmount($costRaw, $importCurrency, fromFile: true);
         if (is_string($cost) === true) {
             $errors[] = 'Purchase Cost "' . $costRaw . '": ' . $cost;
         } else {
