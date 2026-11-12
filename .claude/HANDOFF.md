@@ -6,16 +6,20 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691, #966, #998, #1000, #964, #929.
-Last whole suite (with #968): green. Decisions D-129 to D-153 recorded on 11-12 November (D-135 is the owner's
+#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691, #966, #998, #1000, #964, #929, #1012; #826, #788, #886 closed as already done.
+Last whole suite (with #968): green. Decisions D-129 to D-176 recorded on 11-12 November (D-165 supersedes D-155 and D-157) (D-135 is the owner's
 2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #1004 — strict reading of typed money amounts (D-152, D-153) | `p1004-build`, round 3 building | `Currency::parseAmount()`; new hard gate `check_no_float_money.py` to wire in pr-security.yml; new test `money-amount-selftest.php` to wire (port 9533). Follow-up #1013 |
-| #1012 — a member's own DBS checks in their data copy | `p1012-build`, building | |
+| #1004 — strict money amounts (D-152, D-153, D-165) | `p1004-build`, 294e3aff | Round 7 in narrow check. Wiring at integration: `check_no_float_money.py` in pr-security.yml; `money-amount-selftest.php` in the runner and portal-selftests.yml (port 9533) |
+| #988 + #1009 — anonymous prayer requests (D-176) | `p988-build`, building | |
+| #971, #972, #875 — mail faults | `p971-build`, building | |
+| #982 (#985 duplicate), #922, #926, #973 — page messages | `p982-build`, building | |
+
+**Triage (D-156, 12 November):** of the 151 issues raised after 5 November, 46 are "fix before release", 87 are labelled `status: deferred`, #788/#886 closed as already done, #821 stays queued, and the 16 owner questions are all answered (D-158 to D-176). The fix list is the next work after the packages above; batch by files that do not overlap. The 5 November backlog (D-055) still follows: #777, #569, #821, then the medium and low issues.
 
 **Migration numbers taken:** 269-279 landed. 282, 283 (#966) and 286 (#964) used. 280, 281, 284, 285 unused. Next free: 287.
 **The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923); the whole-suite runner does not yet (#983).**
@@ -70,4 +74,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1013.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1016.
