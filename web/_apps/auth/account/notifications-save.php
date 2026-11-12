@@ -180,7 +180,12 @@ if (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice !==
 }
 
 Logger::activity('NotificationPrefsUpdated', 'User updated notification preferences');
-$_SESSION['notifications_flash']      = 'Preferences saved.';
+// 📰 "Preferences saved." must not read as covering the newsletter when the
+//    newsletter choice was left alone (#875): it is on, and this form did not
+//    show the choice for this organisation. One plain line says so.
+$_SESSION['notifications_flash']      = (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterChoice === null)
+    ? 'Preferences saved. Your newsletter choice was not changed: the page you saved did not show it for this organisation. Open this page again to change it.'
+    : 'Preferences saved.';
 $_SESSION['notifications_flash_type'] = 'success';
 header('Location: ' . Site::url('account/notifications'), true, 302);
 exit();

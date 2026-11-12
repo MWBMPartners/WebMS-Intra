@@ -101,8 +101,10 @@ final class EventSuggestions
      *
      * SO IT DOES WHAT THE ADMINISTRATOR'S BROWSER DID, in three steps:
      *   1. Text that is not valid UTF-8 has each broken byte sequence replaced
-     *      by "?" (mb_scrub()). A browser never sends such text from this form;
-     *      a request made by hand can. Without this step the Unicode patterns
+     *      by "?" (mb_scrub(), with the replacement character set to "?" HERE
+     *      rather than left to the `mbstring.substitute_character` setting,
+     *      which an installation can change). A browser never sends such text
+     *      from this form; a request made by hand can. Without this step the Unicode patterns
      *      below refuse the whole string, and the first version then fell back
      *      to a byte pattern that KEPT U+2028 and every multi-byte control - so
      *      the rule was different for exactly the text built by hand to get
@@ -116,10 +118,16 @@ final class EventSuggestions
      *      U+200C), which emoji sequences and several scripts (Persian, the
      *      Indian scripts) need to be spelled right; and the left-to-right and
      *      right-to-left MARKS (U+200E, U+200F) and the Arabic letter mark
-     *      (U+061C). A mark is an invisible letter with a direction: it can
-     *      move a neighbouring space or bracket, never reverse a run of letters,
-     *      and people writing in right-to-left scripts type them on purpose. So
-     *      this does NOT remove every "format" character (\p{Cf}).
+     *      (U+061C). A mark acts like an invisible letter with a direction. It
+     *      CAN reorder things inside the visitor's own text - groups of digits
+     *      and right-to-left words (round 2 of the check measured
+     *      "Meeting<U+200F> 12 34 end" shown as "Meeting34 12  end" in Edge) -
+     *      but it never reverses the letters of a word, and in this e-mail it
+     *      cannot reach the surrounding sentence, because the fixed words that
+     *      follow each value begin with a letter (measured in the same check).
+     *      People writing in right-to-left scripts type marks on purpose, so
+     *      they stay, and this does NOT remove every "format" character
+     *      (\p{Cf}).
      *   3. Every run of control characters (line breaks, tabs, every C0/C1
      *      control: \p{Cc}) and of Unicode spaces and line or paragraph
      *      separators (\p{Z}: the no-break space, the en and em spaces, U+2028,
@@ -131,7 +139,15 @@ final class EventSuggestions
      */
     public static function oneLine(string $text): string
     {
-        $valid = mb_scrub($text, 'UTF-8');
+        // "?" for a broken byte sequence, said here: mb_scrub() otherwise uses
+        // whatever `mbstring.substitute_character` is set to. Put back after.
+        $was = mb_substitute_character();
+        mb_substitute_character(0x3F);
+        try {
+            $valid = mb_scrub($text, 'UTF-8');
+        } finally {
+            mb_substitute_character($was);
+        }
         $flat  = preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $valid);
         $flat  = preg_replace('/[\p{Cc}\p{Z}]+/u', ' ', (string) $flat);
 

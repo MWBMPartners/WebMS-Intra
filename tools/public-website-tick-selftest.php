@@ -145,7 +145,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 333; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
+const PWT_EXPECTED_CHECKS = 334; // #885's thirty-nine (G1-G21, PG1-PG18) on top of: 294, then #1020 round 3's P140 (1); before that 287, then #972 round 2 and #1020's E28-E30 (3) and P136-P139 (4); before that 277, then #972's E23-E27 (5) and P131-P135 (5); before that 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2198,11 +2198,16 @@ check('E28 (#972) U+2028, U+2029, the no-break space and other Unicode spaces in
 // #1020, BOTH directions: the embeddings, overrides and isolates go (an
 // override makes "Pat" read "taP"); the zero-width joiner and non-joiner and
 // the right-to-left mark STAY, because emoji, Persian and Arabic need them.
-$dirEvent  = "PWT E direction \u{202E}tap\u{202C} \u{2066}x\u{2069} \u{202B}y\u{202A}z\u{2067}w\u{2068}v";
-$dirWantEv = 'PWT E direction tap x yzwv';
-$dirName   = "Ali \u{200F}\u{0639}\u{0644}\u{064A} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}";
+// EVERY character the rule removes is in the event's name, one after each
+// letter: U+202A-U+202E and U+2066-U+2069 (round 3 of the check: a fixture
+// holding one example of each kind let a range that kept U+202D pass). And
+// EVERY character it keeps is in the name: U+200C, U+200D, U+200E, U+200F and
+// U+061C, so a range that took one of them goes red too.
+$dirEvent  = "PWT E direction a\u{202A}b\u{202B}c\u{202C}d\u{202D}e\u{202E}f g\u{2066}h\u{2067}i\u{2068}j\u{2069}k";
+$dirWantEv = 'PWT E direction abcdef ghijk';
+$dirName   = "Ali \u{200F}\u{0639}\u{0644}\u{064A} \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645} a\u{200E}b \u{061C}\u{0639}";
 $scnDirection = static fn (): array => $scnTyped($dirEvent, $dirName, 'direction.controls@selftest.invalid', $dirWantEv, $dirName);
-check('E29 (#1020) direction overrides, embeddings and isolates are REMOVED from a visitor\'s event name, while the zero-width joiner, the zero-width non-joiner and the right-to-left mark in their name are KEPT exactly',
+check('E29 (#1020) EVERY direction embedding, override and isolate (U+202A-U+202E, U+2066-U+2069) is REMOVED from a visitor\'s event name, while EVERY joiner and mark (U+200C, U+200D, U+200E, U+200F, U+061C) in their name is KEPT exactly',
     $scnDirection(), ['stored' => [$dirWantEv, $dirName], 'e-mail says' => true]);
 // Text that is not UTF-8 at all (a request made by hand): broken byte
 // sequences become "?", by the same rule as every other input.
@@ -4318,6 +4323,10 @@ check('P138 with EVERY format character removed instead (all of \\p{Cf}), the jo
 $p = $plant('_core/EventSuggestions.php', "\$valid = mb_scrub(\$text, 'UTF-8');", '$valid = $text;', $scnBytes);
 check('P139 with text that is not UTF-8 no longer repaired first, the rule refuses it and the suggestion is not stored as written (E30 goes red)',
     [$p['applied'], ($p['result']['stored'][0] ?? null) === $bytesWantEv], [true, false]);
+$p = $plant('_core/EventSuggestions.php', "preg_replace('/[\\x{202A}-\\x{202E}\\x{2066}-\\x{2069}]+/u', '', \$valid);",
+    "preg_replace('/[\\x{202A}-\\x{202C}\\x{202E}\\x{2066}-\\x{2069}\\x{200E}\\x{061C}]+/u', '', \$valid);", $scnDirection);
+check('P140 with the removal range keeping U+202D and taking U+200E and U+061C instead (the plant round 3 of the check found green), both halves of E29 go red',
+    [$p['applied'], ($p['result']['stored'][0] ?? null) === $dirWantEv, ($p['result']['stored'][1] ?? null) === $dirName], [true, false, false]);
 // The words-watching line comes out of the copy's Mailer now, and every mail
 // row goes back as it was.
 file_put_contents($mailerPath, $mailerWas);

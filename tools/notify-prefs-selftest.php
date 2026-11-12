@@ -915,13 +915,19 @@ $scenarioNewsletter = static function (bool $drawnOn, bool $hadRow) use (&$state
         $setNewsletter('1');                 // ON at the moment of saving, either way
         $answer  = $http('POST', $form['action'], $fields);
         $subs    = $db->query("SELECT COUNT(*) AS n, MIN(`optedIn`) AS lowest FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}")->fetch_assoc();
-        $saved   = str_contains($http('GET', '/account/notifications')['body'], 'Preferences saved.');
+        $after   = $http('GET', '/account/notifications')['body'];
+        $saved   = str_contains($after, 'Preferences saved.');
+        // The success message must not read as covering the newsletter when
+        // the newsletter choice was left alone (round 3): it says so then, and
+        // only then.
+        $toldNot = str_contains($after, 'Your newsletter choice was not changed');
         // Drawn and unticked: the member chose to leave, so ONE row, opted out.
         // Not drawn: nothing about the newsletter changes, row or no row.
         $want    = $drawnOn === true ? [1, 0] : ($hadRow === true ? [1, 1] : [0, null]);
         $now     = [(int) $subs['n'], $subs['lowest'] === null ? null : (int) $subs['lowest']];
-        $ok      = $answer['status'] === 302 && $saved === true && $now === $want;
-        return [$ok, 'save HTTP ' . $answer['status'] . '; newsletter rows/lowest optedIn ' . $fmt($now) . ' (want ' . $fmt($want) . '); "Preferences saved." ' . ($saved ? 'shown' : 'NOT shown'), $premise];
+        $ok      = $answer['status'] === 302 && $saved === true && $now === $want && $toldNot === ($drawnOn === false);
+        return [$ok, 'save HTTP ' . $answer['status'] . '; newsletter rows/lowest optedIn ' . $fmt($now) . ' (want ' . $fmt($want) . '); "Preferences saved." ' . ($saved ? 'shown' : 'NOT shown')
+            . '; "newsletter choice was not changed" ' . ($toldNot ? 'said' : 'not said'), $premise];
     } finally {
         $setNewsletter('0');
         $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
@@ -933,7 +939,7 @@ $scenarioNewsletter = static function (bool $drawnOn, bool $hadRow) use (&$state
 [$okDrawn, $detailDrawn, $premiseOn]               = $scenarioNewsletter(true, true);
 check('D10 (the premise) the newsletter box and its "drawn" marker are on the page, once each, only while the newsletter is switched on',
     $premiseOff === ['drawn' => false, 'markers' => 0] && $premiseOn === ['drawn' => true, 'markers' => 1], 'off ' . $fmt($premiseOff) . '; on ' . $fmt($premiseOn));
-check('D11 (#875) a page opened with the newsletter OFF and saved after it was switched ON does NOT unsubscribe a member who is subscribed',
+check('D11 (#875) a page opened with the newsletter OFF and saved after it was switched ON does NOT unsubscribe a member who is subscribed, and says the newsletter choice was not changed',
     $okNotDrawnRow, $detailNotDrawnRow);
 check('D12 (#875) ...and writes no "opted out" row for a member who had never chosen',
     $okNotDrawnNone, $detailNotDrawnNone);
@@ -1018,6 +1024,7 @@ $scenarioOtherOrganisation = static function () use (&$state, $db, $http, $formO
         $fresh = $formOn($http('GET', '/account/notifications')['body'], 'account/notifications/save');
         $out['current token: answer'] = $http('POST', $formA['action'], ['csrf_token' => $fresh['fields']['csrf_token'] ?? ''] + $fieldsA)['status'];
         $out['current token: subscriptions'] = $subs();
+        $out['current token: told not changed'] = str_contains($http('GET', '/account/notifications')['body'], 'Your newsletter choice was not changed');
         // ── B's own page, unticked, in B: B's choice changes, A's does not ──
         $setSubs();
         $fieldsB = $fresh['fields'];
@@ -1025,6 +1032,7 @@ $scenarioOtherOrganisation = static function () use (&$state, $db, $http, $formO
         unset($fieldsB['newsletterOptedIn']);
         $out['B\'s own page: answer'] = $http('POST', $fresh['action'], $fieldsB)['status'];
         $out['B\'s own page: subscriptions'] = $subs();
+        $out['B\'s own page: told not changed'] = str_contains($http('GET', '/account/notifications')['body'], 'Your newsletter choice was not changed');
         $switchTo($siteId);
         return $out;
     } finally {
@@ -1063,10 +1071,12 @@ check('D14 (the premise) the organisation really is chosen per session: the page
 check('D15 a form drawn for A, posted with its own token after switching to B, is refused and changes neither subscription (the switch spent that token: measured, and true before this check existed too)',
     ($other['own token: told expired'] ?? null) === true && ($other['own token: subscriptions'] ?? null) === $both,
     $fmt([$other['own token: answer'] ?? null, $other['own token: told expired'] ?? null, $other['own token: subscriptions'] ?? null]));
-check('D16 (#875) a form drawn for A, posted in B with a CURRENT token, does NOT change B\'s newsletter choice (or A\'s): its box was about A',
-    ($other['current token: answer'] ?? null) === 302 && ($other['current token: subscriptions'] ?? null) === $both, $fmt([$other['current token: answer'] ?? null, $other['current token: subscriptions'] ?? null]));
+check('D16 (#875) a form drawn for A, posted in B with a CURRENT token, does NOT change B\'s newsletter choice (or A\'s): its box was about A; and the member is told the newsletter choice was not changed',
+    ($other['current token: answer'] ?? null) === 302 && ($other['current token: subscriptions'] ?? null) === $both && ($other['current token: told not changed'] ?? null) === true,
+    $fmt([$other['current token: answer'] ?? null, $other['current token: subscriptions'] ?? null, $other['current token: told not changed'] ?? null]));
 check('D17 ...while B\'s own page, saved unticked in B, does unsubscribe from B and leaves A alone (the marker still works)',
-    ($other['B\'s own page: answer'] ?? null) === 302 && ($other['B\'s own page: subscriptions'] ?? null) === ['A' => 1, 'B' => 0], $fmt([$other['B\'s own page: answer'] ?? null, $other['B\'s own page: subscriptions'] ?? null]));
+    ($other['B\'s own page: answer'] ?? null) === 302 && ($other['B\'s own page: subscriptions'] ?? null) === ['A' => 1, 'B' => 0] && ($other['B\'s own page: told not changed'] ?? null) === false,
+    $fmt([$other['B\'s own page: answer'] ?? null, $other['B\'s own page: subscriptions'] ?? null, $other['B\'s own page: told not changed'] ?? null]));
 // Every section below runs as the member signed in afresh, in one organisation.
 $signIn();
 
