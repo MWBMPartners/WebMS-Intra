@@ -25,6 +25,11 @@
  *      whole. The audit record of the API call must name only what it changed.
  *      (Round 1 changed three columns; exempting `locationID` and
  *      `isConfidential` from the rule then left every check green.)
+ *   N  THE OTHER DIRECTION. The asset starts with every column that may be
+ *      empty filled in; while the request waits the other writer EMPTIES all
+ *      of them (the list asked of the schema); the row must stay emptied.
+ *      (Round 2 only ever set values, so falling back to the request's stale
+ *      value whenever the locked one was empty — the `??` idiom — passed.)
  *   S  THE LOCKING READ. The same race, driven in a separate PHP process that
  *      loads the portal's own start-up but begins every transaction WITH a
  *      consistent snapshot, so a plain read under the lock would see the row
@@ -38,7 +43,9 @@
  *      a 400, a change the asset's records forbid is a 409 with the reason and
  *      the asset untouched, a permitted change is written, and a currency
  *      changed by somebody else while the request waited survives a request
- *      that did not send one.
+ *      that did not send one;
+ *   Z  no PHP error in the server's log, and (Z2) after the tidy-up every
+ *      table holds exactly as many rows as before the run.
  *
  * WHAT IT CANNOT SHOW, said plainly:
  *   - the edit page (`/assets/save`, a FULL write) is not raced here: it posts
@@ -338,6 +345,16 @@ $removeAll = static function () use ($db, $site): void {
         $id = (int) $r['assetID'];
         run($db, 'DELETE FROM `tblAssetMaintenance` WHERE `assetID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$id]);
+        // Every asset change is mirrored into the platform's audit trail and
+        // activity log (AssetRegister::audit()). Round 3 of the check found
+        // both left behind: the trail rows were removed by nothing, and the
+        // activity record written by section S's worker carries NO account
+        // (it has no session), so a match on the administrator missed it.
+        // Matched here by THIS asset's number, which only this run's assets
+        // carry: the trail by table and record, the activity log by the
+        // fixed opening AssetRegister::audit() writes ("Asset #N — …").
+        run($db, "DELETE FROM `tblAuditTrail` WHERE `tableName` = 'tblAssets' AND `recordID` = ?", 'i', [$id]);
+        run($db, "DELETE FROM `tblActivityLogs` WHERE `activityType` LIKE 'Asset%' AND `activityDescription` LIKE ?", 's', ['Asset #' . $id . ' %']);
         run($db, 'DELETE FROM `tblAssets` WHERE `assetID` = ?', 'i', [$id]);
     }
     // The race's fixture rows (their links from the assets are ON DELETE SET NULL).
@@ -346,11 +363,32 @@ $removeAll = static function () use ($db, $site): void {
     // Signing in and each API call write activity records naming the
     // administrator; they hold a link to the account, so they go first.
     run($db, 'DELETE FROM `tblActivityLogs` WHERE `userID` = ?', 'i', [AU_ADMIN]);
+    run($db, 'DELETE FROM `tblAuditTrail` WHERE `userID` = ?', 'i', [AU_ADMIN]);
     run($db, 'DELETE FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [AU_ADMIN]);
     run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [AU_ADMIN]);
     run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [AU_ADMIN]);
 };
 $removeAll();
+/**
+ * The exact number of rows in EVERY table of this database. Taken once here and
+ * again after the tidy-up at the end (Z2), so "removed at the end" is a
+ * measurement rather than a claim (round 3 of the check found rows left in
+ * tblActivityLogs and tblAuditTrail under that very comment).
+ *
+ * @return array<string, int>
+ */
+$tableCounts = static function () use ($db): array {
+    $out = [];
+    foreach (rows($db, "SELECT `TABLE_NAME` AS `t` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_TYPE` = 'BASE TABLE' ORDER BY `TABLE_NAME`") as $r) {
+        $table = (string) $r['t'];
+        if (preg_match('/^[A-Za-z0-9_]+$/', $table) !== 1) {
+            continue;
+        }
+        $out[$table] = (int) (rows($db, 'SELECT COUNT(*) AS `n` FROM `' . $table . '`')[0]['n'] ?? 0);
+    }
+    return $out;
+};
+$countsBefore = $tableCounts();
 register_shutdown_function(static function () use ($removeAll): void {
     try {
         $removeAll();
@@ -593,6 +631,72 @@ $raceDiff  = json_decode((string) ($raceAudit[0]['changeSet'] ?? 'null'), true);
 check('R6 the API call\'s audit record names ONLY the name as changed — it neither claims nor hides a change to anything the other writer changed',
     count($raceAudit) === 1 && is_array($raceDiff) === true && array_keys($raceDiff) === ['name'],
     json_encode($raceAudit));
+// R7: the list of columns the race leaves alone is pinned WHOLE. Moving a
+// column into it would let the race stop changing that column without R0
+// noticing — and a column the race does not change is one R3 cannot see being
+// put back. So such a move fails here and has to be a visible edit to this line.
+check('R7 AU_NOT_CHANGED is exactly assetID, siteID, name, createdAt, updatedAt, isDeleted — a column moved into it could stop being raced without R0 noticing',
+    AU_NOT_CHANGED === ['assetID', 'siteID', 'name', 'createdAt', 'updatedAt', 'isDeleted'], json_encode(AU_NOT_CHANGED));
+
+// =============================================================================
+// N. The other direction: somebody CLEARS every field while the request waits
+// =============================================================================
+// Round 3 of the check: R only ever SETS values on an asset that starts mostly
+// empty, so a rule that falls back to the caller's stale value whenever the
+// locked row's is empty — `$lockedRow[$col] ?? $fields[$col][0]`, the `??`
+// idiom used all through updateAsset() — passed all 18 checks, while a field
+// somebody had cleared on the edit page would be put back. Here the asset
+// starts with EVERY column that may be empty filled in, the other writer
+// empties all of them (asked of the schema, not listed by hand), and the row
+// is compared whole afterwards.
+echo "\nSection N — a field CLEARED while the API request waits stays cleared\n";
+$nullable = array_values(array_filter(
+    array_column(rows($db, "SELECT `COLUMN_NAME` AS `c` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblAssets' AND `IS_NULLABLE` = 'YES' ORDER BY `ORDINAL_POSITION`"), 'c'),
+    static fn (string $c): bool => preg_match('/^[A-Za-z0-9_]+$/', $c) === 1
+));
+$cabinet = $makeRaceAsset(AU_PREFIX . ' cabinet');
+$changeEverything($db, $cabinet); // fills every column, the empty-able ones included (autocommit)
+$cabinetStart = $fullRow($cabinet);
+$emptyAtStart = array_values(array_filter($nullable, static fn (string $c): bool => ($cabinetStart[$c] ?? null) === null));
+check('N0 the premise: tblAssets has columns that may be empty (' . count($nullable) . '), and EVERY one of them is filled in on this asset before the race',
+    count($nullable) >= 20 && $emptyAtStart === [], 'empty already: ' . json_encode($emptyAtStart));
+$cabinetToken  = $freshToken('/assets/edit?id=' . $cabinet);
+$cabinetAudit0 = (int) (rows($db, 'SELECT COALESCE(MAX(`auditID`), 0) AS `m` FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$cabinet])[0]['m'] ?? 0);
+$cabinetHolder = $holdAsset($cabinet);
+$cabinetExpected = [];
+$clearRace = $raceApi(['assetID' => $cabinet, 'name' => AU_PREFIX . ' cabinet renamed', 'csrf_token' => $cabinetToken], $cabinetHolder, $cabinet,
+    static function () use ($cabinetHolder, $cabinet, $nullable, &$cabinetExpected): void {
+        $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = NULL', $nullable));
+        $u = $cabinetHolder->prepare('UPDATE `tblAssets` SET ' . $set . ' WHERE `assetID` = ?');
+        $u->bind_param('i', $cabinet);
+        $u->execute();
+        $u->close();
+        $s = $cabinetHolder->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ?');
+        $s->bind_param('i', $cabinet);
+        $s->execute();
+        $cabinetExpected = $s->get_result()->fetch_assoc() ?? [];
+        $s->close();
+        $cabinetHolder->commit();
+        $cabinetHolder->close();
+    });
+$cabinetRow = $fullRow($cabinet);
+// array_key_exists, not `??`: `??` treats an emptied column as missing, which
+// is the very confusion this section exists to catch (it made N1 red on a
+// correct run when first written).
+$stillFilled = array_values(array_filter($nullable,
+    static fn (string $c): bool => array_key_exists($c, $cabinetExpected) === false || $cabinetExpected[$c] !== null));
+check('N1 the premise: the API request was seen WAITING on this asset\'s lock, and the other writer really emptied every one of those columns',
+    $clearRace['seen'] === true && $cabinetExpected !== [] && $stillFilled === [], 'not emptied: ' . json_encode($stillFilled));
+check('N2 the field the API WAS sent is written: the asset is renamed (HTTP 200)',
+    $clearRace['status'] === 200 && ($cabinetRow['name'] ?? '') === AU_PREFIX . ' cabinet renamed',
+    'HTTP ' . $clearRace['status'] . ' ' . mb_substr($clearRace['body'], 0, 200));
+$cabinetLost = $differences($cabinetExpected, $cabinetRow);
+check('N3 every field somebody CLEARED while the request waited STAYS cleared — none is filled back in from the request\'s earlier read — compared as the whole row',
+    $cabinetLost === [], 'filled back or changed: ' . json_encode($cabinetLost));
+$clearAudit = rows($db, 'SELECT `changeSet` FROM `tblAssetAudit` WHERE `assetID` = ? AND `action` = \'update\' AND `auditID` > ? ORDER BY `auditID`', 'ii', [$cabinet, $cabinetAudit0]);
+$clearDiff  = json_decode((string) ($clearAudit[0]['changeSet'] ?? 'null'), true);
+check('N4 the API call\'s audit record names ONLY the name as changed',
+    count($clearAudit) === 1 && is_array($clearDiff) === true && array_keys($clearDiff) === ['name'], json_encode($clearAudit));
 
 // =============================================================================
 // S. The re-read under the lock must be a LOCKING read (FOR UPDATE)
@@ -728,6 +832,18 @@ check('C4 a request that did NOT send a currency, made while somebody changed it
 $serverErrors = is_file($child . $sep . 'php-errors.log') === true ? trim((string) file_get_contents($child . $sep . 'php-errors.log')) : '';
 check('Z1 the web server logged no PHP error or warning during the run',
     preg_match('/PHP (Fatal|Parse|Warning|Deprecated)/', $serverErrors) !== 1, mb_substr($serverErrors, 0, 400));
+
+// ── The tidy-up, run now (and again, harmlessly, at shutdown), then measured ─
+$removeAll();
+$countsAfter = $tableCounts();
+$leftBehind  = [];
+foreach ($countsAfter + $countsBefore as $table => $unused) {
+    if (($countsAfter[$table] ?? -1) !== ($countsBefore[$table] ?? -1)) {
+        $leftBehind[$table] = ['before' => $countsBefore[$table] ?? null, 'after' => $countsAfter[$table] ?? null];
+    }
+}
+check('Z2 the tidy-up removes every row this run made: each of the ' . count($countsBefore) . ' tables holds exactly as many rows as before the run',
+    count($countsBefore) > 100 && $leftBehind === [], 'differs: ' . json_encode($leftBehind));
 
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail === 0 ? 0 : 1);
