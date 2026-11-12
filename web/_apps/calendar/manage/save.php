@@ -1645,6 +1645,21 @@ if ($action === 'update') {
     }
 
     if ($refusedUnderLock !== null) {
+        // 🧹 The pictures. The first refusal (near the top) comes before
+        //    `$processUpload` runs, so it never leaves a file; THIS one comes
+        //    after, so any picture this request already stored would be left
+        //    on disk belonging to no event. Each name is one `$processUpload`
+        //    built itself (slug, field, time, allow-listed extension) — never
+        //    a name the request supplied — so deleting it here can only
+        //    remove a file this request wrote.
+        foreach ([$heroImage, $posterImage, $profileImage] as $storedPicture) {
+            if ($storedPicture !== null && $storedPicture !== '') {
+                $storedPath = $uploadsDir . DIRECTORY_SEPARATOR . $storedPicture;
+                if (is_file($storedPath) === true && @unlink($storedPath) === false) {
+                    error_log('Manage Events: a picture stored for a save that was then refused could not be removed: ' . $storedPicture);
+                }
+            }
+        }
         $_SESSION['flash_msg']  = $refusedUnderLock['words'];
         $_SESSION['flash_type'] = $refusedUnderLock['type'];
         header('Location: ' . $refusedUnderLock['to']);

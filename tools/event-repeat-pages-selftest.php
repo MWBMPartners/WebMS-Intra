@@ -4547,6 +4547,16 @@ ok('U17 a NEW cancelled series: all three dates are cancelled WITH the reason (r
         => (string) $r['status'] === 'cancelled' && (string) $r['cancelReason'] === 'EVREP the building is closed')) === 3,
     json_encode($newSeriesRows));
 
+// A reason of "0" is a real reason. The event page tested it with `empty()`,
+// which treats the text "0" as empty, so it was stored and never shown
+// (round 2 of #998's check).
+createEvent($jar['admin'], 'EVREP Reason zero', '2031-06-08T10:00', '2031-06-08T11:00', ['isPublic' => '1']);
+$zeroId = (int) (eventsNamed('EVREP Reason zero')[0]['eventID'] ?? 0);
+reasonEdit($jar['admin'], $zeroId, ['status' => 'cancelled', 'cancelReason' => '0']);
+ok('U17b a reason of "0" is stored (read back)', (string) (reasonRow($zeroId)['cancelReason'] ?? '') === '0', json_encode(reasonRow($zeroId)));
+ok('U17c ...and a member SEES it under the cancelled banner',
+    preg_match('/This event has been cancelled<\/h2>\s*<p class="mb-1">0<\/p>/', memberEventPage($jar['member'], $zeroId)) === 1);
+
 // -----------------------------------------------------------------------------
 // U18-U25 — the series bulk update.
 // -----------------------------------------------------------------------------
@@ -4756,6 +4766,46 @@ ok('U38 ...posting to it changes nothing (read back), and says only that it coul
     json_encode(reasonRow($otherEvent)));
 
 // -----------------------------------------------------------------------------
+// U36e-U36h — THE BULK UPDATE AND A HIDDEN DATE, AND WHAT ITS MESSAGE COUNTS
+// (round 2 of #998's check). Two dates are cancelled with a reason; the second
+// is then hidden. A hand-made bulk post naming BOTH, Cancelled with a new
+// reason, must change only the live one: the writer's own `isDeleted = 0`
+// was pinned by nothing (removing it left every check green and overwrote the
+// hidden date's reason, which is what it comes back with — D-146). And the
+// live date was ALREADY cancelled, so the status UPDATE changes no column of
+// it: the message must count the date that matched and the date that took the
+// reason, not the UPDATE's changed rows ("0 event(s) updated" was measured).
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Reason bulk hidden', '2032-01-04T10:00', '2032-01-04T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '3',
+]);
+$bhSeries = repatSeries('EVREP Reason bulk hidden');
+$bhIds    = array_map(static fn (array $r): int => (int) $r['eventID'], eventsNamed('EVREP Reason bulk hidden'));
+$bhPost   = static function (array $fields) use ($jar, $bhSeries): string {
+    $sent = req($jar['admin'], 'POST', '/calendar/manage/series-edit', array_merge([
+        'csrf_token' => managePage($jar['admin'])['token'],
+        'seriesID'   => (string) $bhSeries,
+    ], $fields));
+
+    return messageAfter($jar['admin'], $sent);
+};
+$bhPost(['eventIDs' => [(string) $bhIds[0], (string) $bhIds[1]], 'bulkStatus' => 'cancelled', 'bulkCancelReason' => 'EVREP first reason']);
+$hideWithButton($bhIds[1]);
+ok('U36e (premise) two dates cancelled with a reason, the second then hidden',
+    (string) reasonRow($bhIds[0])['cancelReason'] === 'EVREP first reason' && (int) reasonRow($bhIds[1])['isDeleted'] === 1
+    && (string) reasonRow($bhIds[1])['cancelReason'] === 'EVREP first reason',
+    json_encode([reasonRow($bhIds[0]), reasonRow($bhIds[1])]));
+$bhMessage = $bhPost(['eventIDs' => [(string) $bhIds[0], (string) $bhIds[1]], 'bulkStatus' => 'cancelled', 'bulkCancelReason' => 'EVREP second reason']);
+ok('U36f THE HIDDEN DATE KEEPS ITS OWN REASON when its number is posted with a new one (read back)',
+    (int) reasonRow($bhIds[1])['isDeleted'] === 1 && (string) reasonRow($bhIds[1])['cancelReason'] === 'EVREP first reason',
+    json_encode(reasonRow($bhIds[1])));
+ok('U36g ...while the live date, already cancelled, takes the new reason (read back)',
+    (string) reasonRow($bhIds[0])['cancelReason'] === 'EVREP second reason', json_encode(reasonRow($bhIds[0])));
+ok('U36h ...and the message counts ONE date updated and ONE carrying the reason, word for word',
+    $bhMessage === '1 event(s) updated successfully. 1 date now carries the reason you gave.', $bhMessage);
+
+// -----------------------------------------------------------------------------
 // U39 — THE SECOND ASK, UNDER THE LOCK. The first refusal reads without a
 // lock; between it and the write the date can be hidden. This connection
 // holds the row's lock while the real save runs (its first read is a plain
@@ -4773,9 +4823,29 @@ $raceRow    = (array) one(
     [$raceId]
 );
 $racePost   = array_merge(editPostFor($raceRow, managePage($jar['admin'])['token']), ['eventName' => 'EVREP Race renamed', 'status' => 'cancelled', 'cancelReason' => 'EVREP race reason']);
+// The post carries a PICTURE (round 2 of #998's check): the first ask passes
+// (the date is live), so the picture IS stored before the save waits on the
+// lock, and the refusal under the lock must delete it again.
+$picturesBeforeRace = $pictureCount();
+$racePost['heroImage'] = new CURLFile($picture, 'image/png', 'evrep-picture.png');
+$raceHandle = curl_init('http://127.0.0.1:' . $port . ADDR . '/calendar/manage/save');
+curl_setopt_array($raceHandle, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+    CURLOPT_TIMEOUT => 120, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_HTTPHEADER => ['Expect:'],
+    CURLOPT_COOKIEJAR => $jar['admin'], CURLOPT_COOKIEFILE => $jar['admin'], CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => $racePost,
+]);
 $db->begin_transaction();
 q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$raceId]);
-$raceAsync = restAsyncStart($jar['admin'], '/calendar/manage/save', $racePost);
+$raceMulti = curl_multi_init();
+curl_multi_add_handle($raceMulti, $raceHandle);
+$raceRunning = 1;
+$raceUntil   = microtime(true) + 2.0;
+while (microtime(true) < $raceUntil && $raceRunning > 0) {
+    curl_multi_exec($raceMulti, $raceRunning);
+    curl_multi_select($raceMulti, 0.1);
+}
+$raceAsync = ['multi' => $raceMulti, 'handle' => $raceHandle, 'running' => $raceRunning];
 ok('U39 (premise) the save is WAITING on this connection\'s lock, so the order below is real', $raceAsync['running'] > 0);
 q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$raceId]);
 $db->commit();
@@ -4788,6 +4858,8 @@ $raceMessage = flashOn(restPage($jar['admin'], $raceSeries)['body']);
 ok('U41 ...and the answer is the hidden-date refusal, not "updated successfully"',
     $raceMessage === 'This date is hidden, so it cannot be edited. Bring it back first, from the "Hidden dates" card at the foot of its series\' bulk-edit page, and then edit it. Nothing was saved.',
     $raceMessage);
+ok('U41b ...and the picture that save had already stored was deleted again, not left on disk',
+    $pictureCount() === $picturesBeforeRace, $picturesBeforeRace . ' then ' . $pictureCount());
 
 // =============================================================================
 // J. Nothing fell over on the way

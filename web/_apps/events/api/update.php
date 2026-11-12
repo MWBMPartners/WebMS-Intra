@@ -321,31 +321,49 @@ if ($nothingToWrite === false) {
     // still carries its own marker for tools/audit-checks/check_event_visibility.py.
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $set)
          . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1';
-    $stmt = $db->prepare($sql);
-    if ($stmt === false) {
-        Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_PREP', $db->error, '');
-        ApiResponse::error('Database error', 500);
-    }
-    $stmt->bind_param($types, ...$params);
-    $ok = $stmt->execute();
-    $stmt->close();
+    // 🔒 ONE TRANSACTION for the row and its reason (#998, round 2 of its
+    //    check): `EventCancelReason::write()` must run inside its caller's
+    //    transaction, or its locking read is decoration (#697) and the status
+    //    and the reason could be seen apart. It is opened BEFORE any locking
+    //    read. Every early answer below ROLLS BACK FIRST, because
+    //    `ApiResponse::error()` ends the request without unwinding a `try`,
+    //    and `Logger` writes on this same connection — a log line written
+    //    inside an open transaction would be rolled back with it (#694).
+    $db->begin_transaction();
+    try {
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            $db->rollback();
+            Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_PREP', $db->error, '');
+            ApiResponse::error('Database error', 500);
+        }
+        $stmt->bind_param($types, ...$params);
+        $ok = $stmt->execute();
+        $stmt->close();
 
-    if ($ok === false) {
-        Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_FAIL', $db->error, '');
-        ApiResponse::error('Failed to update event', 500);
-    }
+        if ($ok === false) {
+            $db->rollback();
+            Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_FAIL', $db->error, '');
+            ApiResponse::error('Failed to update event', 500);
+        }
 
-    // ✍️ #998: a status that no longer carries a reason loses the reason.
-    //    This endpoint takes no reason of its own (the published description
-    //    has no such field, and adding one is #1002), so it only ever EMPTIES
-    //    one: through the one writer, `EventCancelReason::write()`, with
-    //    "no reason sent", which keeps a reason while the status still
-    //    carries one and removes it otherwise. Without this, a date the API
-    //    set back to published kept its old reason, which would reappear —
-    //    out of date — the next time anybody cancelled it. Asked only when a
-    //    status was sent, so an update of the name alone touches nothing else.
-    if (array_key_exists('status', $body) === true) {
-        EventCancelReason::write($db, $siteId, [$eventId], false, null);
+        // ✍️ #998: a status that no longer carries a reason loses the reason.
+        //    This endpoint takes no reason of its own (the published
+        //    description has no such field, and adding one is #1002), so it
+        //    only ever EMPTIES one: through the one writer,
+        //    `EventCancelReason::write()`, with "no reason sent", which keeps a
+        //    reason while the status still carries one and removes it
+        //    otherwise. Without this, a date the API set back to published
+        //    kept its old reason, which would reappear — out of date — the
+        //    next time anybody cancelled it. Asked only when a status was
+        //    sent, so an update of the name alone touches nothing else.
+        if (array_key_exists('status', $body) === true) {
+            EventCancelReason::write($db, $siteId, [$eventId], false, null);
+        }
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollback();
+        throw $e;
     }
 
     Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);

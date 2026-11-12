@@ -181,9 +181,17 @@ final class EventCancelReason
      *                            while its status (whose UPDATE carries the
      *                            same series test) was not.
      *
-     * @return array{cleared:int} how many of those rows HAD a reason and lose
-     *         it because their status no longer carries one — read under the
-     *         same lock as the write, so a page can say so truthfully.
+     * @return array{cleared:int, took:int} read under the same lock as the
+     *         write, so a page can say each truthfully:
+     *         `cleared` — how many of those rows HAD a reason and lose it
+     *         because their status no longer carries one;
+     *         `took` — how many rows took the reason SENT (0 unless
+     *         `$arrived`): the rows in scope whose status carries one. Ask
+     *         this, never the caller's own status UPDATE's affected-row count,
+     *         which is 0 for a date that was already cancelled and so changed
+     *         status nowhere while still taking the new reason (round 2 of
+     *         #998's check measured the page saying "0 event(s) updated"
+     *         over a reason it had just stored).
      */
     public static function write(mysqli $db, int $siteId, array $eventIds, bool $arrived, ?string $reason, ?int $seriesId = null): array
     {
@@ -192,7 +200,7 @@ final class EventCancelReason
             static fn (int $id): bool => $id > 0
         ));
         if ($ids === []) {
-            return ['cleared' => 0];
+            return ['cleared' => 0, 'took' => 0];
         }
         $idMarks     = implode(', ', array_fill(0, count($ids), '?'));
         $statusMarks = implode(', ', array_fill(0, count(self::STATUSES), '?'));
@@ -202,19 +210,24 @@ final class EventCancelReason
         $scopeTypes  = str_repeat('i', count($ids)) . 'i' . ($seriesId !== null ? 'i' : '');
         $scopeValues = array_merge($ids, [$siteId], $seriesId !== null ? [$seriesId] : []);
 
-        // 🔢 What is about to be emptied, counted FIRST and under a lock, so
-        //    the count and the write describe the same rows. (The lock is real
-        //    only inside the caller's transaction — #697 — which is where both
-        //    pages call this.)
+        // 🔢 What is about to be emptied, and what is about to take the
+        //    reason, counted FIRST and under a lock, so the counts and the
+        //    write describe the same rows. (The lock is real only inside the
+        //    caller's transaction — #697 — which is where every caller is.)
+        //    `status IN (...)` is 1 or 0 in MySQL and MariaDB, so SUM counts.
         $count = $db->prepare(
-            'SELECT COUNT(*) AS `n` FROM `tblEvents` WHERE ' . $scope
-            . ' AND `cancelReason` IS NOT NULL AND `status` NOT IN (' . $statusMarks . ') FOR UPDATE'
+            'SELECT '
+            . 'COALESCE(SUM(`cancelReason` IS NOT NULL AND `status` NOT IN (' . $statusMarks . ')), 0) AS `cleared`, '
+            . 'COALESCE(SUM(`status` IN (' . $statusMarks . ')), 0) AS `carrying` '
+            . 'FROM `tblEvents` WHERE ' . $scope . ' FOR UPDATE'
         );
-        $countTypes  = $scopeTypes . str_repeat('s', count(self::STATUSES));
-        $countValues = array_merge($scopeValues, self::STATUSES);
+        $countTypes  = str_repeat('s', 2 * count(self::STATUSES)) . $scopeTypes;
+        $countValues = array_merge(self::STATUSES, self::STATUSES, $scopeValues);
         $count->bind_param($countTypes, ...$countValues);
         $count->execute();
-        $cleared = (int) ($count->get_result()->fetch_assoc()['n'] ?? 0);
+        $counted  = $count->get_result()->fetch_assoc() ?? [];
+        $cleared  = (int) ($counted['cleared'] ?? 0);
+        $carrying = (int) ($counted['carrying'] ?? 0);
         $count->close();
 
         // ✍️ The write. With no reason sent, a row whose status still carries
@@ -240,7 +253,7 @@ final class EventCancelReason
         $update->execute();
         $update->close();
 
-        return ['cleared' => $cleared];
+        return ['cleared' => $cleared, 'took' => $arrived === true ? $carrying : 0];
     }
 
     /** Trimmed, with `\r\n` and a lone `\r` both made `\n`. */

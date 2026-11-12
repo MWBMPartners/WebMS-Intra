@@ -296,19 +296,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    yet, and a failure leaves neither. The status UPDATE locks the rows
     //    it changes, so a second administrator's bulk update waits for this
     //    one rather than interleaving between the two statements.
+    //
+    // 🔢 WHAT THE MESSAGE COUNTS. It used to print the UPDATE's affected-row
+    //    count, which counts rows whose values CHANGED: giving a reason to a
+    //    date that was already cancelled changed no column of that statement,
+    //    so the page said "0 event(s) updated successfully" over a reason it
+    //    had just stored (measured by round 2 of #998's check). The dates are
+    //    now counted as MATCHED — this series, this organisation, live, the
+    //    portal's own, among the numbers posted — read under the lock inside
+    //    the transaction, before the write, and each sentence below is built
+    //    from its own count.
     $reasonCleared = 0;
+    $reasonTook    = 0;
     $mysqli->begin_transaction();
     try {
+        $matchStmt = $mysqli->prepare(
+            'SELECT COUNT(*) AS `n` FROM `tblEvents` WHERE `eventID` IN (' . $placeholders . ') '
+            . 'AND `seriesID` = ? AND `siteID` = ? AND `isDeleted` = 0 AND `externalFeedID` IS NULL FOR UPDATE'
+        );
+        $matchStmt->bind_param(str_repeat('i', count($validIds)) . 'ii', ...array_merge(array_values($validIds), [$seriesID, $siteId]));
+        $matchStmt->execute();
+        $matched = (int) ($matchStmt->get_result()->fetch_assoc()['n'] ?? 0);
+        $matchStmt->close();
+
         $stmt = $mysqli->prepare($sql);
         $stmt->bind_param($paramTypes, ...$paramValues);
         $stmt->execute();
-        $affected = $stmt->affected_rows;
         $stmt->close();
 
         // Only when a status was chosen: with "No change" no reason can
         // change either (a typed reason was refused above).
         if ($bulkStatus !== '') {
-            $reasonCleared = EventCancelReason::write(
+            $reasonWritten = EventCancelReason::write(
                 $mysqli,
                 $siteId,
                 // The same numbers the status UPDATE was given, and the same
@@ -320,7 +339,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $bulkReason !== null,
                 $bulkReason,
                 $seriesID
-            )['cleared'];
+            );
+            $reasonCleared = $reasonWritten['cleared'];
+            $reasonTook    = $reasonWritten['took'];
         }
         $mysqli->commit();
     } catch (\Throwable $e) {
@@ -330,12 +351,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     Logger::activity(
         'SeriesBulkEdit',
-        'Bulk updated ' . $affected . ' event(s) in series #' . $seriesID,
+        'Bulk updated ' . $matched . ' event(s) in series #' . $seriesID,
         $userId
     );
 
-    $_SESSION['flash_msg']  = $affected . ' event(s) updated successfully.'
-        . ($bulkReason !== null ? ' Those dates now carry the reason you gave.' : '')
+    $_SESSION['flash_msg']  = $matched . ' event(s) updated successfully.'
+        . ($reasonTook > 0
+            ? ' ' . ($reasonTook === 1 ? '1 date now carries' : $reasonTook . ' dates now carry') . ' the reason you gave.'
+            : '')
         . ($reasonCleared > 0
             ? ' ' . ($reasonCleared === 1
                 ? '1 date lost the reason it had for being cancelled or postponed'

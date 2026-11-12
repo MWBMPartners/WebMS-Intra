@@ -653,11 +653,15 @@ endif;
         </div>
     <?php endif; ?>
 
-    <?php // 🚫 Cancellation / postponement broadcast banner (#337) ?>
+    <?php
+    // 🚫 Cancellation / postponement broadcast banner (#337). The reason is
+    //    shown whenever it is a non-empty string (#998): `empty()` was used
+    //    here and treats the text "0" as empty, so a reason of "0" was hidden.
+    ?>
     <?php if ($event['status'] === 'cancelled'): ?>
         <div class="alert alert-danger mb-4">
             <h2 class="h5"><i class="fa-solid fa-ban me-2"></i>This event has been cancelled</h2>
-            <?php if (!empty($event['cancelReason'])): ?>
+            <?php if ((string) ($event['cancelReason'] ?? '') !== ''): ?>
                 <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
             <?php endif; ?>
             <?php if (!empty($event['statusChangedAt'])): ?>
@@ -667,7 +671,7 @@ endif;
     <?php elseif ($event['status'] === 'postponed'): ?>
         <div class="alert alert-warning mb-4">
             <h2 class="h5"><i class="fa-solid fa-pause me-2"></i>This event has been postponed</h2>
-            <?php if (!empty($event['cancelReason'])): ?>
+            <?php if ((string) ($event['cancelReason'] ?? '') !== ''): ?>
                 <p class="mb-1"><?php echo nl2br(htmlspecialchars((string) $event['cancelReason'], ENT_QUOTES, 'UTF-8')); ?></p>
             <?php endif; ?>
             <?php if (!empty($event['statusChangedAt'])): ?>
