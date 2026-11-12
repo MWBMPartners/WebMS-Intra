@@ -1,7 +1,7 @@
 # D-155 · A currency sign shared by several currencies is refused in an imported file, with the true reason
 
 **Date:** 2026-11-12  
-**Status:** in force
+**Status:** superseded by D-165
 
 **Question:** the bank and asset imports read a cell written with the organisation's own currency sign (D-153). Some
 signs are shared: "$" is written by Australian, Canadian, New Zealand, Singapore, Mexican and Hong Kong dollars as well

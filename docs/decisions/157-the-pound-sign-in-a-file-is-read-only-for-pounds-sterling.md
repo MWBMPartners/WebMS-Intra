@@ -1,7 +1,7 @@
 # D-157 · "£" in an imported file is read only for an organisation using pounds sterling
 
 **Date:** 2026-11-12  
-**Status:** in force
+**Status:** superseded by D-165
 
 **Question:** D-153's example for imported files was "£1,234.56" read as pounds, and D-155 refuses a sign shared by
 several currencies. "£" is also the sign of the Gibraltar, Falkland Islands and St Helena pounds and of the Egyptian,

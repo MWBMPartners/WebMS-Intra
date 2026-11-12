@@ -210,14 +210,18 @@ appended with its real date and a note that it was added later.
 | [D-152](152-a-typed-money-amount-is-figures-only.md) | 2026-11-12 | A money amount typed into a box is figures only | in force |
 | [D-153](153-the-asset-import-reads-amounts-like-the-bank-import.md) | 2026-11-12 | The asset import reads amounts the way the bank-statement import does | in force |
 | [D-154](154-a-members-dbs-copy-leaves-out-who-recorded-it.md) | 2026-11-12 | A member's copy of their own DBS checks leaves out who recorded each one | in force |
-| [D-155](155-a-shared-currency-sign-in-an-imported-file-is-refused.md) | 2026-11-12 | A currency sign shared by several currencies is refused in an imported file, with the true reason | in force |
+| [D-155](155-a-shared-currency-sign-in-an-imported-file-is-refused.md) | 2026-11-12 | A currency sign shared by several currencies is refused in an imported file, with the true reason | superseded by D-165 |
 | [D-156](156-later-issues-are-triaged-before-the-first-install.md) | 2026-11-12 | Issues raised after 5 November are triaged: only the risky ones are fixed before the first install | in force |
-| [D-157](157-the-pound-sign-in-a-file-is-read-only-for-pounds-sterling.md) | 2026-11-12 | "£" in an imported file is read only for an organisation using pounds sterling | in force |
+| [D-157](157-the-pound-sign-in-a-file-is-read-only-for-pounds-sterling.md) | 2026-11-12 | "£" in an imported file is read only for an organisation using pounds sterling | superseded by D-165 |
 | [D-158](158-outside-services-are-named-now-and-gated-later.md) | 2026-11-12 | Outside services not yet under D-058 are named on the privacy page now and gated later | in force |
 | [D-159](159-a-series-website-window-is-fixed-dates-said-plainly.md) | 2026-11-12 | A series' public-website window is one set of fixed dates, said plainly on the form | in force |
 | [D-160](160-the-api-pages-website-link-follows-a-setting.md) | 2026-11-12 | The API page's publisher "Website" link follows a setting | in force |
 | [D-161](161-the-language-switch-return-goes-through-the-redirect-judge.md) | 2026-11-12 | The language switch's return address goes through the redirect judge, and the judge looks only at the path | in force |
+| [D-162](162-members-see-no-last-changed-time-on-past-sessions.md) | 2026-11-12 | Members see no "last changed" time on a past attendance session | in force |
+| [D-163](163-the-privacy-retention-setting-is-kept-and-given-a-job.md) | 2026-11-12 | The unused privacy data-retention setting is kept and given a real job | in force |
+| [D-164](164-an-erasure-empties-the-hashed-address-on-asset-changes.md) | 2026-11-12 | An erasure empties the hashed network address on asset-change records the person made | in force |
+| [D-165](165-a-currency-sign-in-a-file-means-the-organisations-own-currency.md) | 2026-11-12 | A currency sign in an imported file is read as the organisation's own currency whenever that currency uses the sign | in force |
 
-*161 decisions. This index is checked against the folder by
+*165 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
