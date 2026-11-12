@@ -207,7 +207,8 @@ appended with its real date and a note that it was added later.
 | [D-149](149-no-confirmation-e-mail-after-a-visitor-erasure.md) | 2026-11-12 | A visitor is not sent a confirmation e-mail after their details are erased | in force |
 | [D-150](150-a-visitor-erasure-request-reaches-only-its-own-organisation.md) | 2026-11-12 | A visitor erasure request reaches only the organisation whose administrator filed it | in force |
 | [D-151](151-records-in-an-organisation-the-worker-has-left-are-counted-not-listed.md) | 2026-11-12 | A worker's download counts, and does not list, records in organisations they have left | in force |
+| [D-152](152-a-typed-money-amount-is-figures-only.md) | 2026-11-12 | A money amount typed into a box is figures only | in force |
 
-*151 decisions. This index is checked against the folder by
+*152 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
