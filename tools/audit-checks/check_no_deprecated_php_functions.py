@@ -60,27 +60,31 @@ HOW IT READS THE CODE
     (`\Vendor\finfo_close`) is somebody else's. Names are compared without
     regard to capitals, because PHP's function names are.
 
-    AN UNQUALIFIED CALL IN A FILE WHOSE NAMESPACE DECLARES THAT FUNCTION IS
-    NOT A CALL TO PHP'S. In `namespace Portal\Core; function imagedestroy($i)
-    {} imagedestroy(1);` PHP calls the namespace's own function and prints no
-    deprecation (measured on 8.5.12). The first version of this check reported
-    it, which is crying wolf on a hard gate (#483) — found by round 2 of the
-    independent check. So a file is read for the functions IT declares outside
-    any class, interface, trait or enum body (a METHOD of that name changes
-    nothing: an unqualified call still reaches the global function), and an
-    unqualified call to one of those names in a namespaced file is skipped. A
-    FULLY-QUALIFIED `\imagedestroy()` in the same file is still reported: the
-    backslash means the global one.
+    EVERY UNQUALIFIED CALL TO A DEPRECATED NAME IS REPORTED, even in a
+    namespace that declares its own function of that name. That has ONE cost,
+    stated plainly: a namespace's own function that shares a deprecated name
+    (`namespace Portal\Core; function imagedestroy($i) {} imagedestroy(1);`,
+    which PHP 8.5.12 runs without a deprecation) is reported too. RENAME IT —
+    or write the call `namespace\imagedestroy()`, which this check does not
+    read. Nothing in this repository does that today.
+
+    WHY NOT SKIP SUCH A FILE, which round 2 of #1003's independent check
+    asked for and round 3 found WRONG IN THE OTHER DIRECTION. "Does this file
+    declare a function of that name" cannot answer "which function does THIS
+    CALL reach" — PHP decides that at run time. The skip let real deprecated
+    calls through, each measured on PHP 8.5.12 to print the deprecation: a
+    `use function imagedestroy;` import; a polyfill inside
+    `if (!function_exists(...))`; a declaration inside `if (false)`; one
+    inside another function's body (declared only when that function runs);
+    and two namespace blocks where only one declares it. A check that has been
+    wrong in BOTH directions is asking the wrong kind of question, so the
+    question is gone: report every call, and name the one false report.
 
 WHAT IT CANNOT SEE (the same four shapes as check_no_curl_close.py)
     A name built at run time (`$fn = 'finfo_' . 'close'; $fn($f);`); a name in
     a string handed to `call_user_func()`; an import alias
     (`use function finfo_close as fc;` then `fc($f);`); and
     `namespace\finfo_close($f);` in a file with no namespace.
-    And one the other way round, which REPORTS correct code: a namespace that
-    declares its own `imagedestroy()` in ANOTHER file, called unqualified here,
-    is reported, because this reads one file at a time. Nothing here does that;
-    the cure if it ever happens is to write the call `namespace\imagedestroy()`.
 
 PENDING (fails both ways)
     One call is LEFT on purpose, and named here so the check is green while it
@@ -160,40 +164,6 @@ foreach (array_slice($argv, 2) as $root) {
         $scanned++;
         $tokens = token_get_all((string) file_get_contents($f->getPathname()));
         $n = count($tokens);
-        // Which function names THIS FILE declares outside a class-like body,
-        // and whether it is in a namespace at all (see the header: such a
-        // name, called unqualified, is the namespace's own function).
-        $declared = []; $namespaced = false; $stack = []; $classNext = false;
-        $real = static function (int $from, int $step) use ($tokens, $n) {
-            for ($j = $from; $j >= 0 && $j < $n; $j += $step) {
-                if (is_array($tokens[$j]) && in_array($tokens[$j][0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }
-                return [$j, $tokens[$j]];
-            }
-            return [-1, null];
-        };
-        foreach ($tokens as $i => $t) {
-            if (is_array($t) === true) {
-                if ($t[0] === T_NAMESPACE) {
-                    [, $nx] = $real($i + 1, 1);
-                    if (is_array($nx) && in_array($nx[0], [T_STRING, T_NAME_QUALIFIED], true)) { $namespaced = true; }
-                } elseif (in_array($t[0], [T_CLASS, T_INTERFACE, T_TRAIT, T_ENUM], true)) {
-                    // `Foo::class` is not a declaration.
-                    [, $pv] = $real($i - 1, -1);
-                    if (!(is_array($pv) && $pv[0] === T_DOUBLE_COLON)) { $classNext = true; }
-                } elseif ($t[0] === T_FUNCTION && in_array('class', $stack, true) === false) {
-                    [$k, $nx] = $real($i + 1, 1);
-                    if ($nx === '&' || (is_array($nx) && in_array($nx[0], [T_AMPERSAND_NOT_FOLLOWED_BY_VAR_OR_VARARG, T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true))) {
-                        [, $nx] = $real($k + 1, 1);
-                    }
-                    if (is_array($nx) && $nx[0] === T_STRING) { $declared[strtolower($nx[1])] = true; }
-                } elseif ($t[0] === T_CURLY_OPEN || $t[0] === T_DOLLAR_OPEN_CURLY_BRACES) {
-                    $stack[] = 'other';
-                }
-                continue;
-            }
-            if ($t === '{') { $stack[] = $classNext === true ? 'class' : 'other'; $classNext = false; }
-            elseif ($t === '}') { array_pop($stack); }
-        }
         foreach ($tokens as $i => $t) {
             if (is_array($t) === false) { continue; }
             if (in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true) === false) { continue; }
@@ -225,9 +195,6 @@ foreach (array_slice($argv, 2) as $root) {
                 }
                 if (is_array($before) && $before[0] === T_FUNCTION) { continue; }
             }
-            // An unqualified call to a name this namespaced file declares is
-            // the namespace's own function, never PHP's.
-            if ($t[0] === T_STRING && $namespaced === true && isset($declared[strtolower($bare)]) === true) { continue; }
             $hits[] = ['file' => $f->getPathname(), 'line' => $t[2], 'name' => strtolower($bare)];
         }
     }
@@ -347,18 +314,25 @@ def selftest() -> int:
         ("a constant of that name",       "<?php echo FINFO_CLOSE;",                                        False),
         ("finfo_open is fine",            "<?php $f = finfo_open(FILEINFO_MIME_TYPE); finfo_file($f, 'x');", False),
         ("curl_multi_close is fine",      "<?php curl_multi_close($m);",                                   False),
-        # Round 2 of #1003's check: two cry-wolf cases on CORRECT code, which on
-        # a hard gate is how a check gets switched off (#483). PHP 8.5.12 calls
-        # the namespace's own imagedestroy() here and prints no deprecation.
-        ("a namespace's own function",    "<?php namespace Portal\\Core;\nfunction imagedestroy($i) {}\nimagedestroy(1);", False),
-        # The by-reference declarations are in files with NO namespace on
-        # purpose: inside a namespace the "declares its own" rule would pass
-        # them anyway, and the case would then not test the `&` rule at all
-        # (measured: with the `&` rule switched off, a namespaced case stayed
-        # green).
+        # Round 3 of #1003's check: the "declared in this file" skip let these
+        # REAL deprecations through (each measured to print one on 8.5.12), so
+        # it was removed. All must be reported.
+        ("a use function import",         "<?php namespace A;\nuse function imagedestroy;\nimagedestroy($i);", True),
+        ("a polyfill in function_exists", "<?php namespace A;\nif (!function_exists('imagedestroy')) { function imagedestroy($i) {} }\nimagedestroy($i);", True),
+        ("declared inside if (false)",    "<?php namespace A;\nif (false) { function imagedestroy($i) {} }\nimagedestroy($i);", True),
+        ("declared inside another function", "<?php namespace A;\nfunction setup() { function imagedestroy($i) {} }\nimagedestroy($i);", True),
+        ("two namespaces, one declares it", "<?php namespace A { function imagedestroy($i) {} }\nnamespace B { imagedestroy($i); }", True),
+        # The ONE cost, said in the header: a namespace's own function sharing a
+        # deprecated name IS reported, though PHP 8.5.12 runs it without a
+        # deprecation. Round 2 had this as stay-green; no rule a file can be
+        # read for tells it apart from the five above, so rename such a function.
+        ("a namespace's own function (the cost)", "<?php namespace Portal\\Core;\nfunction imagedestroy($i) {}\nimagedestroy(1);", True),
+        # The one narrowing left: a by-reference DECLARATION (`function &name`)
+        # is a declaration, not a call. Unambiguous, so it stays.
         ("a by-reference declaration",    "<?php function &finfo_close() {}", False),
         ("a by-reference method",         "<?php class A { public function &finfo_close() { static $x = null; return $x; } }", False),
-        # ...and the narrowing must not reach further than that:
+        # More real calls beside a declaration of the same name (kept from
+        # round 2, when they guarded the now-removed skip):
         ("the global one, qualified, beside it", "<?php namespace A;\nfunction imagedestroy($i) {}\n\\imagedestroy($g);", True),
         ("only a METHOD of that name here", "<?php namespace A;\nclass K { public function imagedestroy() {} }\nimagedestroy($i);", True),
         ("declared, but no namespace",    "<?php if (false) { function imagedestroy($i) {} }\nimagedestroy($i);", True),

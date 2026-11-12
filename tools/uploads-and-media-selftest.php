@@ -175,38 +175,110 @@ check('R23 leading zeros are legal and count for nothing: twenty zeros then 5 is
 ], [[206, 5, 9, 5], [206, 0, 1, 2], [416, -1, -1, 0]]);
 
 // =============================================================================
-echo "M. ByteRange::send() does not gather the file in memory behind an open buffer\n";
+echo "M. ByteRange::send() and output buffers already open when it is called\n";
 // =============================================================================
-// Round 2 of the check measured a 43 MB peak for a 20 MB file when an output
-// buffer was open (a host's `output_buffering`, or a caller's `ob_start()`):
-// every chunk was kept until the request ended. `send()` now ends open buffers
-// first, as `CsvExporter::download()` does. Measured in a CHILD process, so
-// the 20 MB it sends goes to /dev/null rather than into this test's output.
-$probe = sys_get_temp_dir() . $sep . 'byterange-peak-' . bin2hex(random_bytes(4)) . '.php';
+// `send()` ends every open output buffer before it sends anything, as
+// `CsvExporter::download()` does, and DISCARDS what was in them. Three things
+// to pin, each found unpinned by a round of the independent check:
+//   M1  memory: with buffers open, every chunk was kept until the request
+//       ended — a 42 MB peak for a 20 MB file. TWO buffers are opened, so a
+//       loop shortened to a single `if` leaves one behind and goes red.
+//   M2  what is sent: anything a page printed before calling send() is
+//       DISCARDED, not sent. Flushing it instead (`ob_end_flush()`) puts that
+//       text in front of the file's first byte: a whole answer that is not the
+//       file, and a piece whose bytes are off by the junk's length.
+//   M3  a buffer PHP will NOT remove (`ob_start(null, 0, 0)`): `ob_end_clean()`
+//       answers false for ever, so the loop must stop rather than spin. Run
+//       under a time limit, so a missing `break` FAILS instead of hanging this
+//       test.
+// Each runs in a CHILD process: send() writes to standard output, which here
+// is a pipe this test reads (or /dev/null for the 20 MB one).
+$probe = sys_get_temp_dir() . $sep . 'byterange-probe-' . bin2hex(random_bytes(4)) . '.php';
 file_put_contents($probe, '<?php
 declare(strict_types=1);
 require ' . var_export($repo . $sep . 'web' . $sep . '_core' . $sep . 'ByteRange.php', true) . ';
-$f = sys_get_temp_dir() . "/byterange-peak-" . getmypid() . ".bin";
-$h = fopen($f, "wb");
-for ($i = 0; $i < 20; $i++) { fwrite($h, random_bytes(1048576)); }
-fclose($h);
-ob_start();
-\\Portal\\Core\\ByteRange::send($f);
+$mode = $argv[1];
+$file = $argv[2];
+if (($argv[3] ?? "") !== "") { $_SERVER["HTTP_RANGE"] = $argv[3]; }
+if ($mode === "peak") { ob_start(); ob_start(); }
+if ($mode === "junk") { ob_start(); echo "JUNK PRINTED BEFORE SEND"; }
+if ($mode === "stuck") { ob_start(null, 0, 0); echo "HELD"; }
+$sent = \\Portal\\Core\\ByteRange::send($file);
 $left = ob_get_level();
-while (ob_get_level() > 0) { ob_end_clean(); }
-unlink($f);
-fwrite(STDERR, json_encode(["peakMb" => round(memory_get_peak_usage(true) / 1048576, 1), "buffersLeft" => $left]));
+$status = http_response_code();
+if ($mode !== "stuck") { while (ob_get_level() > 0) { ob_end_clean(); } }
+fwrite(STDERR, json_encode(["sent" => $sent, "status" => $status, "buffersLeft" => $left,
+    "peakMb" => round(memory_get_peak_usage(true) / 1048576, 1)]));
 ');
-$proc = proc_open([PHP_BINARY, '-d', 'memory_limit=256M', $probe], [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']], $pipes);
-$peak = is_resource($proc) === true ? json_decode((string) stream_get_contents($pipes[2]), true) : null;
-if (is_resource($proc) === true) {
-    fclose($pipes[2]);
+/**
+ * Run the probe; answers [stdout, the facts it reported, timed out?]. The
+ * child is KILLED at the deadline, so a loop that never ends is a red check.
+ */
+$runProbe = static function (string $mode, string $file, string $range = '', bool $keepOut = true, float $deadline = 20.0) use ($probe): array {
+    $proc = proc_open(
+        [PHP_BINARY, '-d', 'memory_limit=256M', $probe, $mode, $file, $range],
+        [0 => ['file', '/dev/null', 'r'], 1 => $keepOut === true ? ['pipe', 'w'] : ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']],
+        $pipes
+    );
+    if (is_resource($proc) === false) {
+        return ['', null, false];
+    }
+    $out = ''; $err = ''; $start = microtime(true); $timedOut = false;
+    foreach ($pipes as $p) {
+        stream_set_blocking($p, false);
+    }
+    while (true) {
+        foreach ($pipes as $k => $p) {
+            $chunk = (string) fread($p, 1048576);
+            $k === 1 ? $out .= $chunk : $err .= $chunk;
+        }
+        if (proc_get_status($proc)['running'] === false) {
+            foreach ($pipes as $k => $p) {
+                $chunk = (string) stream_get_contents($p);
+                $k === 1 ? $out .= $chunk : $err .= $chunk;
+            }
+            break;
+        }
+        if (microtime(true) - $start > $deadline) {
+            proc_terminate($proc, 9);
+            $timedOut = true;
+            break;
+        }
+        usleep(20000);
+    }
+    foreach ($pipes as $p) {
+        fclose($p);
+    }
     proc_close($proc);
+    return [$out, json_decode($err, true), $timedOut];
+};
+$bigFile = sys_get_temp_dir() . $sep . 'byterange-big-' . bin2hex(random_bytes(4)) . '.bin';
+$bh = fopen($bigFile, 'wb');
+for ($i = 0; $i < 20; $i++) {
+    fwrite($bh, random_bytes(1048576));
 }
-@unlink($probe);
-check('M1 sending a 20 MB file with ob_start() open: every buffer ended, and memory stays under 8 MB (it was 42 MB)',
+fclose($bh);
+$smallBytes = random_bytes(1000);
+$smallFile  = sys_get_temp_dir() . $sep . 'byterange-small-' . bin2hex(random_bytes(4)) . '.bin';
+file_put_contents($smallFile, $smallBytes);
+
+[, $peak] = $runProbe('peak', $bigFile, '', false);
+check('M1 sending a 20 MB file with TWO buffers open: both ended, and memory stays under 8 MB (it was 42 MB)',
     [is_array($peak) === true ? $peak['buffersLeft'] : 'no answer', is_array($peak) === true && $peak['peakMb'] < 8],
     [0, true]);
+[$jOut, $jFacts] = $runProbe('junk', $smallFile);
+[$jrOut, $jrFacts] = $runProbe('junk', $smallFile, 'bytes=10-19');
+check('M2 text a page printed before send() is DISCARDED: the whole answer is exactly the file, and a piece is exactly that piece with a 206',
+    [is_array($jFacts) === true ? $jFacts['status'] : 'no answer', $jOut === $smallBytes,
+        is_array($jrFacts) === true ? $jrFacts['status'] : 'no answer', $jrOut === substr($smallBytes, 10, 10)],
+    [200, true, 206, true]);
+[, $sFacts, $sTimedOut] = $runProbe('stuck', $smallFile, '', true, 10.0);
+check('M3 a buffer PHP will not remove: send() still finishes (within 10 seconds), answers, and leaves that one buffer',
+    [$sTimedOut, is_array($sFacts) === true ? [$sFacts['sent'], $sFacts['buffersLeft']] : 'no answer'],
+    [false, [true, 1]]);
+@unlink($probe);
+@unlink($bigFile);
+@unlink($smallFile);
 
 // ── A copy of web/, so a planted fault never touches the repository ─────────
 $child = sys_get_temp_dir() . $sep . 'uploads-media-' . bin2hex(random_bytes(6));
