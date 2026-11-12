@@ -167,12 +167,19 @@ function convertWords(string $code): string
     return 'Only ' . $code . ' amounts are read here: if this figure is in another currency, convert it to ' . $code
         . ' first — do not just put ' . $code . ' in front of it.';
 }
-/** Round 14: the ONE sentence for any cell with more than one currency marker in front, the first ours. */
-function many(string $code): string
+/**
+ * Round 14: the ONE sentence for any cell with more than one currency marker in
+ * front, the first ours. Round 16: where negatives are allowed it keeps the
+ * minus, or following it would turn a payment out into a credit.
+ */
+function many(string $code, bool $allowNegative = false): string
 {
+    $front = $allowNegative === true
+        ? 'nothing in front but its minus sign, if it has one, and at most the code ' . $code
+        : 'nothing in front but, at most, the code ' . $code;
+
     return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
-        . 'write the figure with nothing in front but, at most, the code ' . $code . ', and if it is in another '
-        . 'currency, convert it to ' . $code . ' first.';
+        . 'write the figure with ' . $front . ', and if it is in another currency, convert it to ' . $code . ' first.';
 }
 function otherCur(string $code): string
 {
@@ -499,15 +506,30 @@ foreach ([['GBP £12.50', 'GBP'], ['£GBP 12.50', 'GBP'], ['££12.50', 'GBP'], 
           ['££12.345', 'GBP'], ['£££1.2.3', 'GBP'], ['GBP £0,500', 'GBP']] as [$t, $code]) {
     foreach ([true, false] as $allowNegative) {
         $got = Currency::parseAmount($t, $code, allowNegative: $allowNegative, fromFile: true);
-        if ($got !== many($code)) {
-            $twice[] = $code . ' ' . $t . ' → ' . var_export($got, true);
+        if ($got !== many($code, $allowNegative)) {
+            $twice[] = $code . ' ' . $t . ' (negatives ' . ($allowNegative === true ? 'allowed' : 'not allowed') . ') → ' . var_export($got, true);
         }
     }
 }
 if (Currency::parseAmount('-££3', 'GBP', fromFile: true) !== many('GBP')) {
     $twice[] = 'GBP -££3 (no negatives) → ' . var_export(Currency::parseAmount('-££3', 'GBP', fromFile: true), true);
 }
-check('A10i MORE THAN ONE currency marker in front, the first the organisation\'s own — two of ours ("GBP £12.50", "££12.50", "CAD CA$12"), ours then not ("GBP $12", "CAD US$12", "CUP ₱12"), three or four ("GBP £$12", "£££$12", "£££12", "GBP USD$12"), with or without spaces, and with another fault too ("££12.345", "-££3") — gets ONE fixed sentence naming and counting no marker (round 14)',
+// Round 16: the bank import's negative shapes keep their minus in the
+// instruction — and following it reads the NEGATIVE amount, not a credit.
+foreach (['-££3', 'GBP-£12', '-GBP£12', '£-£3', '-£$12.00'] as $t) {
+    if (Currency::parseAmount($t, 'GBP', allowNegative: true, fromFile: true) !== many('GBP', true)) {
+        $twice[] = 'GBP ' . $t . ' (negatives allowed) → ' . var_export(Currency::parseAmount($t, 'GBP', allowNegative: true, fromFile: true), true);
+    }
+}
+if (str_contains(many('GBP', true), 'its minus sign, if it has one') === false || str_contains(many('GBP', false), 'minus') === true) {
+    $twice[] = 'the minus is named where negatives are not allowed, or not named where they are';
+}
+foreach (['GBP -3', '-GBP 3', '-3'] as $t) {
+    if (Currency::parseAmount($t, 'GBP', allowNegative: true, fromFile: true) !== -300) {
+        $twice[] = 'following the negative instruction, "' . $t . '" does not read as -3.00';
+    }
+}
+check('A10i MORE THAN ONE currency marker in front, the first the organisation\'s own — two of ours ("GBP £12.50", "££12.50", "CAD CA$12"), ours then not ("GBP $12", "CAD US$12", "CUP ₱12"), three or four ("GBP £$12", "£££$12", "£££12", "GBP USD$12"), with or without spaces, and with another fault too ("££12.345", "-££3") — gets ONE fixed sentence naming and counting no marker (round 14); where negatives are allowed it keeps the minus ("-££3", "GBP-£12", "-GBP£12", "£-£3", "-£$12.00"), and "GBP -3", "-GBP 3", "-3" read as -3.00 (round 16)',
     $twice === [], implode(' | ', array_slice($twice, 0, 4)));
 
 // A10k — D-177: a sign made only of LETTERS is NOT read in a file. Every such
@@ -725,11 +747,19 @@ foreach ([['£12', 'GBP', 1200], ['GBP 12', 'GBP', 1200], ['GBP -3', 'GBP', -300
 $followable = 0;
 foreach (array_keys(Currency::choices()) as $code) {
     $followable++;
-    if (Currency::parseAmount($code . ' 12', $code, fromFile: true) !== 1200 || Currency::parseAmount('12', $code, fromFile: true) !== 1200) {
-        $r15[] = $code . ': "' . $code . ' 12" or "12" not read, so the sentence\'s instruction cannot be followed';
+    if (Currency::parseAmount($code . ' 12', $code, fromFile: true) !== 1200 || Currency::parseAmount('12', $code, fromFile: true) !== 1200
+        || Currency::parseAmount($code . ' -12', $code, allowNegative: true, fromFile: true) !== -1200
+        || Currency::parseAmount('-12', $code, allowNegative: true, fromFile: true) !== -1200) {
+        $r15[] = $code . ': "' . $code . ' 12", "12", "' . $code . ' -12" or "-12" not read, so the sentence\'s instruction cannot be followed';
     }
-    if (str_contains(many($code), 'sign or code in front, and') === true || str_contains(Currency::manyMarkersWords($code), ' sign or code in front, and') === true) {
-        $r15[] = $code . ': the instruction still asks for "a ' . $code . ' sign"';
+    // The instruction (after "read here:") may name a MINUS sign and nothing
+    // else that is a sign: not "a ZAR sign", "the sign or code ZAR", "sign".
+    foreach ([false, true] as $neg) {
+        $words = Currency::manyMarkersWords($code, $neg);
+        $instruction = (string) substr($words, (int) strpos($words, 'read here:'));
+        if (preg_match('/\bsign\b/', str_replace('minus sign', '', $instruction)) === 1) {
+            $r15[] = $code . ': the instruction asks for a sign: ' . $instruction;
+        }
     }
 }
 check('A10u round 15: a marker AFTER the figure ("£12$", "GBP 12£", "£12 €", "£12.50 GBP", "GBP 12 USD", "$12€", "£12 $5", "GBP 1,234$"), a code then a plain word ("GBP PAID 12") never get the more-than-one-marker sentence (nor are they stored); one marker ("£12", "GBP 12", "GBP -3") reads; and for all ' . $followable . ' choosable currencies the sentence\'s instruction can be followed ("CODE 12" and "12" both read) and asks for no sign',

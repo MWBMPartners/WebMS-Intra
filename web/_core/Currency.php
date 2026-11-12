@@ -705,7 +705,8 @@ final class Currency
      *   it for certain (#1004 rounds 9 to 15):
      *     - more than one currency marker in front: one of the organisation's
      *       own (ownMarkerAtStart()), then another that anyMarkerAtStart()
-     *       finds straight after it. The organisation's code is only
+     *       finds after it, past any spaces and at most one minus. The
+     *       organisation's code is only
      *       taken where an amount or a sign follows it (a sign listed in
      *       SIGNS_OF with a symbol in it, or capitals joined to one; never a
      *       letters-only sign, so "GBP R12" could not be read), so "GBP £12",
@@ -794,9 +795,10 @@ final class Currency
                 }
                 // MORE THAN ONE currency sign or code in front: after one of
                 // the organisation's own, ANOTHER marker that
-                // anyMarkerAtStart() finds straight after it ("GBP £12",
-                // "££12", "GBP $12", "£$12", "GBP US$12", "GBP £$12",
-                // "AED AED$12"). Only straight after: a marker after the
+                // anyMarkerAtStart() finds after it, past any spaces and at
+                // most one minus ("GBP £12", "££12", "GBP $12", "£$12",
+                // "GBP US$12", "GBP £$12", "AED AED$12", "£-£3"). Not after
+                // the figure: a marker after the
                 // figure ("£12$", "GBP 12£", "£12 €") is not in front, and
                 // the cell could not be read. Every such cell gets ONE fixed
                 // sentence, manyMarkersWords(), which names, counts and
@@ -814,7 +816,7 @@ final class Currency
                 // ownMarkerAtStart() too could never change the answer
                 // (round 15 removed it, as round 11 removed `|| isKnown()`).
                 if (self::anyMarkerAtStart($text) !== '') {
-                    return self::manyMarkersWords($code);
+                    return self::manyMarkersWords($code, $allowNegative);
                 }
             }
         }
@@ -975,9 +977,9 @@ final class Currency
     }
 
     /**
-     * 💱 What a FILE's amount answers when, straight after one of the
-     * organisation's own markers (ownMarkerAtStart()), ANOTHER currency marker
-     * follows — one anyMarkerAtStart() finds (a sign listed in SIGNS_OF with a
+     * 💱 What a FILE's amount answers when, after one of the organisation's
+     * own markers (ownMarkerAtStart()) and past any spaces and at most one
+     * minus, ANOTHER currency marker follows — one anyMarkerAtStart() finds (a sign listed in SIGNS_OF with a
      * symbol in it, capitals joined to one, or a known code followed by an
      * amount or a sign). That and nothing else (round 14). It names, counts
      * and judges no marker, so it is true of every such cell: the markers may
@@ -992,6 +994,14 @@ final class Currency
      * figure. It asks for a figure in another currency to be converted first,
      * never for a marker to be kept on a foreign figure.
      *
+     * Where the caller allows a negative (`$allowNegative`, the bank import's
+     * debits), the instruction keeps the minus: "nothing in front but its
+     * minus sign, if it has one, and at most the code GBP" (round 16). Round
+     * 15's wording reached "-££3" and "GBP-£12" too, and read literally told
+     * the person to drop the minus — the converter's own REFUSED_MINUS_PLACE
+     * calls a minus something that goes in front — so following it turned a
+     * £3 payment out into a £3 credit. "GBP -3", "-GBP 3" and "-3" all read.
+     *
      * A cell whose FIRST marker is not the organisation's gets
      * otherCurrencyWords() instead, which is true of it however many follow.
      * A code is a marker only where an amount or a sign follows it, so a code
@@ -1001,13 +1011,19 @@ final class Currency
      * sentence. A marker after the figure ("£12$", "GBP 12£") is not in
      * front: that cell could not be read.
      */
-    public static function manyMarkersWords(string $code): string
+    public static function manyMarkersWords(string $code, bool $allowNegative = false): string
     {
         $code = strtoupper(trim($code));
+        // Where an amount may be negative (the bank import's debits), the
+        // minus is named as something that may stay in front: "nothing in
+        // front but, at most, the code" read literally drops it, and a £3
+        // payment out would then be imported as a £3 credit (round 16).
+        $front = $allowNegative === true
+            ? 'nothing in front but its minus sign, if it has one, and at most the code ' . $code
+            : 'nothing in front but, at most, the code ' . $code;
 
         return 'That amount has more than one currency sign or code in front. Only ' . $code . ' amounts are read here: '
-            . 'write the figure with nothing in front but, at most, the code ' . $code . ', and if it is in another '
-            . 'currency, convert it to ' . $code . ' first.';
+            . 'write the figure with ' . $front . ', and if it is in another currency, convert it to ' . $code . ' first.';
     }
 
     /** otherCurrencyWords()'s instruction. */
