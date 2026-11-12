@@ -298,10 +298,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    one rather than interleaving between the two statements.
     //
     // 🔢 WHAT THE MESSAGE COUNTS. It used to print the UPDATE's affected-row
-    //    count, which counts rows whose values CHANGED: giving a reason to a
-    //    date that was already cancelled changed no column of that statement,
-    //    so the page said "0 event(s) updated successfully" over a reason it
-    //    had just stored (measured by round 2 of #998's check). The dates are
+    //    count, which counts rows whose values CHANGED. The statement writes
+    //    `updatedByID` as well as the status, so a date counts as unchanged
+    //    only when it already had that status AND the same administrator made
+    //    its last edit — and then the page said "0 event(s) updated
+    //    successfully" over a reason it had just stored (measured by round 2
+    //    of #998's check, in exactly that case). The dates are
     //    now counted as MATCHED — this series, this organisation, live, the
     //    portal's own, among the numbers posted — read under the lock inside
     //    the transaction, before the write, and each sentence below is built

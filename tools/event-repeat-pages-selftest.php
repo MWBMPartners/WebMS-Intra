@@ -4556,6 +4556,13 @@ reasonEdit($jar['admin'], $zeroId, ['status' => 'cancelled', 'cancelReason' => '
 ok('U17b a reason of "0" is stored (read back)', (string) (reasonRow($zeroId)['cancelReason'] ?? '') === '0', json_encode(reasonRow($zeroId)));
 ok('U17c ...and a member SEES it under the cancelled banner',
     preg_match('/This event has been cancelled<\/h2>\s*<p class="mb-1">0<\/p>/', memberEventPage($jar['member'], $zeroId)) === 1);
+// The postponed banner is a second copy of the same test (round 3 of the
+// check: putting `empty()` back on it alone stayed green).
+reasonEdit($jar['admin'], $zeroId, ['status' => 'postponed']);
+ok('U17d ...and under the POSTPONED banner too',
+    (string) (reasonRow($zeroId)['status'] ?? '') === 'postponed'
+    && preg_match('/This event has been postponed<\/h2>\s*<p class="mb-1">0<\/p>/', memberEventPage($jar['member'], $zeroId)) === 1,
+    json_encode(reasonRow($zeroId)));
 
 // -----------------------------------------------------------------------------
 // U18-U25 — the series bulk update.
@@ -4589,10 +4596,16 @@ ok('U20 BULK CANCELLED WITH A REASON: both chosen dates carry it, the third does
 ok('U21 a member sees the bulk reason on one of those dates\' pages',
     str_contains(text(memberEventPage($jar['member'], $bulkIds[1])), 'EVREP the heating has failed'));
 
-$bulkPost(['eventIDs' => [(string) $bulkIds[1]], 'bulkStatus' => 'postponed']);
+$did = $bulkPost(['eventIDs' => [(string) $bulkIds[1]], 'bulkStatus' => 'postponed']);
 ok('U22 bulk POSTPONED with the box empty: the date keeps its own reason (read back)',
     (string) reasonRow($bulkIds[1])['status'] === 'postponed'
     && (string) reasonRow($bulkIds[1])['cancelReason'] === 'EVREP the heating has failed', json_encode(reasonRow($bulkIds[1])));
+// The message, word for word: with the box EMPTY no date "took" a reason, so
+// there must be no "now carries the reason you gave" clause (round 3 of the
+// check: `took` counting the carrying rows whatever was sent left every
+// earlier check green).
+ok('U22b ...and the message claims no reason was given, word for word',
+    $did['message'] === '1 event(s) updated successfully.', $did['message']);
 
 $did = $bulkPost(['eventIDs' => [(string) $bulkIds[0]], 'bulkCancelReason' => 'EVREP stray words']);
 ok('U23 a reason with Status left at "No change" is REFUSED, nothing changed (read back)',
@@ -4860,6 +4873,45 @@ ok('U41 ...and the answer is the hidden-date refusal, not "updated successfully"
     $raceMessage);
 ok('U41b ...and the picture that save had already stored was deleted again, not left on disk',
     $pictureCount() === $picturesBeforeRace, $picturesBeforeRace . ' then ' . $pictureCount());
+
+// -----------------------------------------------------------------------------
+// U42-U44 — THE SAME RACE THROUGH THE EVENTS API (round 3 of #998's check).
+// Its existence check reads without a lock, so a date hidden after it used to
+// have its status changed while the reason writer (which never touches a
+// hidden date) left its reason alone. This connection holds the row while a
+// real API call waits on it, hides the date and commits; the call's own
+// locked read must then answer 404 and write nothing.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Reason api race', '2032-02-01T10:00', '2032-02-01T11:00');
+$apiRaceId = (int) (eventsNamed('EVREP Reason api race')[0]['eventID'] ?? 0);
+reasonEdit($jar['admin'], $apiRaceId, ['status' => 'cancelled', 'cancelReason' => 'EVREP api race reason']);
+$apiRaceToken  = managePage($jar['admin'])['token'];
+$apiRaceHandle = curl_init('http://127.0.0.1:' . $port . ADDR . '/api/events/update?id=' . $apiRaceId);
+curl_setopt_array($apiRaceHandle, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+    CURLOPT_COOKIEJAR => $jar['admin'], CURLOPT_COOKIEFILE => $jar['admin'], CURLOPT_TIMEOUT => 120,
+    CURLOPT_HTTPHEADER => ['Expect:', 'Content-Type: application/json', 'X-CSRF-Token: ' . $apiRaceToken],
+    CURLOPT_POSTFIELDS => (string) json_encode(['eventID' => $apiRaceId, 'status' => 'published']),
+]);
+$db->begin_transaction();
+q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$apiRaceId]);
+$apiRaceMulti = curl_multi_init();
+curl_multi_add_handle($apiRaceMulti, $apiRaceHandle);
+$apiRaceRunning = 1;
+$apiRaceUntil   = microtime(true) + 2.0;
+while (microtime(true) < $apiRaceUntil && $apiRaceRunning > 0) {
+    curl_multi_exec($apiRaceMulti, $apiRaceRunning);
+    curl_multi_select($apiRaceMulti, 0.1);
+}
+ok('U42 (premise) the API call is WAITING on this connection\'s lock, so the order below is real', $apiRaceRunning > 0);
+q('UPDATE tblEvents SET isDeleted = 1 WHERE eventID = ?', 'i', [$apiRaceId]);
+$db->commit();
+$apiRaceCode = restAsyncFinish(['multi' => $apiRaceMulti, 'handle' => $apiRaceHandle, 'running' => $apiRaceRunning]);
+$apiRaceAfter = reasonRow($apiRaceId);
+ok('U43 HIDDEN WHILE THE API CALL WAITED: its status and reason are untouched (read back)',
+    (string) ($apiRaceAfter['status'] ?? '') === 'cancelled' && (string) ($apiRaceAfter['cancelReason'] ?? '') === 'EVREP api race reason',
+    json_encode($apiRaceAfter));
+ok('U44 ...and the call answered 404, as for any hidden event', $apiRaceCode === 404, 'HTTP ' . $apiRaceCode);
 
 // =============================================================================
 // J. Nothing fell over on the way

@@ -319,8 +319,15 @@ if ($nothingToWrite === false) {
     // Imported events are read-only (#514 D5); the existence check above already refuses one, so this
     // statement is unreachable for an imported row — the condition is repeated here so the statement
     // still carries its own marker for tools/audit-checks/check_event_visibility.py.
+    //
+    // ♻️ `isDeleted = 0` on the write itself too (#1000, round 3 of #998's
+    //    check): the existence check at the top of this file reads without a
+    //    lock, so a date hidden after it would otherwise have its status
+    //    changed here while `EventCancelReason::write()` — which never touches
+    //    a hidden date — left its reason alone, putting the two out of step on
+    //    a date that comes back with both (D-146, D-147).
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $set)
-         . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1';
+         . ' WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1';
     // 🔒 ONE TRANSACTION for the row and its reason (#998, round 2 of its
     //    check): `EventCancelReason::write()` must run inside its caller's
     //    transaction, or its locking read is decoration (#697) and the status
@@ -331,6 +338,27 @@ if ($nothingToWrite === false) {
     //    inside an open transaction would be rolled back with it (#694).
     $db->begin_transaction();
     try {
+        // 🔒 THE SECOND ASK, UNDER THE LOCK (round 3 of #998's check). The
+        //    first ask, at the top of this file, is a plain read: it decides
+        //    the 404 cheaply and supplies what the checks above need, but the
+        //    date can be hidden — by the Delete button, a pattern change or a
+        //    second API call — between it and this write. Read again here,
+        //    `FOR UPDATE`, inside the transaction (#697: a lock outside one is
+        //    decoration), and answer exactly as the top does for a hidden or
+        //    missing event: 404, nothing written.
+        $live = $db->prepare(
+            'SELECT `isDeleted` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? '
+            . 'AND `externalFeedID` IS NULL FOR UPDATE'
+        );
+        $live->bind_param('ii', $eventId, $siteId);
+        $live->execute();
+        $liveRow = $live->get_result()->fetch_assoc();
+        $live->close();
+        if ($liveRow === null || (int) $liveRow['isDeleted'] === 1) {
+            $db->rollback();
+            ApiResponse::error('Event not found', 404);
+        }
+
         $stmt = $db->prepare($sql);
         if ($stmt === false) {
             $db->rollback();
