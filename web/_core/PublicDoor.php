@@ -451,8 +451,19 @@ final class PublicDoor
                 self::notFound();
             }
             self::sendDataHeaders($file['type'], $testCopy, $testersOnly);
-            header('Content-Length: ' . (string) $file['size']);
-            readfile($file['path']);
+            // 🎞️ In pieces when a browser asks for a piece (#880): Safari
+            //    will not play a poster VIDEO from a server that cannot answer
+            //    `Range:` with 206 and `Content-Range`. `ByteRange::send()` is
+            //    the ONE place that is done, and it sets the status (200, 206
+            //    or 416), `Accept-Ranges` and `Content-Length` itself. Every
+            //    question above — whose door, is it on, the app, the testers
+            //    rule, and `media()`'s "a ticked poster of THIS organisation
+            //    uses it" — has been answered before this line.
+            if (ByteRange::send($file['path']) === false) {
+                // Gone between `media()` looking and now: the door's one 404.
+                // `send()` sent nothing, so notFound() can still answer.
+                self::notFound();
+            }
             exit();
         }
         $body = $surface === self::SURFACE_EVENTS

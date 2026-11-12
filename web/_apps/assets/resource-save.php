@@ -221,7 +221,10 @@ if ($linkUrlRaw !== '') {
         $fail('Unable to inspect uploaded file.');
     }
     $sniffedMime = finfo_buffer($finfo, $binary);
-    finfo_close($finfo);
+    // ⚠️ No `finfo_close()` (#1003). It has done nothing since PHP 8.1 — the
+    //    finfo object is freed when it goes out of scope — and PHP 8.5 deprecates
+    //    it, so every upload here wrote a deprecation notice into the portal's
+    //    error log. Removing it changes nothing about the type found above.
     if ($sniffedMime === false || array_key_exists($sniffedMime, ASSETS_RESOURCE_ALLOWED_MIME_EXT) === false) {
         $fail('Unsupported file type for asset resources (pdf/png/jpg/gif/webp/mp4/webm/txt/docx/xlsx only)'
             . ($sniffedMime !== false ? ': ' . $sniffedMime : '') . '.');

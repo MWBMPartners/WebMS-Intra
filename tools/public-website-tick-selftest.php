@@ -1585,7 +1585,10 @@ $scnImportDefault = static function () use ($signIn, $http, $tokenOn, $publicOf,
         CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_TIMEOUT => 60,
         CURLOPT_POSTFIELDS => ['csrf_token' => $tokenOn($page), 'action' => 'preview', 'csv_file' => new CURLFile($csv, 'text/csv', 'n.csv')]]);
     $preview = (string) curl_exec($handle);
-    curl_close($handle);
+    // Not `curl_close()` (#1003): it has done nothing since PHP 8.0 and PHP 8.5
+    // deprecates it. `unset()` frees the handle now, which is what writes the
+    // cookie jar before the next request reads it — what the old call meant.
+    unset($handle);
     $token = $tokenOn($preview) !== '' ? $tokenOn($preview) : $tokenOn($page);
     $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm']);
     return $publicOf('PWT N import default');

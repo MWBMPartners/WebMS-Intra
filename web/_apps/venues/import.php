@@ -183,9 +183,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // client-declared Content-Type or the filename extension alone.
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $sniffedMime = $finfo !== false ? finfo_buffer($finfo, $binary) : false;
-        if ($finfo !== false) {
-            finfo_close($finfo);
-        }
+        // ⚠️ No `finfo_close()` (#1003). It has done nothing since PHP 8.1 — the
+        //    finfo object is freed when it goes out of scope — and PHP 8.5 deprecates
+        //    it, so every upload here wrote a deprecation notice into the portal's
+        //    error log. Removing it changes nothing about the type found above.
 
         $sourceKind = null;
         if ($ext === 'csv' && in_array($sniffedMime, ['text/csv', 'text/plain', 'application/csv'], true) === true) {

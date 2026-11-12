@@ -43,64 +43,35 @@ class Recordings
      * Stream a recording file with HTTP Range support so audio/video
      * clients can seek without re-downloading the whole asset.
      *
-     * Returns true on success, false on any I/O failure (caller should
-     * have already sent the response code).
+     * Returns true once it has answered (a 416 for a piece beyond the end
+     * included), false when the file is missing or cannot be opened — and in
+     * that case NOTHING has been sent, so the caller can still answer 404.
+     *
+     * 🎞️ The range itself is `ByteRange::send()`'s (#880), the ONE place a
+     * `Range:` request is answered. This method used to hold its own copy,
+     * with two faults the other copy (`podcast-media.php`) shared —
+     * `bytes=-500` ("the last 500 bytes") was read as bytes 0 to 500, and an
+     * end beyond the file was not shortened, so `Content-Length` promised
+     * bytes that never came — and one of its own: a 416 answered FALSE, which
+     * `recordings/stream` turned into a 404 with the 416's `Content-Range`
+     * still attached.
      */
     public static function streamFile(string $path, string $mimeType): bool
     {
         if (is_file($path) === false || is_readable($path) === false) {
             return false;
         }
-        $size = filesize($path);
-        if ($size === false) {
-            return false;
-        }
-
-        $fp = fopen($path, 'rb');
-        if ($fp === false) {
-            return false;
-        }
-
-        $start = 0;
-        $end   = $size - 1;
-        $range = $_SERVER['HTTP_RANGE'] ?? '';
-
-        if (is_string($range) === true && preg_match('/bytes=(\d*)-(\d*)/', $range, $m) === 1) {
-            if ($m[1] !== '') {
-                $start = (int) $m[1];
-            }
-            if ($m[2] !== '') {
-                $end = (int) $m[2];
-            }
-            if ($start > $end || $start >= $size) {
-                http_response_code(416);
-                header('Content-Range: bytes */' . $size);
-                fclose($fp);
-                return false;
-            }
-            http_response_code(206);
-            header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
-        }
 
         header('Content-Type: ' . $mimeType);
-        header('Accept-Ranges: bytes');
-        header('Content-Length: ' . ($end - $start + 1));
         header('Cache-Control: public, max-age=3600');
-
-        fseek($fp, $start);
-        $remaining = $end - $start + 1;
-        $chunk     = 8192;
-        while ($remaining > 0 && feof($fp) === false) {
-            $read = $remaining < $chunk ? $remaining : $chunk;
-            $buf  = fread($fp, $read);
-            if ($buf === false) {
-                break;
-            }
-            echo $buf;
-            flush();
-            $remaining -= strlen($buf);
+        if (ByteRange::send($path) === false) {
+            // Nothing went out: take back the two headers set for a file that
+            // is not coming, so the caller's "not found" is clean.
+            header_remove('Content-Type');
+            header_remove('Cache-Control');
+            return false;
         }
-        fclose($fp);
+
         return true;
     }
 
