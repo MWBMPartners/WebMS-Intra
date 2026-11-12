@@ -2401,7 +2401,10 @@ check(
     && str_contains($method($givingCode, 'buildHmrcCsv'), 'self::hmrcRows(')
     && str_contains($method($givingCode, 'erasedDonorSql'), "GdprEraser::emptiedAccountSql('ku')")
     && str_contains($method($givingCode, 'isErasedDonor'), "self::erasedDonorSql('?', '?')")
-    && str_contains($method($givingCode, 'renderStatementPdf'), 'self::isErasedDonor($siteId, $donorId) === true')
+    // #999 round 3: the statement's words (and so the erased-donor refusal)
+    //    moved into statementHtml(), which renderStatementPdf() calls first.
+    && str_contains($method($givingCode, 'statementHtml'), 'self::isErasedDonor($siteId, $donorId) === true')
+    && str_contains($method($givingCode, 'renderStatementPdf'), '$html = self::statementHtml($siteId, $donorId, $fromDate, $toDate, $periodLabel);')
     && str_contains($method($givingCode, 'statementsPreview'), "NOT ' . self::erasedDonorSql(")
     && substr_count($method($givingCode, 'renderStatementBatch'), "NOT ' . self::erasedDonorSql(") === 3
     && substr_count($givingCode, 'FROM tblGivingKeptDonors') === 1,

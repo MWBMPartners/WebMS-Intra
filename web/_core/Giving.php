@@ -258,7 +258,14 @@ class Giving
      * in a CHAR column, so "gbp" or "GBP " counts there. The claim file's PHP
      * filter compared with `===` and would have left such a gift out of the
      * file while the statement called it eligible (round 2 of #999's check).
-     * This asks the same question the SQL asks, so the two cannot disagree.
+     * This agrees with the SQL for EVERY CODE A WRITER CAN STORE, and not for
+     * every string: under utf8mb4_general_ci 'ĜBP' = 'GBP' is true (measured
+     * on MySQL 8.0.36 and MariaDB 11.4 by #999's round-2 check) while this
+     * answers no. No writer can store that: Currency::fromPosted() gives three
+     * ASCII capitals or '', Currency::onEdit() upper-cases what was posted (or
+     * keeps what is already stored), and a CHAR(3)
+     * column under strict mode refuses a value with a leading space. A row
+     * written by hand outside the portal could still make the two differ.
      */
     private static function isGiftAidCurrency(string $code): bool
     {
@@ -397,8 +404,42 @@ class Giving
      * renders for any site" hole the original query had — a donor with
      * neither an active membership NOR any recorded gift at this site can
      * never match either arm, so cross-tenant rendering stays impossible.
+     *
+     * The document's words are built by statementHtml(), and ONLY there; this
+     * method turns them into the PDF and saves it (#999 round 3).
      */
     public static function renderStatementPdf(int $siteId, int $donorId, string $fromDate, string $toDate, string $periodLabel): string|false
+    {
+        $html = self::statementHtml($siteId, $donorId, $fromDate, $toDate, $periodLabel);
+        if ($html === false) {
+            return false;
+        }
+
+        // 📁 Namespaced by siteID + periodKey — the old flat
+        // statement-{donor}-{year}.pdf naming let the same donor in two
+        // sites overwrite one file with the other site's data (#440).
+        $periodKey = self::statementPeriodKey($fromDate, $toDate);
+        $dir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
+             . DIRECTORY_SEPARATOR . 'statements' . DIRECTORY_SEPARATOR . (string) $siteId;
+        if (is_dir($dir) === false) {
+            mkdir($dir, 0755, true);
+        }
+        $path = $dir . DIRECTORY_SEPARATOR . 'statement-' . $donorId . '-' . $periodKey . '.pdf';
+        return Pdf::create($html, $path);
+    }
+
+    /**
+     * 🧾 The statement document's HTML — every word and figure the PDF will
+     * carry — or false where renderStatementPdf() would refuse (an unreal date
+     * range, an erased donor, a donor with no tie to this organisation). Split
+     * out of renderStatementPdf() (#999 round 3) for one reason: a test can
+     * DRIVE the real per-gift Gift Aid query and read its answer without
+     * dompdf, which a test copy does not ship. A pin that only counted calls to
+     * giftAidEligibleSql() was fooled by a dead call (`if (false) { … }`) beside
+     * the old query. There is no second copy of the query: the PDF is made
+     * from exactly this text.
+     */
+    public static function statementHtml(int $siteId, int $donorId, string $fromDate, string $toDate, string $periodLabel): string|false
     {
         // 🛡️ Reject anything that isn't a real, ordered date range before
         // it touches SQL or a filename — statementPeriodKey() below trusts
@@ -531,17 +572,7 @@ class Giving
             . 'charity. Gift Aid applies only to gifts recorded in pounds sterling.'
             . '</p></body></html>';
 
-        // 📁 Namespaced by siteID + periodKey — the old flat
-        // statement-{donor}-{year}.pdf naming let the same donor in two
-        // sites overwrite one file with the other site's data (#440).
-        $periodKey = self::statementPeriodKey($fromDate, $toDate);
-        $dir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving'
-             . DIRECTORY_SEPARATOR . 'statements' . DIRECTORY_SEPARATOR . (string) $siteId;
-        if (is_dir($dir) === false) {
-            mkdir($dir, 0755, true);
-        }
-        $path = $dir . DIRECTORY_SEPARATOR . 'statement-' . $donorId . '-' . $periodKey . '.pdf';
-        return Pdf::create($html, $path);
+        return $html;
     }
 
     /**

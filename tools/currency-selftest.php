@@ -999,7 +999,8 @@ check('H2f the one eligibility rule counts only this donor\'s gift in POUNDS (30
 //    back to the old EXISTS with no pounds condition, one at a time, and every
 //    check above stayed green while a euro gift showed "Yes" on the statement
 //    and a euro-only donor's giftAidPence was stored non-zero. So the CALLS are
-//    pinned here, counted with PHP's own tokeniser over each function's body
+//    pinned here (a presence pin, which round 3 showed a dead call fools — H2i
+//    drives the statement), counted with PHP's own tokeniser over each function's body
 //    (comments and strings are their own tokens, so a comment naming the rule
 //    cannot stand in for calling it), and H11b drives the preview's stored
 //    figure for a euro-only donor.
@@ -1044,10 +1045,59 @@ $isGbp = new ReflectionMethod(\Portal\Core\Giving::class, 'isGiftAidCurrency');
 check('H2h the claim file\'s pounds test counts "GBP", "gbp" and "GBP " as pounds, as the SQL rule does, and "EUR" and "" as not',
     [$isGbp->invoke(null, 'GBP'), $isGbp->invoke(null, 'gbp'), $isGbp->invoke(null, 'GBP '), $isGbp->invoke(null, 'EUR'), $isGbp->invoke(null, '')]
         === [true, true, true, false, false]);
+// ⚠️ H2g COUNTS CALLS, AND A DEAD CALL FOOLS IT (round 3 of #999's check):
+//    the old EXISTS put back in the statement's query beside
+//    `if (false) { self::giftAidEligibleSql('e'); }` left every check here
+//    green while a euro gift showed "Yes" again. D-065: where the property is
+//    "this code RUNS", drive it. H2i calls the REAL statement builder,
+//    Giving::statementHtml() — the text renderStatementPdf() turns into the
+//    PDF, split out so it can be read without dompdf — for this donor, who
+//    has active declarations and gifts in pounds, euros, dollars and none, and
+//    reads the "Gift Aid" cell of every line. The class reaches the database
+//    through App::db(), which this test sets for the one call and puts back.
+$appDb = new ReflectionProperty(\Portal\Core\App::class, 'db');
+$appDbBefore = $appDb->getValue();
+$appDb->setValue(null, $db);
+try {
+    $statementHtml = \Portal\Core\Giving::statementHtml($site, CU_ADMIN, date('Y-01-01'), date('Y-12-31'), 'H2i');
+} finally {
+    $appDb->setValue(null, $appDbBefore);
+}
+$giftAidCells = [];
+if (is_string($statementHtml) === true
+    && preg_match_all('#<td class="center">([^<]*)</td><td class="right">([^<]*)</td>#u', $statementHtml, $cells, PREG_SET_ORDER) > 0) {
+    foreach ($cells as $cell) {
+        $giftAidCells[] = [html_entity_decode($cell[2], ENT_QUOTES, 'UTF-8'), $cell[1]];
+    }
+}
+$poundsLines = array_values(array_filter($giftAidCells, static fn (array $c): bool => str_starts_with($c[0], '£')));
+$otherLines  = array_values(array_filter($giftAidCells, static fn (array $c): bool => str_starts_with($c[0], '£') === false));
+check('H2i the REAL statement (Giving::statementHtml()) marks this donor\'s pounds gift "Yes" for Gift Aid and every gift in euros, dollars or with no currency "–", though declarations cover them all',
+    $poundsLines !== [] && $otherLines !== [] && count(array_filter($otherLines, static fn (array $c): bool => str_contains($c[0], '€'))) > 0
+    && array_filter($poundsLines, static fn (array $c): bool => $c[1] !== 'Yes') === []
+    && array_filter($otherLines, static fn (array $c): bool => $c[1] !== '–') === [],
+    json_encode($giftAidCells, JSON_UNESCAPED_UNICODE));
+// The claim file and the left-out count must treat a gift stored as "gbp" as
+// pounds, as the SQL rule does (round 2's isGiftAidCurrency()). Nothing the
+// portal writes stores lower case, so the row is written straight to the
+// table; it is removed again at once.
+run($db, "INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, 777, 'gbp', CURDATE(), 'cash')",
+    'iii', [$site, CU_ADMIN, $category]);
+$lowerGift = (int) $db->insert_id;
+$made['gifts'][] = $lowerGift;
+$claimFile3 = $http('GET', '/giving/hmrc-export?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'));
+$leftOutPage3 = $http('GET', '/giving/manage?from=' . date('Y-01-01') . '&to=' . date('Y-12-31'))['body'];
+run($db, 'DELETE FROM `tblGivingEntry` WHERE `entryID` = ?', 'i', [$lowerGift]);
+check('H2j a gift stored as "gbp" IS in the claim file (7.77) and is NOT counted as left out (' . $notPounds . ' still) — the claim file and the count ask the same pounds test as the SQL',
+    $claimFile3['status'] === 200 && preg_match('/,7\.77\s*$/m', $claimFile3['body']) === 1
+    && preg_match('/data-hmrc-left-out="(\d+)"/', $leftOutPage3, $mm) === 1 && (int) $mm[1] === $notPounds,
+    'HTTP ' . $claimFile3['status'] . '; left out: ' . ($mm[1] ?? '(none)'));
 $givingFile = $repo . $sep . 'web' . $sep . '_core' . $sep . 'Giving.php';
-check('H2g the statement document (renderStatementPdf) and the statements preview (statementsPreview) each CALL the one eligibility rule, Giving::giftAidEligibleSql(), exactly once',
-    [$callsIn($givingFile, 'renderStatementPdf', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')] === [1, 1],
-    json_encode([$callsIn($givingFile, 'renderStatementPdf', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')]));
+// A presence pin only: a dead call satisfies it (round 3). The guards are H2i
+// (the statement, driven) and H11b (the preview, driven).
+check('H2g the statement builder (statementHtml) and the statements preview (statementsPreview) each contain one call to Giving::giftAidEligibleSql() — presence only; H2i and H11b drive them',
+    [$callsIn($givingFile, 'statementHtml', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')] === [1, 1],
+    json_encode([$callsIn($givingFile, 'statementHtml', 'giftAidEligibleSql'), $callsIn($givingFile, 'statementsPreview', 'giftAidEligibleSql')]));
 
 // Reconciliation: a statement in EUR, a closed count in USD and one in EUR.
 run($db, "INSERT INTO `tblBankImports` (`siteID`, `filename`, `currency`, `fileHash`) VALUES (?, 'selftest.csv', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(32))]);
