@@ -36,7 +36,9 @@
  *      registrations indefinitely; negative and missing are 90 days), and the
  *      job does NOT apply the ceiling (D-074 following D-032)
  *   K  with the clear-out switched off (`events.registrationRetentionRun`), the
- *      job, this page and the Retention card all say what really happens
+ *      job, this page and the Retention card all say what really happens; and
+ *      (#840) a period stored above the ceiling is still WARNED about while the
+ *      clear-out is off, in words true of that state
  *   R  THE REVERSE LOCK: an organisation's save in flight makes a ceiling save
  *      WAIT, and the ceiling save then sees the longer period and refuses
  *   S  a ceiling below a held period is refused whether it goes UP or DOWN
@@ -78,7 +80,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RR_EXPECTED_CHECKS = 95;
+const RR_EXPECTED_CHECKS = 99;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -663,6 +665,32 @@ $scnRunOff = static function () use ($put, $sweepWith, $signIn, $page, $http): a
     ];
 };
 
+/**
+ * #840: a period above the ceiling (400 days under 30, which only SQL or a
+ * restore can produce) is warned about with the clear-out ON and with it OFF,
+ * and each state gets the sentence that is true of it. Answers, per state,
+ * whether the warning was there and carried that state's words.
+ */
+$scnAboveWhileOff = static function () use ($put, $world, $signIn, $page): array {
+    $world('30', '30', '400', null);
+    $signIn('orgadmin');
+    $put(RegistrationRetentionRunKey::KEY, null, 'true');
+    $on = $page()['body'];
+    $put(RegistrationRetentionRunKey::KEY, null, 'false');
+    $off = $page()['body'];
+    $put(RegistrationRetentionRunKey::KEY, null, 'true');
+    $world('90', '0', null, null);
+    $warned = static fn (string $body, string $state): bool => str_contains($body, 'data-registration-above-ceiling="1"')
+        && str_contains($body, 'data-registration-above-ceiling-clear-out="' . $state . '"');
+    return [
+        'on warned'   => $warned($on, 'on') && str_contains($on, 'the portal keeps registrations for the') === true,
+        'off warned'  => $warned($off, 'off') && str_contains($off, 'when the clear-out is switched back') === true,
+        // The off-state words must not claim the portal is keeping them for a period now:
+        // nothing is being deleted at all, so "keeps … for the longer period" would be untrue.
+        'off not claiming a period now' => str_contains($off, 'the portal keeps registrations for the') === false,
+    ];
+};
+
 /** Gate 2 going UP: 30 -> 60 is refused while an event keeps indefinitely (only SQL can put it there). */
 $scnRaiseRefused = static function () use ($world, $eventWithPeriod, $signIn, $save, $setting): bool {
     $world('30', '30', null, null);
@@ -885,6 +913,10 @@ check('K2 the switch is read EXACTLY: "True" and " true" are OFF, and no row at 
     ['True' => true, 'space' => true, 'no row' => true]);
 $signIn('orgadmin');
 check('K3 switched back on, the page no longer says it is off', str_contains($page()['body'], 'data-registration-clear-out-off'), false);
+$above = $scnAboveWhileOff();
+check('K4 (#840) 400 days stored under a ceiling of 30 with the clear-out ON: the page warns, in the on-state words', $above['on warned'], true);
+check('K5 (#840) ...and with the clear-out OFF it STILL warns, in words true while nothing is deleted', $above['off warned'], true);
+check('K6 (#840) ...and the off-state words do not claim a period is being kept now', $above['off not claiming a period now'], true);
 
 echo "R. The reverse lock: a ceiling save waits for an organisation's save in flight\n";
 [$rBlocked, $rRefused] = $scnReverseLock();
@@ -971,6 +1003,10 @@ check('Pg with the switch read ignoring case and spaces, "True" and " true" star
 $ph = $plant('_core/RegistrationRetention.php', "return (string) (App::settingForSite(self::KEY_RUN, \$siteId) ?? 'true') === 'true';",
     "return (string) (App::settingForSite(self::KEY_RUN, \$siteId) ?? 'false') === 'true';", $scnRunExact);
 check('Ph with no row read as OFF, the job stops deleting', [$ph['applied'], $ph['result']['no row'] ?? null], [true, false]);
+$pi = $plant('_apps/admin/settings/registrations/index.php', '$inForceAbove = RegistrationRetention::isAboveCeiling($inForce, $ceiling);',
+    '$inForceAbove = $runs === true && RegistrationRetention::isAboveCeiling($inForce, $ceiling);', $scnAboveWhileOff);
+check('Pi (#840) with the warning hidden again while the clear-out is off, the off-state check goes red (and the on-state one stays green)',
+    [$pi['applied'], $pi['result']['off warned'] ?? null, $pi['result']['on warned'] ?? null], [true, false, true]);
 check('P8 with every plant removed again, gate 1 is green once more', $scnGateOne(), true);
 
 // 🧾 The server's own error log. A page that throws part-way can still answer

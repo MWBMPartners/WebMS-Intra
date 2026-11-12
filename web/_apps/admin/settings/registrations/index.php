@@ -98,7 +98,16 @@ $ceiling          = RegistrationRetention::ceilingNow($mysqli);
 //    backup can produce that (both save paths refuse it), and the job then
 //    keeps the details LONGER. Said plainly, because otherwise the page would
 //    show a period above a ceiling with nothing to explain why it is obeyed.
-$inForceAbove = $runs === true && RegistrationRetention::isAboveCeiling($inForce, $ceiling);
+//
+//    #840: asked WHATEVER the clear-out switch says. This used to be
+//    `$runs === true && …`, so with the clear-out switched off the page showed
+//    the ceiling and, right beside it, a longer period with nothing saying why
+//    the two disagreed — which an administrator could read as the ceiling being
+//    in force on that period. Nothing is deleted while the switch is off, so no
+//    data was at risk; the page was simply silent about a fact that is still
+//    true. The switch now chooses only the WORDS (two complete sentences below,
+//    one per state), never whether the warning appears.
+$inForceAbove = RegistrationRetention::isAboveCeiling($inForce, $ceiling);
 
 // The box: the organisation's own figure exactly as stored, never altered to
 // fit a `max` — `max` is widened instead (see the header).
@@ -174,13 +183,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php if ($inForceAbove === true): ?>
             <?php /* 🚧 Reached only by a row written in SQL or restored from a backup. It
                      never names WHO set the ceiling: the two levels may be different parties. */ ?>
-            <p class="mb-0 small text-warning-emphasis" data-registration-above-ceiling="1">
+            <p class="mb-0 small text-warning-emphasis" data-registration-above-ceiling="1"
+               data-registration-above-ceiling-clear-out="<?php echo $runs === true ? 'on' : 'off'; ?>">
                 <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
-                The period in force is longer than the ceiling. It was not set on this page, which would
-                have refused it. The portal still keeps registrations for the longer period rather than
-                deleting them early, because a period like this can be a legal requirement and a deletion
-                cannot be undone. Choose a period within the ceiling below if your organisation does not
-                need the longer one.
+                <?php if ($runs === true): ?>
+                    The period in force is longer than the ceiling. It was not set on this page, which would
+                    have refused it. The ceiling does not shorten it: the portal keeps registrations for the
+                    longer period rather than deleting them early, because a period like this can be a legal
+                    requirement and a deletion cannot be undone. Choose a period within the ceiling below if
+                    your organisation does not need the longer one.
+                <?php else: ?>
+                    The period that will apply is longer than the ceiling. It was not set on this page, which
+                    would have refused it. The ceiling does not shorten it: when the clear-out is switched back
+                    on, the portal will keep registrations for the longer period rather than deleting them
+                    early, because a period like this can be a legal requirement and a deletion cannot be
+                    undone. Choose a period within the ceiling below if your organisation does not need the
+                    longer one.
+                <?php endif; ?>
             </p>
         <?php endif; ?>
     </div>

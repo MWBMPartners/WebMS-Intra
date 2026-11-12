@@ -41,6 +41,13 @@
  *   I  A WRONG TOKEN WRITES NOTHING. The security property, driven rather than
  *      read out of the source: a request that could record a start would let
  *      anybody on the internet make a dead job look alive.
+ *   J  #817: A JOB THAT DIES ON EVERY RUN IS REPORTED. Each start used to
+ *      reset the clock, so such a job read "part-way through" for ever. The
+ *      streak of unfinished runs is driven through the real began() and
+ *      finished(), the page's words are read, a job merely called again while
+ *      still running is NOT reported, and the class still records before
+ *      migration 287 has run. Three plants, each in a COPY of the class run in
+ *      its own process (this one has the real class loaded), must go red.
  *
  * WHAT IT CANNOT DO, said plainly:
  *   * It drives TWO of the fifteen pages, not all fifteen. The other thirteen
@@ -726,6 +733,20 @@ if (preg_match('/CREATE TABLE IF NOT EXISTS `tblScheduledJobRun`.*?;/s', $migrat
     refuse('could not find the CREATE TABLE in migration 253, so this test cannot restore the table it dropped');
 }
 $db->query($grab[0]);
+// #817: and migration 287's two columns, from the migration itself, so every
+// section after this one runs on the table as it ships — not on 253's shape,
+// which the class now treats as "287 has not run yet" (section J checks that).
+$migration287 = (string) file_get_contents($repo . $sep . 'web' . $sep . '_sql' . $sep . '287_scheduled_jobs_count_unfinished_runs.sql');
+$apply287 = static function () use ($db, $migration287): void {
+    $db->multi_query($migration287);
+    do {
+        $result = $db->store_result();
+        if ($result instanceof mysqli_result) {
+            $result->free();
+        }
+    } while ($db->more_results() === true && $db->next_result() === true);
+};
+$apply287();
 ScheduledJobs::forgetTableCheck();
 check('F6 the table is back, taken from the migration itself and not a copy', is_array($row('cron/mail-queue')) || $row('cron/mail-queue') === null, true);
 check(
@@ -776,6 +797,7 @@ check(
 );
 $db->query('DROP TABLE `tblScheduledJobRun`');
 $db->query($grab[0]);
+$apply287();
 ScheduledJobs::forgetTableCheck();
 
 // PortalCheck is required here because the token seeding below reads its
@@ -911,6 +933,7 @@ check(
 check('G15 nor an all-clear', $severityOf($found, 'has run recently enough'), null);
 $db->query('DROP TABLE `tblScheduledJobRun`');
 $db->query($grab[0]);
+$apply287();
 ScheduledJobs::forgetTableCheck();
 foreach (array_keys(ScheduledJobs::JOBS) as $job) {
     ScheduledJobs::began($db, $job);
@@ -1755,6 +1778,211 @@ check(
     true
 );
 $setSetting('venues.cron_token', $token);
+
+echo "\n=== J. #817: a job that dies on every run is reported ===\n";
+// ⚠️ THE FAULT, IN ONE SENTENCE: each run's began() cleared the finish and reset
+//    the start, so a job dying part-way on EVERY run always had a fresh start
+//    and no finish — RUNNING_NOW for ever, under an all-clear, while the page's
+//    own note promised it "will be reported as having started and never
+//    finished". The streak columns (migration 287) keep the OLDEST unfinished
+//    start, and state() judges that against the job's own allowance.
+$streakRow = static function (string $jobKey) use ($db): ?array {
+    $stmt = $db->prepare('SELECT `unfinishedRuns`, `unfinishedSinceUtc`, `finishedAtUtc` FROM `tblScheduledJobRun` WHERE `jobKey` = ?');
+    $stmt->bind_param('s', $jobKey);
+    $stmt->execute();
+    $found = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return $found;
+};
+$colsThere = (int) $db->query("SELECT COUNT(*) AS `n` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+    . "AND `TABLE_NAME` = 'tblScheduledJobRun' AND `COLUMN_NAME` IN ('unfinishedSinceUtc', 'unfinishedRuns')")->fetch_assoc()['n'];
+check('J0 PREMISE: the table carries migration 287\'s two columns', $colsThere, 2);
+ScheduledJobs::forgetTableCheck();
+
+// The SCENARIOS, as one PHP program run in its OWN process against a given copy
+// of the class, so a planted copy can be judged by exactly the same steps. It
+// prints one JSON object. Every step goes through the real began()/finished()/
+// state(); the only SQL is moving moments back in time, which is the one thing
+// a test cannot wait for.
+$scenarioCode = <<<'PHPCODE'
+<?php
+declare(strict_types=1);
+require $argv[1];
+use Portal\Core\ScheduledJobs;
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$db = new mysqli((string) getenv('J_HOST'), (string) getenv('J_USER'), (string) getenv('J_PASS'), (string) getenv('J_NAME'), (int) getenv('J_PORT'));
+$job = 'cron/mail-queue';
+$allow = ScheduledJobs::JOBS[$job]['overdue'];
+$back = static function (int $seconds) use ($db, $job): void {
+    // Move the whole run back: its start AND the streak's oldest start.
+    $stmt = $db->prepare('UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL ? SECOND, '
+        . '`unfinishedSinceUtc` = UTC_TIMESTAMP() - INTERVAL ? SECOND WHERE `jobKey` = ?');
+    $stmt->bind_param('iis', $seconds, $seconds, $job);
+    $stmt->execute();
+    $stmt->close();
+};
+$out = [];
+// 1. Dies on every run: the first unfinished run began past the allowance, and
+//    it has been started again (and died again) three times since.
+$db->query("DELETE FROM `tblScheduledJobRun` WHERE `jobKey` = 'cron/mail-queue'");
+ScheduledJobs::began($db, $job);
+$back($allow + 120);
+ScheduledJobs::began($db, $job);
+ScheduledJobs::began($db, $job);
+ScheduledJobs::began($db, $job);
+$st = ScheduledJobs::state($db)[$job];
+$out['crash'] = ['status' => $st['status'], 'runs' => $st['unfinishedRuns'], 'oldest' => $st['unfinishedSeconds'], 'newest' => $st['seconds']];
+// 2. Called again while still running, inside the allowance: NOT a problem.
+$db->query("DELETE FROM `tblScheduledJobRun` WHERE `jobKey` = 'cron/mail-queue'");
+ScheduledJobs::began($db, $job);
+$back(60);
+ScheduledJobs::began($db, $job);
+$st = ScheduledJobs::state($db)[$job];
+$out['overlap'] = ['status' => $st['status'], 'runs' => $st['unfinishedRuns']];
+// 3. A finish ENDS the streak: a job that failed for a long time and then
+//    finished must start afresh, or it would be reported for ever.
+$db->query("DELETE FROM `tblScheduledJobRun` WHERE `jobKey` = 'cron/mail-queue'");
+ScheduledJobs::began($db, $job);
+$back($allow + 120);
+ScheduledJobs::began($db, $job);
+ScheduledJobs::finished($db, $job);
+ScheduledJobs::began($db, $job);
+$st = ScheduledJobs::state($db)[$job];
+$out['afterFinish'] = ['status' => $st['status'], 'runs' => $st['unfinishedRuns']];
+$db->query("DELETE FROM `tblScheduledJobRun` WHERE `jobKey` = 'cron/mail-queue'");
+echo json_encode($out);
+PHPCODE;
+$scenarioDir = sys_get_temp_dir() . $sep . 'sj817-' . bin2hex(random_bytes(5));
+mkdir($scenarioDir, 0700);
+file_put_contents($scenarioDir . $sep . 'scenario.php', $scenarioCode);
+$classFile = $repo . $sep . 'web' . $sep . '_core' . $sep . 'ScheduledJobs.php';
+$runScenario = static function (string $classPath) use ($scenarioDir, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort): ?array {
+    $env = ['J_HOST' => $dbHost, 'J_USER' => $dbUser, 'J_PASS' => $dbPass, 'J_NAME' => $dbName, 'J_PORT' => (string) $dbPort,
+        'PATH' => (string) getenv('PATH')];
+    $proc = proc_open([PHP_BINARY, $scenarioDir . $sep . 'scenario.php', $classPath], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
+    if (is_resource($proc) === false) {
+        return null;
+    }
+    $text = (string) stream_get_contents($pipes[1]);
+    $errs = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($proc);
+    $decoded = json_decode($text, true);
+    if (is_array($decoded) === false) {
+        echo "          (the scenario printed: " . substr($text . ' ' . $errs, 0, 400) . ")\n";
+        return null;
+    }
+
+    return $decoded;
+};
+/** A planted copy of the class: `$from` must occur exactly once, or nothing is planted. */
+$plantClass = static function (string $from, string $to) use ($classFile, $scenarioDir, $sep, $runScenario): array {
+    $text = (string) file_get_contents($classFile);
+    if (substr_count($text, $from) !== 1) {
+        return ['applied' => false, 'result' => null];
+    }
+    $copy = $scenarioDir . $sep . 'Planted' . bin2hex(random_bytes(3)) . '.php';
+    file_put_contents($copy, str_replace($from, $to, $text));
+    $result = $runScenario($copy);
+    unlink($copy);
+
+    return ['applied' => true, 'result' => $result];
+};
+
+$real = $runScenario($classFile);
+check('J1 a job whose runs keep dying, with none finished for longer than its allowance, is DIED_PART_WAY — not RUNNING_NOW for ever',
+    $real['crash']['status'] ?? null, ScheduledJobs::DIED_PART_WAY);
+check('J2 ...counting all four runs that began and never finished', $real['crash']['runs'] ?? null, 4);
+check('J3 ...and timed from the OLDEST of them, not the newest start',
+    ($real['crash']['oldest'] ?? 0) > ScheduledJobs::OVERDUE_MAIL_QUEUE && ($real['crash']['newest'] ?? PHP_INT_MAX) < 60, true);
+check('J4 a job merely called again while its previous run is still going, inside its allowance, is RUNNING_NOW — no false alarm (#483)',
+    [$real['overlap']['status'] ?? null, $real['overlap']['runs'] ?? null], [ScheduledJobs::RUNNING_NOW, 2]);
+check('J5 a finish ENDS the streak: the next run starts a streak of one, and is not reported',
+    [$real['afterFinish']['status'] ?? null, $real['afterFinish']['runs'] ?? null], [ScheduledJobs::RUNNING_NOW, 1]);
+
+// What the page SAYS in that state (the C4b lesson: a classification pinned is
+// not a page pinned).
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+ScheduledJobs::began($db, 'cron/mail-queue');
+$db->query('UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL ' . (ScheduledJobs::OVERDUE_MAIL_QUEUE + 120) . ' SECOND, '
+    . '`unfinishedSinceUtc` = UTC_TIMESTAMP() - INTERVAL ' . (ScheduledJobs::OVERDUE_MAIL_QUEUE + 120) . " SECOND WHERE `jobKey` = 'cron/mail-queue'");
+ScheduledJobs::began($db, 'cron/mail-queue');
+ScheduledJobs::began($db, 'cron/mail-queue');
+MailQueue::forget();
+$found = $pageSays();
+check('J6 the page reports it as a PROBLEM: started and never finished',
+    $severityOf($found, 'started and never finished'), \Portal\Core\PortalCheck::PROBLEM);
+check('J7 ...saying its last 3 runs each started and never finished, not "started a moment ago"',
+    str_contains($allText($found), 'its last 3 runs each started and never finished, and none has finished since the first of them started'), true);
+check('J8 ...and the all-clear is gone', $severityOf($found, 'has run recently enough'), null);
+check('J9 ...and it is NOT also listed as part-way through', $severityOf($found, 'part-way through when this page was drawn'), null);
+
+// The single unfinished run keeps its old words exactly.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+ScheduledJobs::began($db, 'cron/retention-sweep');
+$age('cron/retention-sweep', ScheduledJobs::OVERDUE_NIGHTLY + 600, false);
+$db->query("UPDATE `tblScheduledJobRun` SET `unfinishedSinceUtc` = `startedAtUtc` WHERE `jobKey` = 'cron/retention-sweep'");
+$found = $pageSays();
+check('J10 ONE run that died keeps its own wording ("started … ago and never finished")',
+    preg_match('/ — started [0-9a-z ]+ ago and never finished/', $allText($found)), 1);
+check('J10b ...and never says "its last 1 runs"', str_contains($allText($found), 'its last 1 runs'), false);
+
+// Before migration 287 has run: the class still records, and reads as before.
+$db->query('DROP TABLE `tblScheduledJobRun`');
+$db->query($grab[0]);
+ScheduledJobs::forgetTableCheck();
+check('J11 with 287 not yet run, began() STILL records (files land before the migration, #694)',
+    ScheduledJobs::began($db, 'cron/mail-queue'), true);
+check('J12 ...and so does finished()', ScheduledJobs::finished($db, 'cron/mail-queue'), true);
+check('J13 ...and the state is read, not COULD_NOT_READ', ScheduledJobs::state($db)['cron/mail-queue']['status'], ScheduledJobs::RECENT);
+$apply287();
+$apply287(); // safe to run twice
+ScheduledJobs::forgetTableCheck();
+$migratedRow = $streakRow('cron/mail-queue');
+check('J14 migration 287 runs twice cleanly and leaves a finished row with no streak',
+    // `array_key_exists`, never `??`: the value checked IS null, and `null ?? 'missing'` answers 'missing'.
+    [(int) ($migratedRow['unfinishedRuns'] ?? -1), is_array($migratedRow) === true && array_key_exists('unfinishedSinceUtc', $migratedRow) === true ? $migratedRow['unfinishedSinceUtc'] : 'missing'], [0, null]);
+// A run in flight when the migration runs is carried in as a streak of one.
+$db->query('DROP TABLE `tblScheduledJobRun`');
+$db->query($grab[0]);
+$db->query("INSERT INTO `tblScheduledJobRun` (`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`) VALUES ('cron/backup-run', UTC_TIMESTAMP() - INTERVAL 5 MINUTE, NULL, '')");
+$apply287();
+ScheduledJobs::forgetTableCheck();
+$carried = $streakRow('cron/backup-run');
+check('J15 migration 287 carries a run already in flight in as a streak of one, from its own start',
+    [(int) ($carried['unfinishedRuns'] ?? -1), $carried['unfinishedSinceUtc'] !== null], [1, true]);
+$db->query('DELETE FROM `tblScheduledJobRun`');
+
+// The plants, each in a COPY of the class run by the same scenarios.
+$pa = $plantClass('if ($neverFinished === true && $unfinishedSeconds > $facts[\'overdue\']) {',
+    'if ($neverFinished === true && $since > $facts[\'overdue\']) {');
+check('JPa with state() judging the NEWEST start again (the #817 fault), the plant applied AND J1\'s job reads RUNNING_NOW',
+    [$pa['applied'], $pa['result']['crash']['status'] ?? null], [true, ScheduledJobs::RUNNING_NOW]);
+$pb = $plantClass("'`unfinishedSinceUtc` = COALESCE(`unfinishedSinceUtc`, UTC_TIMESTAMP()), '",
+    "'`unfinishedSinceUtc` = UTC_TIMESTAMP(), '");
+check('JPb with began() restarting the streak\'s clock on every run, the plant applied AND J1\'s job reads RUNNING_NOW',
+    [$pb['applied'], $pb['result']['crash']['status'] ?? null], [true, ScheduledJobs::RUNNING_NOW]);
+$pc = $plantClass("'`unfinishedSinceUtc` = NULL, `unfinishedRuns` = 0'", "'`unfinishedRuns` = `unfinishedRuns`'");
+check('JPc with finished() no longer ending the streak, the plant applied AND a job that finished is reported as never finishing',
+    [$pc['applied'], $pc['result']['afterFinish']['status'] ?? null], [true, ScheduledJobs::DIED_PART_WAY]);
+foreach (glob($scenarioDir . $sep . '*') ?: [] as $leftover) {
+    unlink($leftover);
+}
+rmdir($scenarioDir);
+$db->query('DROP TABLE `tblScheduledJobRun`');
+$db->query($grab[0]);
+$apply287();
+ScheduledJobs::forgetTableCheck();
 
 echo "\n=== Summary ===\n";
 echo "{$passed} passed, {$failed} failed.\n";

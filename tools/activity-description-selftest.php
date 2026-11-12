@@ -100,7 +100,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 16;
+const EXPECTED_CHECKS = 18; // 16 until #1008 added part E2 (two)
 
 function refuse(string $why): never
 {
@@ -197,6 +197,8 @@ const PIA   = 933002; // a member with a password; fails a sign-in, asks for a r
 const QUIN  = 933003; // a person in NO organisation, added to one on the member list
 const EVENT = 933101; // a public event open for registration
 const LINK  = 933201; // Pia's Google link, removed in part F
+const NAMELESS_IN  = 933901; // #1008, part E2 (well above 933004, the number part D's new account is given): a member of organisation 1 whose account holds NO name (NULL)
+const NAMELESS_OUT = 933902; // #1008, part E2: a person in no organisation whose name is '' (offered in the add list)
 
 const PIA_NAME      = 'Pia Privacyperson';
 const PIA_EMAIL     = 'pia.privacy933@selftest.invalid';
@@ -218,7 +220,7 @@ const PERSONAL_TEXTS = [PIA_NAME, PIA_EMAIL, PIA_LOGIN, GOOGLE_EMAIL, MS_EMAIL, 
 /** Remove every row this test makes. Run first (a killed run leaves rows) and last. */
 function removeWorld(): void
 {
-    $people = [ROOT, PIA, QUIN];
+    $people = [ROOT, PIA, QUIN, NAMELESS_IN, NAMELESS_OUT];
     $new    = array_map('intval', array_column(q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [NEW_EMAIL]), 'userID'));
     $all    = array_merge($people, $new);
     $marks  = implode(',', array_fill(0, count($all), '?'));
@@ -474,7 +476,11 @@ unset($env['PHP_CLI_SERVER_WORKERS']);
 $env['PORTAL_ENV'] = 'prod';
 $state['proc']     = proc_open(
     [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        '-d', 'display_errors=0', '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+        // #1008: no opcache, so part E2's planted file is read afresh by the very
+        // next request. With it on (the default for this server), a file
+        // rewritten inside opcache's two-second check window was served from
+        // the old compiled copy, and the plant passed or failed by timing.
+        '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0', '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server-output.log', 'a'], 2 => ['file', $child . $sep . 'server-output.log', 'a']],
     $pipes,
     $child,
@@ -636,6 +642,69 @@ ok(
     'E1 adding a person writes "Added user #' . QUIN . ' to site #1", with no name or e-mail address',
     count($addRec) === 1 && $addRec[0]['activityDescription'] === 'Added user #' . QUIN . ' to site #1' && personalIn((string) $addRec[0]['activityDescription']) === '',
     'list HTTP ' . $list['status'] . ', add HTTP ' . $added['status'] . '; records ' . json_encode(array_column($addRec, 'activityDescription'))
+);
+
+// =============================================================================
+head('E2. #1008 — the member list draws an account with no name, rather than stopping part-way');
+// =============================================================================
+// An account can hold no name (`tblUsers.fullName` is nullable; an erased
+// account, or one a script made, has none). The page passed the name straight
+// to htmlspecialchars(), which under strict types throws on null — after the
+// header had gone, so the answer was HTTP 200 with the list cut off. The
+// error log is read as well as the page, because that is where it showed.
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, NULL, ?, 1, 0, 0), (?, \'\', ?, 1, 0, 0)',
+    'isis', [NAMELESS_IN, 'nameless.in933@selftest.invalid', NAMELESS_OUT, 'nameless.out933@selftest.invalid']);
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 0, 0)', 'i', [NAMELESS_IN]);
+$errorLog = $child . $sep . 'php-errors.log';
+/** The member list drawn now, with whatever this request added to the server's error log. */
+$drawList = static function () use ($jarOf, $errorLog): array {
+    clearstatcache();
+    $before = is_file($errorLog) === true ? (int) filesize($errorLog) : 0;
+    $page   = req($jarOf('root'), 'GET', '/admin/sites/users?site=1');
+    // ⚠️ The server writes its log lines as the request ENDS, which can be a
+    //    moment after the answer has reached us: read at once, the log came
+    //    back empty on one run of the plant below and full on the next. So
+    //    wait half a second first — otherwise "nothing in the error log" in
+    //    E2a could pass on broken code just by reading too early.
+    usleep(500000);
+    clearstatcache();
+    $after  = is_file($errorLog) === true ? (string) file_get_contents($errorLog, false, null, $before) : '';
+
+    return ['status' => $page['status'], 'body' => $page['body'], 'log' => $after];
+};
+$drawn = $drawList();
+ok(
+    'E2a the list is drawn WHOLE (HTTP 200, the list closed — not merely </html>, which the error handler prints after a fault too) with "No name recorded" for the member with no name AND for the person offered in the add list, and nothing in the error log',
+    $drawn['status'] === 200 && str_contains($drawn['body'], '</table>') === true
+        && substr_count($drawn['body'], 'No name recorded') === 2
+        && str_contains($drawn['body'], 'nameless.in933@selftest.invalid') === true
+        && trim($drawn['log']) === '',
+    'HTTP ' . $drawn['status'] . ', list closed (</table>): ' . var_export(str_contains($drawn['body'], '</table>'), true)
+        . ', placeholders: ' . substr_count($drawn['body'], 'No name recorded') . ', log: ' . mb_substr(trim($drawn['log']), 0, 300)
+);
+// The plant: the old line put back in the COPY the server runs, then restored.
+$usersCopy = $child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'sites' . $sep . 'users.php';
+$usersText = (string) file_get_contents($usersCopy);
+$fixedLine = "\$auName     = htmlspecialchars(\$personName(\$au['fullName']), ENT_QUOTES, 'UTF-8');";
+$planted   = null;
+if (substr_count($usersText, $fixedLine) === 1) {
+    file_put_contents($usersCopy, str_replace($fixedLine, "\$auName     = htmlspecialchars(\$au['fullName'], ENT_QUOTES, 'UTF-8');", $usersText));
+    try {
+        $planted = $drawList();
+    } finally {
+        file_put_contents($usersCopy, $usersText);
+    }
+}
+ok(
+    // The log's first line is not the TypeError itself: the portal's error
+    // handler catches that and draws its error page AFTER the header has gone,
+    // which logs "headers already sent". Any line at all is enough for E2a's
+    // "nothing in the error log" to fail, which is what this proves.
+    'E2b PLANTED: with the old line back, the list is cut off part-way and the error log is no longer empty (so E2a can fail)',
+    $planted !== null && str_contains($planted['body'], '</table>') === false && trim($planted['log']) !== '',
+    $planted === null ? 'the plant did not apply: the line it replaces has moved' : 'HTTP ' . $planted['status']
+        . ', list closed: ' . var_export(str_contains($planted['body'], '</table>'), true) . ', log: ' . mb_substr(trim($planted['log']), 0, 300)
+        . ', page ends: ' . mb_substr(trim(strip_tags($planted['body'])), -200)
 );
 
 // =============================================================================

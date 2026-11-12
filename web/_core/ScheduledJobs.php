@@ -99,6 +99,37 @@
  * inferred from a caught error, because "the table is not there yet" and
  * "something is wrong" must not be answered the same way.
  *
+ * -----------------------------------------------------------------------------
+ * A JOB THAT DIES ON EVERY RUN (#817, migration 287)
+ * -----------------------------------------------------------------------------
+ * Each run's `began()` clears the finish and resets the start. So a job that
+ * died part-way on EVERY run — the case most worth knowing about — always had
+ * a fresh start and no finish, and `state()` answered RUNNING_NOW for ever:
+ * the page said "part-way through … reload this page in a few minutes" under
+ * an all-clear, and its own promise that such a job "will be reported as
+ * having started and never finished" was untrue. Since D-076 every allowance
+ * is at least three times the job's gap, so this applied to EVERY frequent job
+ * by construction.
+ *
+ * The fix keeps two more facts that `began()` never clears while runs keep
+ * failing to finish: `unfinishedSinceUtc`, when the OLDEST run in the current
+ * unbroken streak of unfinished runs began, and `unfinishedRuns`, how many runs
+ * the streak holds (the newest included). A finish ends the streak. `state()`
+ * then judges a job with no finish by how long it has gone WITHOUT ANY RUN
+ * FINISHING — the oldest start of the streak — against the job's own
+ * allowance, which is D-070's rule ("overdue is per job") applied to finishes.
+ *
+ * WHY NOT "the run before this one never finished, so report it" (a count of
+ * one). A job called again while its previous run is genuinely still going —
+ * a slow mail server, a long feed import — has exactly that shape for a few
+ * minutes, and reporting it would be a false alarm on a healthy portal (#483).
+ * Judging the streak's AGE reports only a job that has not finished a single
+ * run for longer than its own allowance, which no healthy job does.
+ *
+ * Before migration 287 has run the two columns are not there (files land
+ * first, #694), and the class then records and reads exactly as it did before
+ * #817 — asked with `SHOW COLUMNS`, never inferred from a caught error.
+ *
  * @package WebMS\Portal\Core
  * @author  MWBM Partners Ltd (t/a MWservices)
  * @copyright All Rights Reserved — MWBM Partners Ltd (t/a MWservices)
@@ -433,6 +464,9 @@ final class ScheduledJobs
     /** @var bool|null Whether the table is there; asked once per request. */
     private static ?bool $tableThere = null;
 
+    /** @var bool|null Whether migration 287's two streak columns are there (#817); asked once per request. */
+    private static ?bool $streakThere = null;
+
     /**
      * 🔀 Record that a job has BEGUN, called once its token has been accepted.
      *
@@ -459,13 +493,31 @@ final class ScheduledJobs
             return false;
         }
         try {
-            $stmt = $db->prepare(
-                'INSERT INTO `tblScheduledJobRun` '
-                . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`) '
-                . 'VALUES (?, UTC_TIMESTAMP(), NULL, \'\') '
-                . 'ON DUPLICATE KEY UPDATE '
-                . '`startedAtUtc` = UTC_TIMESTAMP(), `finishedAtUtc` = NULL, `lastOutcome` = \'\''
-            );
+            // 🔁 #817: every start EXTENDS the streak of runs with no finish:
+            //    one more run, and the streak keeps the moment its oldest run
+            //    began. A finish is what ENDS a streak — finished() empties both
+            //    columns — so after a finish this start opens a new streak of
+            //    one, from now. That is the ONE place a streak ends; this
+            //    statement deliberately does not also ask whether the previous
+            //    run finished, because two mechanisms for one rule are two
+            //    places for it to drift, and a test can then pin neither
+            //    (tools/scheduled-jobs-selftest.php section J plants each half).
+            //    A row carried over by migration 287 with a run in flight has
+            //    its streak filled in by that migration.
+            $sql = self::streakColumnsThere($db) === true
+                ? 'INSERT INTO `tblScheduledJobRun` '
+                    . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`, `unfinishedSinceUtc`, `unfinishedRuns`) '
+                    . 'VALUES (?, UTC_TIMESTAMP(), NULL, \'\', UTC_TIMESTAMP(), 1) '
+                    . 'ON DUPLICATE KEY UPDATE '
+                    . '`unfinishedSinceUtc` = COALESCE(`unfinishedSinceUtc`, UTC_TIMESTAMP()), '
+                    . '`unfinishedRuns` = LEAST(`unfinishedRuns` + 1, 65535), '
+                    . '`startedAtUtc` = UTC_TIMESTAMP(), `finishedAtUtc` = NULL, `lastOutcome` = \'\''
+                : 'INSERT INTO `tblScheduledJobRun` '
+                    . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`) '
+                    . 'VALUES (?, UTC_TIMESTAMP(), NULL, \'\') '
+                    . 'ON DUPLICATE KEY UPDATE '
+                    . '`startedAtUtc` = UTC_TIMESTAMP(), `finishedAtUtc` = NULL, `lastOutcome` = \'\'';
+            $stmt = $db->prepare($sql);
             $stmt->bind_param('s', $jobKey);
             $stmt->execute();
             $stmt->close();
@@ -532,13 +584,23 @@ final class ScheduledJobs
             // ⚠️ AN UPSERT, NOT AN UPDATE. A job whose page was changed to call
             //    only finished() would otherwise record nothing at all, and the
             //    silence would look exactly like the job not running.
-            $stmt = $db->prepare(
-                'INSERT INTO `tblScheduledJobRun` '
-                . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`) '
-                . 'VALUES (?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?) '
-                . 'ON DUPLICATE KEY UPDATE '
-                . '`finishedAtUtc` = UTC_TIMESTAMP(), `lastOutcome` = VALUES(`lastOutcome`)'
-            );
+            // 🔁 #817: a finish ENDS the streak of unfinished runs — the one
+            //    place that happens (see began()). Without this, a healthy job
+            //    that once failed would carry its old streak into every later
+            //    run and be reported as never finishing.
+            $sql = self::streakColumnsThere($db) === true
+                ? 'INSERT INTO `tblScheduledJobRun` '
+                    . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`, `unfinishedSinceUtc`, `unfinishedRuns`) '
+                    . 'VALUES (?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, NULL, 0) '
+                    . 'ON DUPLICATE KEY UPDATE '
+                    . '`finishedAtUtc` = UTC_TIMESTAMP(), `lastOutcome` = VALUES(`lastOutcome`), '
+                    . '`unfinishedSinceUtc` = NULL, `unfinishedRuns` = 0'
+                : 'INSERT INTO `tblScheduledJobRun` '
+                    . '(`jobKey`, `startedAtUtc`, `finishedAtUtc`, `lastOutcome`) '
+                    . 'VALUES (?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?) '
+                    . 'ON DUPLICATE KEY UPDATE '
+                    . '`finishedAtUtc` = UTC_TIMESTAMP(), `lastOutcome` = VALUES(`lastOutcome`)';
+            $stmt = $db->prepare($sql);
             $stmt->bind_param('ss', $jobKey, $word);
             $stmt->execute();
             $stmt->close();
@@ -560,8 +622,17 @@ final class ScheduledJobs
      * database rather than by PHP, so neither clock nor zone comes into it —
      * every moment in this table is UTC from `UTC_TIMESTAMP()`.
      *
+     * #817: for a job whose newest run has no finish, `unfinishedRuns` is how
+     * many runs in a row have begun without one (the newest included, so at
+     * least 1) and `unfinishedSeconds` how long ago the OLDEST of them began —
+     * which is how long the job has gone without finishing anything, and what
+     * decides DIED_PART_WAY. For every other job they are 0 and null. Before
+     * migration 287 has run they are 1 and `seconds`, which is exactly the
+     * pre-#817 judgement.
+     *
      * @return array<string, array{status: string, whatStops: string, token: string,
-     *                             overdue: int, seconds: int|null, outcome: string}>
+     *                             overdue: int, seconds: int|null, outcome: string,
+     *                             unfinishedRuns: int, unfinishedSeconds: int|null}>
      */
     public static function state(mysqli $db): array
     {
@@ -569,10 +640,18 @@ final class ScheduledJobs
         $readBroke = false;
         if (self::tableExists($db) === true) {
             try {
+                // #817: the streak's oldest start, where migration 287 has run.
+                // Without it, the newest start stands in, which is the old rule.
+                $streak = self::streakColumnsThere($db) === true
+                    ? 'TIMESTAMPDIFF(SECOND, COALESCE(`unfinishedSinceUtc`, `startedAtUtc`), UTC_TIMESTAMP()) AS `sinceUnfinished`, '
+                        . 'GREATEST(`unfinishedRuns`, 1) AS `unfinishedRuns`, '
+                    : 'TIMESTAMPDIFF(SECOND, `startedAtUtc`, UTC_TIMESTAMP()) AS `sinceUnfinished`, '
+                        . '1 AS `unfinishedRuns`, ';
                 $result = $db->query(
                     'SELECT `jobKey`, `lastOutcome`, '
                     . 'TIMESTAMPDIFF(SECOND, `finishedAtUtc`, UTC_TIMESTAMP()) AS `sinceFinished`, '
                     . 'TIMESTAMPDIFF(SECOND, `startedAtUtc`, UTC_TIMESTAMP()) AS `sinceStarted`, '
+                    . $streak
                     . '(`finishedAtUtc` IS NULL) AS `neverFinished` '
                     . 'FROM `tblScheduledJobRun`'
                 );
@@ -597,12 +676,14 @@ final class ScheduledJobs
             $row = $rows[$jobKey] ?? null;
             if ($row === null) {
                 $out[$jobKey] = [
-                    'status'    => $readBroke === true ? self::COULD_NOT_READ : self::NOT_KNOWN,
-                    'whatStops' => $facts['whatStops'],
-                    'token'     => $facts['token'],
-                    'overdue'   => $facts['overdue'],
-                    'seconds'   => null,
-                    'outcome'   => '',
+                    'status'            => $readBroke === true ? self::COULD_NOT_READ : self::NOT_KNOWN,
+                    'whatStops'         => $facts['whatStops'],
+                    'token'             => $facts['token'],
+                    'overdue'           => $facts['overdue'],
+                    'seconds'           => null,
+                    'outcome'           => '',
+                    'unfinishedRuns'    => 0,
+                    'unfinishedSeconds' => null,
                 ];
                 continue;
             }
@@ -617,7 +698,16 @@ final class ScheduledJobs
             //    the page claim every job had recorded a finish when one had
             //    not. RUNNING_NOW is the honest answer, and the page counts it
             //    separately.
-            if ($neverFinished === true && $since > $facts['overdue']) {
+            //
+            // 🔁 #817: JUDGED BY THE STREAK, NOT BY THE NEWEST START. A job that
+            //    dies on every run has a fresh start every time, so judging the
+            //    newest start alone answered RUNNING_NOW for ever. What matters
+            //    is how long the job has gone without ANY run finishing: the
+            //    oldest start in the unbroken streak of unfinished runs. For a
+            //    single unfinished run the two are the same moment, so nothing
+            //    changes in the case the old rule already got right.
+            $unfinishedSeconds = $neverFinished === true ? (int) $row['sinceUnfinished'] : null;
+            if ($neverFinished === true && $unfinishedSeconds > $facts['overdue']) {
                 $status = self::DIED_PART_WAY;
             } elseif ($neverFinished === true) {
                 $status = self::RUNNING_NOW;
@@ -628,12 +718,14 @@ final class ScheduledJobs
             }
 
             $out[$jobKey] = [
-                'status'    => $status,
-                'whatStops' => $facts['whatStops'],
-                'token'     => $facts['token'],
-                'overdue'   => $facts['overdue'],
-                'seconds'   => $since,
-                'outcome'   => (string) $row['lastOutcome'],
+                'status'            => $status,
+                'whatStops'         => $facts['whatStops'],
+                'token'             => $facts['token'],
+                'overdue'           => $facts['overdue'],
+                'seconds'           => $since,
+                'outcome'           => (string) $row['lastOutcome'],
+                'unfinishedRuns'    => $neverFinished === true ? (int) $row['unfinishedRuns'] : 0,
+                'unfinishedSeconds' => $unfinishedSeconds,
             ];
         }
 
@@ -789,9 +881,40 @@ final class ScheduledJobs
         return self::$tableThere = $there;
     }
 
-    /** Forget whether the table is there. For tests, and for the upgrade page after a migration. */
+    /**
+     * Whether migration 287's two streak columns are there (#817).
+     *
+     * ⚠️ ASKED, NEVER INFERRED FROM A CAUGHT ERROR, for the reason the table
+     *    check above gives: files land before anybody presses "Run
+     *    migrations", and a run must still be recorded in that window. Without
+     *    the columns the class records and reads exactly as it did before
+     *    #817. BOTH columns must be there; one alone (a migration that stopped
+     *    part-way) is treated as neither, so no statement names a column that
+     *    is missing.
+     */
+    private static function streakColumnsThere(mysqli $db): bool
+    {
+        if (self::$streakThere !== null) {
+            return self::$streakThere;
+        }
+        $there = false;
+        try {
+            $result = $db->query(
+                "SHOW COLUMNS FROM `tblScheduledJobRun` WHERE `Field` IN ('unfinishedSinceUtc', 'unfinishedRuns')"
+            );
+            $there  = $result->num_rows === 2;
+            $result->free();
+        } catch (Throwable $e) {
+            $there = false;
+        }
+
+        return self::$streakThere = $there;
+    }
+
+    /** Forget whether the table (and its #817 columns) are there. For tests, and for the upgrade page after a migration. */
     public static function forgetTableCheck(): void
     {
-        self::$tableThere = null;
+        self::$tableThere  = null;
+        self::$streakThere = null;
     }
 }

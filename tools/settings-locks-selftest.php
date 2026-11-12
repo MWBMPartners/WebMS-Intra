@@ -11,7 +11,8 @@
  * outside companies may be sent. Each such family has ONE method that says
  * which keys are its own: a `public static function …LockedInGeneralEditor()`
  * in `web/_core/`. The save handler asks every one of them when a row is
- * changed and when one is added.
+ * changed and when one is added, and (#845) the Settings page asks every one
+ * when it draws a row.
  *
  * WHAT WAS WRONG. The DELETE (in `web/_apps/settings/index.php`) asked eight
  * of the nine and not `TranscriptRetention::lockedInGeneralEditor()`, so a
@@ -44,8 +45,9 @@
  *     `1`/`0`): an unknown value there makes the run refuse.
  *
  * WHAT IT COVERS
- *   S  every lock method is ASKED on all three paths: changing a row and
- *      adding one (`save.php`), deleting one (`index.php`). Comments AND
+ *   S  every lock method is ASKED on all four paths: changing a row and
+ *      adding one (`save.php`), deleting one and drawing one (`index.php`,
+ *      the drawing since #845). Comments AND
  *      string literals are removed first (PHP's tokeniser), so a call that is
  *      only mentioned in a comment, or only written as text in a string,
  *      does not count.
@@ -64,12 +66,20 @@
  *      nothing) AND be recorded naming the key. Controls prove the same
  *      request shapes DO delete, change and add an ordinary setting, so a
  *      refusal is not just a request that never worked.
+ *   D  #845: the Settings page itself, read as the global administrator,
+ *      draws no Delete button on any locked row and no Edit button except on
+ *      the one row a method leaves open, and puts a note naming where the
+ *      setting IS changed in their place. (It used to draw both on the
+ *      transcription period and the currency, which were then refused.) The
+ *      drawing is also the fourth path section S reads.
  *   P  plants, in a COPY of the portal: the transcription refusal taken out of
  *      the delete; the giving refusal taken out of the delete; every delete
  *      refusal taken out at once; the transcription refusal taken out of BOTH
  *      save paths (change and add); and, in memory, for section S, the
  *      transcription call taken out of the delete and replaced by a string
- *      holding the call's text. Each must go red.
+ *      holding the call's text, and taken out of the DRAWING (P4c); and, for
+ *      section D, the drawing's transcription ask switched off (P8) and the
+ *      currency's note taken away (P9). Each must go red.
  *
  * HOW THE KEYS ARE ENUMERATED
  *   The candidates are every setting name in the database (a fresh install
@@ -101,10 +111,10 @@
  *   - A key locked only by a rule the methods do not express (for example a
  *     prefix written with a different function) is found only if its name is
  *     in the database or written in the method's body.
- *   - It does not look at the Settings page's own hiding of Edit and Delete
- *     buttons (that page draws a Delete button for transcription.retentionDays
- *     which is then refused — found while building #836 and left for its
- *     own change, because it is drawing, not the refusal).
+ *   - Section D reads the Settings page as a GLOBAL administrator only. What
+ *     an administrator of one organisation is shown for an installation-wide
+ *     row (an Edit button the save handler then refuses, for a reason that is
+ *     not a lock) is not judged here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_locks SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         [SELFTEST_WEB_PORT=9836] php tools/settings-locks-selftest.php
@@ -389,13 +399,13 @@ function lockedBy(array $methods, string $key): array
 }
 
 // =============================================================================
-head('Section S — every lock method is asked on all three paths (read; comments and strings removed)');
+head('Section S — every lock method is asked on all four paths (read; comments and strings removed)');
 // =============================================================================
 $saveRaw  = (string) file_get_contents($repo . $sep . 'web' . $sep . '_apps' . $sep . 'settings' . $sep . 'save.php');
 $indexRaw = (string) file_get_contents($repo . $sep . 'web' . $sep . '_apps' . $sep . 'settings' . $sep . 'index.php');
 
 /**
- * The three paths, cut from the RAW files at markers that are comments (so they
+ * The four paths, cut from the RAW files at markers that are comments (so they
  * must be cut before comments are removed), then reduced to code only.
  *
  * @return array<string, string> path name => its code, '' when a marker is missing
@@ -419,6 +429,9 @@ function threePaths(string $saveRaw, string $indexRaw): array
         'changing a row (save.php)' => $cut($saveRaw, 'if ($settingId > 0) {', '// ➕ Insert new.'),
         'adding a row (save.php)'   => $cut($saveRaw, '// ➕ Insert new.', ''),
         'deleting a row (index.php)' => $cut($indexRaw, "(\$_POST['action'] ?? '') === 'delete'", '// 📋 Fetch settings list'),
+        // #845: the page's own DRAWING of each row asks the same methods, so it
+        // offers no Edit or Delete button the handlers would then refuse.
+        'drawing a row (index.php)'  => $cut($indexRaw, '// 📋 Fetch settings list', ''),
     ];
 }
 
@@ -445,7 +458,7 @@ foreach ($paths as $path => $code) {
     check("S1 the path for {$path} was found", $code !== '', 'a marker this test cuts at has moved; nothing below can be trusted for that path');
 }
 $missing = missingAsks($methods, $paths);
-check('S2 every lock method is asked on every one of the three paths', $missing === [], 'not asked: ' . implode('; ', $missing));
+check('S2 every lock method is asked on every one of the four paths', $missing === [], 'not asked: ' . implode('; ', $missing));
 
 // =============================================================================
 // 🏗️ The keys: every candidate asked of every method
@@ -1015,6 +1028,88 @@ foreach (array_keys($locked) as $key) {
 }
 
 // =============================================================================
+head('Section D — #845: the Settings page draws no Edit or Delete button for a locked row, and names where it is set');
+// =============================================================================
+/**
+ * Read /settings as the global administrator and say, for each row drawn, whether
+ * it carries an Edit button, a Delete form, and the note naming the page where
+ * the setting is changed (its text, tags removed; null when there is no note).
+ * Cut at the Edit modal first, so the last row's block holds nothing after it.
+ *
+ * @return array{status: int, whole: bool, rows: array<int, array{edit: bool, delete: bool, note: ?string}>}
+ */
+$drawn = static function () use ($http): array {
+    $answer = $http('GET', '/settings');
+    $body   = $answer['body'];
+    $end    = strpos($body, '<!-- 📝 Edit Modal -->');
+    $list   = $end === false ? $body : substr($body, 0, $end);
+    $rows   = [];
+    foreach (array_slice(explode('<div class="portal-data-row portal-setting-row"', $list), 1) as $block) {
+        if (preg_match('/^\s*data-setting-id="(\d+)"/', $block, $m) !== 1) {
+            continue;
+        }
+        $note = null;
+        if (preg_match('/<span class="d-inline-block" data-locked-note="1">(.*?)<\/span>\s*(?:<form|<\/div>)/s', $block, $n) === 1) {
+            $note = trim(preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($n[1]), ENT_QUOTES, 'UTF-8')) ?? '');
+        }
+        $rows[(int) $m[1]] = [
+            'edit'   => str_contains($block, 'data-bs-target="#editModal"'),
+            'delete' => str_contains($block, 'name="action" value="delete"'),
+            'note'   => $note,
+        ];
+    }
+
+    return ['status' => $answer['status'], 'whole' => str_contains($body, '</html>'), 'rows' => $rows];
+};
+/** Every snapshot row judged against what was drawn. @return list<string> one line per row drawn wrongly */
+$drawnWrong = static function (array $page) use (&$snapshot, $changeLocked, $site): array {
+    $wrong = [];
+    foreach ($snapshot as $row) {
+        $id    = (int) $row['settingID'];
+        $level = $row['siteID'] === null ? 'installation' : 'organisation ' . $site;
+        $seen  = $page['rows'][$id] ?? null;
+        if ($seen === null) {
+            $wrong[] = $row['settingKey'] . " ({$level}): not drawn at all";
+            continue;
+        }
+        if ($seen['delete'] === true) {
+            $wrong[] = $row['settingKey'] . " ({$level}): a DELETE button is drawn";
+        }
+        if ($changeLocked($row) === false) {
+            // The one row a method leaves open to a global administrator: Edit IS offered.
+            if ($seen['edit'] === false) {
+                $wrong[] = $row['settingKey'] . " ({$level}): left open by its method, yet no Edit button";
+            }
+            continue;
+        }
+        if ($seen['edit'] === true) {
+            $wrong[] = $row['settingKey'] . " ({$level}): an EDIT button is drawn";
+        }
+        if ($seen['note'] === null || $seen['note'] === '') {
+            $wrong[] = $row['settingKey'] . " ({$level}): no note naming where it is changed";
+        }
+    }
+
+    return $wrong;
+};
+// The control: an ordinary row of this organisation's DOES draw both buttons, and no note.
+run($db, "DELETE FROM `tblSettings` WHERE `settingKey` = 'selftest836.ordinary.drawn'");
+run($db, "INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, 'selftest836.ordinary.drawn', 'x', '', 0)", 'i', [$site]);
+$controlId = (int) $db->insert_id;
+$page      = $drawn();
+$control   = $page['rows'][$controlId] ?? null;
+check('D0 PREMISE: the page is drawn whole (HTTP 200, </html>), and an ordinary row DOES carry an Edit button and a Delete button, and no note',
+    $page['status'] === 200 && $page['whole'] === true && $control !== null && $control['edit'] === true && $control['delete'] === true && $control['note'] === null,
+    'HTTP ' . $page['status'] . ', control row: ' . json_encode($control));
+$wrongDrawn = $drawnWrong($page);
+check('D1 every one of the ' . count($snapshot) . ' locked rows draws no Delete button, no Edit button (except the one row its method leaves open), and a note naming where it is changed',
+    $wrongDrawn === [], implode('; ', $wrongDrawn));
+check('D2 PREMISE (#845\'s own key): transcription.retentionDays and the currency are among the rows judged',
+    isset($locked['transcription.retentionDays']) === true && array_filter(array_keys($locked), static fn ($k): bool => \Portal\Core\Currency::lockedInGeneralEditor((string) $k)) !== [],
+    'locked: ' . implode(', ', array_keys($locked)));
+run($db, 'DELETE FROM `tblSettings` WHERE `settingID` = ?', 'i', [$controlId]);
+
+// =============================================================================
 head('Section P — the plants: each refusal taken out of a COPY must turn this red');
 // =============================================================================
 $copyOf = static fn (string $name): string => $child . $sep . 'web' . $sep . '_apps' . $sep . 'settings' . $sep . $name;
@@ -1110,6 +1205,21 @@ check('P7 with the UPDATE silently skipped (the page still says "updated"), the 
     $p7['applied'] === true && $openRows !== [] && ($p7['result']['stored'] ?? true) === false && ($p7['result']['said'] ?? false) === true,
     'applied: ' . var_export($p7['applied'], true) . ', open rows: ' . count($openRows));
 
+// #845: the drawing's transcription ask taken out — the row offers Edit and Delete again.
+$p8 = $plant($copyOf('index.php'), [
+    "\$transcriptLocked = \\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$row['settingKey']);" => '$transcriptLocked = false;',
+], static fn (): array => $drawnWrong($drawn()));
+check('P8 with the drawing\'s transcription ask taken out, the plant applied AND section D names transcription.retentionDays drawn with buttons',
+    $p8['applied'] === true && count(array_filter($p8['result'] ?? [], static fn (string $l): bool => str_starts_with($l, 'transcription.retentionDays '))) > 0,
+    'applied: ' . var_export($p8['applied'], true) . '; D reported: ' . implode('; ', $p8['result'] ?? []));
+// #845: a lock with no branch in the note — the row hides its buttons and says nothing.
+$p9 = $plant($copyOf('index.php'), [
+    "<?php elseif (\$currencyLocked === true): ?>" => "<?php elseif (false): ?>",
+], static fn (): array => $drawnWrong($drawn()));
+check('P9 with the currency\'s note branch taken out, the plant applied AND section D names a row with no note',
+    $p9['applied'] === true && count(array_filter($p9['result'] ?? [], static fn (string $l): bool => str_contains($l, 'no note naming'))) > 0,
+    'applied: ' . var_export($p9['applied'], true) . '; D reported: ' . implode('; ', $p9['result'] ?? []));
+
 // Section S's own plants, in memory.
 $plantedIndex = str_replace(
     "\\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$lockedKey['settingKey'])",
@@ -1126,6 +1236,15 @@ $textOnly = str_replace(
     $indexRaw
 );
 $textMissing = missingAsks($methods, threePaths($saveRaw, $textOnly));
+$drawingPlanted = str_replace(
+    "\\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$row['settingKey'])",
+    'false',
+    $indexRaw
+);
+$drawingMissing = missingAsks($methods, threePaths($saveRaw, $drawingPlanted));
+check('P4c with the transcription call taken out of the DRAWING, section S names exactly that one missing ask',
+    $drawingPlanted !== $indexRaw && $drawingMissing === ['drawing a row (index.php): TranscriptRetention::lockedInGeneralEditor()'],
+    'section S reported: ' . implode('; ', $drawingMissing));
 check('P4b with the call replaced by a STRING holding its text (refuses nothing), section S still names it missing',
     $textOnly !== $indexRaw && $textMissing === ['deleting a row (index.php): TranscriptRetention::lockedInGeneralEditor()'],
     'section S reported: ' . ($textMissing === [] ? 'nothing missing' : implode('; ', $textMissing)));
@@ -1143,9 +1262,9 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 // ── Tidy up: only what this run made (the shutdown function would do it too) ─
 $cleanUp();
 
-// S1 three times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
-// per key, P1 to P3, P6a/b, P7, P4, P4b, P5.
-$expected = 3 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 3 + 2 + 1 + 2 + 1;
+// S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
+// per key, D0 to D2, P1 to P3, P6a/b, P7, P8, P9, P4, P4c, P4b, P5.
+$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 3 + 3 + 2 + 1 + 2 + 1 + 2 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

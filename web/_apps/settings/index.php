@@ -749,6 +749,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php foreach ($groupRows as $row): ?>
                             <?php $isSensitive = $row['isSecret']; ?>
                             <div class="portal-data-row portal-setting-row"
+                                 data-setting-id="<?php echo (int) $row['settingID']; ?>"
                                  data-setting-key="<?php echo htmlspecialchars($row['settingKey'], ENT_QUOTES, 'UTF-8'); ?>">
                                 <div class="col-12 col-md-4">
                                     <span class="d-md-none fw-semibold">Key: </span>
@@ -834,7 +835,37 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     $foyerLocked = \Portal\Core\NoticeboardFoyer::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 And for which port numbers a webhook may use (#615, D-102).
                                     $webhookPortsLocked = \Portal\Core\WebhookPorts::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 #845: how long transcripts are kept (#722) and the currency
+                                    //    (#966). Both handlers refused them, but this drawing never
+                                    //    asked, so the row offered an Edit button (and, to a global
+                                    //    administrator, a Delete button) that could only be refused.
+                                    $transcriptLocked = \Portal\Core\TranscriptRetention::lockedInGeneralEditor((string) $row['settingKey']);
+                                    $currencyLocked   = \Portal\Core\Currency::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 #845: ONE answer each to "is Edit offered" and "is Delete
+                                    //    offered", built from the methods' answers above and nothing
+                                    //    else. They used to be two separate chains — the Edit chain
+                                    //    below and a long `=== false` list on the Delete button — and
+                                    //    each lock method had to be added to both by hand, which is
+                                    //    how the two above came to be missing from both. The Delete
+                                    //    answer differs in ONE place on purpose: the giving-records
+                                    //    rule is refused on delete for EVERY row of its family, the
+                                    //    installation's hold included (deleting the hold switches it
+                                    //    off), while a global administrator may still CHANGE that one
+                                    //    row here. tools/settings-locks-selftest.php (sections S and
+                                    //    D) fails when a lock method in web/_core is not asked here,
+                                    //    or when a locked row draws either button.
+                                    $editLocked = $givingLocked === true || $organisationsLocked === true || $mailLocked === true
+                                        || $versionLocked === true || $capabilityLocksLocked === true || $zoneLocked === true
+                                        || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
+                                        || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
+                                        || $transcriptLocked === true || $currencyLocked === true;
+                                    $deleteLocked = $editLocked === true || $isGivingRule === true;
                                     ?>
+                                    <?php if ($editLocked === true): ?>
+                                    <?php /* The note naming where the setting IS changed. One branch per
+                                             family below; `data-locked-note` is what the self-test reads,
+                                             and an empty note (a lock with no branch) fails it. */ ?>
+                                    <span class="d-inline-block" data-locked-note="1">
                                     <?php if ($zoneLocked === true && Site::timezoneFacts()['inRow'] === false): ?>
                                         <?php // Before migration 217 has run, neither page takes a zone: the way on is the upgrade. ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/upgrade'), ENT_QUOTES, 'UTF-8'); ?>">Run the upgrade first (Admin, Upgrade); then time zones are chosen at Admin, Organisations</a>
@@ -877,6 +908,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Registration retention</a>
                                     <?php elseif ($givingLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Giving records</a>
+                                    <?php elseif ($transcriptLocked === true && $row['siteID'] === null): ?>
+                                        <?php /* The installation's figure is set on Admin, Transcription (a
+                                                 global administrator's card there); an organisation's own on
+                                                 Admin, Settings, Transcript retention. TranscriptRetention::LOCKED_MESSAGE. */ ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/transcription'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isRoot === true ? 'Changed at Admin, Transcription' : 'Changed by a global administrator, at Admin, Transcription'; ?></a>
+                                    <?php elseif ($transcriptLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/transcription'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Transcript retention</a>
+                                    <?php elseif ($currencyLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Organisation</a>
+                                    <?php endif; ?>
+                                    </span>
                                     <?php else: ?>
                                     <button class="btn btn-sm btn-outline-primary me-1" data-bs-toggle="modal" data-bs-target="#editModal"
                                             data-id="<?php echo (int) $row['settingID']; ?>"
@@ -887,10 +929,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <i class="fa-solid fa-pen"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <?php /* 🔒 `$capabilityLocksLocked` joined this list with #727: the delete handler
-                                             refuses the row anyway, so drawing the button would offer a
-                                             control that cannot work. */ ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false && $activityLogLocked === false && $copiedRuleLocked === false && $foyerLocked === false && $webhookPortsLocked === false): ?>
+                                    <?php /* 🔒 No Delete button for a locked row: the delete handler refuses
+                                             it anyway, so drawing it would offer a control that cannot
+                                             work (#727, #845). `$deleteLocked` is worked out above. */ ?>
+                                    <?php if ($isRoot === true && $deleteLocked === false): ?>
                                         <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

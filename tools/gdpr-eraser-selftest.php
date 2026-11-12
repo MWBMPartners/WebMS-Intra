@@ -784,12 +784,25 @@ $GLOBALS['ge_triggers'] = [];
 $GLOBALS['ge_files']    = [];
 $GLOBALS['ge_dirs']     = [];
 $GLOBALS['ge_family']   = 931000;
+// 🧹 #1008: every account this run makes, by number, so the clean-up can take
+//    each one away again (ge_removeAccounts()). Filled by ge_user(), the ONE
+//    place this file makes an account.
+$GLOBALS['ge_users']    = [];
+$GLOBALS['ge_accounts_removed'] = null;
 
 // 🧹 Whatever happens, take the planted triggers and the scratch files away.
 //    Only files this run made are removed, by their exact names; the folders
 //    are removed with rmdir(), which refuses a folder that is not empty.
 register_shutdown_function(static function () use ($scratch): void {
     global $mysqli;
+    // 🧹 #1008: the accounts too, on EVERY way out — a crash or a refusal
+    //    included — not only the normal end. ge_finish() does it first and
+    //    this does nothing when it already has (it runs once).
+    try {
+        ge_removeAccounts();
+    } catch (Throwable $ignored) {
+        echo "  ! the accounts this run made could not all be removed; numbers 920000 and up may be left.\n";
+    }
     foreach ($GLOBALS['ge_triggers'] as $trigger) {
         try {
             $mysqli->query('DROP TRIGGER IF EXISTS `' . $trigger . '`');
@@ -857,9 +870,83 @@ function ge_section(string $number, string $title): void
     echo "\n== " . $number . '. ' . $title . "\n";
 }
 
+/**
+ * 🧹 #1008: take away every account this run made, and every row that names
+ * one of them, then say how many accounts are still there (0 when it worked).
+ *
+ * WHAT WAS WRONG. Nothing removed them. The run left its made-up people in the
+ * database — 144 of them from section 23's table alone (920800-920943), 24 of
+ * those with NO name — and on a test database shared with another self-test,
+ * `admin/sites/users.php` then threw part-way through its list on a nameless
+ * account (the page half is fixed there), failing that other test's
+ * error-log check. A test must leave behind nothing it made.
+ *
+ * WHICH ROWS. Every column that names an account: each column with a link to
+ * `tblUsers`.`userID` (read from `information_schema`, never typed here, so a
+ * new table is covered without anybody remembering it), and each column called
+ * `userID`, which several tables carry with no link declared. Then the
+ * accounts themselves. Only rows naming THIS RUN'S numbers are touched — they
+ * are all 920000 or higher, far above anything the install script seeds — so
+ * a seeded row is never removed. The links are switched off for the deletes
+ * because the order among dozens of tables cannot be worked out by hand; the
+ * database is a throwaway (the name check at the top refuses anything else).
+ *
+ * WHAT IT DOES NOT REMOVE, said plainly: rows this run made that name no
+ * account in either of those ways (an organisation made for a section, a
+ * setting, a category), and a row naming an account only in a column with no
+ * declared link and another name (`donorID`, say). Those name nobody who still
+ * exists once the account is gone. #1008 is about the accounts.
+ *
+ * Runs once: a second call (the shutdown function, after ge_finish()) answers
+ * the first call's count.
+ */
+function ge_removeAccounts(): int
+{
+    global $mysqli;
+    if (is_int($GLOBALS['ge_accounts_removed'] ?? null) === true) {
+        return $GLOBALS['ge_accounts_removed'];
+    }
+    $ids = array_values(array_unique(array_map('intval', $GLOBALS['ge_users'] ?? [])));
+    if ($ids === []) {
+        return $GLOBALS['ge_accounts_removed'] = 0;
+    }
+    // Whole numbers only, from this file's own constants: safe to write into the statement.
+    $list = implode(',', $ids);
+    $columns = ge_q(
+        'SELECT DISTINCT k.`TABLE_NAME` AS `t`, k.`COLUMN_NAME` AS `c` '
+        . 'FROM `information_schema`.`KEY_COLUMN_USAGE` k '
+        . 'JOIN `information_schema`.`TABLES` tb ON tb.`TABLE_SCHEMA` = k.`TABLE_SCHEMA` AND tb.`TABLE_NAME` = k.`TABLE_NAME` AND tb.`TABLE_TYPE` = \'BASE TABLE\' '
+        . 'WHERE k.`TABLE_SCHEMA` = DATABASE() AND k.`REFERENCED_TABLE_NAME` = \'tblUsers\' AND k.`REFERENCED_COLUMN_NAME` = \'userID\' '
+        . 'UNION '
+        . 'SELECT c.`TABLE_NAME`, c.`COLUMN_NAME` FROM `information_schema`.`COLUMNS` c '
+        . 'JOIN `information_schema`.`TABLES` tb ON tb.`TABLE_SCHEMA` = c.`TABLE_SCHEMA` AND tb.`TABLE_NAME` = c.`TABLE_NAME` AND tb.`TABLE_TYPE` = \'BASE TABLE\' '
+        . 'WHERE c.`TABLE_SCHEMA` = DATABASE() AND c.`COLUMN_NAME` = \'userID\' AND c.`TABLE_NAME` <> \'tblUsers\''
+    );
+    $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+    try {
+        foreach ($columns as $col) {
+            $mysqli->query('DELETE FROM `' . str_replace('`', '', (string) $col['t']) . '` WHERE `'
+                . str_replace('`', '', (string) $col['c']) . '` IN (' . $list . ')');
+        }
+        $mysqli->query('DELETE FROM `tblUsers` WHERE `userID` IN (' . $list . ')');
+    } finally {
+        $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+    }
+    $left = (int) (ge_q('SELECT COUNT(*) AS `n` FROM `tblUsers` WHERE `userID` IN (' . $list . ')')[0]['n'] ?? -1);
+    // Worded to be true either way: it says what was ASKED and what is still there.
+    echo "\nClean-up (#1008): this run made " . count($ids) . ' accounts; the deletes were run for each and every row naming one; '
+        . $left . " of them still in the database afterwards.\n";
+
+    return $GLOBALS['ge_accounts_removed'] = $left;
+}
+
 /** The end: exit 0 only when everything ran and nothing failed. */
 function ge_finish(): never
 {
+    // 🧹 #1008: the accounts this run made go BEFORE the verdict, so a clean-up
+    //    that leaves any behind is a failed run rather than a line nobody reads.
+    //    Not counted among EXPECTED_CHECKS: it is about the test, not the portal.
+    $accountsLeft = ge_removeAccounts();
     $ran = $GLOBALS['ge_pass'] + $GLOBALS['ge_fail'];
     echo "\n" . $GLOBALS['ge_pass'] . ' passed, ' . $GLOBALS['ge_fail'] . ' failed, ' . $ran . ' ran of '
         . EXPECTED_CHECKS . " expected.\n";
@@ -875,6 +962,10 @@ function ge_finish(): never
     }
     if ($GLOBALS['ge_fail'] > 0) {
         echo 'FAIL — ' . $GLOBALS['ge_fail'] . " check(s) failed.\n";
+        $bad = true;
+    }
+    if ($accountsLeft !== 0) {
+        echo 'FAIL — the clean-up left ' . $accountsLeft . " of this run's accounts in the database (#1008).\n";
         $bad = true;
     }
     if ($bad === true) {
@@ -1332,6 +1423,8 @@ function ge_dropTrigger(string $name): void
 
 function ge_user(int $id, string $name, string $email): void
 {
+    // 🧹 #1008: remembered, so the clean-up can take it away again.
+    $GLOBALS['ge_users'][] = $id;
     ge_insert('tblUsers', [], [
         'userID' => $id, 'fullName' => $name, 'emailAddress' => $email, 'isActive' => 1, 'isAdmin' => 0, 'isRootAdmin' => 0,
     ]);

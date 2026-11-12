@@ -928,9 +928,23 @@ final class PortalCheck
                 continue;
             }
             if ($facts['status'] === ScheduledJobs::DIED_PART_WAY) {
-                $diedPart[] = $words . ' — started '
-                    . ScheduledJobs::howLongAgo((int) $facts['seconds'])
-                    . ' and never finished';
+                // 🔁 #817: a job dying on EVERY run has a fresh start each time,
+                //    so "started 2 minutes ago and never finished" would hide
+                //    that nothing has finished for hours. Where more than one
+                //    run in a row has no finish, say so, and say how long ago
+                //    the OLDEST of them began — which is what made this a
+                //    problem (ScheduledJobs::state()). Two complete phrasings,
+                //    one per case, so neither is assembled from pieces.
+                $runs = (int) ($facts['unfinishedRuns'] ?? 1);
+                if ($runs > 1) {
+                    $diedPart[] = $words . ' — its last ' . $runs . ' runs each started and never finished, '
+                        . 'and none has finished since the first of them started '
+                        . ScheduledJobs::howLongAgo((int) ($facts['unfinishedSeconds'] ?? $facts['seconds']));
+                } else {
+                    $diedPart[] = $words . ' — started '
+                        . ScheduledJobs::howLongAgo((int) $facts['seconds'])
+                        . ' and never finished';
+                }
                 continue;
             }
             if ($facts['status'] === ScheduledJobs::COULD_NOT_READ) {
@@ -1222,11 +1236,16 @@ final class PortalCheck
             $findings[] = [
                 'severity' => self::NOTE,
                 'what'     => 'Some scheduled jobs were part-way through when this page was drawn.',
+                // 🔁 #817: the last sentence was untrue for a job that dies on
+                //    every run — each run's fresh start kept it "part-way" for
+                //    ever. ScheduledJobs::state() now counts from the OLDEST run
+                //    with no finish, so it is true, and is worded to say so.
                 'why'      => 'Each of these recorded a start and has not yet recorded a finish, '
                     . 'and not enough time has passed for that to be a worry. Usually it means '
-                    . 'the job is running at this moment. If one is still listed here after its '
-                    . 'own expected gap it will be reported as having started and never '
-                    . 'finished, which IS a problem.',
+                    . 'the job is running at this moment. If one of them goes longer than its '
+                    . 'own expected gap without any run finishing — however many times it is '
+                    . 'started again in between — it will be reported as having started and '
+                    . 'never finished, which IS a problem.',
                 'todo'     => 'Nothing. Reload this page in a few minutes to see whether they '
                     . 'finished.',
                 'count'    => count($running),

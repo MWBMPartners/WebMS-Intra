@@ -10781,6 +10781,8 @@ CREATE TABLE IF NOT EXISTS `tblScheduledJobRun` (
     `startedAtUtc`  DATETIME    NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when this job last BEGAN, recorded only after its token was accepted. A request with the wrong token writes nothing, or anybody on the internet could make a dead job look alive',
     `finishedAtUtc` DATETIME        NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this job last finished its work. EMPTY means the newest run began and never reached the end, which is what distinguishes a job dying part-way from one that is not being called at all',
     `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok, refused (it was called and deliberately did nothing) or failed (it tried and could not). NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
+    `unfinishedSinceUtc` DATETIME NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC (#817): when the OLDEST run in the current unbroken streak of runs with no finish began. EMPTY whenever the newest run has finished. began() never clears it while runs keep failing to finish, so a job that dies on EVERY run is judged by how long it has gone without finishing anything, not by its newest start',
+    `unfinishedRuns`     SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'How many runs in a row, the newest included, have begun and not recorded a finish (#817). 0 once a run finishes. Shown on the Check this portal page as the last N runs each started and never finished',
     PRIMARY KEY (`jobKey`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Whether each scheduled job has actually run (#775). Read by the Check this portal page.';
@@ -11795,6 +11797,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('283_every_amount_keeps_its_cur
 -- Every request that already exists is an account's, which is the column's
 -- default; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('286_erasure_by_visitor_address.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 287_scheduled_jobs_count_unfinished_runs.sql (#817) ───────────────
+-- tblScheduledJobRun.unfinishedSinceUtc and .unfinishedRuns are written above,
+-- in the table itself. A fresh install starts with the table EMPTY (D-071), so
+-- the migration's carry-over of an existing unfinished run has nothing to act
+-- on; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('287_scheduled_jobs_count_unfinished_runs.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

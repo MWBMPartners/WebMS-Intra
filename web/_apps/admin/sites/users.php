@@ -212,6 +212,22 @@ $flashMsg  = $_SESSION['flash_msg'] ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// 🏷️ #1008: an account can have NO name. `tblUsers.fullName` is nullable, and
+//    an erased account, or one made by a script, holds NULL there. This page
+//    passed it straight to htmlspecialchars(), which under strict types throws
+//    a TypeError on null — mid-page, after the header had gone, so the answer
+//    was HTTP 200 with the list cut off and a fault in the error log. Every
+//    name on this page is now shown through this one function, which says
+//    plainly that there is no name rather than printing nothing (an empty
+//    entry in a list of people reads as a fault in the page). The address is
+//    NOT NULL in the schema, but is cast for the same reason: a page must not
+//    depend on a column never being empty to finish drawing.
+$personName = static function (mixed $name): string {
+    $text = trim((string) ($name ?? ''));
+
+    return $text === '' ? 'No name recorded' : $text;
+};
+
 $siteName    = htmlspecialchars($siteInfo['siteName'], ENT_QUOTES, 'UTF-8');
 $pageTitle   = 'Users — ' . $siteInfo['siteName'];
 $pageSection = 'admin';
@@ -249,8 +265,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <option value="">— Select user —</option>
                     <?php foreach ($unassignedUsers as $uu): ?>
                     <option value="<?php echo (int) $uu['userID']; ?>">
-                        <?php echo htmlspecialchars($uu['fullName'], ENT_QUOTES, 'UTF-8'); ?>
-                        (<?php echo htmlspecialchars($uu['emailAddress'], ENT_QUOTES, 'UTF-8'); ?>)
+                        <?php echo htmlspecialchars($personName($uu['fullName']), ENT_QUOTES, 'UTF-8'); ?>
+                        (<?php echo htmlspecialchars((string) ($uu['emailAddress'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>)
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -287,8 +303,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php foreach ($assignedUsers as $au): ?>
             <?php
             $auId       = (int) $au['userID'];
-            $auName     = htmlspecialchars($au['fullName'], ENT_QUOTES, 'UTF-8');
-            $auEmail    = htmlspecialchars($au['emailAddress'], ENT_QUOTES, 'UTF-8');
+            $auName     = htmlspecialchars($personName($au['fullName']), ENT_QUOTES, 'UTF-8');
+            $auEmail    = htmlspecialchars((string) ($au['emailAddress'] ?? ''), ENT_QUOTES, 'UTF-8');
             $isSA       = ((string) $au['isSiteAdmin'] === '1');
             $isSRA      = ((string) $au['isSiteRootAdmin'] === '1');
             $isUmbrella = ((string) $au['isRootAdmin'] === '1');
