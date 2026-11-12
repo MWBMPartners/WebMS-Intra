@@ -1462,7 +1462,12 @@ cap_check(
 );
 cap_check(
     'and withholds the Delete button for it, rather than offering one that is refused',
-    str_contains($settingsIndex, '$capabilityLocksLocked === false') === true
+    // Since #845 one answer decides both buttons: the lock key is part of $editLocked, and
+    // $deleteLocked starts from $editLocked, so the Delete button is drawn only where neither is set.
+    preg_match('/\$editLocked\s*=\s*([^;]*);/', $settingsIndex, $editLockedExpr) === 1
+    && str_contains($editLockedExpr[1], '$capabilityLocksLocked === true') === true
+    && preg_match('/\$deleteLocked\s*=\s*\$editLocked === true\b/', $settingsIndex) === 1
+    && str_contains($settingsIndex, '$deleteLocked === false') === true
 );
 
 // =============================================================================

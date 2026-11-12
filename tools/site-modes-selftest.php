@@ -1184,7 +1184,9 @@ $withEdit  = 0;
 $wrong     = [];
 foreach (array_slice($rowsShown, 1) as $shownRow) {
     $hasButton = (str_contains($shownRow, 'data-bs-target="#editModal"') === true || str_contains($shownRow, 'name="action" value="delete"') === true);
-    if (preg_match('/^\s*data-setting-key="multisite\.(enabled|detectionMode)"/i', $shownRow) === 1) {
+    // The row's opening tag carries more than one attribute (#845 added data-setting-id before
+    // data-setting-key), so look anywhere inside that tag, never at a fixed position in it.
+    if (preg_match('/^[^>]*\bdata-setting-key="multisite\.(enabled|detectionMode)"/i', $shownRow) === 1) {
         $locked++;
         if ($hasButton === true || str_contains($shownRow, 'Changed at Admin, Organisations') === false) {
             $wrong[] = substr(trim($shownRow), 0, 60);

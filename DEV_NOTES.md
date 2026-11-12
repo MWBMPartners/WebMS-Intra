@@ -23885,3 +23885,65 @@ still read under the lock, and only an administrator with the form token can sen
   moves the stored time. Its own 1146 handler names its exception `$failure` because section O's plant O18b finds
   the 1146 test in `recordsCarryingYourName()` by its exact text.
 
+## A job that dies on every run (#817)
+
+`ScheduledJobs::began()` used to clear the finish and reset the start, so a job dying on
+every run always looked freshly started. Migration 287 adds `unfinishedSinceUtc` (when the
+OLDEST run in the current streak of unfinished runs began) and `unfinishedRuns`. `began()`
+extends a streak (`COALESCE(unfinishedSinceUtc, now)`, `+1`); `finished()` is the ONE
+place a streak ends (both emptied). `state()` judges a job with no finish by the streak's
+age against the job's allowance. Before 287 has run the class asks `SHOW COLUMNS` and uses
+the pre-#817 statements, so files landing first still record. Section J of
+`tools/scheduled-jobs-selftest.php` drives it; its three plants run a COPY of the class in
+a separate process (this process already has the real class loaded).
+
+Round 2 of the independent check found two untrue sentences, both mine: the part-way note
+promised a report after the job's "expected gap" while `state()` waits for its ALLOWANCE
+(at least three times the gap since D-076), and "its last N runs each started and never
+finished" counted the newest run, which may be going at that moment. Now "longer than the
+time allowed for it" and "none of its last N runs has finished"; J7, J7b and J7d go red on
+the round-1 wording (planted by putting round 1's `PortalCheck.php` back). **Say what the
+code measures, in its own unit; and never say a run "never finished" when it might still be
+running.**
+
+Round 3 found the test of that wording could not fail: J7 matched `started [0-9a-z ]+ ago`,
+which "less than a minute ago" satisfies, so a page timing the streak from the NEWEST start
+passed. J7 now requires the exact age its fixture produces ("17 minutes ago", typed by hand;
+1020 seconds, stable to 1079), and that plant turns J7 red. **A pattern that a WRONG value
+also matches is not a pin on the value.** Round 3 also found the part-way note's "however many
+times it is started again" untrue before migration 287 has run (each new start then resets
+the clock); `ScheduledJobs::countsUnfinishedRuns()` now chooses between two complete
+sentences, and J7f/J7g drive the before-287 state (the round-2 sentence put back turns J7g red).
+
+Round 4 found round 3's before-287 sentence untrue in its tail ("so a job that fails every
+time it runs is not reported here": a FAILED outcome, and a run that died and was not started
+again, are both reported on the same page). Second round running for this note, so it was
+SIMPLIFIED: the before-287 note now says only what is certain — a report after the time
+allowed since a job last started — and makes no claim about what is not reported. J7g pins
+the new words and that "is not reported" appears nowhere on the page (round 3's tail put back
+turns it red). J7f now calls `forgetTableCheck()` before `countsUnfinishedRuns()`, so a version
+answering from remembered state goes red (planted `return self::$streakThere ?? true;`: J7f
+red). **A sentence about what is NOT reported must be true of every other finding on the page;
+the cheap fix is not to make one.**
+
+Lesson worth keeping: my first version had TWO mechanisms ending a streak (an `IF` in
+`began()` and the reset in `finished()`), each making the other redundant, so a plant of
+either alone stayed green. One mechanism, one plant.
+
+## The Settings page asks the lock methods when it draws a row (#845)
+
+The drawing is now the fourth path `tools/settings-locks-selftest.php` section S reads, so
+a lock method added to `web/_core/` and not asked by the drawing fails it. Section D draws
+`/settings` as a global administrator AND as an administrator of this organisation only
+(D3, D4: no Edit, no Delete, a note; plant P10 makes the drawing judge every viewer as a
+global administrator and D4 goes red), and checks every locked row (74 rows, 37 keys, 14
+methods on 12 November 2026 — count them from the test, not from here).
+
+### Test-only traps found in that package
+
+- `tools/activity-description-selftest.php` ran its web server WITH opcache, so a file
+  rewritten for a plant inside opcache's two-second check window was served from the old
+  compiled copy. Its server now passes `-d opcache.enable=0` like the other page tests.
+- The PHP built-in server writes its error-log lines as a request ENDS, which can be after
+  the answer reaches the test; read at once, "nothing in the error log" can pass on broken
+  code. E2 waits half a second.

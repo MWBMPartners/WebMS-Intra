@@ -4,6 +4,23 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Four admin pages that showed something wrong or broke (#845, #840, #817, #1008; migration 287)
+
+- **Settings page: no Edit or Delete button on a setting it would refuse (#845).** How
+  long transcripts are kept and the currency drew both buttons, and pressing either was
+  refused. A locked row now shows a note naming the page where it is changed, decided by
+  the same `…lockedInGeneralEditor()` methods the handlers ask; one `$editLocked` /
+  `$deleteLocked` pair replaces the two hand-kept chains that let them drift.
+- **Registration retention: the "longer than the ceiling" warning shows whether or not the
+  clear-out is switched on (#840),** with words true of each state.
+- **Check this portal: a scheduled job that dies on every run is reported (#817, migration
+  287).** It used to read "part-way through" for ever, because each run reset the clock.
+  The page now says "none of its last N runs has finished" once no run has finished for
+  longer than the time allowed for that job.
+- **The organisation users page no longer stops part-way on an account with no name
+  (#1008):** it shows "No name recorded". `gdpr-eraser-selftest.php` now removes every
+  account it made (measured on a fresh database: the old version left 201, 48 of them with no name; the new one leaves 0) and fails if any remain.
+
 ### A member's full data copy includes their own DBS checks (#1012; D-154)
 
 - The full data copy (`account/data-export`) now includes the DBS checks recorded FOR a member, which an erasure
