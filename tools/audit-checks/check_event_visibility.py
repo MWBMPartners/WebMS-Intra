@@ -351,12 +351,12 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # the read into the public `zonesInUse()` (the public door needs the zone
     # list to size its second read) and added the fixed-moment reading and
     # `startsAtOrAfter()` beside the builder. The probes are unchanged.
-    # Moved 725/726 -> 768 by #1025 and #1024 round 3 (now one statement) (12 November 2026), which rewrote
+    # Moved 725/726 -> 774 by #1025 and #1024 rounds 3-4 (now one statement) (12 November 2026), which rewrote
     # `volunteeringFor()`'s comment and statement above them.
     # Since round 3 of #1024's check the two statements are ONE, built from
     # its conditions, live texts first and at most Events::ZONE_TEXT_LIMIT
     # of them; this is its FROM line.
-    ("_core/Events.php", 768): (
+    ("_core/Events.php", 774): (
         ". 'FROM `tblEvents`' . ($where === [] ? '' : ' WHERE ' . implode(' AND ', $where)) . ' '",
         "reads only the zone texts in use (at most Events::ZONE_TEXT_LIMIT), to work out each event's clock (#804, #1024); no event is returned",
     ),
@@ -366,11 +366,11 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # detail, and it must count imported events too, because the statements
     # it serves list imported events (each applying the visibility rule
     # itself). Keyed by line number like every entry here.
-    ("_core/Events.php", 1387): (
+    ("_core/Events.php", 1400): (
         ". 'FROM `tblEvents` WHERE `isDeleted` = 0'",
         "reads only the lowest and highest start reading, to work out each event's real moment (#1024); no event is returned",
     ),
-    ("_core/Events.php", 1391): (
+    ("_core/Events.php", 1404): (
         ". 'FROM `tblEvents` WHERE `isDeleted` = 0 AND `siteID` = ?'",
         "reads only one organisation's lowest and highest start reading, to work out each event's real moment (#1024); no event is returned",
     ),
@@ -388,9 +388,9 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # Moved 1092 -> 1335 by #882/#898, which added methods above it.
     # Moved 1335 -> 1485 by #811, which added `soonestByRealStart()` and its
     # helpers above it (the "next N events" order shared with the door).
-    # Moved 1485 -> 1896 by #1024/#1025 (three rounds), which added `startAsUtcMoment()` and
+    # Moved 1485 -> 1909 by #1024/#1025 (four rounds), which added `startAsUtcMoment()` and
     # its helpers above it.
-    ("_core/Events.php", 1896): (
+    ("_core/Events.php", 1909): (
         "SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1",
         "asks only whether an event web address is taken, across every row the unique key covers (#877, #883); no event is returned",
     ),
@@ -407,8 +407,8 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # `saveUnderFreeSlug()` above it.
     # Moved 1275 -> 1518 by #882/#898, which added methods above it.
     # Moved 1518 -> 1668 by #811 (see above).
-    # Moved 1668 -> 2079 by #1024/#1025 (see above).
-    ("_core/Events.php", 2079): (
+    # Moved 1668 -> 2092 by #1024/#1025 (see above).
+    ("_core/Events.php", 2092): (
         "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
         "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
     ),

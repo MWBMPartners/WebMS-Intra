@@ -489,13 +489,16 @@ class Events
      *    comparison is what the word means, so each spelling now gets its own
      *    `WHEN`, and each still reaches its zone through that trim.
      *
-     * The `ELSE` is reached by exactly one kind of row: one whose zone was
-     * written in the instant between the two statements (every zone text
-     * the statement can meet is otherwise in the list, because the column is
-     * NOT NULL). For a page it reads the organisation's clock, wrong only by
-     * that row's offset from the organisation's. A zone text PHP cannot open
-     * is NOT an `ELSE` case: it is in the list, and reads the organisation's
-     * clock exactly as every page that SHOWS the event does
+     * The `ELSE` is reached by two kinds of row: one whose zone was written
+     * in the instant between the two statements, and -- since round 3 of
+     * #1024's check -- one whose zone text `zonesInUse()` LEFT OUT because
+     * more than `ZONE_TEXT_LIMIT` distinct texts exist (texts of events that
+     * are not deleted come first, so in practice only texts of deleted
+     * events, or of an organisation with over five hundred zones, are left
+     * out). For a page it reads the organisation's clock, wrong by that
+     * row's offset from the organisation's. A zone text PHP cannot open is
+     * NOT an `ELSE` case while it is in the list: it reads the
+     * organisation's clock exactly as every page that SHOWS the event does
      * (`Site::zoneFor()`).
      *
      * ⚠️ A FAILED READ OF THE ZONE LIST THROWS; it does not come back empty.
@@ -608,8 +611,10 @@ class Events
      * longest period, not the event's: one event kept for ten years puts
      * every event of that organisation on a ten-year window.
      *
-     * The `ELSE` (a zone written between the two statements) reads
-     * `Etc/GMT+12`, the lowest offset there is, and a zone text PHP cannot
+     * The `ELSE` (a zone written between the two statements, or a zone text
+     * `zonesInUse()` left out at its `ZONE_TEXT_LIMIT`) reads
+     * `Etc/GMT+12`, the lowest offset there is -- so such a row is only ever
+     * deleted LATE -- and a zone text PHP cannot
      * open is judged on the organisation's zone, the clock it is shown on
      * everywhere (`Site::zoneFor()`). Two more read `Etc/GMT+12`, both on
      * purpose, rather than being worked out:
@@ -679,7 +684,8 @@ class Events
     /**
      * The one builder behind both methods above: reads the zones in use,
      * BYTE FOR BYTE (see the 🔤 note), and binds `$readingFor` each one's reading,
-     * with `$elseReading` for a zone written after the list was read.
+     * with `$elseReading` for a zone written after the list was read AND for
+     * a zone text `zonesInUse()` left out at its `ZONE_TEXT_LIMIT`.
      *
      * @param callable(\DateTimeZone): string $readingFor
      *
@@ -837,8 +843,8 @@ class Events
      *
      * with every value bound, exact row by row inside SQL, so `LIMIT` stays
      * right. The zones are read with `zonesInUse()`, and the `ELSE` -- a zone
-     * written between that read and this statement -- reads the
-     * organisation's clock, as `nowOnItsOwnClock()` does; a zone text PHP
+     * written between that read and this statement, or a zone text left out
+     * at `ZONE_TEXT_LIMIT` -- reads the organisation's clock, as `nowOnItsOwnClock()` does; a zone text PHP
      * cannot open reads it too, through `Site::zoneFor()`, as every page
      * that shows the event does. With no events at all there are no zones,
      * and a `CASE` with no `WHEN` is not SQL (#804's trap), so the
@@ -1080,6 +1086,13 @@ class Events
                 // When zonesInUse() stopped at its limit, a text it left out
                 // might carry the highest offset, so the proof uses two days
                 // -- more than any clock has ever been ahead of UTC.
+                // ⚠️ NO TEST CAN TELL THIS BRANCH FROM THE ORDINARY ONE. It
+                //    is taken whenever the limit is reached (deleted texts
+                //    count), but it only changes an answer when a LEFT-OUT
+                //    text is ahead of every kept one on a row the caller
+                //    lists -- over five hundred live zones -- and no fixture
+                //    here builds that, so removing it would leave every test
+                //    green.
                 $ahead = count($zones) >= self::ZONE_TEXT_LIMIT ? 2 * 86400 : self::maxOffsetOfZones($zones, $siteId);
                 $upTo  = gmdate('Y-m-d H:i:s', $latest + $ahead);
                 $rows = $read($upTo, null);

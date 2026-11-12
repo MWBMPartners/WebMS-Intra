@@ -563,6 +563,33 @@ check(
     $ug2 === array_merge([E_AKL], range(E_UTC, E_UTC + 28)),
     'first ' . json_encode(array_slice($ug2, 0, 2)) . ', count ' . count($ug2) . ', 9999 event among them: ' . json_encode(in_array(E_FAR + 3, $ug2, true))
 );
+// Round 4: "texts of events that are NOT deleted come first" in
+// Events::zonesInUse() was pinned by nothing. One live event in
+// Pacific/Tahiti (UTC-10, its zone used by no other event) sorts AFTER every
+// one of the 33,000 deleted "Junk/Zone..." texts by name and by count, so
+// without that ordering the cap leaves Tahiti out and
+// Events::nowOnItsOwnClock() judges it on the organisation's clock (UTC
+// here). It began 23 hours ago on its OWN clock, so it is inside My
+// volunteering's day of grace only when Tahiti's clock is used: on UTC's it
+// began 33 hours ago and is dropped.
+const UI      = 900019;
+const E_TAHITI = 900520;
+run($db, 'INSERT INTO tblUsers (userID, fullName, emailAddress) VALUES (?, ?, ?)', 'iss', [UI, 'Selftest volunteer i', 'selftest-547-i@invalid.test']);
+addEventAt($db, E_TAHITI, ORG, $readingOn('Pacific/Tahiti', '-23 hours'), 'Pacific/Tahiti');
+addRole($db, E_TAHITI, UI, 'host');
+$nowParams = Events::nowOnItsOwnClock($db, 'e', ORG)['params'];
+check(
+    '#1025 round 4: with 33,000 deleted made-up zone texts, the ONE live event\'s zone (Pacific/Tahiti, sorting after all of them) still has its own WHEN in nowOnItsOwnClock() -- live texts come first under the cap',
+    in_array('Pacific/Tahiti', $nowParams, true) === true && count($nowParams) <= 2 * Events::ZONE_TEXT_LIMIT + 1,
+    count($nowParams) . ' values; Tahiti among them: ' . json_encode(in_array('Pacific/Tahiti', $nowParams, true))
+);
+$ui = array_map('intval', array_column(Events::volunteeringFor($db, UI, ORG), 'eventID'));
+check(
+    '#1025 round 4: so My volunteering keeps the Tahiti event that began 23 hours ago on ITS clock (on the organisation\'s UTC clock it began 33 hours ago and would be dropped)',
+    $ui === [E_TAHITI],
+    json_encode($ui)
+);
+
 $moment = Events::startAsUtcMoment($db, 'e', ORG);
 check(
     '#1025 round 2: the ordering expression stays bounded with events from year 0 to 9999 and ten summer-time zones in use (' . count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters)',
@@ -657,6 +684,7 @@ $cases = [
     // #1025 round 2: across clock changes, with the far-off dates in place,
     // the page shows every event and in REAL order (the fourth element asks
     // for the order of the names on the page, not just their presence).
+    'a live zone under the cap (UI, #1025 round 4)' => [UI, ['Selftest event ' . E_TAHITI], []],
     'across clock changes, in real order (UH, #1025)' => [UH, array_map(static fn (int $id): string => 'Selftest event ' . $id, array_merge($clk['real'], [E_FAR + 3])), [], true],
 ];
 foreach ($cases as $label => $case) {
