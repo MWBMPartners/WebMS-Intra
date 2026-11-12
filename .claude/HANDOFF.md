@@ -1,23 +1,27 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 11 November 2026. Updated at every commit boundary and every
+*Overwritten, never appended. Current state only. 12 November 2026. Updated at every commit boundary and every
 change of a package's state (the owner, 10 November 2026: "update our handoff document regularly at each stage").*
 
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
 #493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #826 (already fixed as #832/#833), #657, #691, #966, #998, #1000, #964, #929, #1012; #826, #788, #886 closed as already done.
-Last whole suite (with #968): green. Decisions D-129 to D-176 recorded on 11-12 November (D-165 supersedes D-155 and D-157) (D-135 is the owner's
+Last whole suite (with #968): green. Decisions D-129 to D-179 recorded on 11-12 November (D-177: letter-only signs not read in files; D-178: network addresses kept and handled as personal data; D-179: the page is "Organisations") (D-165 supersedes D-155 and D-157) (D-135 is the owner's
 2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #1004 — strict money amounts (D-152, D-153, D-165) | `p1004-build`, 294e3aff | Round 7 in narrow check. Wiring at integration: `check_no_float_money.py` in pr-security.yml; `money-amount-selftest.php` in the runner and portal-selftests.yml (port 9533) |
-| #988 + #1009 — anonymous prayer requests (D-176) | `p988-build`, building | |
-| #971, #972, #875 — mail faults | `p971-build`, building | |
-| #982 (#985 duplicate), #922, #926, #973 — page messages | `p982-build`, building | |
+| #1004 — strict money amounts (D-152, D-153, D-165, D-177) | `p1004-build` | Round 9: refusal wording simplified (file mode no longer names another currency). Every stored value correct since round 7. Wiring at integration: `check_no_float_money.py` in pr-security.yml; `money-amount-selftest.php` in the runner and portal-selftests.yml (port 9533) |
+| #988 + #1009 — anonymous prayer requests (D-176) | `p988-build` | Round 1 NOT CLEAN on three member-facing sentences (notice, privacy page, moderators' help); round 2 building. Wiring: `check_activity_naming_nobody.py` in pr-security.yml |
+| #971, #972, #875 — mail faults | `p971-build`, 6b619f41 | Round 1 check running |
+| #982 (#985 duplicate), #922, #926, #973 — page messages | `p982-build` | Round 1 check running |
+| #845, #840, #817, #1008 — admin faults | `p845-build` | Building |
+| #885, #853, #854, #855, #811 — events faults | `p885-build` | Building |
+
+Raised today, both fix-before-release: **#1019** (every network-address column needs a keeping period, D-178 — eleven columns, prayer requests' kept for ever), **#1020** (invisible direction characters in visitor-typed text).
 
 **Triage (D-156, 12 November):** of the 151 issues raised after 5 November, 46 are "fix before release", 87 are labelled `status: deferred`, #788/#886 closed as already done, #821 stays queued, and the 16 owner questions are all answered (D-158 to D-176). The fix list is the next work after the packages above; batch by files that do not overlap. The 5 November backlog (D-055) still follows: #777, #569, #821, then the medium and low issues.
 
@@ -74,4 +78,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1016.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#1020.
