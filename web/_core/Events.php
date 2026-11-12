@@ -1134,6 +1134,30 @@ class Events
     }
 
     /**
+     * The first and last reading `startAsUtcMoment()` ever works out an
+     * offset for. A reading outside is given the offset at the nearer end.
+     * Round 2 of #1024's check: one stored date of 9999-12-31 or 0001-01-01
+     * -- a draft from the public submission form, an imported or API event,
+     * even a deleted one -- took the two-day margin past the years
+     * `I18n::wallClockReading()` can read, and the list view and My
+     * volunteering threw for the WHOLE organisation. Nothing real happens
+     * outside these years, and the end's offset costs such a row at most
+     * its own place in the order.
+     */
+    private const MOMENT_FIRST_READING = '1900-01-01 00:00:00';
+    private const MOMENT_LAST_READING  = '2200-12-31 23:59:59';
+
+    /**
+     * The most clock changes, over every zone together, that one
+     * `startAsUtcMoment()` expression may carry. Each costs one bound value
+     * and about seventy characters; round 2 of #1024's check built a
+     * 95,567-placeholder, 5.5 MB statement from one event in 9990 with four
+     * zones in use, and MySQL refused it. Past this, the window is narrowed
+     * round "now" (see `momentWindow()`), so the statement stays bounded.
+     */
+    private const MOMENT_CHANGE_BUDGET = 2000;
+
+    /**
      * ⏱️ Each event's START as a real moment, in UTC, as an SQL expression
      *    worked out ROW BY ROW inside the database -- the ONE place a query
      *    that PAGES or LIMITS a list of events across clocks gets its order
@@ -1153,9 +1177,8 @@ class Events
      *
      * HOW. A zone's offset from UTC is the same for long stretches of
      * readings and changes only around a clock change. So, for each zone in
-     * use, PHP works out the stretches of readings over the span of readings
-     * actually stored (`MIN`/`MAX` of `startDateTime`, with two days of
-     * margin each side) and the offset in each, and the expression is
+     * use, PHP works out the stretches of readings, and the offset in each,
+     * over a WINDOW of readings (`momentWindow()`), and the expression is
      *
      *     DATE_SUB(start, INTERVAL (CASE WHEN start < ? THEN o1
      *                                    WHEN start < ? THEN o2 ... ELSE oN END) SECOND)
@@ -1170,14 +1193,18 @@ class Events
      * rule) and one in the hour a clock repeats is PHP's own pick: the same
      * moment `sortByRealStart()` would give it.
      *
-     * The first stretch also covers every reading below the span, and the
-     * last every reading above it, at the offset the zone has at that end.
-     * A row can only be outside the span if it was written between the read
-     * of the span and the statement, and the cost then is at most that one
-     * row's place in the order, never a missing row. The `ELSE` of the zone
-     * `CASE` (a zone written in that same instant) reads the organisation's
-     * clock; a zone text PHP cannot open reads it too (`Site::zoneFor()`),
-     * as every page that shows the event does.
+     * THE WINDOW is the span of start readings of the organisation's events
+     * that are not deleted, with two days of margin, held inside 1900-2200,
+     * and narrowed round "now" if the zones in use would change their clocks
+     * more than `MOMENT_CHANGE_BUDGET` times in it. A reading outside the
+     * window -- a far-off date, or a row written between the read of the
+     * span and the statement -- is given the offset at the nearer end. That
+     * can cost such a row its exact place among rows within an hour or so of
+     * it; it never drops a row, never throws and never makes the statement
+     * unbounded. The `ELSE` of the zone `CASE` (a zone written in that same
+     * instant) reads the organisation's clock; a zone text PHP cannot open
+     * reads it too (`Site::zoneFor()`), as every page that shows the event
+     * does.
      *
      * The result is a DATETIME in UTC. Order by it, then by `startDateTime`,
      * then by the event's number, which is `sortByRealStart()`'s tie rule.
@@ -1201,10 +1228,15 @@ class Events
             throw new \InvalidArgumentException('Events::startAsUtcMoment(): the alias must be a plain SQL name.');
         }
         $column = '`' . $alias . '`.`startDateTime`';
-        [$low, $high] = self::readingSpan($db, $siteId);
+        $zones  = self::zonesInUse($db, $siteId);
+        $ownZone = new \DateTimeZone(Site::timezone($siteId));
+        $clocks  = [$ownZone];
+        foreach ($zones as $zone) {
+            $clocks[] = Site::zoneFor($zone, $siteId);
+        }
+        [$from, $until] = self::momentWindow(self::readingSpan($db, $siteId), $clocks, time());
 
-        $own   = self::utcMomentOnOneClock(new \DateTimeZone(Site::timezone($siteId)), $column, $low, $high);
-        $zones = self::zonesInUse($db, $siteId);
+        $own = self::utcMomentOnOneClock($ownZone, $column, $from, $until);
         if ($zones === []) {
             // No events: a CASE with no WHEN is not SQL (#804's trap).
             return ['sql' => $own['sql'], 'types' => str_repeat('s', count($own['params'])), 'params' => $own['params']];
@@ -1213,7 +1245,7 @@ class Events
         $sql    = 'CAST(CASE CAST(`' . $alias . '`.`timezone` AS BINARY)';
         $params = [];
         foreach ($zones as $zone) {
-            $one      = self::utcMomentOnOneClock(Site::zoneFor($zone, $siteId), $column, $low, $high);
+            $one      = self::utcMomentOnOneClock(Site::zoneFor($zone, $siteId), $column, $from, $until);
             $sql     .= ' WHEN ? THEN ' . $one['sql'];
             $params[] = $zone;
             $params   = array_merge($params, $one['params']);
@@ -1225,17 +1257,65 @@ class Events
     }
 
     /**
-     * The lowest and highest stored start READING (as "seconds, as if the
-     * reading were UTC") of one organisation's events, or of every
-     * organisation's; the current moment for both when there are none.
+     * The window of readings, as "seconds, as if the reading were UTC",
+     * that `startAsUtcMoment()` works offsets out over: the span with two
+     * days of margin, held inside `MOMENT_FIRST_READING` ..
+     * `MOMENT_LAST_READING`, then halved round `$nowUtc` (as a reading)
+     * until the clocks change no more than `MOMENT_CHANGE_BUDGET` times in
+     * it, all clocks together. It is never narrowed below about a year
+     * either side of now, where no zone changes more than a few times.
+     * Public so a test can drive the narrowing with a moment of its choice.
+     *
+     * @param array{0:int, 1:int}  $span   From `readingSpan()`.
+     * @param list<\DateTimeZone> $clocks Every clock the expression will carry.
+     *
+     * @return array{0:int, 1:int} `[from, until]`, with from <= until.
+     */
+    public static function momentWindow(array $span, array $clocks, int $nowUtc): array
+    {
+        $first = (int) I18n::wallClockReading(self::MOMENT_FIRST_READING)?->getTimestamp();
+        $last  = (int) I18n::wallClockReading(self::MOMENT_LAST_READING)?->getTimestamp();
+        $hold  = static fn (int $r): int => max($first, min($last, $r));
+        $from  = $hold($span[0] - 2 * 86400);
+        $until = $hold($span[1] + 2 * 86400);
+        if ($from > $until) {
+            $from = $until;
+        }
+
+        $changes = static function (int $a, int $b) use ($clocks): int {
+            $n = 0;
+            foreach ($clocks as $clock) {
+                $states = $clock->getTransitions($a - 2 * 86400, $b + 2 * 86400);
+                $n     += is_array($states) === true ? max(0, count($states) - 1) : 0;
+            }
+
+            return $n;
+        };
+        $centre = $hold($nowUtc);
+        while ($changes($from, $until) > self::MOMENT_CHANGE_BUDGET && $until - $from > 2 * 366 * 86400) {
+            $half  = intdiv($until - $from, 4);
+            $mid   = max($from, min($until, $centre));
+            $from  = max($from, $mid - $half);
+            $until = min($until, $mid + $half);
+        }
+
+        return [$from, $until];
+    }
+
+    /**
+     * The lowest and highest start READING (as "seconds, as if the reading
+     * were UTC") of one organisation's events that are NOT deleted, or of
+     * every organisation's; the current moment for both when there are none.
+     * Deleted rows are left out because no statement using the expression
+     * lists them (round 2 of #1024's check).
      *
      * @return array{0:int, 1:int}
      */
     private static function readingSpan(mysqli $db, ?int $siteId): array
     {
         $stmt = $siteId === null
-            ? $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents`')
-            : $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `siteID` = ?');
+            ? $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `isDeleted` = 0')
+            : $db->prepare('SELECT MIN(`startDateTime`) AS `low`, MAX(`startDateTime`) AS `high` FROM `tblEvents` WHERE `isDeleted` = 0 AND `siteID` = ?');
         $row = null;
         // A backstop only: under strict reporting a failed prepare THROWS.
         if ($stmt !== false) {
@@ -1256,7 +1336,9 @@ class Events
         $low  = $asSeconds($row['low'] ?? null);
         $high = $asSeconds($row['high'] ?? null);
         if ($low === null || $high === null) {
-            return [time(), time()];
+            $now = (int) I18n::wallClockReading(gmdate('Y-m-d H:i:s'))?->getTimestamp();
+
+            return [$now, $now];
         }
 
         return [$low, $high];
@@ -1264,24 +1346,24 @@ class Events
 
     /**
      * The `DATE_SUB(...)` half of `startAsUtcMoment()` for ONE clock: the
-     * stretches of readings in `[low - 2 days, high + 2 days]` with the
-     * offset in each, as an SQL expression over `$column`.
+     * stretches of readings in `[$from, $until]` (a window from
+     * `momentWindow()`) with the offset in each, as an SQL expression over
+     * `$column`. The first stretch also covers every reading below the
+     * window and the last every reading above it.
      *
      * @return array{sql: string, params: list<string>}
      */
-    private static function utcMomentOnOneClock(\DateTimeZone $zone, string $column, int $low, int $high): array
+    private static function utcMomentOnOneClock(\DateTimeZone $zone, string $column, int $from, int $until): array
     {
         $offsetOf = static function (int $r) use ($zone): int {
             $instant = I18n::wallClockInstant(gmdate('Y-m-d H:i:s', $r), $zone);
             if ($instant === null) {
-                throw new \RuntimeException('Events::startAsUtcMoment(): a stored reading could not be placed on its clock.');
+                // Inside 1900-2200 every reading can be placed; a backstop.
+                return (int) $zone->getOffset(new \DateTimeImmutable('@' . $r));
             }
 
             return $r - $instant->getTimestamp();
         };
-
-        $from  = $low - 2 * 86400;
-        $until = $high + 2 * 86400;
 
         // Where the offset may change: a clock change at the instant `ts`
         // from offset b to offset a is the readings `ts + b` and `ts + a`.

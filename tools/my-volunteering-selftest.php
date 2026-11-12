@@ -425,6 +425,108 @@ check(
 );
 
 // =============================================================================
+// 🕰️ Part 1c (#1025, round 2 of its check): across CLOCK CHANGES, and with
+//    dates no calendar should hold
+// =============================================================================
+// Round 2 found two things nothing pinned. (1) The order across a clock
+// change: every fixture above sits weeks away with no change between, so
+// switching off the clock-change half of Events::startAsUtcMoment() left
+// every check green. (2) One event dated 9999-12-31 or 0001-01-01 -- even a
+// DELETED one -- made the whole list throw, and one in 9990 built a statement
+// MySQL refused. Both are fixtures here now.
+//
+// The clock-change fixtures: in London and in Auckland (opposite
+// hemispheres), the next change each way, at least five days on. For each
+// change, an event at 12:00 two days BEFORE it and one two days AFTER it, and
+// beside each a UTC event at the moment exactly HALF WAY between that event's
+// real instant and the instant it would have on the OTHER side's offset. So
+// an event given the wrong offset swaps places with its UTC partner, whichever
+// side of the change it is on.
+
+const UH     = 900018;
+const E_CLK  = 900400; // 900400 .. the clock-change events
+const E_FAR  = 900500; // 900500 .. the far-off dates
+
+/**
+ * The clock-change fixture: [reading, zone] pairs in insertion order, and
+ * their ids in REAL order (instant, then reading, then id -- the house tie
+ * rule) and in READING order.
+ *
+ * @return array{rows: list<array{0:string,1:string}>, real: list<int>, reading: list<int>}
+ */
+function clockChangeWorld(int $firstId, array $zones, int $changesPerZone): array
+{
+    $rows = [];
+    $now  = time();
+    foreach ($zones as $zoneName) {
+        $zone   = new DateTimeZone($zoneName);
+        $states = $zone->getTransitions($now + 5 * 86400, $now + 800 * 86400);
+        for ($i = 1; $i < count($states) && $i <= $changesPerZone; $i++) {
+            $old = (int) $states[$i - 1]['offset'];
+            $new = (int) $states[$i]['offset'];
+            $day = gmdate('Y-m-d', (int) $states[$i]['ts'] + $new);
+            foreach ([['-2 days', $new], ['+2 days', $old]] as [$shift, $wrongOffset]) {
+                $reading = (new DateTimeImmutable($day . ' 12:00:00', new DateTimeZone('UTC')))->modify($shift)->format('Y-m-d H:i:s');
+                $real    = (new DateTimeImmutable($reading, $zone))->getTimestamp();
+                $asIf    = (new DateTimeImmutable($reading, new DateTimeZone('UTC')))->getTimestamp() - $wrongOffset;
+                $rows[]  = [$reading, $zoneName];
+                $rows[]  = [gmdate('Y-m-d H:i:s', intdiv($real + $asIf, 2)), 'UTC'];
+            }
+        }
+    }
+    $keyed = [];
+    foreach ($rows as $n => [$reading, $zoneName]) {
+        $keyed[] = [(new DateTimeImmutable($reading, new DateTimeZone($zoneName)))->getTimestamp(), $reading, $firstId + $n];
+    }
+    $real = $keyed;
+    usort($real, static fn (array $a, array $b): int => [$a[0], $a[1], $a[2]] <=> [$b[0], $b[1], $b[2]]);
+    $byReading = $keyed;
+    usort($byReading, static fn (array $a, array $b): int => [$a[1], $a[2]] <=> [$b[1], $b[2]]);
+
+    return ['rows' => $rows, 'real' => array_column($real, 2), 'reading' => array_column($byReading, 2)];
+}
+
+run($db, 'INSERT INTO tblUsers (userID, fullName, emailAddress) VALUES (?, ?, ?)', 'iss', [UH, 'Selftest volunteer h', 'selftest-547-h@invalid.test']);
+$clk = clockChangeWorld(E_CLK, ['Europe/London', 'Pacific/Auckland'], 2);
+foreach ($clk['rows'] as $n => [$reading, $zone]) {
+    addEventAt($db, E_CLK + $n, ORG, $reading, $zone);
+    addRole($db, E_CLK + $n, UH, 'helper');
+}
+check(
+    '#1025 round 2 premise: ' . count($clk['rows']) . ' events straddle two clock changes in London and two in Auckland, and their real order is NOT their reading order',
+    count($clk['rows']) === 16 && $clk['real'] !== $clk['reading'],
+    'rows ' . count($clk['rows'])
+);
+
+// Far-off dates: a DELETED event at the very end of the calendar and one at
+// its very start, and a live one in 9990 on a fifth clock. None has a role
+// for UH, so the list below is unchanged by them -- but every statement reads
+// the organisation's span of dates, and these used to break it.
+addEventAt($db, E_FAR, ORG, '9999-12-31 23:30:00', 'Europe/London');
+addEventAt($db, E_FAR + 1, ORG, '0001-01-01 00:30:00', 'Pacific/Auckland');
+run($db, 'UPDATE `tblEvents` SET `isDeleted` = 1 WHERE `eventID` IN (?, ?)', 'ii', [E_FAR, E_FAR + 1]);
+addEventAt($db, E_FAR + 2, ORG, '9990-06-15 12:00:00', 'America/New_York');
+
+$uh = null;
+$uhError = '';
+try {
+    $uh = array_map('intval', array_column(Events::volunteeringFor($db, UH, ORG), 'eventID'));
+} catch (Throwable $e) {
+    $uhError = get_class($e) . ': ' . $e->getMessage();
+}
+check(
+    '#1025 round 2: with deleted events dated 9999-12-31 and 0001-01-01 and a live one in 9990 in the organisation, the list still answers -- and the events either side of each clock change come back in REAL order',
+    $uh === $clk['real'],
+    $uhError !== '' ? 'THREW ' . $uhError : 'got ' . json_encode($uh) . ' wanted ' . json_encode($clk['real'])
+);
+$moment = Events::startAsUtcMoment($db, 'e', ORG);
+check(
+    '#1025 round 2: the ordering expression stays bounded with a 9990 event in use (' . count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters)',
+    count($moment['params']) <= 2100 && strlen($moment['sql']) <= 200000,
+    count($moment['params']) . ' values, ' . strlen($moment['sql']) . ' characters'
+);
+
+// =============================================================================
 // 📄 Part 2: the real page file, once for each kind of member
 // =============================================================================
 
@@ -476,8 +578,14 @@ $cases = [
     // #1025: the page shows the Auckland event (soonest in real time, last by
     // reading) and not the 30th UTC one, which the LIMIT now cuts instead.
     'events on two clocks (UG, #1025)'      => [UG, ['Selftest event ' . E_AKL, 'Selftest event ' . E_UTC], ['Selftest event ' . (E_UTC + 29)]],
+    // #1025 round 2: across clock changes, with the far-off dates in place,
+    // the page shows every event and in REAL order (the fourth element asks
+    // for the order of the names on the page, not just their presence).
+    'across clock changes, in real order (UH, #1025)' => [UH, array_map(static fn (int $id): string => 'Selftest event ' . $id, $clk['real']), [], true],
 ];
-foreach ($cases as $label => [$user, $mustShow, $mustNotShow]) {
+foreach ($cases as $label => $case) {
+    [$user, $mustShow, $mustNotShow] = $case;
+    $inOrder = ($case[3] ?? false) === true;
     $out = [];
     $exit = 0;
     $cmd = [PHP_BINARY, $runner, $core, $page, $dbHost, $dbUser, $dbPass, $dbName, (string) $dbPort, $scratch, $siteStandIn];
@@ -494,8 +602,11 @@ foreach ($cases as $label => [$user, $mustShow, $mustNotShow]) {
     fclose($pipes[2]);
     $exit = proc_close($proc);
     $ok = $exit === 0 && str_contains($stdout, 'PAGE-REACHED-ITS-END') === true;
+    $lastAt = -1;
     foreach ($mustShow as $needle) {
-        $ok = $ok && str_contains($stdout, $needle);
+        $at = strpos($stdout, $needle);
+        $ok = $ok && $at !== false && ($inOrder === false || $at > $lastAt);
+        $lastAt = $at === false ? $lastAt : $at;
     }
     foreach ($mustNotShow as $needle) {
         $ok = $ok && str_contains($stdout, $needle) === false;

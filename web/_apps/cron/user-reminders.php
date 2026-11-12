@@ -21,11 +21,18 @@
  *                       anniversaries to designated roles
  *                       (`milestones.digest_recipients`, migration 076).
  *
- * WHOSE CLOCK (#1028): every "today" and every hour here is the
- * ORGANISATION's own (`Site::timezone($siteId)`, and `RotaSwaps::today()`
- * for the rota), worked out inside the per-organisation loop. Never the
- * database server's CURDATE()/NOW(), and never PHP's default zone, which is
- * whichever organisation the request happened to resolve to.
+ * WHOSE CLOCK (#1028): the rota's "today" and the birthday digest's hour
+ * and date are the ORGANISATION's own (`Site::timezone($siteId)`, and
+ * `RotaSwaps::today()` for the rota), worked out inside the
+ * per-organisation loop -- never the database server's CURDATE(), and never
+ * PHP's default zone, which is whichever organisation the request happened
+ * to resolve to.
+ *
+ * ⚠️ ONE EXCEPTION, NOT YET PUT RIGHT: the task-reminder family still
+ *    compares `tblTasks.reminderDate` (a time typed on the organisation's
+ *    clock) with the database's NOW(), so a task reminder can go hours
+ *    early or late for an organisation far from the database's clock. That
+ *    is #1041.
  *
  * TOKEN GATE: `?key=` vs `user_reminders.cron_token`, constant-time
  * `hash_equals()`, empty stored token ⇒ ALWAYS 403 — migration 171 seeds
@@ -352,6 +359,10 @@ foreach ($siteIds as $siteId) {
     $taskRemindersOn  = (string) (App::settingForSite('tasks.reminders_enabled', $siteId) ?? '1');
     if (in_array($tasksEnabled, ['1', 'true'], true) === true && $taskRemindersOn !== '0') {
         $lookbackDays = (int) (App::settingForSite('tasks.reminder_lookback_days', $siteId) ?? '7');
+
+        // ⚠️ Still the DATABASE's NOW() against a time typed on the
+        //    organisation's clock -- the one exception named in the header,
+        //    #1041. Not changed by #1028.
 
         $stmt = $db->prepare(
             'SELECT t.taskID, t.title, t.description, t.priority, t.dueDate, '
