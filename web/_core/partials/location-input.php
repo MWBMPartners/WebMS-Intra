@@ -72,7 +72,9 @@ if (function_exists('portal_location_input') === false) {
      * PUBLIC place ('public'). A home's remembered map answer is personal data.
      * `addressKindPublicWhenTicked` names a checkbox on the same form which,
      * when ticked, makes it a public place instead — the small groups' "not
-     * anybody's home" (D-123) — so a form that can be either asks the person.
+     * anybody's home" (D-123) — or a radio pair whose chosen value 'public'
+     * does (the event form's "This is someone's home" / "This is a public
+     * place"), so a form that can be either asks the person.
      */
     function portal_location_input(array $cfg): void
     {

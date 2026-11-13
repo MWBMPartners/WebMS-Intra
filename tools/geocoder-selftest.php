@@ -54,7 +54,9 @@
  *      installation's secret, so it differs from the plain key a public place
  *      gets for the same address; a missing or unknown kind is a home; and
  *      the small-group form sends home, or public when "not anybody's home"
- *      is ticked, driven over HTTP (the venue form's public mark is D5)
+ *      is ticked, and the event form sends what its home/public pair says
+ *      (home when nothing is chosen), each driven over HTTP (the venue
+ *      form's public mark is D5)
  *   N  the cache keeps no address text (#1037): no column for it, no value
  *      in any row this run wrote holds any part of an address, and a forward
  *      answer carries no wording of the address
@@ -72,10 +74,13 @@
  *   company changing the shape of its answer. The stand-in answers in the
  *   shape each documents today.
  *   It drives ONE worker, so two look-ups at once are untested.
- *   It drives two callers (`/geo/lookup` and a venue save). The other three
- *   (event, organisation, small group) are read, not driven: each asks
- *   `$geocoded !== null` before it reads a position, so "no answer" leaves
- *   them storing nothing.
+ *   It drives four callers: `/geo/lookup`, a venue save, and (section O,
+ *   for the home/public mark only) a small-group save and an event save. The
+ *   organisation's address save is read, not driven, and none of the event,
+ *   organisation and small-group savers is driven with a bad answer: each
+ *   asks `$geocoded !== null` before it reads a position, so "no answer"
+ *   leaves them storing nothing. The look-up button's script, which reads the
+ *   form's home/public choice in a browser, is driven by nothing here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_geocoder SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/geocoder-selftest.php
@@ -205,6 +210,11 @@ $tidyRows = static function () use ($db, $cacheIdBefore): void {
     $st->close();
     $like = '%' . GT_MARK . '%';
     $st = $db->prepare('DELETE FROM `tblVenues` WHERE `venueName` LIKE ?');
+    $st->bind_param('s', $like);
+    $st->execute();
+    $st->close();
+    // Section O's events (#1037, D-183).
+    $st = $db->prepare('DELETE FROM `tblEvents` WHERE `eventName` LIKE ?');
     $st->bind_param('s', $like);
     $st->execute();
     $st->close();
@@ -1088,6 +1098,43 @@ check('O8 one saved with "not anybody\'s home" ticked remembers its answer as a 
     [$gPublic === 302 || $gPublic === 303, $stubCalls(), $kindsSince($markG2)], [true, ['nominatim'], ['public']]);
 $setSetting('small-groups.enabled', $settingsBefore['small-groups.enabled']);
 
+// The Manage Events form, over HTTP: its own "This is someone's home" / "This
+// is a public place" pair (locationAddressKind), home when nothing is chosen.
+$saveEvent = static function (string $name, string $address, ?string $kind) use ($http, $freshToken): int {
+    $fields = [
+        'csrf_token' => $freshToken(), 'action' => 'create', 'eventName' => $name,
+        'description' => 'Made by tools/geocoder-selftest.php.',
+        'startDateTime' => date('Y-m-d', strtotime('+30 days')) . 'T19:00', 'endDateTime' => '',
+        'timezone' => 'Europe/London', 'status' => 'published', 'locationName' => 'Selftest place',
+        'locationAddress' => $address, 'locationGeoLat' => '', 'locationGeoLng' => '',
+    ];
+    if ($kind !== null) {
+        $fields['locationAddressKind'] = $kind;
+    }
+    return $http('POST', '/calendar/manage/save', $fields)['status'];
+};
+$markE1 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Hall', GT_MARK . ' Event Hall Street', 'public');
+check('O9 an event saved with "This is a public place" chosen remembers its address as a PUBLIC place',
+    [$stubCalls(), $kindsSince($markE1)], [['nominatim'], ['public']]);
+$markE2 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Home', GT_MARK . ' Event Home Street', null);
+check('O10 an event saved with NO choice sent remembers its address as a HOME (the default)',
+    [$stubCalls(), $kindsSince($markE2)], [['nominatim'], ['home']]);
+$markE3 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Home Two', GT_MARK . ' Event Home Two Street', 'home');
+check('O11 ...and so does one with "This is someone\'s home" chosen',
+    [$stubCalls(), $kindsSince($markE3)], [['nominatim'], ['home']]);
+$manage = $http('GET', '/calendar/manage')['body'];
+check('O12 the Manage Events form draws the choice, with "This is someone\'s home" chosen to start, and the look-up button reads it',
+    [preg_match('/name="locationAddressKind" id="locationAddressKindHome" value="home" checked/', $manage) === 1,
+     str_contains($manage, 'name="locationAddressKind" id="locationAddressKindPublic" value="public">'),
+     str_contains($manage, 'data-address-kind-public-field="locationAddressKind"')],
+    [true, true, true]);
+
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');
 
@@ -1096,5 +1143,5 @@ echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 echo "It reaches no real provider: a stand-in on this machine answers in each\n";
 echo "provider's documented shape, so a change in Google's or OpenStreetMap's own\n";
 echo "answers would not be seen here. It drives /geo/lookup and the venue save;\n";
-echo "the event, organisation and small-group savers are read, not driven.\n";
+echo "the organisation saver is read, not driven; the small-group and event savers are driven only for the home/public mark.\n";
 exit($failed === 0 ? 0 : 1);

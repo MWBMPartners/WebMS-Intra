@@ -206,7 +206,14 @@ if ($locationW3W !== '' && What3Words::isConfigured() === true) {
 }
 
 if (($locationGeoLat === null || $locationGeoLng === null) && Geocoder::autoEnabled() === true && $locationAddress !== '') {
-    $geocoded = Geocoder::forward($locationAddress);
+    // 🏠 D-183: whether the address is somebody's home or a public place, as the
+    //    form's radio pair says. Only the exact word 'public' is public; a missing
+    //    or other value is a home, the safe direction.
+    $geocoded = Geocoder::forward(
+        $locationAddress,
+        null,
+        ($_POST['locationAddressKind'] ?? null) === Geocoder::KIND_PUBLIC ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME
+    );
     if ($geocoded !== null) {
         $locationGeoLat = $geocoded['lat'];
         $locationGeoLng = $geocoded['lng'];

@@ -130,8 +130,11 @@ if (function_exists('portal_location_map_assets') === false) {
                 //    checkbox ticked ("not anybody's home") makes it public.
                 var kind = btn.dataset.addressKind === 'public' ? 'public' : 'home';
                 if (btn.dataset.addressKindPublicField) {
-                    var mark = form.querySelector('[name="' + btn.dataset.addressKindPublicField + '"]');
-                    if (mark && mark.checked) { kind = 'public'; }
+                    // A ticked checkbox (small groups' "not anybody's home",
+                    // value 1) or the chosen radio of a home/public pair (the
+                    // event form, value 'public').
+                    var mark = form.querySelector('[name="' + btn.dataset.addressKindPublicField + '"]:checked');
+                    if (mark && (mark.value === '1' || mark.value === 'public')) { kind = 'public'; }
                 }
                 body.set('addressKind', kind);
                 if (addressVal) { body.set('address', addressVal); }
