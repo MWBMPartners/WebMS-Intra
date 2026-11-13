@@ -299,7 +299,16 @@ if (
 //    date-and-time box will send a five-digit year if one is typed, and that
 //    is outside the range too, so it is refused here rather than reaching the
 //    database as a bare error.
-$rangeProblem = EventDateRange::whyRefused([$startWhen, $endWhen !== '' ? $endWhen : null]);
+// ⚠️ ASKED OF THE READING THAT IS STORED, not of the "T"-to-space text
+//    above: `I18n::wallClockFromInput()` reads ISO basic form
+//    (`20300601T100000`) as 2030, which the text above leaves unreadable, so
+//    round 1 refused a 2030 start as out of range. Anything that helper
+//    cannot read falls back to the text, which is then judged as it stands.
+$readingFor = static fn (string $when): string => I18n::wallClockFromInput($when) ?? $normaliseWhen($when);
+$rangeProblem = EventDateRange::whyRefused([
+    $readingFor($startDateTime),
+    $endDateTime !== '' ? $readingFor($endDateTime) : null,
+]);
 if ($rangeProblem !== null) {
     $_SESSION['flash_msg']  = $rangeProblem . ' Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';
@@ -401,6 +410,116 @@ if ($keepsStoredZone === true) {
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('calendar/manage'));
     exit();
+}
+
+// 🔁 THE WHOLE REPEAT IS JUDGED BEFORE ANYTHING IS WRITTEN (#1045, D-181).
+//    A repeat's dates are worked out here, before the uploads and the insert,
+//    and if ANY date it would make — the first one included, after it is
+//    moved onto the pattern — falls outside the range an event may have, the
+//    WHOLE save is refused with the range in words and nothing is saved.
+//
+//    Round 1 of #1045 capped the pattern at the last allowed day and skipped
+//    a date whose end spilled past it. That shortened a repeat SILENTLY
+//    (ten dates asked for, four made, "3 more date(s) were added"), withdrew
+//    the repeat rule with only the error log saying why, and never checked
+//    the first date at all once the pattern MOVED it — a start of
+//    2200-12-30 22:00 with Wednesdays ticked was stored as 2200-12-31 22:00
+//    to 2201-01-01 01:00 with "created successfully". One refusal, before
+//    any write, is the same answer the series pattern page gives.
+//
+//    The code below is the generator call that used to run after the insert,
+//    moved here unchanged; the block after the insert uses `$worked`.
+$repeatFrequency = $action === 'create' ? (string) ($_POST['repeatFrequency'] ?? '') : '';
+if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'], true) === true) {
+    // The browser joins the date and time with a "T" and may leave the
+    // seconds off; the generator wants a full reading.
+    // 📌 ONE READING, SLICED ONCE. Every date part below comes out of this
+    //    text rather than out of a moment built from it (#777 round 10).
+    //    `I18n::wallClockFromInput()` is the ONE place a posted time
+    //    becomes a stored reading; the `?? $toReading(...)` keeps the old
+    //    normalisation for anything it refuses, so no form that worked
+    //    before stops working.
+    $toReading = static function (string $when): string {
+        $when = trim(str_replace('T', ' ', $when));
+        return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $when) === 1 ? $when . ':00' : $when;
+    };
+    $startReading = I18n::wallClockFromInput($startDateTime) ?? $toReading($startDateTime);
+
+    $repeatDays = [];
+    foreach ((array) ($_POST['repeatDays'] ?? []) as $day) {
+        if (is_scalar($day) === true && preg_match('/^[0-6]$/', (string) $day) === 1) {
+            $repeatDays[] = (string) (int) $day;
+        }
+    }
+
+    $monthlyByWeekday = (string) ($_POST['repeatMonthlyMode'] ?? 'day') === 'weekday';
+    $weekOfMonthRaw   = (string) ($_POST['repeatWeekOfMonth'] ?? '');
+    $countRaw         = (string) ($_POST['repeatCount'] ?? '');
+    $untilRaw         = trim((string) ($_POST['repeatUntil'] ?? ''));
+
+    $rule = [
+        'frequency'      => $repeatFrequency,
+        'intervalVal'    => 1,
+        'dayOfWeek'      => $repeatDays === [] ? null : implode(',', $repeatDays),
+        // 🕐 SLICED, NOT RESOLVED -- see the slug above for the two zones
+        //    where `date('j', strtotime(...))` names the wrong day. Here it
+        //    cost more than a slug: the pattern was stored on the 29th, so
+        //    `$firstWanted` disagreed with the typed start and lines
+        //    692-700 then UPDATED the event onto the pattern's date, with
+        //    the administrator told the first date had moved -- so every
+        //    occurrence of the series fell a day late, permanently, and it
+        //    read as deliberate.
+        'dayOfMonth'     => $monthlyByWeekday === true ? null : (int) substr($startReading, 8, 2),
+        'weekOfMonth'    => $monthlyByWeekday === true && preg_match('/^-?[1-5]$/', $weekOfMonthRaw) === 1
+            ? (int) $weekOfMonthRaw
+            : null,
+        'monthOfYear'    => $repeatFrequency === 'yearly'
+            ? (int) substr($startReading, 5, 2)
+            : null,
+        'startDate'      => substr($startReading, 0, 10),
+        'endDate'        => preg_match('/^\d{4}-\d{2}-\d{2}$/', $untilRaw) === 1 ? $untilRaw : null,
+        'maxOccurrences' => preg_match('/^\d+$/', $countRaw) === 1 && (int) $countRaw > 0 ? (int) $countRaw : null,
+    ];
+
+    // 🧢 HOW BIG A SERIES MAY BE is this installation's choice, and this
+    //    organisation's within it — `calendar.repeat.maxOccurrences` and
+    //    `calendar.repeat.maxYears`, set at /admin/settings/repeats.
+    //
+    //    BOTH LAYERS go in, and the order matters: the INSTALLATION'S
+    //    value takes precedence. An organisation may hold itself to a
+    //    lower ceiling, but can never raise its own above what the
+    //    installation allows (the owner, 29 October 2026) — the two levels
+    //    may be different people, a hosting provider and its customers.
+    //    `$SETTINGS` is the merged answer and cannot express that on its
+    //    own, which is why the settings loader keeps
+    //    `$SETTINGS_INSTALLATION` beside it.
+    //
+    //    These were constants in the class until 29 October 2026. They are
+    //    settings because 200 dates and three years are right for a church
+    //    with one Sunday service and wrong for a school with a daily
+    //    registration period, and this portal is a product rather than one
+    //    customer's installation.
+    $worked = EventRecurrence::datesFor(
+        $rule,
+        $toReading($startDateTime),
+        $endDateTime === '' ? null : $toReading($endDateTime),
+        $timezone,
+        EventRecurrence::limitsFrom($SETTINGS, InstallationSettings::layerOrNull())
+    );
+
+    foreach ($worked['dates'] as $wouldMake) {
+        $repeatRangeProblem = EventDateRange::whyRefused([
+            (string) $wouldMake['start'],
+            $wouldMake['end'] === null ? null : (string) $wouldMake['end'],
+        ]);
+        if ($repeatRangeProblem !== null) {
+            $_SESSION['flash_msg']  = 'One or more of the dates this repeat would make falls outside the range. '
+                . $repeatRangeProblem . ' Nothing was saved.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('calendar/manage'));
+            exit();
+        }
+    }
 }
 
 // 🌐 THE PUBLIC WEBSITE SWITCH AND DATES (#493 P1; D-057, D-077, D-078).
@@ -834,105 +953,14 @@ if ($action === 'create') {
     // ordinary event, so moving or cancelling ONE already works through the
     // normal edit and delete; shifting a whole run, or extending it, is its own
     // piece of work and the form does not offer it rather than half-offering.
-    $repeatFrequency = (string) ($_POST['repeatFrequency'] ?? '');
+    // `$repeatFrequency`, `$rule`, `$toReading`, `$startReading` and `$worked`
+    // are worked out BEFORE anything is written (#1045) — see "THE WHOLE
+    // REPEAT IS JUDGED BEFORE ANYTHING IS WRITTEN" above the uploads.
     $repeatMade      = 0;
     $repeatNote      = '';
     $ruleWasWritten  = false;
 
     if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'], true) === true) {
-        // The browser joins the date and time with a "T" and may leave the
-        // seconds off; the generator wants a full reading.
-        // 📌 ONE READING, SLICED ONCE. Every date part below comes out of this
-        //    text rather than out of a moment built from it (#777 round 10).
-        //    `I18n::wallClockFromInput()` is the ONE place a posted time
-        //    becomes a stored reading; the `?? $toReading(...)` keeps the old
-        //    normalisation for anything it refuses, so no form that worked
-        //    before stops working.
-        $toReading = static function (string $when): string {
-            $when = trim(str_replace('T', ' ', $when));
-            return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $when) === 1 ? $when . ':00' : $when;
-        };
-        $startReading = I18n::wallClockFromInput($startDateTime) ?? $toReading($startDateTime);
-
-        $repeatDays = [];
-        foreach ((array) ($_POST['repeatDays'] ?? []) as $day) {
-            if (is_scalar($day) === true && preg_match('/^[0-6]$/', (string) $day) === 1) {
-                $repeatDays[] = (string) (int) $day;
-            }
-        }
-
-        $monthlyByWeekday = (string) ($_POST['repeatMonthlyMode'] ?? 'day') === 'weekday';
-        $weekOfMonthRaw   = (string) ($_POST['repeatWeekOfMonth'] ?? '');
-        $countRaw         = (string) ($_POST['repeatCount'] ?? '');
-        $untilRaw         = trim((string) ($_POST['repeatUntil'] ?? ''));
-
-        $rule = [
-            'frequency'      => $repeatFrequency,
-            'intervalVal'    => 1,
-            'dayOfWeek'      => $repeatDays === [] ? null : implode(',', $repeatDays),
-            // 🕐 SLICED, NOT RESOLVED -- see the slug above for the two zones
-            //    where `date('j', strtotime(...))` names the wrong day. Here it
-            //    cost more than a slug: the pattern was stored on the 29th, so
-            //    `$firstWanted` disagreed with the typed start and lines
-            //    692-700 then UPDATED the event onto the pattern's date, with
-            //    the administrator told the first date had moved -- so every
-            //    occurrence of the series fell a day late, permanently, and it
-            //    read as deliberate.
-            'dayOfMonth'     => $monthlyByWeekday === true ? null : (int) substr($startReading, 8, 2),
-            'weekOfMonth'    => $monthlyByWeekday === true && preg_match('/^-?[1-5]$/', $weekOfMonthRaw) === 1
-                ? (int) $weekOfMonthRaw
-                : null,
-            'monthOfYear'    => $repeatFrequency === 'yearly'
-                ? (int) substr($startReading, 5, 2)
-                : null,
-            'startDate'      => substr($startReading, 0, 10),
-            'endDate'        => preg_match('/^\d{4}-\d{2}-\d{2}$/', $untilRaw) === 1 ? $untilRaw : null,
-            'maxOccurrences' => preg_match('/^\d+$/', $countRaw) === 1 && (int) $countRaw > 0 ? (int) $countRaw : null,
-        ];
-
-        // 📅 A REPEAT STOPS AT THE LAST DAY AN EVENT MAY BE STORED ON (#1045,
-        //    D-181). The first date has already been checked above; the rest
-        //    are made here, and a series begun near the far end of the range
-        //    could otherwise run past it. Capping the pattern's own "until"
-        //    here — the GENERATOR's limit, not a stored one: the rule row
-        //    below never writes `endDate` and records a COUNT of the dates
-        //    made — keeps the dates and that count in agreement. Dropping
-        //    dates afterwards instead would make the series disagree with
-        //    its pattern, and the rule would be withdrawn below. Only applied
-        //    where it can matter, so an ordinary series is generated exactly
-        //    as before.
-        $lastRepeatDay = EventDateRange::lastYear() . '-12-31';
-        if ((int) substr($startReading, 0, 4) + EventRecurrence::HARD_MAX_YEARS >= EventDateRange::lastYear()
-            && ($rule['endDate'] === null || $rule['endDate'] > $lastRepeatDay)
-        ) {
-            $rule['endDate'] = $lastRepeatDay;
-        }
-
-        // 🧢 HOW BIG A SERIES MAY BE is this installation's choice, and this
-        //    organisation's within it — `calendar.repeat.maxOccurrences` and
-        //    `calendar.repeat.maxYears`, set at /admin/settings/repeats.
-        //
-        //    BOTH LAYERS go in, and the order matters: the INSTALLATION'S
-        //    value takes precedence. An organisation may hold itself to a
-        //    lower ceiling, but can never raise its own above what the
-        //    installation allows (the owner, 29 October 2026) — the two levels
-        //    may be different people, a hosting provider and its customers.
-        //    `$SETTINGS` is the merged answer and cannot express that on its
-        //    own, which is why the settings loader keeps
-        //    `$SETTINGS_INSTALLATION` beside it.
-        //
-        //    These were constants in the class until 29 October 2026. They are
-        //    settings because 200 dates and three years are right for a church
-        //    with one Sunday service and wrong for a school with a daily
-        //    registration period, and this portal is a product rather than one
-        //    customer's installation.
-        $worked = EventRecurrence::datesFor(
-            $rule,
-            $toReading($startDateTime),
-            $endDt === null ? null : $toReading((string) $endDt),
-            $timezone,
-            EventRecurrence::limitsFrom($SETTINGS, InstallationSettings::layerOrNull())
-        );
 
         // 📍 THE EVENT JUST CREATED IS MOVED ONTO THE PATTERN'S FIRST DATE.
         //
@@ -1351,15 +1379,6 @@ if ($action === 'create') {
                     foreach ($extra as $index => $occurrence) {
                         $occStart = (string) $occurrence['start'];
                         $occEnd   = $occurrence['end'];
-                        // 📅 Asked of every date made, not only the first
-                        //    (#1045, D-181). The cap above keeps every START
-                        //    inside the range; this catches the one date whose
-                        //    END would spill over the last day. Not made, so
-                        //    the count below withdraws the rule as for any
-                        //    date that could not be saved.
-                        if (EventDateRange::whyRefused([$occStart, $occEnd === null ? null : (string) $occEnd]) !== null) {
-                            continue;
-                        }
                         // 🔤 EACH DATE GETS ITS OWN ADDRESS, NAME AND ITS OWN
                         //    DATE, ASKED OF THE DATABASE (#883). It was the
                         //    FIRST date's address plus `-2`, `-3` … — so the

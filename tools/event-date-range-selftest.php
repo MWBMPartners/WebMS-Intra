@@ -22,9 +22,12 @@
  *   B  the events API, update: a start or end moved outside is refused and
  *      nothing changes; a stored date written before the range existed does
  *      NOT block an unrelated change
- *   C  Manage Events: both edges, years 1, 9999 and 10000, and a weekly
- *      repeat begun in the last December, whose dates stop on the last day
- *      with the stored rule saying so
+ *   C  Manage Events: both edges, years 1, 9999 and 10000; a repeat any of
+ *      whose dates would fall outside — a first date the pattern MOVES past
+ *      the edge, ten dates from the last December, an "until" five years
+ *      past it, a last date whose END spills — refused WHOLE with nothing
+ *      stored, beside a repeat wholly inside that is made in full; and a
+ *      start in ISO basic form judged by the reading actually stored
  *   D  the public "suggest an event" form: refused with `?err=range`, and the
  *      form shows the range in words
  *   E  the series pattern page: a pattern outside the range is refused before
@@ -692,46 +695,66 @@ foreach ($formCases as [$name, $start, $end, $saved]) {
     }
 }
 
-// A weekly repeat begun in the last allowed December: its dates stop on the
-// last day, and the stored rule says so (which is what keeps the calendar
-// feed's single repeating entry honest).
-$lastDec = [];
-for ($d = 10; $d <= 31; $d += 7) {
-    $lastDec[] = sprintf('%d-12-%02d 10:00:00', $L, $d);
+// A REPEAT IS JUDGED WHOLE, BEFORE ANYTHING IS WRITTEN. If any date it would
+// make — the first one included, after the pattern moves it — falls outside
+// the range, the whole save is refused and NOTHING is stored: no event, no
+// series, no shortened run. Round 1 capped and skipped instead, which made
+// fewer dates than were asked for with a cheerful message, and never checked
+// a first date the pattern had moved (round 2 of #1045's check measured
+// 2200-12-30 22:00 with Wednesdays ticked stored as 2200-12-31 22:00 to
+// 2201-01-01 01:00, "created successfully").
+/** Post one repeat; answers how many rows of that name exist and the message. */
+$repeatRun = static function (string $name, string $start, string $end, array $repeat) use ($formCreate, $db): array {
+    $made = $formCreate($name, $start, $end, ['repeatFrequency' => 'weekly'] + $repeat);
+    $q = $db->prepare('SELECT COUNT(*) AS n FROM `tblEventSeries` WHERE `seriesName` = ?');
+    $q->bind_param('s', $name);
+    $q->execute();
+    $series = (int) ($q->get_result()->fetch_assoc()['n'] ?? 0);
+    $q->close();
+    return ['events' => $made['saved'], 'series' => $series, 'message' => $made['message']];
+};
+// The weekday of 31 December of the last allowed year, as the form numbers
+// it (0 = Sunday), worked out rather than assumed.
+$lastDayWeekday = (string) (int) (new DateTimeImmutable($L . '-12-31', new DateTimeZone('UTC')))->format('w');
+$repeatCases = [
+    // name                     start                     end                       repeat fields
+    ['P1045 repeat moved',      $L . '-12-30T22:00',      $L . '-12-31T01:00',      ['repeatCount' => '3', 'repeatDays' => [$lastDayWeekday]]],
+    ['P1045 repeat count 10',   $L . '-12-10T10:00',      $L . '-12-10T11:00',      ['repeatCount' => '10']],
+    ['P1045 repeat until',      $L . '-12-10T10:00',      $L . '-12-10T11:00',      ['repeatUntil' => ($L + 5) . '-12-31']],
+    ['P1045 repeat spill',      $L . '-12-24T23:00',      $L . '-12-25T00:30',      ['repeatCount' => '3']],
+];
+$repeatAll = static function () use ($repeatCases, $repeatRun): array {
+    $out = [];
+    foreach ($repeatCases as [$name, $start, $end, $repeat]) {
+        $out[$name] = $repeatRun($name, $start, $end, $repeat);
+    }
+    return $out;
+};
+$reps = $repeatAll();
+check('C premise: the moved case really is moved — 30 December is not the ticked weekday',
+    (string) (int) (new DateTimeImmutable($L . '-12-30', new DateTimeZone('UTC')))->format('w') !== $lastDayWeekday, true);
+foreach ($repeatCases as [$name]) {
+    check("C {$name}: refused WHOLE — no event and no series stored", [$reps[$name]['events'], $reps[$name]['series']], [0, 0]);
+    check("C {$name}: and the message names the range and says nothing was saved",
+        str_contains($reps[$name]['message'], $range) && str_contains($reps[$name]['message'], 'Nothing was saved.'), true);
 }
-$repeatRun = static function () use ($formCreate, $db, $rowNamed): array {
-    $formCreate('P1045 form repeat', $GLOBALS['L'] . '-12-10T10:00', $GLOBALS['L'] . '-12-10T11:00', ['repeatFrequency' => 'weekly', 'repeatCount' => '10']);
-    $series = (int) ($rowNamed('P1045 form repeat')['seriesID'] ?? 0);
-    $starts = [];
-    $rs = $db->query("SELECT `startDateTime` FROM `tblEvents` WHERE `eventName` = 'P1045 form repeat' AND `isDeleted` = 0 ORDER BY `startDateTime`");
-    while ($row = $rs->fetch_assoc()) {
-        $starts[] = (string) $row['startDateTime'];
-    }
-    $rule = $series > 0 ? $db->query("SELECT `maxOccurrences` FROM `tblRecurrenceRules` WHERE `seriesID` = {$series}")->fetch_assoc() : null;
-    return ['starts' => $starts, 'ruleCount' => $rule === null ? null : (int) $rule['maxOccurrences'], 'series' => $series];
-};
-$rep = $repeatRun();
-check('C a weekly repeat from 10 December ' . $L . ' stops on the last allowed day: ' . count($lastDec) . ' dates', $rep['starts'], $lastDec);
-// The rule row is written with a COUNT of the dates made (its `endDate` is
-// deliberately never written — see `save.php`), so the cap is what lets the
-// rule survive: without it the pattern makes ten dates, six are refused, and
-// the rule is withdrawn because the series no longer matches it (plant P4).
-check('C and its stored rule survives, describing exactly those ' . count($lastDec) . ' dates', $rep['ruleCount'], count($lastDec));
+// The control: a repeat wholly inside the range, near the edge, is made in
+// full, so the refusals above are the range and not the repeat itself.
+$inside = $repeatRun('P1045 repeat inside', $L . '-12-03T10:00', $L . '-12-03T11:00', ['repeatCount' => '3']);
+check('C premise: three weekly dates from 3 December ' . $L . ' are all made, in one series', [$inside['events'], $inside['series']], [3, 1]);
 
-// And a repeat whose LAST date would END past the range: 24 December at
-// 23:00 for ninety minutes. The cap keeps every start inside; the 31st's end
-// would be 1 January of the year after, so that one date is not made.
-$spillRun = static function () use ($formCreate, $db): array {
-    $L = $GLOBALS['L'];
-    $formCreate('P1045 form spill', $L . '-12-24T23:00', $L . '-12-25T00:30', ['repeatFrequency' => 'weekly', 'repeatCount' => '3']);
-    $starts = [];
-    $rs = $db->query("SELECT `startDateTime` FROM `tblEvents` WHERE `eventName` = 'P1045 form spill' AND `isDeleted` = 0 ORDER BY `startDateTime`");
-    while ($row = $rs->fetch_assoc()) {
-        $starts[] = (string) $row['startDateTime'];
-    }
-    return $starts;
+// The reading that is STORED decides, not the "T"-to-space text: ISO basic
+// form is read as 2030 by I18n::wallClockFromInput() and stored as 2030 by
+// MySQL (measured on 8.0.36: '20300601T100000' -> 2030-06-01 10:00:00).
+// Round 1 judged the text and refused it as out of range.
+$basicRun = static function () use ($formCreate, $rowNamed): array {
+    $made = $formCreate('P1045 form basic', '20300601T100000');
+    $row  = $rowNamed('P1045 form basic');
+    return [$made['saved'], $row === null ? null : (string) $row['startDateTime'], $made['message']];
 };
-check('C a repeat whose last date would end past the range keeps only the date that fits', $spillRun(), [$L . '-12-24 23:00:00']);
+$basic = $basicRun();
+check('C a start in ISO basic form (20300601T100000) is saved, as 2030-06-01 10:00:00', [$basic[0], $basic[1]], [1, '2030-06-01 10:00:00']);
+check('C and it is not refused for the range', str_contains($basic[2], $range), false);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nD  The public \"suggest an event\" form\n";
@@ -827,17 +850,29 @@ $pg  = $apiUpdateRun();
 $unplant('_apps/events/api/update.php', $was);
 check('P2 update without its call: a start in 9999 is stored again', $pg['start9999'], [200, '9999-12-31 10:00:00']);
 
-$was = $plant('_apps/calendar/manage/save.php', "\$rangeProblem = EventDateRange::whyRefused([\$startWhen, \$endWhen !== '' ? \$endWhen : null]);", '$rangeProblem = null;');
+$was = $plant('_apps/calendar/manage/save.php', 'if ($rangeProblem !== null) {', 'if (false) {');
 $clearEvents();
 $pg  = $formRun();
 $unplant('_apps/calendar/manage/save.php', $was);
 check('P3 Manage Events without its call: 31 December 1899 is saved again', $pg['P1045 form 1899']['saved'], 1);
 
-$was = $plant('_apps/calendar/manage/save.php', "\$rule['endDate'] = \$lastRepeatDay;", '// planted: no cap');
+// The whole-repeat refusal taken away — which is round 1's behaviour less its
+// cap and skip, both now deleted: every repeat case is stored again.
+$was = $plant('_apps/calendar/manage/save.php', 'if ($repeatRangeProblem !== null) {', 'if (false) {');
 $clearEvents();
-$pg  = $repeatRun();
+$pg  = $repeatAll();
 $unplant('_apps/calendar/manage/save.php', $was);
-check('P4 Manage Events without the repeat cap: the rule is withdrawn (the every-date check still keeps the dates inside)', [$pg['ruleCount'], $pg['starts']], [null, $lastDec]);
+check('P4 Manage Events without the whole-repeat refusal: the moved first date is stored past the range again',
+    $pg['P1045 repeat moved']['events'] > 0, true);
+check('P4b and the count-10 repeat near the edge is stored again (all ten)', $pg['P1045 repeat count 10']['events'], 10);
+
+// The first range check put back on the "T"-to-space text, as in round 1.
+$was = $plant('_apps/calendar/manage/save.php', '    $readingFor($startDateTime),', '    $normaliseWhen($startDateTime),');
+$clearEvents();
+$pg  = $basicRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P4c judging the text rather than the reading: the 2030 basic-form start is refused as out of range again',
+    [$pg[0], str_contains($pg[2], $range)], [0, true]);
 
 $was = $plant('_apps/calendar/submit-save.php', 'if (EventDateRange::whyRefused([$startUtc, $endUtc]) !== null) {', 'if (false) {');
 $clearEvents();
@@ -849,26 +884,18 @@ $clearEvents();
 $formCreate('P1045 series base', '2031-10-05T10:00', '2031-10-05T11:00', ['repeatFrequency' => 'weekly', 'repeatCount' => '3']);
 $baseSeries = (int) ($rowNamed('P1045 series base')['seriesID'] ?? 0);
 // The page asks twice — the first date, then every date — so the far case
-// needs both taken away (and the cap, below), and the spill case needs only the second.
+// needs both taken away, and the spill case needs only the second.
 $everyDate = "if (EventDateRange::whyRefused([(string) \$newDate['start'], \$newDate['end'] === null ? null : (string) \$newDate['end']]) !== null) {";
 $was = $plant('_apps/calendar/manage/series-repattern.php', '} elseif (EventDateRange::whyRefused([$anchor, $anchorEnd]) !== null) {', '} elseif (false) {');
 $plant('_apps/calendar/manage/series-repattern.php', $everyDate, 'if (false) {');
-// And the cap, which on its own turns a pattern past the far edge into "no
-// dates" — a refusal too, but not one that names the range.
-$plant('_apps/calendar/manage/series-repattern.php', "\$askedRule['endDate'] = \$lastRepeatDay;", '// planted: no cap');
 $pg  = $repattRun();
 $unplant('_apps/calendar/manage/series-repattern.php', $was);
-check('P6 the pattern page without either call or the cap: that pattern is previewed again', $pg['far'], [false, true]);
+check('P6 the pattern page without either call: that pattern is previewed again', $pg['far'], [false, true]);
 $was = $plant('_apps/calendar/manage/series-repattern.php', $everyDate, 'if (false) {');
 $pg  = $spillPreview();
 $unplant('_apps/calendar/manage/series-repattern.php', $was);
 check('P6b without the every-date check: the spilling pattern is previewed again', $pg, [false, true]);
 
-$was = $plant('_apps/calendar/manage/save.php', "if (EventDateRange::whyRefused([\$occStart, \$occEnd === null ? null : (string) \$occEnd]) !== null) {", 'if (false) {');
-$clearEvents();
-$pg  = $spillRun();
-$unplant('_apps/calendar/manage/save.php', $was);
-check('P6c Manage Events without the every-date check: the date ending past the range is made again', count($pg), 2);
 
 $was = $plant('_apps/calendar/manage/import.php', 'if (\Portal\Core\EventDateRange::contains($out) === false) {', 'if (false) {');
 $clearEvents();

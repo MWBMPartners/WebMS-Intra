@@ -410,16 +410,6 @@ if ($isPost === true) {
                     'maxOccurrences' => preg_match('/^\d+$/', $formCount) === 1 && (int) $formCount > 0 ? (int) $formCount : null,
                 ];
 
-                // 📅 THE PATTERN STOPS AT THE LAST DAY AN EVENT MAY BE STORED
-                //    ON (#1045, D-181), exactly as the create handler caps it,
-                //    and only where that can matter.
-                $lastRepeatDay = EventDateRange::lastYear() . '-12-31';
-                if ((int) substr($anchor, 0, 4) + EventRecurrence::HARD_MAX_YEARS >= EventDateRange::lastYear()
-                    && ($askedRule['endDate'] === null || $askedRule['endDate'] > $lastRepeatDay)
-                ) {
-                    $askedRule['endDate'] = $lastRepeatDay;
-                }
-
                 $worked = EventRecurrence::datesFor(
                     $askedRule,
                     $anchor,
@@ -429,11 +419,12 @@ if ($isPost === true) {
                 );
 
                 $newDates = $worked['dates'];
-                // 📅 And every date the pattern makes is asked too: the cap
-                //    keeps each START inside, but a last date's END could
-                //    still spill past the final day. Refused whole rather
-                //    than trimmed, because the preview must show what the
-                //    change really does.
+                // 📅 And every date the pattern makes is asked too (#1045):
+                //    a pattern whose first date fits can still run past the
+                //    last allowed day, or end there. Refused WHOLE rather
+                //    than capped or trimmed — Manage Events gives the same
+                //    answer, and a pattern quietly shortened is a change
+                //    nobody asked for.
                 foreach ($newDates as $newDate) {
                     if (EventDateRange::whyRefused([(string) $newDate['start'], $newDate['end'] === null ? null : (string) $newDate['end']]) !== null) {
                         $problem  = EventDateRange::refusalWords();
