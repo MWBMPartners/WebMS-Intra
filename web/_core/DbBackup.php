@@ -5357,12 +5357,61 @@ class DbBackup
     // restore would keep. A one-table restore of `tblTranslationUsage` does the
     // same, because it would reset the counters just as surely.
     //
-    // A FAILURE IS SAID, NOT FATAL. Unlike the kept rows of #697, nothing is
-    // lost for good if this does not happen: the counters are a limit on
-    // spending, and the worst case is that an organisation may spend up to one
-    // month's limit again. Refusing a recovery over that would be the wrong
-    // trade at the one moment somebody is recovering, so the restore goes on
-    // and the answer SAYS the figures may have gone back.
+    // A FAILURE THE TRANSACTION SURVIVES IS SAID, NOT FATAL. Unlike the kept
+    // rows of #697, nothing is lost for good if this does not happen: the
+    // counters are a limit on spending, and the worst case is that an
+    // organisation may spend up to one month's limit again. Refusing a
+    // recovery over that would be the wrong trade at the one moment somebody
+    // is recovering, so the restore goes on and the answer SAYS the figures
+    // may have gone back.
+    //
+    // BUT ONLY WHERE THE RESTORE'S TRANSACTION IS KNOWN TO BE ALIVE, and the
+    // first version got this wrong. It said "a statement error rolls back that
+    // statement only", which is FALSE for a deadlock (1213): InnoDB then rolls
+    // back the WHOLE transaction (measured by the independent check: insert 42,
+    // deadlock caught, insert 43, rollback - 42 gone, 43 saved for good). Caught
+    // and carried on from, that would silently undo every table the restore had
+    // put back, let every later step write outside any transaction, and report
+    // success. MySQL offers an ordinary user no reliable way to ask "am I still
+    // in a transaction" (`@@in_transaction` is MariaDB's; InnoDB's own list
+    // needs the PROCESS right a shared host does not give), so the rule is an
+    // ALLOW-LIST of errors that are known to undo only their own statement
+    // (`TRANSLATION_STATEMENT_ONLY_ERRORS`); ANY other failure - a deadlock, a
+    // lock wait, a lost connection, anything not from the database - is
+    // re-thrown, and the restore stops and undoes everything exactly as when
+    // #694's and #697's carries fail. Erring towards stopping is the
+    // recoverable direction: "nothing was changed, try again".
+
+    /**
+     * Database error numbers after which only the failing STATEMENT is undone
+     * and the restore's transaction is certainly still open (#801): a refused
+     * value (1048, 1264, 1265, 1292, 1366, 1406), a duplicate (1062), a
+     * trigger's or procedure's own refusal (1644), a missing table or column
+     * (1146, 1054), and a right not granted (1142, 1143). Anything else is
+     * treated as possibly having ended the transaction.
+     */
+    private const TRANSLATION_STATEMENT_ONLY_ERRORS = [1048, 1054, 1062, 1142, 1143, 1146, 1264, 1265, 1292, 1366, 1406, 1644];
+
+    /**
+     * Re-throw a failure of the translation-counter carry unless it is one the
+     * restore's transaction is known to survive (see the note above).
+     *
+     * @throws RuntimeException When the transaction may be gone.
+     */
+    private static function stopUnlessStatementOnly(\Throwable $e): void
+    {
+        if ($e instanceof \mysqli_sql_exception
+            && in_array((int) $e->getCode(), self::TRANSLATION_STATEMENT_ONLY_ERRORS, true) === true) {
+            return;
+        }
+        // The fault's own words are not repeated: they can quote values. Its
+        // NUMBER is, so an administrator can tell a deadlock from anything else.
+        throw new RuntimeException(
+            'The database stopped while this month\'s translation figures were being kept (error number '
+            . (int) $e->getCode() . '), and after that kind of failure the database may already have undone '
+            . 'part of the work, so the whole restore is being undone rather than carried on.'
+        );
+    }
 
     /**
      * This month's translation counters, read before a restore empties
@@ -5370,7 +5419,7 @@ class DbBackup
      *
      * The month is `gmdate('Y-m-01')`, which MUST stay the same expression as
      * `Translation::usageMonth()` (this class is also loaded by itself, so it
-     * does not ask that class; section L of tools/backup-restore-selftest.php
+     * does not ask that class; proof 30 of tools/backup-restore-selftest.php
      * compares the two).
      *
      * @param list<string> $replacing The tables this restore is going to empty.
@@ -5417,6 +5466,9 @@ class DbBackup
             }
             $stmt->close();
         } catch (\Throwable $e) {
+            // A read inside the restore's transaction can fail in a way that
+            // ends it (a deadlock), so the same rule as the write applies.
+            self::stopUnlessStatementOnly($e);
             // Said out loud by the caller, never read as "nothing was used".
             return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
         }
@@ -5488,9 +5540,11 @@ class DbBackup
                 $raised++;
             }
         } catch (\Throwable $e) {
-            // A statement error rolls back that statement only; the restore's
-            // transaction is still alive, so it can go on. The fault's own
-            // words are not repeated: they can quote values.
+            // Only an error known to undo just its own statement lets the
+            // restore go on (see `TRANSLATION_STATEMENT_ONLY_ERRORS`); anything
+            // else is re-thrown and the whole restore is undone. The fault's
+            // own words are not repeated: they can quote values.
+            self::stopUnlessStatementOnly($e);
             return $failed;
         } finally {
             foreach ([$look, $write] as $stmt) {
@@ -5503,11 +5557,16 @@ class DbBackup
             return '';
         }
 
-        return 'This month\'s translation figures for ' . $raised . ' organisation(s) '
-             . ($dryRun === true ? 'would be' : 'were')
-             . ' kept at what they were before the restore, because they are higher than this snapshot recorded: '
-             . 'translation requests already made and paid for this month still count against the monthly limits. '
-             . 'Earlier months\' figures ' . ($dryRun === true ? 'would be' : 'were') . ' put back as the snapshot has them.';
+        // ⚠️ "The higher of the two", never "kept at what they were before the
+        //    restore": the two counters are judged separately, so an
+        //    organisation can end with the snapshot's request count and the
+        //    live figure for money (the independent check's mixed case).
+        return 'This month\'s translation figures (how many translation requests were made, and what they cost) '
+             . ($dryRun === true ? 'would be' : 'were') . ' higher before this restore than in the snapshot for '
+             . $raised . ' organisation(s). For each of those, the higher of the two figures '
+             . ($dryRun === true ? 'would be' : 'was') . ' kept, for the number of requests and for the money '
+             . 'separately, because requests already made and paid for this month still count against the monthly '
+             . 'limits. Earlier months\' figures ' . ($dryRun === true ? 'would be' : 'were') . ' put back as the snapshot has them.';
     }
 
     /**

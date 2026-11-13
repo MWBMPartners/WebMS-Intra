@@ -306,7 +306,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 551; // 527 until #954 added part L5 (twenty-four: who may open a claim's generated PDF, the newest version under the newest stage's name, a Range request, every refusal compared with a made-up claim, D-130's record and the refusal's absent one, the claim page's links, and three file and four number tricks); 521 until #918 and #1014 added six (three Q11b, one per person who downloads the attendance spreadsheet, and H1-H3 on the venues year schedule message); 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 554; // 551 until #954's round 2 added three (a claim PDF and a receipt each served as a plain file and then swapped for a link in the same running server, with its premise); 527 until #954 added part L5 (twenty-four: who may open a claim's generated PDF, the newest version under the newest stage's name, a Range request, every refusal compared with a made-up claim, D-130's record and the refusal's absent one, the claim page's links, and three file and four number tricks); 521 until #918 and #1014 added six (three Q11b, one per person who downloads the attendance spreadsheet, and H1-H3 on the venues year schedule message); 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3763,13 +3763,52 @@ $l4Add(916878, L3_MEM_CLAIM, 'Claim_' . L3_MEM_CLAIM . '_Approved.pdf', 'claim_'
 $cross = $l5Get($jar['adm'], L3_MEM_CLAIM);
 ok('L5-17. a claim whose stored PDF name is ANOTHER claim\'s file: 404, and none of that file', $secretOk($cross) && $secretPdfLeak($cross) === false, $l4Why($cross));
 // A link in the PDF folder, under the claim's own name, to the key file.
+//
+// SERVED AS A PLAIN FILE FIRST, THEN SWAPPED, IN THE SAME RUNNING SERVER (round
+// 2 of #954's check). PHP keeps `realpath()`'s answers across requests in the
+// same server process (the "realpath cache"), so a file that was resolved as a
+// plain file a moment ago still resolves to ITSELF after it is replaced by a
+// link, the "inside the folder" test passes, and `fopen()` follows the link.
+// A link made before the path was ever looked up never meets that cache, which
+// is why the first version of this check could not fail: it passed with the
+// guard deleted whenever more than two minutes had gone by since L5-1. The
+// premise request immediately before the swap is what makes it bite.
 q('UPDATE `tblExpenseClaims` SET `fileName` = ? WHERE `claimID` = ?', 'si', ['claim_' . L3_MEM_CLAIM . '.pdf', L3_MEM_CLAIM]);
+$plainFirst = $l5Get($jar['adm'], L3_MEM_CLAIM);
+ok(
+    'L5-18a. (premise) the claim\'s PDF is served as a plain file just before it is swapped, so the server has looked the path up',
+    $plainFirst['status'] === 200 && $plainFirst['body'] === $l5Bytes[L3_MEM_CLAIM],
+    $l4Why($plainFirst)
+);
 unlink($l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf');
 if (symlink($l4Secret, $l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf') === false) {
     refuse('a link could not be made inside the scratch copy\'s PDF folder');
 }
 $linked = $l5Get($jar['adm'], L3_MEM_CLAIM);
-ok('L5-18. the claim\'s own name in the PDF folder is a LINK to a file outside it: 404, and nothing of the key file', $secretOk($linked), $l4Why($linked));
+ok('L5-18. …then swapped for a LINK to a file outside the folder, in the same running server: 404, and nothing of the key file', $secretOk($linked), $l4Why($linked));
+// The same for a RECEIPT (#867's receiptFile() carried the same shape; L4-16's
+// link was made before the path was ever looked up, so it could not see it).
+const L5_R_SWAP = 916880;
+$swapName  = L3_OWN_DEPT . '_1700000000_receipt7.pdf';
+$swapBytes = "%PDF-1.4 a receipt swapped for a link\n" . random_bytes(500);
+file_put_contents($l4Folder . $sep . $swapName, $swapBytes);
+q(
+    'INSERT INTO `tblExpenseClaimFiles` (`fileID`, `claimID`, `fileLabel`, `storedFilename`, `fileSize`, `fileType`, `stage`) VALUES (?, ?, ?, ?, ?, ?, NULL)',
+    'iissis', [L5_R_SWAP, L3_OWN_DEPT, 'swap.pdf', $swapName, strlen($swapBytes), 'application/pdf']
+);
+$receiptFirst = $l4Get($jar['adm'], L3_OWN_DEPT, L5_R_SWAP);
+ok(
+    'L5-18b. (premise) a receipt is served as a plain file just before it is swapped',
+    $receiptFirst['status'] === 200 && $receiptFirst['body'] === $swapBytes,
+    $l4Why($receiptFirst)
+);
+unlink($l4Folder . $sep . $swapName);
+if (symlink($l4Secret, $l4Folder . $sep . $swapName) === false) {
+    refuse('a link could not be made inside the scratch copy\'s receipts folder');
+}
+$receiptLinked = $l4Get($jar['adm'], L3_OWN_DEPT, L5_R_SWAP);
+ok('L5-18c. …then swapped for a LINK to a file outside the folder, in the same running server: 404, and nothing of the key file', $secretOk($receiptLinked), $l4Why($receiptLinked));
+q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` = ?', 'i', [L5_R_SWAP]);
 unlink($l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf');
 $gone = $l5Get($jar['adm'], L3_MEM_CLAIM);
 ok('L5-19. the file is not there: 404', $secretOk($gone), $l4Why($gone));

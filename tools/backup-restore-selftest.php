@@ -5275,7 +5275,7 @@ function brs_proof30(): void
     $rehearsal = $backup->restoreAll($dir, true);
     brs_check(($rehearsal['success'] ?? false) === true, 'the rehearsal succeeds', brs_say($rehearsal));
     brs_check(
-        str_contains(implode(' ', $rehearsal['warnings'] ?? []), 'This month\'s translation figures for 3 organisation(s) would be kept at what they were before the restore') === true,
+        str_contains(implode(' ', $rehearsal['warnings'] ?? []), 'would be higher before this restore than in the snapshot for 3 organisation(s). For each of those, the higher of the two figures would be kept') === true,
         'and says this month\'s figures for three organisations WOULD be kept',
         brs_say($rehearsal['warnings'] ?? [])
     );
@@ -5313,7 +5313,7 @@ function brs_proof30(): void
         brs_say($figures($last))
     );
     brs_check(
-        str_contains(implode(' ', $restored['warnings'] ?? []), 'This month\'s translation figures for 3 organisation(s) were kept at what they were before the restore') === true,
+        str_contains(implode(' ', $restored['warnings'] ?? []), 'were higher before this restore than in the snapshot for 3 organisation(s). For each of those, the higher of the two figures was kept') === true,
         'and the restore says so, with the number of organisations',
         brs_say($restored['warnings'] ?? [])
     );
@@ -5346,10 +5346,54 @@ function brs_proof30(): void
         brs_say([$one, $figures($month)])
     );
     brs_check(
-        str_contains((string) ($one['notice'] ?? ''), 'This month\'s translation figures for 1 organisation(s) were kept') === true,
+        str_contains((string) ($one['notice'] ?? ''), 'were higher before this restore than in the snapshot for 1 organisation(s)') === true,
         'and says so in its notice',
         brs_say($one['notice'] ?? null)
     );
+
+    // ---------------------------------------------------------------------
+    // F. WHEN THE CARRY FAILS (round 2 of the independent check: the
+    //    "restore says so" path was tested by nothing, and a deadlock was
+    //    being carried on from although it ends the whole transaction). A
+    //    connection that fails one statement of the carry with a chosen
+    //    database error number (BrsUsageFault). 970301 is at 20/400 now and
+    //    the snapshot holds 5/100, so a working carry would keep 20/400.
+    // ---------------------------------------------------------------------
+    $failSentence = 'be sure of keeping this month\'s translation figures';
+    foreach ([['read', 1146], ['write', 1644]] as [$where, $code]) {
+        BrsUsageFault::$where = $where;
+        BrsUsageFault::$code  = $code;
+        $faulty = brs_backup('p30', brs_connect('', BrsUsageFault::class))->restoreAll($dir);
+        BrsUsageFault::$where = '';
+        brs_check(
+            ($faulty['success'] ?? false) === true
+                && str_contains(implode(' ', $faulty['warnings'] ?? []), 'This restore could not ' . $failSentence) === true,
+            'when the carry\'s ' . strtoupper($where) . ' fails with an error that undoes only its own statement (' . $code
+                . '), the restore goes on AND SAYS the figures may be the snapshot\'s',
+            brs_say([$faulty['error'] ?? '', $faulty['warnings'] ?? []])
+        );
+        brs_check(
+            ($figures($month)[970301] ?? null) === [5, 100],
+            '…and the figures really are the snapshot\'s, which is what that sentence warns of',
+            brs_say($figures($month))
+        );
+        $set($month, 970301, 20, 400);
+    }
+    $beforeFatal = $figures($month);
+    foreach ([['read', 1213], ['write', 1213], ['write', 2013]] as [$where, $code]) {
+        BrsUsageFault::$where = $where;
+        BrsUsageFault::$code  = $code;
+        $stopped = brs_backup('p30', brs_connect('', BrsUsageFault::class))->restoreAll($dir);
+        BrsUsageFault::$where = '';
+        brs_check(
+            ($stopped['success'] ?? true) === false
+                && str_contains((string) ($stopped['error'] ?? ''), 'error number ' . $code) === true
+                && $figures($month) === $beforeFatal,
+            'a ' . ($code === 1213 ? 'DEADLOCK' : 'lost connection') . ' (' . $code . ') during the carry\'s ' . $where
+                . ' STOPS the restore and undoes it, because after it the transaction may already be gone; nothing is left changed',
+            brs_say([$stopped['error'] ?? '', $figures($month)])
+        );
+    }
 
     Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
     brs_checkSame($before, 'the whole database is back to how this proof found it');
@@ -5373,6 +5417,34 @@ final class BrsNoLevel extends mysqli
             return true;
         }
         return parent::query($query, $result_mode);
+    }
+}
+
+/**
+ * A connection that fails ONE statement of the translation-counter carry
+ * (#801, proof 30 section F), with the database error number the test
+ * chooses, exactly as mysqli under strict reporting throws it. Everything
+ * else is the real thing.
+ *
+ * `$where` is 'read' (the carry's read of this month's rows, before anything
+ * is emptied) or 'write' (its INSERT ... GREATEST after every table is back).
+ * A deadlock (1213) cannot be provoked on demand in one process, so it is
+ * SIMULATED here: what this proves is the RULE - that such a number stops
+ * the restore - not InnoDB's behaviour, which the independent check measured.
+ */
+final class BrsUsageFault extends mysqli
+{
+    public static string $where = '';
+    public static int $code = 0;
+
+    public function prepare(string $query): mysqli_stmt|false
+    {
+        $isRead  = str_starts_with($query, 'SELECT `siteID`, `calls`, `costPence` FROM `tblTranslationUsage`');
+        $isWrite = str_starts_with($query, 'INSERT INTO `tblTranslationUsage`') && str_contains($query, 'GREATEST');
+        if ((self::$where === 'read' && $isRead === true) || (self::$where === 'write' && $isWrite === true)) {
+            throw new mysqli_sql_exception('planted by proof 30', self::$code);
+        }
+        return parent::prepare($query);
     }
 }
 

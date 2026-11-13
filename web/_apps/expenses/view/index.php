@@ -454,7 +454,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         //    is the same rule the receipt address asks, so the link is
                         //    drawn for exactly the people it will open for. A row WITH a
                         //    stage is a version of the claim's generated PDF, which that
-                        //    address deliberately does not serve, so it stays plain text.
+                        //    address deliberately does not serve: since #954 the NEWEST
+                        //    such row links to `expenses/claim-pdf` (the branch below),
+                        //    and an older one stays plain text, marked as replaced.
                         //    EXACTLY `=== null`, the same test as the address's
                         //    `stage IS NULL`: an empty-text stage (which nothing writes)
                         //    would otherwise get a link the address answers with 404.

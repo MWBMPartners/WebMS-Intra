@@ -2054,6 +2054,12 @@ final class ExpenseRules
         //    file system (lstat) afresh, and `clearstatcache(true, …)` drops
         //    the cached answer for this one path before `realpath()` is asked.
         //    The portal never writes a link into this folder.
+        //
+        //    EITHER LINE ALONE CLOSES THE MEASURED CASE, and that is said so
+        //    nobody reads one as dead: planted, removing only the `is_link()`
+        //    block, or only the `clearstatcache()` line, left L5-18 and L5-18c
+        //    of tools/access-pages-selftest.php green; removing BOTH turned them
+        //    red. Two independent guards over one fault, kept on purpose.
         clearstatcache(true, $named);
         if (is_link($named) === true) {
             return null;
