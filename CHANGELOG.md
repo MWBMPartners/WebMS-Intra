@@ -4,6 +4,32 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Deleted assets and one lock order; task reminders on the organisation's clock (#1047, #1041)
+
+- **Nothing is written to an asset deleted while the write waited (#1047).** #1031 fixed this for
+  an asset's edit; every other write that changes one asset, or adds something to it, had the
+  same gap: it checked the asset existed, then wrote without asking again. Twenty-one writes now
+  ask under the asset's lock — identifiers, resources, owners and their authority, terms, the
+  public token, loan requests, approval and check-out (a deleted kit component is skipped), kits,
+  repairs, licence seats, event bookings, stocktake scans, kiosk check-out and the daily
+  valuation. Approving or checking out a loan of a deleted asset now says so and suggests
+  declining or cancelling it, which still work, as does checking it in. A kit checked out without
+  some of its components now names them and says why. Ending a loan, releasing a seat and removing a
+  record stay allowed on purpose. Every write that locks more than one asset now takes them in
+  one order (lowest number first), which stops a kit's check-out deadlocking against a seat
+  linked between its parts; and two kit attaches at once can no longer make a kit loop.
+- **Task reminders now go out by the organisation's own clock (#1041, migration 289).** The scheduled
+  user reminders job compared a task's reminder time — typed on the organisation's clock — with the
+  database server's clock (`NOW()`), so an organisation hours away from the database had its task
+  reminders sent hours early or late. It now compares the reminder, as text, with what the
+  organisation's clock reads now, and counts the seven-day look-back on that clock too. The task form
+  stores the reminder as the reading typed, refuses a date that does not exist (such as 31 February)
+  with a message instead of an error page, and decides "is the reminder still to come?" on the
+  organisation's clock. The Tasks page now shows its messages ("Task updated.", the refusal): it
+  printed none, so every one was set and never seen. Completing a recurring task carries its reminder
+  on at the same time on the clock: it used to pass through a moment, which on the morning the clocks
+  go forward moved a 01:30 reminder to 02:30; the edit form's reminder box had the same fault.
+
 ### Event dates within 1900 to 2200; page messages that say what happened (#1045, #982, #922, #926, #973)
 
 - **An event's dates must fall between 1900 and at least 2200 (#1045, D-181).** Every writer of an

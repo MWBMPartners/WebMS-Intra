@@ -24369,3 +24369,86 @@ takes the start and the end (null = no end) and answers the one sentence, `refus
   round 1's `web/` the ten repeat/basic-form checks go red, against round 2's the five unreadable-value
   checks go red), section K08 of
   `tools/clock-change-selftest.php`, part N of `tools/feed-importer-selftest.php` (planted: N2 and N3 red).
+
+
+## A deleted asset is never written, and assets are locked in ONE order (#1031, #1047)
+
+`AssetRegister::lockedLiveAsset()` is the ONE locked question "is this asset still here?"
+(`SELECT * … AND isDeleted = 0 FOR UPDATE`). It must run inside a transaction — outside one the
+lock ends with the statement. `withLiveAssetsLocked()` / `withLiveAssetLocked()` begin the
+transaction FIRST, lock every named asset lowest number first, and answer null without calling the
+work when a REQUIRED one is gone; `$alsoLockIfLive` names assets locked in the same order whose
+absence refuses nothing (a kit's components on checkout; everything a check-in touches, because
+ending a loan is never refused). The work must never answer null itself. Never call them inside
+another transaction (`begin_transaction()` silently commits what was open).
+
+**One lock order.** Every write that locks more than one asset goes through
+`withLiveAssetsLocked()`. Locking a second asset row any other way while one is held is a second
+order: round 2 measured a kit's checkout (kit, then component) deadlocking against a seat linked
+between them (lowest first) — the seat's save said "please try again". The `sort()` is the whole
+guarantee; section O of the test drives the overlaps that deadlock without it.
+
+Three single-asset writes already run inside `Currency::withParentLocked()` (updateAsset,
+addMaintenance, recordValueSnapshot) and ask `lockedLiveAsset()` directly; section S pins that
+list, because no race can tell a lock inside a transaction from one outside it.
+
+`attachToKit()` asks "kits are one level deep" again under both locks: the checks before the lock
+let two attaches at once make a loop.
+
+Judged NOT to refuse, each reason at the top of its method: ending a loan (decline, cancel,
+check-in — the loans register lists a deleted asset's loans, and ending them is the only way they
+leave the open lists), releasing a seat, removing a record of the asset, the scan and found-report
+records.
+
+Test: `tools/assets-deleted-writes-selftest.php` — per write: A control, B deleted before, W
+deleted while it waited (two real connections; the wait read from performance_schema), P the race
+against a copy with that method's deletion question planted out; K the kit component; O the lock
+order (with the sort planted out, each overlap deadlocks); L the kit loop; H the loans register
+over HTTP; S the source rules; Z the tidy-up.
+
+## Task reminders on the organisation's clock (#1041)
+
+- `tblTasks.reminderDate` is a WALL-CLOCK reading (migration 289 says so in the column comment; comment
+  only, the harness reports SAME_AS_FRESH), so it is now under `check_clock_time_not_a_moment.py`
+  (pinned set 6 → 7, `--repin`) and `check_wall_clock_writes_not_moments.py`. Declaring it is what found
+  the two readers: `tasks/index.php` (edit box, `date(strtotime())`) and `tasks/complete.php` (next
+  reminder, `new DateTime()` in PHP's default zone).
+- `cron/user-reminders.php`: `reminderDate <= ? AND reminderDate >= ?`, bound to
+  `I18n::wallClockNow(Site::timezone($siteId))` and that reading minus the look-back days (calendar
+  days, UTC arithmetic). Never `NOW()`.
+- `tasks/save.php`: `I18n::wallClockFromInput()` (shape and range, no moment), and "in the future" is
+  `strcmp($reading, I18n::wallClockNow(...)) > 0`. **Be exact about the old fault here:** start-up sets
+  PHP's default zone to the request's organisation, so `strtotime($r) > time()` agreed with the new test
+  on every ordinary day and differed only in the hour the clocks skip. The live fault in save.php was a
+  value that is not a real date reaching the database (strict mode refuses it → error page).
+- **`I18n::wallClockMovedOn($reading, $unit, $count)` moves a STORED reading on to its next occurrence**
+  by whole days/weeks/months/years, in UTC (no clock changes); null for a non-reading, an unknown unit or
+  a count below 1. `tasks/complete.php` calls it. **Do not call it "the one place a reading is moved
+  on"** — round 2 of the check caught that wording: `resources/resource.php` and the task look-back in
+  `cron/user-reminders.php` do the same `wallClockReading()->modify()` inline.
+  **Why it lives in I18n and not in the page — the lesson of round 1:** the write gate's probe cannot
+  tell a UTC-built reading from a moment, so arithmetic in the page needed an `ALLOWED` entry, and that
+  entry (keyed by file + variable + column + function, pinned to the line building the reading)
+  **forgave any OTHER faulty line filling the same variable** — measured: adding
+  `$nextReminder = date("Y-m-d H:i:s", strtotime(... " +1 day"));` below it left the gate OK. With the
+  arithmetic in I18n the page builds no moment, the exemption is DELETED, and that same added line
+  makes the gate FAIL (measured). **An exemption keyed by variable forgives the variable, not the line.**
+- Month/year roll-over is unchanged from before and not decided here: 31 Jan + 1 month = 3 March
+  (2 March in a leap year); 29 Feb + 1 year = 1 March (measured; pinned by N03).
+- Tests: L15-L26 of `tools/time-zones-selftest.php` (327 checks), and section N of
+  `tools/clock-change-selftest.php` (189 checks: N01 refusals, N02 each unit and a count of 2 onto
+  London's spring-forward morning with PHP's default zone set to London, N03 month-end roll-over).
+  - L15 premise: the OLD condition, run on the database with the job's clock, does not pick exactly the
+    tasks due an hour ago and six days ago.
+  - L16: an hour ago and six days ago reminded; two hours on and eight days ago not. The six-day task
+    pins the look-back's UNIT (round 1 found `' days'` → `' hours'` left everything green).
+  - L17-L20: save re-arms a future reminder and stores the reading; edit box shows it back; a past one
+    does not re-arm; 31 February refused with the message, nothing changed.
+  - L21 premise (01:30 on 28 March 2027 does not exist in London), L22-L26: completing a daily, weekly,
+    monthly, yearly and every-two-days task over HTTP with organisation 1 on London's clock gives the
+    next reminder 01:30 on that morning.
+  - Plants, each on a fresh database: old `NOW()` query → L16 red; look-back dropped → L16 red;
+    look-back unit `days` → `hours` → L16 red; old `save.php` → L20 red; monthly mapped to `days` →
+    L24 red; yearly mapped to `months` → L25 red; the interval forced to 1 → L26 red; `complete.php`
+    as before #1041 → L22-L24 red (L25/L26 added after that plant). L17-L19 pass on the old `save.php` too
+    (same answer on an ordinary day) and pin over-reach only.

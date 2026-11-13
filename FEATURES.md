@@ -1349,6 +1349,12 @@ another repo, ever**.
 - Roles: D-093 (only a global administrator hands out "Set up the public website") is judged again inside the save (#866).
 - Event dates are limited to 1 January 1900 – 31 December of the later of 2200 and fifty years from now;
   every way of adding or changing an event says so plainly when a date falls outside (#1045).
+- An asset deleted by somebody else while a change to it was being saved is never changed; the
+  change is refused as for any deleted asset (#1031, #1047). A loan of a deleted asset can be
+  declined or cancelled, not approved or checked out, and the page says so.
+- Tasks: reminder times are on the organisation's own clock; an impossible reminder date is refused
+  with a message; the Tasks page shows its save/refusal messages; a recurring task's next reminder
+  keeps the same time on the clock.
 - Erasure request for an e-mail address (whether or not it also belongs to an account): the name and address on
   event suggestions made without signing in, every prayer request sent through the anonymous form with that address
   (name, address, network address, the sender's own words and any prayer partner's note emptied; the request kept),
