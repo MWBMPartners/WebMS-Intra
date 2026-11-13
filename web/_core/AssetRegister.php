@@ -5474,8 +5474,9 @@ class AssetRegister
         //    self::get() just below ALREADY refuses a component deleted before this call
         //    ("Component asset not found.", measured in round 3). Only one deleted in the
         //    instant between that read and the UPDATE is detached anyway: its link is removed
-        //    on a row no page shows (kitChildren() leaves deleted components out), and nothing
-        //    is created on it. Detaching an already-deleted component is not offered, because
+        //    on a row no page shows (kitChildren() leaves deleted components out), and the only
+        //    new record is self::audit()'s line saying it was detached. Detaching an
+        //    already-deleted component is not offered, because
         //    no page lists one to detach.
         $child = self::get($childAssetId);
         if ($child === null) {

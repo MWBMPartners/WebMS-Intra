@@ -917,12 +917,36 @@ check('C2P with the `continue` planted out (a gone asset then refuses), the same
     && $field('tblAssetLoans', 'status', 'loanID', $kitJob['l']) === 'active' && $field('tblAssetLoans', 'status', 'loanID', $kitJob['partLoan']) === 'active',
     'plant changed ' . $changed . '; ' . $short($r));
 
-/** The skipped component is named even when no component went out (round 3). */
+/**
+ * A skipped component is NAMED, with its reason, even when no component went
+ * out (round 3). This is the case where the component was live when the
+ * checkout read the kit's list and was deleted before the checkout got its
+ * lock — the only way a "no longer in the register" component reaches the
+ * message, since kitChildren() leaves one deleted earlier out of the list.
+ * The component's own NAME is required, not just the reason: with the names
+ * replaced by a fixed string the reason alone still matched (round 4).
+ */
 $kit    = $makeKit();
+$cName  = (string) $field('tblAssets', 'name', 'assetID', $kit['c']);
 $holder = $holdAsset($kit['c']);
 $r      = $runJob($kit, $liveDir, $holder, $kit['c']); // the component is deleted while the checkout waits
-check('C3 a kit whose ONLY component was deleted while it went out says so: the message names the component as no longer in the register',
-    ($r['result']['ok'] ?? null) === true && str_contains((string) ($r['result']['msg'] ?? ''), 'no longer in the register') === true, $short($r));
+check('C3 a kit whose ONLY component was deleted while it went out says so: the message names THAT component as no longer in the register',
+    ($r['result']['ok'] ?? null) === true
+    && str_contains((string) ($r['result']['msg'] ?? ''), $cName . ' (no longer in the register)') === true, $short($r));
+
+/** C4: two components, one goes out and one is skipped — both sentences, each with the right count or name. */
+$kit2   = $makeKit();
+$second = $asset('kit second part');
+run($db, 'UPDATE `tblAssets` SET `parentAssetID` = ? WHERE `assetID` = ?', 'ii', [$kit2['a'], $second]);
+$sName  = (string) $field('tblAssets', 'name', 'assetID', $second);
+$keptName = (string) $field('tblAssets', 'name', 'assetID', $kit2['c']);
+$holder = $holdAsset($second);
+$r      = $runJob($kit2, $liveDir, $holder, $second); // the SECOND component is deleted while the checkout waits
+$msg    = (string) ($r['result']['msg'] ?? '');
+check('C4 a kit with two components, one deleted while it went out: the message says 1 component went out AND names the skipped one; the other is on loan',
+    ($r['result']['ok'] ?? null) === true && str_contains($msg, '1 kit component(s) checked out too.') === true
+    && str_contains($msg, $sName . ' (no longer in the register)') === true && str_contains($msg, $keptName) === false
+    && $count('tblAssetLoans', 'assetID', $kit2['c']) === 1 && $count('tblAssetLoans', 'assetID', $second) === 0, $short($r));
 
 // =============================================================================
 // O. ONE lock order: two writes on the same two assets never deadlock
