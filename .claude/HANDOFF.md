@@ -5,32 +5,37 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927), #968, #977, #933, #619, #655, #657, #691, #966, #998, #1000, #964, #929, #1012, #845, #840, #817, #1008, #988, #1009, #1001, #918, #987, #945, #1014, #960, #885, #853, #854, #855, #811, #971, #972, #875, #1020, #1034, #1035, #1006, #1017; #826, #788, #886, #1033 closed as already done or not a fault.
-Decisions D-129 to D-180 recorded 11-12 November (D-178: network addresses kept and handled as personal data; D-180: an imported date is decided as it stands now).
+`claude/alpha-wip`, pushed after every commit (D-088). Landed and closed since 12 November: #1004, #1003, #880,
+#1021, #1031, #824, #865, #1028, #1025, #1024, #1043, #1040, #1013, #999, #820, #967, #991, #815, #866, #1039,
+#982 (+ #985), #922, #926, #973, #1045, #1047, #1041 (and everything listed in earlier handoffs).
+Decisions recorded 12-13 November: D-180 to D-185 (D-181 event years 1900-2200+; D-182 map-memory period is a capped
+setting; D-183 a home's remembered position is personal data, homes vs public places chosen; D-184 care cases in the
+data copy; D-185 Microsoft/Google sign-in may create accounts by setting, default allow, plus a merge feature #1064 —
+the owner says D-185 applies to SIGNula.id too: record it there when that repository is next worked on).
 
-**Merged locally, not yet pushed (whole suite running):** #1004 (strict money amounts), #1003 + #880 (deprecated PHP functions, byte ranges), #1021 + #1031 (settings row rule, deleted asset), #824 + #865 (discipleship sweep, offline page). Docs and wiring for these are uncommitted on the branch.
+## In flight (no shared files between them)
 
-## In flight (side by side, no shared files — the 12 October 2026 rule)
-
-| Package | Worktree / branch | State |
+| Package | Branch | State |
 |---|---|---|
-| #982 (+ #922, #926, #973) — page messages | `p982-build` | Round 9 building (rehire wording now facts only) |
-| #1028, #1025, #1024 — time faults | `p1028-build` | Round 4 building: pin "live zones first" in `zonesInUse()`; correct five docblocks about the ELSE |
-| #1013, #999, #820 — money | builder af9dac2d | Building |
-| #967, #991, #815 — settings | builder a65b7de9 | Building |
-| #866, #1039 | builder a620a293 | Building |
+| #1037, #1036, #1029 — map memory (D-182, D-183) | `p1037-build` | Round 2 being checked |
+| #1018, #813, #970, #1015 — erasure words, data copy, giving edges, care cases (D-184) | `p1018-build` | Round 2 building |
+| #954, #801 — expense PDF, translation counter through a restore | `p954-build` | Round 2 being checked (migration 292) |
+| #1051, #1050, #1053 — send-log lines | `p1051-build` | Round 1 being checked |
+| #1049, #1042 — Users-page refusal wording; sign-in may create accounts (D-185) | `p1042-build` | Round 2 building (migration 294) |
 
-**Fix list still to build (D-156):** #1019 and #1044 (privacy; after #982, which shares Logger/GdprEraser), #1037, #813, #1015, #1018, #801, #848, #954, #970, #990/#1007, #1041, #1045, #1029/#1030, #1036, #1040, #1042, #1043, #1047, #1048. Decisions to build: #808 (D-158), #847 (D-159), #863 (D-160), #910 (D-161), #930 (D-162), #938 (D-164), #934 (D-166), #939 (D-167), #952 (D-168), #965 (D-169), #986 (D-170), #989 (D-171), #992 (D-172), #993 (D-173).
-Flaky under load (#1046): sign-in-limits 0b and public-website-tick's sign-in — re-run alone before calling red.
+Migration numbers: 289 (#1041, landed), 290 (#1037), 292 (#954), 294 (#1042). 291 and 293 free.
 
-**Migration numbers taken:** through 287. 280, 281, 284, 285 unused. Next free: 288.
-**The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923); the whole-suite runner does not yet (#983).**
+**Fix list still to build (D-156):** #1019, #1044, #1030, #848, #990/#1007, #1048, #1063, #1065 (with #938), #1064
+(merge accounts, D-185), and the decisions to build: #808 (D-158), #847 (D-159), #863 (D-160), #910 (D-161),
+#930 (D-162), #938 (D-164), #934 (D-166), #939 (D-167), #952 (D-168), #965 (D-169), #986 (D-170), #989 (D-171),
+#992 (D-172), #993 (D-173). Raised this stretch and needing triage under D-156: #1049-#1062.
+Flaky under load (#1046): sign-in-limits 0b, public-website-tick sign-in, erasure-pages O6/O19, and port clashes in
+the whole-suite runner (re-run alone before calling red).
 
 ## Next, in this order
 
-1. Push the four merged packages once the suite is green; land the five in flight.
-2. The fix list and decision builds above.
+1. Land the five packages above as each comes back clean.
+2. The fix list and decision builds.
 3. The 5 November backlog (D-055): #777, #569, #821, then medium and low.
 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
 
