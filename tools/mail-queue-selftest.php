@@ -212,7 +212,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 193; // #1051, #1053 added eight: three in R1 (a fallback whose sign-in fails, its last attempt given up on, and a route line before the queue settles it) and five in R2 (two page sends that throw, three SMTP error rows). #1039 added eight: part R2 (four, then four in round 2 of its check). #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
+const EXPECTED_CHECKS = 195; // #1051 round 2 added two: the queue's "route-unusable" reason (R1) and a not-set-up route that throws (R2). #1051, #1053 added eight: three in R1 (a fallback whose sign-in fails, its last attempt given up on, and a route line before the queue settles it) and five in R2 (two page sends that throw, three SMTP error rows). #1039 added eight: part R2 (four, then four in round 2 of its check). #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -255,6 +255,18 @@ if (($argv[1] ?? '') === '--child') {
         switch ((string) $job['task']) {
             case 'send': // several messages through Mailer::send(), in ONE process
                 foreach ((array) $job['messages'] as $m) {
+                    if (($job['catchEach'] ?? false) === true) {
+                        // #1051 round 2: a send that THROWS, and what
+                        // lastOutcome() says afterwards, as a page that
+                        // catches it would ask.
+                        try {
+                            $sent = \Portal\Core\Mailer::send($m['to'], (string) $m['subject'], (string) $m['body'], (array) ($m['files'] ?? []), (array) ($m['options'] ?? []));
+                            $out['each'][] = [$sent, \Portal\Core\Mailer::lastOutcome(), ''];
+                        } catch (Throwable $sendThrew) {
+                            $out['each'][] = [null, \Portal\Core\Mailer::lastOutcome(), get_class($sendThrew)];
+                        }
+                        continue;
+                    }
                     $sent          = \Portal\Core\Mailer::send($m['to'], (string) $m['subject'], (string) $m['body'], (array) ($m['files'] ?? []), (array) ($m['options'] ?? []));
                     $out['each'][] = [$sent, \Portal\Core\Mailer::lastOutcome(), \Portal\Core\Mailer::lastQueueId()];
                 }
@@ -4187,6 +4199,17 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
             && $noSignIn['lines'] === [$line('ms365', 'queued', SITE_R1)],
         'asked ' . json_encode($noSignIn['asked']) . '; waiting ' . $noSignIn['left'] . '; lines ' . json_encode($noSignIn['lines'])
     );
+    //    #1051 round 2: and that line's REASON is "route-unusable" - the route
+    //    could not be used - not "provider-said-no", which it said before #1051
+    //    although no mail service had been asked anything. Pinned by nothing
+    //    until round 2 of the check (removing the line that sets it left the
+    //    whole test green).
+    $noSignInCode = array_column(q('SELECT errorCode FROM tblEmailLog WHERE subject = ?', 's', ['R1 through Microsoft 365, no sign-in']), 'errorCode');
+    ok(
+        'the queue\'s line for a waiting message whose route THREW gives the reason "route-unusable", not "provider-said-no": no mail service was asked anything (#1051)',
+        $noSignInCode === ['route-unusable'],
+        'codes ' . json_encode($noSignInCode)
+    );
     q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Microsoft 365, no sign-in'");
 
     $sent = $r1Send('R1 through Microsoft 365, accepted', SITE_R1, $graphOk, $gmailOk);
@@ -4514,15 +4537,32 @@ if (part('R2', 'A message a caller names for another organisation is KEPT under 
     ]);
     foreach (['ms365' => 'R2 page send, Microsoft 365 cannot sign in (#1051)', 'google' => 'R2 page send, Google cannot sign in (#1051)'] as $provider => $subject) {
         setting('mail.provider', $provider);
-        $threw     = child(['task' => 'send', 'viaHttpsStandin' => true, 'messages' => [msg(mailOf('other'), $subject, 'A message.', ['siteId' => SITE_R1])]]);
+        $threw     = child(['task' => 'send', 'viaHttpsStandin' => true, 'catchEach' => true, 'messages' => [msg(mailOf('other'), $subject, 'A message.', ['siteId' => SITE_R1])]]);
         $thrownWhy = q('SELECT provider, status, siteID, errorCode FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', [$subject]);
         ok(
-            'a page sending at once through ' . ($provider === 'ms365' ? 'Microsoft 365' : 'Google') . ' whose sign-in FAILS: the throw still reaches the page, and the attempt has exactly ONE line in the send log - failed, "route-unusable", under the named organisation - where before it had none (#1051)',
-            $threw['threw'] !== '' && count(queued("subject = '" . addslashes($subject) . "'")) === 0
+            'a page sending at once through ' . ($provider === 'ms365' ? 'Microsoft 365' : 'Google') . ' whose sign-in FAILS: the throw still reaches the page, lastOutcome() says "not-sent", and the attempt has exactly ONE line in the send log - failed, "route-unusable", under the named organisation - where before it had none (#1051)',
+            array_slice((array) ($threw['each'][0] ?? []), 0, 2) === [null, 'not-sent'] && ($threw['each'][0][2] ?? '') !== ''
+                && count(queued("subject = '" . addslashes($subject) . "'")) === 0
                 && $thrownWhy === [['provider' => $provider, 'status' => 'failed', 'siteID' => SITE_R1, 'errorCode' => 'route-unusable']],
-            'threw ' . json_encode($threw['threw']) . '; lines ' . json_encode($thrownWhy)
+            'each ' . json_encode($threw['each'] ?? $threw['threw']) . '; lines ' . json_encode($thrownWhy)
         );
     }
+    //  #1051 round 2: the same throw from a route that is NOT SET UP (Microsoft
+    //  365 with its tenant missing). lastOutcome() must still say
+    //  "not-set-up", as send() set it before trying, and the line's code says
+    //  the same, as SMTP's does - the first version of the catch overwrote
+    //  both with "not-sent" / "route-unusable", untrue for a route nobody
+    //  could have used.
+    setting('mail.provider', 'ms365');
+    setting('auth.ms365.tenantID', '');
+    $notSetUp    = child(['task' => 'send', 'viaHttpsStandin' => true, 'catchEach' => true, 'messages' => [msg(mailOf('other'), 'R2 page send, Microsoft 365 not set up (#1051)', 'A message.', ['siteId' => SITE_R1])]]);
+    $notSetUpWhy = q('SELECT provider, status, siteID, errorCode FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', ['R2 page send, Microsoft 365 not set up (#1051)']);
+    ok(
+        'a page sending at once through Microsoft 365 that is NOT SET UP: the throw still reaches the page, lastOutcome() still says "not-set-up", and the one line says "not-set-up" too, under the named organisation (#1051)',
+        array_slice((array) ($notSetUp['each'][0] ?? []), 0, 2) === [null, 'not-set-up'] && ($notSetUp['each'][0][2] ?? '') !== ''
+            && $notSetUpWhy === [['provider' => 'ms365', 'status' => 'failed', 'siteID' => SITE_R1, 'errorCode' => 'not-set-up']],
+        'each ' . json_encode($notSetUp['each'] ?? $notSetUp['threw']) . '; lines ' . json_encode($notSetUpWhy)
+    );
     setting('mail.provider', 'smtp');
     foreach (['auth.ms365.tenantID', 'auth.ms365.appwide.clientID', 'auth.ms365.appwide.clientSecret', 'mail.google.delegateUser', 'mail.google.serviceAccountKeyFile'] as $key) {
         setting($key, '');

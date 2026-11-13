@@ -706,9 +706,15 @@ class Mailer
             //    service's refusal, never the message (the same words the
             //    queue's line has always carried). It is still thrown, as it
             //    always was: what a page does about it is the page's business.
-            self::$lastOutcome = self::OUTCOME_NOT_SENT;
+            //    A route that is NOT SET UP (a setting missing) also throws here;
+            //    lastOutcome() then keeps saying 'not-set-up', as it was set
+            //    above, and the line says so too, as SMTP's does. Only a route
+            //    that was set up and still failed is 'not-sent'.
+            if ($setUp === true) {
+                self::$lastOutcome = self::OUTCOME_NOT_SENT;
+            }
             self::logSend(
-                $route, '', implode(', ', $recipients), $subj, 0, 'failed', null, 'route-unusable',
+                $route, '', implode(', ', $recipients), $subj, 0, 'failed', null, $setUp === true ? 'route-unusable' : 'not-set-up',
                 'Not sent: ' . self::ROUTES[$route] . ' could not be used. ' . $e->getMessage(), $message['logSite']
             );
 
@@ -1513,10 +1519,13 @@ class Mailer
      * @param bool $quiet True when only asking WHETHER there is a sender
      *                    (sendingRoute() does): rule 2 then writes no error
      *                    record. A real send leaves it false.
+     * @param int|false|null $forSiteId The organisation rule 2's error record
+     *        goes under: the message's (#1053), as logSend() takes it; false
+     *        for the request's.
      *
      * @return array{mailbox: string, address: string, name: string, isShared: bool}|null
      */
-    private static function effectiveSender(bool $quiet = false): ?array
+    private static function effectiveSender(bool $quiet = false, int|false|null $forSiteId = false): ?array
     {
         global $SETTINGS;
 
@@ -1537,10 +1546,11 @@ class Mailer
             //    flowing while an admin fixes the setting.
             if ($quiet === false) {
                 // Through errorRowFor() so an alert it sends is never taken
-                // for the message being handed over (#1051); `false` keeps the
-                // request's organisation, as it always had.
+                // for the message being handed over (#1051), and under the
+                // message's organisation when the caller names one (#1053);
+                // `false`, the default, is the request's, as it always was.
                 self::errorRowFor(
-                    false,
+                    $forSiteId,
                     'Graph',
                     'BAD_SHARED_MAILBOX',
                     'mail.ms365.sharedMailbox is not a valid email address — falling back to mail.defaultFromAddress',
@@ -1580,7 +1590,7 @@ class Mailer
     {
         global $SETTINGS;
 
-        $sender = self::effectiveSender();
+        $sender = self::effectiveSender(false, $forSiteId);
         if ($sender === null) {
             throw new RuntimeException('From address missing');
         }
@@ -1623,13 +1633,13 @@ class Mailer
 
         $url = 'https://graph.microsoft.com/v1.0/users/' . urlencode($sender['mailbox']) . '/sendMail';
 
-        $result = self::graphSendRequest($url, $payload);
+        $result = self::graphSendRequest($url, $payload, $forSiteId);
 
         // 🔁 401 — token expired/revoked mid-cache-window: clear the
         //    static cache and retry ONCE with a freshly acquired token.
         if ($result['code'] === 401) {
             self::$token = '';
-            $result = self::graphSendRequest($url, $payload);
+            $result = self::graphSendRequest($url, $payload, $forSiteId);
         }
 
         // 🔁 429 — throttled. Only retry when Graph's own Retry-After is
@@ -1640,7 +1650,7 @@ class Mailer
             $retryAfter = (int) ($result['headers']['retry-after'] ?? 0);
             if ($retryAfter > 0 && $retryAfter <= 5) {
                 sleep($retryAfter);
-                $result = self::graphSendRequest($url, $payload);
+                $result = self::graphSendRequest($url, $payload, $forSiteId);
             }
         }
 
@@ -1716,18 +1726,19 @@ class Mailer
      *
      * `curlErrno` is libcurl's error number when no answer came back at all
      * (0 otherwise, and 0 for curl_init() failing, which has no number), so
-     * the caller can say WHY in the send log (#1050).
+     * the caller can say WHY in the send log (#1050). `$forSiteId` is the
+     * message's organisation, for the one error record written here (#1053).
      *
      * @return array{code: int, body: string, headers: array<string, string>, curlErrno: int}
      */
-    private static function graphSendRequest(string $url, array $payload): array
+    private static function graphSendRequest(string $url, array $payload, int|false|null $forSiteId = false): array
     {
         $token   = self::accessToken();
         $headers = [];
 
         $ch = curl_init($url);
         if ($ch === false) {
-            self::errorRowFor(false, 'Graph', 'CURL_INIT', 'curl_init() failed for sendMail', ''); // through errorRowFor() for its alert's sake (#1051)
+            self::errorRowFor($forSiteId, 'Graph', 'CURL_INIT', 'curl_init() failed for sendMail', ''); // the message's organisation (#1053), through errorRowFor() for its alert's sake (#1051)
             return ['code' => 0, 'body' => '', 'headers' => [], 'curlErrno' => 0];
         }
 
