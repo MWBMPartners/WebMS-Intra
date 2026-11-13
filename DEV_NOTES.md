@@ -24452,3 +24452,61 @@ over HTTP; S the source rules; Z the tidy-up.
     L24 red; yearly mapped to `months` → L25 red; the interval forced to 1 → L26 red; `complete.php`
     as before #1041 → L22-L24 red (L25/L26 added after that plant). L17-L19 pass on the old `save.php` too
     (same answer on an ordinary day) and pin over-reach only.
+
+
+## A claim's generated PDF (#954)
+- `expenses/claim-pdf` (`_apps/expenses/view/claim-pdf.php`) is #867's receipt page with three
+  differences: it takes the CLAIM number only; the row it looks up is the NEWEST stage row whose
+  `storedFilename` equals the claim's `fileName` (`stage IS NOT NULL AND stage <> ''`, the same test as
+  the claim page's `$pdfFileId`); and the path is `ExpensePdf::pathFor($claimID)`, accepted by
+  `ExpenseRules::claimPdfFile()` only when the claim's stored name is exactly that file's name and the
+  file, links followed, is directly inside `_uploads/pdfs`.
+- WHY CLAIM-ONLY: `ExpensePdf::generate()` overwrites one file at every stage and adds a row per stage.
+  An address naming an older stage row would serve the newest bytes under the old stage's name. So
+  there is no such address; the claim page links the Generated PDF card and the newest stage row,
+  and marks older stage rows "replaced by a later version; earlier versions are not kept". A link
+  saved at an earlier stage gives the newest version.
+- **PHP's realpath cache outlives a request.** The first version served a LINK to the key file
+  (HTTP 200, L5-18): the file had been served as a plain file moments earlier, was replaced by a link,
+  and `realpath()` answered from its cache (two minutes per server process by default), so the
+  "directly inside the folder" test passed and `fopen()` followed the link. `claimPdfFile()` and
+  `receiptFile()` (#867, the same latent shape) now refuse a link outright with `is_link()` after
+  `clearstatcache(true, $path)`. #867's own L4 test could not see this, because its link existed
+  before the path was ever looked up. L5-18/L5-18c (with premises L5-18a/b) serve the PDF and a
+  receipt as a plain file, swap each for a link in the SAME running server, and ask again.
+  **Either line alone closes it** (planted: removing only `is_link()`, or only `clearstatcache()`,
+  stays green; removing both turns L5-18 and L5-18c red), so the two are independent guards.
+- The bytes go through `ByteRange::send()`. `receipt.php` still uses `readfile()` (unchanged, not
+  in this package's scope; it parses no `Range:` header, so it does not break #880's rule).
+- Not covered: the same-database-work comparison (#867's L4-12) is not repeated for this page; the
+  reach is worked out before the look-up in the same way, read rather than measured.
+
+## This month's translation counters survive a restore (#801)
+- `DbBackup::readThisMonthsTranslationUse()` reads the current month's rows (month = `gmdate('Y-m-01')`,
+  which must equal `Translation::usageMonth()`; proof 30 compares them) BEFORE anything is emptied;
+  `keepThisMonthsTranslationUse()` writes them back AFTER every table is in place with
+  `INSERT … ON DUPLICATE KEY UPDATE calls = GREATEST(calls, ?), costPence = GREATEST(costPence, ?)` —
+  each counter on its own. Same read-early/write-late order as #694/#697, for the same reason.
+- Table presence is asked of `information_schema` by `LOWER(TABLE_NAME)`, and the "is it being
+  replaced" test uses `namedIn()` (lower_case_table_names, #697).
+- A failure the transaction is KNOWN to survive does not stop the restore (the worst case is one
+  month's limit spent again); the answer says the figures may be the snapshot's. "Known to survive"
+  is an allow-list, `TRANSLATION_STATEMENT_ONLY_ERRORS` (refused values, duplicate, a trigger's
+  SIGNAL 1644, missing table/column, denied right). **Anything else is fatal**, through
+  `stopUnlessStatementOnly()`: a deadlock (1213) makes InnoDB roll back the WHOLE transaction, so
+  carrying on would silently undo every restored table and let later steps commit outside any
+  transaction while reporting success (measured by the independent check). MySQL gives an ordinary
+  user no reliable "am I still in a transaction" (`@@in_transaction` is MariaDB's; INNODB_TRX needs
+  PROCESS), hence the allow-list. The first version's comment ("a statement error rolls back that
+  statement only") was false for exactly this case.
+- Proof 30 section F drives both halves with `BrsUsageFault`, a connection that fails one carry
+  statement with a chosen error number: read 1146 and write 1644 → restore succeeds and SAYS so;
+  read 1213, write 1213 and write 2013 → restore refused, counters unchanged. A deadlock cannot be
+  provoked on demand in one process, so 1213 is simulated: what is proved is the RULE.
+- The success sentence says "the higher of the two figures was kept, for the number of requests and
+  for the money separately" — the first version said "kept at what they were before the restore",
+  untrue when the snapshot's request count is the larger.
+- Also applied in `restoreTableWork()`, since a one-table restore of `tblTranslationUsage` resets the
+  counters just as surely.
+- The carry was chosen over the issue's other option (only saying it on the Backup page): it is about
+  130 lines in one class, no schema change.

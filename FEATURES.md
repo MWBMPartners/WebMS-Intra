@@ -1349,6 +1349,9 @@ another repo, ever**.
 - Roles: D-093 (only a global administrator hands out "Set up the public website") is judged again inside the save (#866).
 - Event dates are limited to 1 January 1900 – 31 December of the later of 2200 and fifty years from now;
   every way of adding or changing an event says so plainly when a date falls outside (#1045).
+- Expenses: "Open a claim's generated PDF from its page (newest version only; every look recorded) — #954".
+- Backup and restore: "A restore keeps this month's translation figures at the higher of now and the
+  snapshot, so a monthly translation limit cannot be spent twice — #801".
 - An asset deleted by somebody else while a change to it was being saved is never changed; the
   change is refused as for any deleted asset (#1031, #1047). A loan of a deleted asset can be
   declined or cancelled, not approved or checked out, and the page says so.

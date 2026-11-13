@@ -479,7 +479,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   D-124, D-128, D-131): `OutsideServices::allowsMeetingPlaceMap()` decides each place's map by its own host,
   `SmallGroups::hostFromPost()` / `placeAgreementAfterSave()` record host and agreement, and
   `SmallGroups::whyHostChangeRefused()` is the ONE rule that only the host may change the host or the mark.
-  Expense receipts are opened only through `expenses/receipt` (#867), which asks the claim page's rule
+  Expense receipts are opened only through `expenses/receipt` (#867), which asks the claim page's rule `expenses/claim-pdf` (#954) serves the claim's generated PDF by the same rule: claim number only, newest version (`ExpenseRules::claimPdfFile()`, which refuses a symbolic link after `clearstatcache()`), through `ByteRange::send()`. A restore keeps this month's `tblTranslationUsage` at the larger figure per organisation and counter (#801, `DbBackup::keepThisMonthsTranslationUse()`); only errors on `TRANSLATION_STATEMENT_ONLY_ERRORS` let it continue.
   and holds none of its own; every look at expense records is logged as numbers only (D-130, D-132).
   A visitor's event suggestion: `tblEvents.submitterName` / `submitterEmail` are read only by the moderation
   page and the approval e-mail (D-134, #963); the events API, the activity log and webhooks carry neither.

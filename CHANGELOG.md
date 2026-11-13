@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A claim's PDF can be opened; a restore keeps this month's translation figures (#954, #801)
+
+- **A claim's generated PDF can be opened (#954).** The claim page listed the PDF the portal
+  makes for each claim by name only, and nothing served it. `expenses/claim-pdf?claim=<n>`
+  (migration 292) now sends it to exactly the people who may open the claim — it asks
+  `ExpenseRules::reachToSee()` / `mayViewClaim()`, the same rule as the claim page and a receipt
+  (#867) — and anybody else gets byte for byte what a made-up claim gets. The bytes go out through
+  `ByteRange::send()` (#880). Every stage overwrites ONE file, so the address takes the claim number
+  alone and always gives the newest version, named after the newest stage; older stage rows on the
+  claim page say they were replaced and are not kept. Each look writes one `ExpenseClaimPdfOpen`
+  activity record with the claim number only (D-130); a refusal writes nothing. The Expenses guide's
+  tip about the PDF (which said it "can be used" when nothing could open it, and "of your approved
+  claim" when it is made at every stage) is corrected, and the list of what each look records gains
+  the PDF.
+- **A restore no longer hands an organisation its monthly translation allowance back (#801).**
+  `tblTranslationUsage` (#762) is now carried through a whole-database restore, a rehearsal (undone
+  with the rest) and a one-table restore of that table: the CURRENT month's rows keep the larger
+  figure per organisation and per counter (requests, money); earlier months come back as the
+  snapshot has them. The answer says when figures were kept. A failure the restore's transaction is
+  known to survive is said and the restore goes on; any other (a deadlock, a lost connection) stops
+  and undoes the whole restore. The disaster-recovery help page says so.
+
 ### Deleted assets and one lock order; task reminders on the organisation's clock (#1047, #1041)
 
 - **Nothing is written to an asset deleted while the write waited (#1047).** #1031 fixed this for
