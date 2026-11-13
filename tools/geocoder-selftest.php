@@ -48,6 +48,11 @@
  *   I  the country a look-up is limited to is part of the cache key (#1035):
  *      the same address limited to Great Britain and to the US is asked of
  *      the provider twice and cached twice; "GB" and "gb" share one row
+ *   M  the Google leg is sent the country too, as `components=country:XX`
+ *      (#1036); a "country" that is not two letters adds no filter
+ *   N  the cache keeps no address text (#1037): no column for it, no value
+ *      in any row this run wrote holds any part of an address, and a forward
+ *      answer carries no wording of the address
  *
  * WHAT #1033 CLAIMED, AND WHY SECTION A EXISTS ANYWAY
  * The issue said a fresh answer had no `lat`/`lng`. Measured before any change,
@@ -182,13 +187,18 @@ $setSetting = static function (string $key, ?string $value) use ($db): void {
     $st->close();
 };
 
+// 🔒 The cache keeps no address text since #1037, so this test's rows cannot be
+//    found by the word in their address any more. They are found instead as
+//    the rows NEWER than the newest one there was when it started.
+$cacheIdBefore = (int) ($db->query('SELECT COALESCE(MAX(`cacheID`), 0) AS n FROM `tblGeocodeCache`')->fetch_assoc()['n'] ?? 0);
+
 /** Remove this test's cache rows and venues. Children of a venue cascade. */
-$tidyRows = static function () use ($db): void {
-    $like = '%' . GT_MARK . '%';
-    $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `queryText` LIKE ?');
-    $st->bind_param('s', $like);
+$tidyRows = static function () use ($db, $cacheIdBefore): void {
+    $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `cacheID` > ?');
+    $st->bind_param('i', $cacheIdBefore);
     $st->execute();
     $st->close();
+    $like = '%' . GT_MARK . '%';
     $st = $db->prepare('DELETE FROM `tblVenues` WHERE `venueName` LIKE ?');
     $st->bind_param('s', $like);
     $st->execute();
@@ -334,10 +344,16 @@ $uri   = (string) ($_SERVER['REQUEST_URI'] ?? '');
 $leg   = str_starts_with($uri, '/google') ? 'google' : 'nominatim';
 $asked = strtolower((string) ($_GET['address'] ?? $_GET['q'] ?? ''));
 file_put_contents(__DIR__ . '/stub-calls.log', $leg . "\n", FILE_APPEND);
+// The country filter Google was sent (#1036): only the `components` value, or
+// "-" for none — never the address.
+if ($leg === 'google') {
+    file_put_contents(__DIR__ . '/stub-components.log', (string) ($_GET['components'] ?? '-') . "\n", FILE_APPEND);
+}
 header('Content-Type: application/json');
 
 $pos = ['google' => [51.5007292, -0.1246254], 'nominatim' => ['52.2053', '0.1218']][$leg];
 if ($leg === 'nominatim' && strtolower((string) ($_GET['countrycodes'] ?? '')) === 'us') { $pos = ['39.7817', '-89.6501']; }
+if ($leg === 'google' && (string) ($_GET['components'] ?? '') === 'country:US') { $pos = [39.7817, -89.6501]; }
 if (str_contains($asked, 'googlejunk')) { $pos = $leg === 'google' ? ['abc', 'def'] : $pos; }
 elseif (str_contains($asked, 'emptyjunk'))  { $pos = ['', '']; }
 elseif (str_contains($asked, 'wordjunk'))   { $pos = ['abc', 'def']; }
@@ -372,6 +388,7 @@ echo json_encode([['lat' => $pos[0], 'lon' => $pos[1], 'display_name' => 'Stand-
 STUB;
 file_put_contents($child . $sep . 'stub.php', $stub);
 touch($child . $sep . 'stub-calls.log');
+touch($child . $sep . 'stub-components.log');
 
 /** Which legs the stand-in has been asked, since the log was last emptied. */
 $stubCalls = static function () use ($child, $sep): array {
@@ -380,6 +397,12 @@ $stubCalls = static function () use ($child, $sep): array {
 };
 $stubReset = static function () use ($child, $sep): void {
     file_put_contents($child . $sep . 'stub-calls.log', '');
+    file_put_contents($child . $sep . 'stub-components.log', '');
+};
+/** The country filter each Google call was sent, since the log was emptied. */
+$stubComponents = static function () use ($child, $sep): array {
+    $raw = trim((string) file_get_contents($child . $sep . 'stub-components.log'));
+    return $raw === '' ? [] : explode("\n", $raw);
 };
 
 $serverDescriptors = static fn (string $log): array => [
@@ -582,10 +605,16 @@ $portalKey =static function (string $address, string $country): string {
     return (string) $key->invoke(null, 'forward', (string) $text->invoke(null, trim($address), $country !== '' ? $country : null));
 };
 
-/** How many forward cache rows hold this address, whatever their key. */
-$rowsFor = static function (string $address) use ($db): int {
-    $st = $db->prepare("SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `direction` = 'forward' AND `queryText` = ?");
-    $st->bind_param('s', $address);
+/**
+ * The newest cache row's number, and how many rows were written after a given
+ * one. Since #1037 a row holds no address, so "a row for this address under
+ * ANY key" can no longer be asked; "any row written since" is asked instead,
+ * which is stricter: it sees a row filed under any key, for any address.
+ */
+$cacheMark = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(`cacheID`), 0) AS n FROM `tblGeocodeCache`')->fetch_assoc()['n'] ?? 0);
+$rowsSince = static function (int $mark) use ($db): int {
+    $st = $db->prepare('SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `cacheID` > ?');
+    $st->bind_param('i', $mark);
     $st->execute();
     $n = (int) $st->get_result()->fetch_assoc()['n'];
     $st->close();
@@ -693,10 +722,12 @@ $n = 0;
 foreach ($bad as $word => $what) {
     $n++;
     $addr = GT_MARK . ' ' . $word . ' Street';
+    $markE = $cacheMark();
     $answer = $lookup($addr);
     check("E{$n}a {$what}: /geo/lookup says not found", [$answer['ok'] ?? null, $answer['reason'] ?? null], [false, 'not_found']);
-    // Counted by ADDRESS, not by key, so a row filed under any key at all is seen.
-    check("E{$n}b ...and nothing is cached, so it is not served for ever", $rowsFor($addr), 0);
+    // Any row written since, under any key at all (the cache holds no address
+    // to count by since #1037).
+    check("E{$n}b ...and nothing is cached, so it is not served for ever", $rowsSince($markE), 0);
     $v = $saveVenue(GT_MARK . ' Venue ' . $word, $addr);
     // ⚠️ array_key_exists, never `??`: a stored NULL is the answer wanted
     //    here, and `??` would read it as "no such column".
@@ -736,10 +767,10 @@ echo "H. A cache row with no coordinates is a miss, not 0,0\n";
 $addrH = GT_MARK . ' Fresh Hollow Row';
 $hashH = $portalKey($addrH, '');
 $st = $db->prepare(
-    "INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `queryText`, `latitude`, `longitude`, `formatted`, `provider`) "
-    . "VALUES (?, 'forward', ?, NULL, NULL, NULL, 'nominatim')"
+    "INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`) "
+    . "VALUES (?, 'forward', NULL, NULL, 'nominatim')"
 );
-$st->bind_param('ss', $hashH, $addrH);
+$st->bind_param('s', $hashH);
 $st->execute();
 $st->close();
 check('H0 premise: the cache row exists, with no coordinates',
@@ -782,9 +813,10 @@ foreach ($badPairs as $id => [$la, $ln, $what]) {
     $addr = GT_MARK . " {$id} pos[{$la},{$ln}]";
     $setSetting('geo.google.apiKey', '');
     $stubReset();
+    $markJ = $cacheMark();
     $a = $lookup($addr);
     check("{$id}a {$what}, from Nominatim: not found, and not cached",
-        [$stubCalls(), $a['ok'] ?? null, $a['reason'] ?? null, $rowsFor($addr)], [['nominatim'], false, 'not_found', 0]);
+        [$stubCalls(), $a['ok'] ?? null, $a['reason'] ?? null, $rowsSince($markJ)], [['nominatim'], false, 'not_found', 0]);
     $setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
     $stubReset();
     $g = $lookup(GT_MARK . " {$id} gonly pos[{$la},{$ln}]");
@@ -882,6 +914,7 @@ echo "I. The country a look-up is limited to is part of the cache key (#1035)\n"
 // The stand-in puts a US-limited Nominatim look-up in Springfield, Illinois,
 // and any other in Cambridge, so a shared row shows up as the wrong place.
 $addrI = GT_MARK . ' Springfield Fresh';
+$markI = $cacheMark();
 $stubReset();
 $gb = $lookup($addrI, 'GB');
 $us = $lookup($addrI, 'US');
@@ -891,7 +924,7 @@ check('I1 the two countries get their own places, not the first one asked',
     [isset($gb['lat']) ? (float) $gb['lat'] : null, isset($us['lat']) ? (float) $us['lat'] : null], [52.2053, 39.7817]);
 check('I2 THE #1035 QUESTION: the second country was asked of the provider, not served the first one\'s row',
     $stubCalls(), ['nominatim', 'nominatim']);
-check('I3 ...so the cache holds one row per country', $rowsFor($addrI), 2);
+check('I3 ...so the cache holds one row per country', $rowsSince($markI), 2);
 $stubReset();
 $gbAgain = $lookup($addrI, 'gb');
 check('I4 GB and gb are one country: the repeat is served from the cache', $stubCalls(), []);
@@ -899,9 +932,70 @@ check('I5 ...with the GB answer', $gbAgain, $gb);
 $stubReset();
 $lookup($addrI);
 check('I6 a look-up limited to NO country is asked of the provider and filed as its own row',
-    [$stubCalls(), $rowsFor($addrI)], [['nominatim'], 3]);
+    [$stubCalls(), $rowsSince($markI)], [['nominatim'], 3]);
 check('I7 ...the three rows are the three keys the portal builds',
     [$cacheRow($addrI, '') !== null, $cacheRow($addrI, 'gb') !== null, $cacheRow($addrI, 'us') !== null], [true, true, true]);
+
+// ── M ────────────────────────────────────────────────────────────────────────
+echo "M. The Google leg is limited to the country asked for (#1036)\n";
+// The stand-in records only the `components` value Google was sent ("-" for
+// none). With the country left off the Google call, as before #1036, M1, M2
+// and M3 go red (measured); M4 and M5 pass either way, being over-reach guards.
+$setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+$addrM = GT_MARK . ' Springfield Google';
+$stubReset();
+$mGb = $lookup($addrM, 'GB');
+check('M1 a look-up limited to GB sends Google components=country:GB',
+    [$stubCalls(), $stubComponents()], [['google'], ['country:GB']]);
+$stubReset();
+$mUs = $lookup($addrM, 'us');
+check('M2 a look-up limited to us sends country:US (upper case, as Google documents it)',
+    [$stubCalls(), $stubComponents()], [['google'], ['country:US']]);
+check('M3 ...and so the two countries get the stand-in\'s two different places',
+    [$posOf($mGb), $posOf($mUs)], [[51.5007292, -0.1246254], [39.7817, -89.6501]]);
+$stubReset();
+$lookup(GT_MARK . ' Springfield Google Unlimited');
+check('M4 a look-up limited to NO country sends no country filter', $stubComponents(), ['-']);
+$stubReset();
+$lookup(GT_MARK . ' Springfield Google Piped', 'GB|locality:Paris');
+// Over-reach and injection in one: a "country" that is not two letters must
+// not become a filter (`|` would add one nobody chose), and the look-up still
+// happens, unlimited on this leg, as every Google look-up was before #1036.
+check('M5 a "country" that is not two letters adds no filter, and the look-up still goes to Google',
+    [$stubCalls(), $stubComponents()], [['google'], ['-']]);
+$setSetting('geo.google.apiKey', '');
+
+// ── N ────────────────────────────────────────────────────────────────────────
+echo "N. The cache keeps no address text (#1037)\n";
+$cols = [];
+$colRes = $db->query(
+    "SELECT `COLUMN_NAME` FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblGeocodeCache' ORDER BY `ORDINAL_POSITION`"
+);
+while (($c = $colRes->fetch_assoc()) !== null) {
+    $cols[] = (string) $c['COLUMN_NAME'];
+}
+check('N1 the cache table has no column for the address as typed or the provider\'s wording of it',
+    [in_array('queryText', $cols, true), in_array('formatted', $cols, true)], [false, false]);
+// Every row this run wrote, every column of it: none may hold the marker word
+// that every address this test looked up carries, in any case.
+$leaks = 0;
+$written = 0;
+$rowRes = $db->query('SELECT * FROM `tblGeocodeCache` WHERE `cacheID` > ' . (int) $cacheIdBefore);
+while (($r = $rowRes->fetch_assoc()) !== null) {
+    $written++;
+    foreach ($r as $v) {
+        if ($v !== null && stripos((string) $v, GT_MARK) !== false) {
+            $leaks++;
+        }
+    }
+}
+// A premise, so N2 cannot pass on an empty table: this run cached answers.
+check('N2a premise: this run wrote cache rows to look in', $written > 0, true);
+check('N2 ...and no value in any of them holds any part of an address that was looked up', $leaks, 0);
+check('N3 a forward answer passes on no wording of the address, fresh or cached',
+    [array_key_exists('formatted', $fresh) ? $fresh['formatted'] : 'missing', array_key_exists('formatted', $cached) ? $cached['formatted'] : 'missing',
+     array_key_exists('formatted', $freshG) ? $freshG['formatted'] : 'missing'],
+    [null, null, null]);
 
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');

@@ -176,8 +176,8 @@ class GeoLocation
      * answer, a JSON number), or TEXT that is a plain decimal with an optional
      * sign -- "51.5", "-0.12", ".5", "0" -- optionally in exponent form
      * ("4.0E-5", up to three exponent digits), with surrounding spaces
-     * ignored. This is the same shape `Sabbath::coordinate()` accepts, so a
-     * value one of them reads the other reads too.
+     * ignored. `Sabbath::coordinate()` asks this method (#1029) rather than
+     * keeping its own copy, so a value one of them reads the other reads too.
      *
      * Refused (null): a word, a decimal comma ("51,5"), hexadecimal, an empty
      * box after trimming, a true/false, an array (a request can send

@@ -2397,8 +2397,19 @@ return [
     ],
     'tblGeocodeCache' => [
         'decision' => 'not-personal',
-        'reason'   => 'A store of place names and their map positions. About places,'
-                    . ' not people.',
+        // #1037: this entry used to say "A store of place names ... About
+        // places, not people", while the table kept every address as typed,
+        // which can be a member's home (a small group's host, #809). Migration
+        // 290 removed the text; what is left is described exactly below,
+        // including the one thing a fingerprint still lets somebody tell.
+        'reason'   => 'Keeps no address and names nobody: for each address that was'
+                    . ' looked up, a one-way fingerprint of it, the map position'
+                    . ' found and which service found it. The address itself is not'
+                    . ' kept (until migration 290 it was, and could be a member\'s'
+                    . ' home). Somebody who already knows an address can tell from'
+                    . ' the fingerprint that it was looked up here; nobody can read'
+                    . ' an address out of it, so there is nothing for an erasure to'
+                    . ' find.',
         'columns'  => ['latitude', 'longitude'],
     ],
     'tblResource' => [

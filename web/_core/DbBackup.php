@@ -219,6 +219,15 @@ class DbBackup
         // the throttle gives, and these are raw addresses that must not come
         // back into a column whose name says it holds fingerprints.
         'tblLiveRateLimits'      => ['senderIP'],
+        // #1037, migration 290. The address look-up cache kept the address as
+        // typed (`queryText`) and the provider's wording of it (`formatted`);
+        // either can be a member's home address, and nothing ever removed a
+        // row. A snapshot taken before 290 still holds both, and without this
+        // entry it would BLOCK a whole-database restore, as #712 above. The
+        // saved text is discarded on purpose: bringing it back is the very
+        // thing 290 exists to undo, and a row is found by its `queryHash`
+        // alone, so the cache works without it.
+        'tblGeocodeCache'        => ['queryText', 'formatted'],
     ];
 
     /**
