@@ -59,6 +59,11 @@ if (isset($_GET['reset']) === true && $_GET['reset'] === '1') {
     $successMsg = t('auth.password_reset_success');
 }
 
+// 📣 #922: why this browser was just signed out, if it was. Read (and taken
+//    out of the session) on every request to this page, a sign-in attempt
+//    included, so it is said once and never again on a reload.
+$signedOutMsg = Auth::takeSignedOutNotice();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 🧾 Who refused this try. The two flags decide which record, if any, this
@@ -277,6 +282,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="alert alert-success small" role="alert" aria-live="polite">
             <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>
             <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- 📣 Why this browser was signed out (#922) -->
+    <?php if ($signedOutMsg !== ''): ?>
+        <div class="alert alert-warning small" role="status" aria-live="polite" id="signed-out-notice">
+            <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>
+            <?php echo htmlspecialchars($signedOutMsg, ENT_QUOTES, 'UTF-8'); ?>
         </div>
     <?php endif; ?>
 

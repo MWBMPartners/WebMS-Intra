@@ -2,8 +2,9 @@
 // Path: public_html/offboarding/rehire.php
 /**
  * Offboarding — reactivate a user within the undo window. Restores
- * isActive flags but NOT credentials; the user must reset password
- * via /forgot-password to sign in.
+ * isActive flags but NOT credentials: offboarding removed the password,
+ * passkeys and Microsoft or Google links, and nothing here puts them
+ * back. The message afterwards says what the account has now (#982).
  *
  * #518 FIX (17 September 2026): App::isAdmin() alone let an administrator
  * of ANY organisation undo ANY offboarding record and reactivate ANY
@@ -128,7 +129,9 @@ $userId = (int) $o['userID'];
 
 try {
     $db->begin_transaction();
-    // Reactivate user + site membership. NOT credentials — user must reset.
+    // Reactivate user + site membership. NOT credentials: the password,
+    // passkeys and Microsoft or Google links offboarding removed stay
+    // removed, and the message after the commit says what the account has.
     // Nor roles, user-group or department memberships (#516, #517):
     // offboarding DELETED those rows (do.php steps 6, 6a, 6b), so there is
     // nothing here to switch back on; an administrator adds them again at
@@ -208,14 +211,109 @@ try {
     }
 
     $db->commit();
-    $_SESSION['flash_msg']  = 'User rehired. They must reset their password to sign in.'
+    // 🔑 WHAT THE ACCOUNT HAS NOW, as FACTS that promise nothing (#982
+    //    rounds 5-8). Rounds 5-7 each promised a route that might not work:
+    //    "reset your password" to an account with none, "with Microsoft or
+    //    Google" where neither was set up, then "They can sign in with Google"
+    //    where Google was set up - but set up is not the same as working: the
+    //    callbacks match a switched-on account by its e-mail address, Microsoft
+    //    only within the tenant set up here, Google only within its hosted
+    //    domain when one is set. So each part is read after the commit, in its
+    //    own try, and said as what IS there, with its conditions:
+    //      - the password row: usable (said as a fact only - the removal
+    //        step may have failed, or somebody may have set one since),
+    //        emptied (a new one via "Forgot your password?", which needs
+    //        this portal to be able to send e-mail), or none;
+    //      - passkeys still registered;
+    //      - Microsoft / Google sign-in, only where set up, with its condition.
+    //    With nothing at all, it says the account has no way in yet, and
+    //    then ONE of two things:
+    //      - still LINKED to Microsoft or Google: it cannot be given a
+    //        password on the Users page. That is certain: admin/users/save.php
+    //        step 10b refuses whenever Auth::countLoginMethods() finds another
+    //        way in, and it counts a link whether or not that sign-in is set
+    //        up (D-018 forbids a SECOND way in);
+    //      - otherwise: "You can try giving it a password on the Users page,
+    //        which will say if it cannot." (round 11: the sentence before it
+    //        already says there is no way in, so it is not said twice.) A
+    //        promise is deliberately NOT
+    //        made. Round 8 said an administrator cannot (false: D-018 does
+    //        not forbid a FIRST way in); round 9 said "You can" (false when
+    //        the save refuses a sign-in name over 50 characters - an e-mail
+    //        address may hold 255 - or one already in use). The page does not
+    //        repeat the save's rules; it says to try, and the save says why
+    //        when it refuses (#982 round 10).
+    //    Pinned by tools/erasure-pages-selftest.php: M13g (emptied password),
+    //    M13h and M13k (no way in, as a global and as an organisation
+    //    administrator, and the save really stores a password), M13o (an
+    //    e-mail address over 50 characters: no promise, and the save really
+    //    refuses), M13i and M13m (Google with and without a hosted domain,
+    //    two passkeys), M13j (a password, one passkey, Microsoft), M13l
+    //    (still linked: the save really refuses) and M13n (the read fails).
+    $facts         = null;
+    $passwordState = Auth::passwordState($db, $userId);
+    try {
+        $kind = $db->prepare('SELECT COUNT(*) AS `passkeys` FROM `tblWebAuthnCredentials` WHERE `userID` = ?');
+        if ($passwordState !== null && $kind !== false) {
+            $kind->bind_param('i', $userId);
+            $kind->execute();
+            $passkeys = (int) ($kind->get_result()->fetch_assoc()['passkeys'] ?? 0);
+            $kind->close();
+            $linkedRead = $db->prepare('SELECT COUNT(*) AS `linked` FROM `tblLinkedAccounts` WHERE `userID` = ?');
+            $linkedRead->bind_param('i', $userId);
+            $linkedRead->execute();
+            $linked = (int) ($linkedRead->get_result()->fetch_assoc()['linked'] ?? 0);
+            $linkedRead->close();
+            $facts = [];
+            if ($passwordState === Auth::PASSWORD_USABLE) {
+                $facts[] = 'They have a password on this portal.';
+            } elseif ($passwordState === Auth::PASSWORD_EMPTIED) {
+                $facts[] = 'Offboarding removed their password; they can set a new one with "Forgot your password?" on the '
+                    . 'sign-in page, if this portal can send e-mail.';
+            }
+            if ($passkeys > 0) {
+                $facts[] = $passkeys === 1
+                    ? '1 passkey is still registered to the account.'
+                    : $passkeys . ' passkeys are still registered to the account.';
+            }
+            if (Auth::isMS365Configured() === true) {
+                $facts[] = 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same '
+                    . 'e-mail address in the Microsoft tenant set up here.';
+            }
+            if (Auth::isGoogleConfigured() === true) {
+                $hostedDomain = (string) (App::settings('auth.google.hostedDomain') ?? '');
+                $facts[] = 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail '
+                    . 'address' . ($hostedDomain !== '' ? ' in the ' . $hostedDomain . ' domain' : '') . '.';
+            }
+        }
+    } catch (\Throwable $kindUnread) {
+        $facts = null;
+    }
+    if ($facts === null) {
+        $howTheySignIn = ' How they can sign in could not be read: check their account on the Users page.';
+    } elseif ($facts === []) {
+        $howTheySignIn = ' This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor '
+            . 'Google sign-in is set up here; a global administrator sets those up on Admin, Settings.';
+        if ($linked > 0) {
+            $howTheySignIn .= ' It is still linked to a Microsoft or Google account, so it cannot be given a password '
+                . 'on the Users page.';
+        } else {
+            $howTheySignIn .= ' You can try giving it a password on the Users page, which will say if it cannot.';
+        }
+    } else {
+        $howTheySignIn = ' ' . implode(' ', $facts);
+    }
+    $_SESSION['flash_msg']  = 'User rehired: their account is switched on again.' . $howTheySignIn
         . ($cancelledRequests > 0
             ? ' A waiting request to erase their personal details has been cancelled.'
             : '');
     $_SESSION['flash_type'] = 'success';
 } catch (\Throwable $e) {
     $db->rollback();
-    $_SESSION['flash_msg']  = 'Rehire failed: ' . $e->getMessage();
+    // #982 round 2: the exception's own words went to the page. They are
+    // recorded for whoever investigates, and the page says what happened.
+    \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'REHIRE_FAIL', 'A rehire could not be completed', $e->getMessage());
+    $_SESSION['flash_msg']  = 'The rehire could not be completed, and nothing was changed. The reason has been recorded on Admin, Errors.';
     $_SESSION['flash_type'] = 'danger';
 }
 

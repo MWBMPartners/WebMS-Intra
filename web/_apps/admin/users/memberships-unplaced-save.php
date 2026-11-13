@@ -116,7 +116,7 @@ $activeOrgName = static function (int $siteId) use ($fetchOne): ?string {
 };
 $notActiveMember = static function (string $orgName): string {
     return 'That person is not an active member of ' . $orgName
-        . '. Add them first (Admin -> Sites -> Users, or Admin -> Users -> No organisation).';
+        . '. Add them first (Admin, Organisations, Users, or Admin -> Users -> No organisation).';
 };
 $dealtWith = 'That entry has already been dealt with.';
 $orgOff    = 'That organisation is switched off or does not exist. Nothing was changed.';

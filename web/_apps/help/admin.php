@@ -221,7 +221,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="site-branding">
     <h2 class="h4 mb-3"><i class="fa-solid fa-palette me-2 text-primary"></i>Site Branding</h2>
 
-    <p>Each site in this install can have its own visual identity. Branding values are configured at <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">/admin/sites/</a> by umbrella admins.</p>
+    <p>Each organisation on this installation can have its own visual identity. Branding values are configured at <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Organisations</a> by a global administrator.</p>
 
     <h5 class="mt-3 mb-3">What you can customise per site</h5>
 
@@ -588,7 +588,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h5 class="mt-3 mb-2">When somebody leaves</h5>
     <p>
-        Removing a person from one organisation (Admin &rarr; Sites &rarr; Users) removes their group and
+        Removing a person from one organisation (Admin, Organisations, Users) removes their group and
         department memberships in that organisation only. Offboarding removes them in every organisation, and
         undoing an offboarding does not bring them back &mdash; add them again if needed.
     </p>

@@ -164,7 +164,7 @@ try {
         //    first if that is really what is needed.
         $mysqli->rollback();
         $_SESSION['flash_msg']  = 'That person is not an active member of ' . $orgName
-            . '. Add them first (Admin -> Sites -> Users, or Admin -> Users -> No organisation).';
+            . '. Add them first (Admin, Organisations, Users, or Admin -> Users -> No organisation).';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/users/roles-unplaced'), true, 302);
         exit();

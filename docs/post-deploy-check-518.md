@@ -25,7 +25,7 @@ ORDER BY createdAt DESC;
 
 **What to look for:** anyone on this list you did not deliberately make an administrator of every organisation.
 
-**What to do:** open the account at **Admin → Users** as a global administrator and untick the administrator box. If the person should only run their own organisation, make them a site administrator of that organisation at **Admin → Sites → Users** instead.
+**What to do:** open the account at **Admin → Users** as a global administrator and untick the administrator box. If the person should only run their own organisation, make them a site administrator of that organisation at **Admin, Organisations, Users** instead.
 
 ## 2. Your global administrators: are they still who they should be?
 
@@ -178,7 +178,7 @@ ORDER BY u.createdAt DESC;
 
 **What to look for:** people who should belong to an organisation. Global administrators often appear here legitimately.
 
-**What to do:** add each person to the right organisation at **Admin → Sites → Users**.
+**What to do:** add each person to the right organisation at **Admin, Organisations, Users**.
 
 ---
 

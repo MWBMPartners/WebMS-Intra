@@ -496,12 +496,19 @@ class Logger
     }
 
     /**
-     * 🕶️ An activity record that NAMES NOBODY, on purpose (#988).
+     * 🕶️ An activity record that NAMES NOBODY, on purpose (#988, #922).
      *
-     * For a page that PROMISES the person sending it that what they send is
-     * anonymous, and for nothing else. Today that is one handler:
+     * For two purposes and nothing else: ANONYMITY (#988), or an account that
+     * is NOT IN THE DATABASE (#922). Anonymity: a page that PROMISES the person
+     * sending it that what they send is anonymous - today one handler,
      * `prayer-requests/anonymous-save.php`, and the one record it causes
      * elsewhere (`PrayerChain::maybeAutoAssign()` for an anonymous request).
+     * An account not in the database: a whole-database restore run by an
+     * administrator whose account is not in the snapshot
+     * (`admin/maintenance/backup.php`, one call) - the session still names
+     * them, but the record's account column is linked to tblUsers, so naming
+     * them would be refused and the line would reach only PHP's error log.
+     * That line says in its own words which account ran it.
      * `tools/audit-checks/check_activity_naming_nobody.py` names every caller
      * and fails when one is added or taken away without the list changing.
      *
@@ -523,9 +530,14 @@ class Logger
      * `sessionID`, `visitorIP`, `userAgent` and `sessionDataSnapshot` EMPTY,
      * whoever is signed in or not.
      *
-     * The words must name nobody either: they are the caller's, and
-     * `check_activity_descriptions_personal.py` reads this method's calls as
-     * it reads `activity()`'s.
+     * The words must name nobody either, with ONE exception: for an account
+     * that is not in the database (#922) they carry that account's NUMBER and
+     * nothing else ("It was run by account #N, which is not in the restored
+     * database ..."), because that number is then the only thing left saying
+     * who pressed the button - never a name, address or anything typed. For
+     * anonymity (#988) they carry no number at all. They are the caller's,
+     * and `check_activity_descriptions_personal.py` reads this method's calls
+     * as it reads `activity()`'s.
      *
      * WHAT IT CANNOT DO. It cannot make the thing being recorded anonymous.
      * The anonymous prayer request keeps the network address it came from in

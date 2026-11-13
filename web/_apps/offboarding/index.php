@@ -20,6 +20,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GdprEraser;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -42,6 +43,13 @@ $rows = [];
 $listSql = 'SELECT o.offboardingID, o.userID, o.effectiveDate, o.reason, o.dataDisposition, '
     . '       o.offboardedAt, o.rehiredAt, '
     . '       u.fullName, u.emailAddress, '
+    // #982 round 12: whether the account has since been ERASED on request.
+    //    An erasure can be carried out inside the undo window, and rehire.php
+    //    then refuses (AccountGuard row 3a), so the list must not offer a
+    //    Rehire button for such an account. The fact is
+    //    GdprEraser::emptiedAccountSql(), the ONE definition AccountGuard
+    //    asks too - never a second test of the tombstone here.
+    . '       ' . GdprEraser::emptiedAccountSql('u') . ' AS isErased, '
     . '       b.fullName AS byName '
     . 'FROM tblOffboarding o '
     . 'JOIN tblUsers u ON u.userID = o.userID '
@@ -66,6 +74,24 @@ if ($stmt !== false) {
 
 $undoWindowDays = (int) (App::settings()['offboarding']['undo_window_days'] ?? 7);
 
+// 📋 The message offboarding/do and offboarding/rehire leave for this page
+//    (#982, #985). Both handlers send the administrator back HERE with their
+//    answer in the session - the #518 refusal of an account outside this
+//    organisation, #977's refusal of an account erased on request, an undo
+//    window that has passed, a failure, and the two successes - and until
+//    #982 this page printed none of them: nothing prints a flash centrally,
+//    each page prints its own, so every one of those answers was lost and a
+//    refused press looked exactly like a press that did nothing. Read and
+//    removed in one place, so a message is shown once and never twice.
+$flashMsg  = is_string($_SESSION['flash_msg'] ?? null) === true ? $_SESSION['flash_msg'] : '';
+$flashType = is_string($_SESSION['flash_type'] ?? null) === true ? $_SESSION['flash_type'] : 'info';
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+// The colour is one of the handlers' own words; anything else is shown as
+// plain information rather than written into a class name.
+if (in_array($flashType, ['success', 'danger', 'warning', 'info'], true) === false) {
+    $flashType = 'info';
+}
+
 $pageTitle   = 'Offboarding';
 $pageSection = 'offboarding';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Offboarding' => ''];
@@ -81,6 +107,13 @@ $csrf = Auth::csrfToken();
     <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Pick user → /admin/users</a>
 </div>
 
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show" id="offboarding-message" role="alert">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
 <div class="alert alert-info small">
     To offboard a user, navigate to <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">/admin/users</a> → click the user → "Offboard" action. This page lists what's already been done.
 </div>
@@ -92,7 +125,8 @@ $csrf = Auth::csrfToken();
         <div class="card-body">
             <div class="portal-data-list">
                 <?php foreach ($rows as $r):
-                    $canUndo = $r['rehiredAt'] === null &&
+                    $isErased = (int) ($r['isErased'] ?? 0) === 1;
+                    $canUndo = $r['rehiredAt'] === null && $isErased === false &&
                         strtotime((string) $r['offboardedAt']) > (time() - $undoWindowDays * 86400);
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
@@ -109,12 +143,14 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-2 text-end">
                             <?php if ($r['rehiredAt'] !== null): ?>
                                 <span class="badge bg-success">Rehired</span>
+                            <?php elseif ($isErased === true): ?>
+                                <span class="small text-muted">Erased on request, so it cannot be rehired</span>
                             <?php elseif ($canUndo === true): ?>
                                 <form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/rehire'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="offboardingID" value="<?php echo (int) $r['offboardingID']; ?>">
                                     <button type="submit" class="btn btn-outline-success btn-sm"
-                                            data-confirm="Rehire this user? Their account becomes active again — they'll need to set a new password.">Rehire</button>
+                                            data-confirm="Rehire this user? Their account becomes active again, unless it has been erased by then. The next page says how they can sign in.">Rehire</button>
                                 </form>
                             <?php else: ?>
                                 <span class="small text-muted">Window passed</span>
