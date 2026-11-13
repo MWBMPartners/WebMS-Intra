@@ -24227,3 +24227,72 @@ gained a `"drop": true` answer: it reads the request and hangs up, which libcurl
 "Empty reply from server" — the one road no status code reaches. **Microsoft falling back to Google
 writes one line per route tried** when Google's half fails on the network (Microsoft's failure, then Google's).
 NOT when Google's SIGN-IN fails inside the fallback: that still writes only Microsoft's line (#1051).
+
+
+## Expense amounts, Gift Aid and the giving job (#1013, #999, #820)
+
+- `ExpenseRules::expenseLine()` is the ONE rule for a claim line on all three doors.
+  It returns each figure twice: whole hundredths (`unitHundredths`,
+  `quotedHundredths`, `lineHundredths`) for arithmetic, and the DECIMAL text the column
+  takes (`unit`, `quotedLineTotal`, `lineTotal`) for binding as `'s'`. Callers add up
+  with `ExpenseRules::claimTotal()`, which refuses a total over DECIMAL(10,2). Never
+  bind an expense amount as `'d'` again.
+- `ExpenseRules::amountText()` turns a JSON float back into the shortest decimal that
+  is the same float with `sprintf('%.nF')`, never `(string)`/`json_encode()`/`var_export()`
+  — those follow `precision`/`serialize_precision`, and with serialize_precision 17
+  `json_encode(0.1)` is "0.10000000000000001", which would refuse a plain 0.10.
+- The line-total limit is asked by DIVISION before the multiply, so the multiply can
+  never pass PHP's integer range (2,147,483,647 × 9,999,999,999 would).
+- `Giving::giftAidEligibleSql()` is the ONE eligibility rule (pounds, and an active
+  declaration via EXISTS); the claim file's reader `hmrcRows()` picks ONE declaration
+  per gift by a scalar subquery with `ORDER BY validFrom DESC, declarationID DESC LIMIT 1`
+  (a scalar subquery may carry LIMIT; an `IN (…)` subquery may not on MySQL).
+- `Giving::STATEMENTS_THE_JOB_SENDS` is the one copy of the giving job's selection;
+  `PortalCheck::JOB_WORK_WAITING` is built from it. Section K of
+  `tools/scheduled-jobs-selftest.php` RUNS the job against rows in every state and
+  compares what it took (rows marked `invalid-email`, and the job's "N queued
+  row(s) processed") with the page's count. A planted `AND 1 = 0` and the pre-#820
+  WHERE each go red there; text comparison could see neither.
+- Lesson again: the statements preview filters its Gift Aid totals to pounds for
+  DISPLAY as well as in SQL, so a planted rule without the pounds condition left the
+  page check green — the rule is asked directly against the database (H2f).
+- `Giving::statementHtml()` is the ONE builder of a giving statement's words; `renderStatementPdf()` makes the PDF from exactly its text and is pinned WHOLE by H2k of `tools/currency-selftest.php`, because nothing here can run dompdf. A pin that counts calls is fooled by a dead call (round 2 of the check): the Gift Aid marks are DRIVEN by H2i. The eraser test's statement-refusal checks ask `statementHtml()`; asked of `renderStatementPdf()` they passed only because dompdf is absent.
+- `ExpenseRules::claimTotal()` also refuses a total of zero, at all three doors.
+
+## The installation's country and currency, and the older page (#967, #991, #815)
+
+The installation card writes `siteID IS NULL` through the page's `$upsert(…, null)`; its form is the signal for the
+global-administrator gate (`$installationCardWasSent`), so a post of it by anybody else is refused whole. Both boxes
+are judged before either is written, inside a transaction that first locks the two installation rows. Each box
+carries `…Drawn`; a box sent back as drawn writes nothing (#875's shape). For the member page,
+`OutsideServices::drawnMarkerName()` names the marker and `saveMemberChoice(…, $drawn)` decides; `$drawn = null`
+means "no page" and keeps the old behaviour for callers with no form. A post with NO drawn value is judged by EFFECT:
+applied when it can only make less shared (an "off", or a "follow" over a stored "on"), held back when it could turn
+sharing on (an "on", or a "follow" over a stored "off"). **Judging by the word lost a withdrawal in round 1**: under a
+default of off, "follow" over "on" IS a withdrawal, and holding it back kept the member's picture going out. **Measured: within one browser session the form
+token already refuses an older tab (`Auth::verifyCsrf()` rotates), so the live exposure was two sessions of one
+member.** Trap: in `currency-selftest.php` the classes have no connection (`App::db()`), so asking them returns ''
+whatever the database holds — ask the page (C2 is such a clause and cannot fail).
+
+This narrows the #778 round-4 entry's "every 'off' and every 'follow' is applied": since #815 a control sent back as drawn is not written, and an undrawn "follow" over a stored "off" is held back.
+
+## D-093 judged inside the transaction; a kept message's organisation (#866, #1039)
+
+**`Capabilities::lockMappingOf()` is the ONE lock under which a capability's role set changes and
+under which a role change is judged against it (#866).** It locks the organisation's own
+`tblSites` row `FOR UPDATE` — the PARENT, because an organisation that never chose a set has no
+mapping row, and a lock on a missing row is only a gap lock (not taken under READ COMMITTED, and
+two can be held at once). `save()` and `forget()` (now transactional) take it first;
+`PublicWebsiteSetup::whyRoleChangeRefusedUnderLock()` takes it and then reads the set with
+`Capabilities::roleKeysInForceLocked()` — fresh, `FOR UPDATE`, never the request's memo (P144
+plants the memo read and goes red: the lock alone is not enough). The Users page and the Roles
+page's delete ask before their transaction AND inside it; record a refusal after the rollback,
+because Logger writes on the same connection. Testing a race with one web worker: hold the lock
+from the test's own connection, start the request with `curl_multi`, wait until
+`information_schema.INNODB_TRX` shows it in `LOCK WAIT` on THAT statement, change, commit. A
+planted fault can deadlock such a test (the request's own row locks against the test's); treat
+1213 as an outcome, not a crash.
+**`Mailer::send()`'s `siteId` names the message's organisation everywhere (#1039):** the footer
+(#683), the queue row, and every send-log line the request writes (`$message['logSite']`, `false`
+= this request's when the caller named none). The job's lines already follow the row
+(`queueRowSite()`, #1006).

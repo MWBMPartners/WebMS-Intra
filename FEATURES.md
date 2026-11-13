@@ -1337,6 +1337,16 @@ another repo, ever**.
 - My volunteering: soonest thirty by real start time; a day of grace on each event's own clock (#1025).
 - Rota reminders and the birthday digest follow each organisation's own date and hour (#1028).
 - Send log: a Google send lost on the network, or one that could not start, now leaves its line (#1043).
+- Expenses: amounts on a claim are figures only, at most two decimals and at most
+  99,999,999.99; quantities are whole numbers; a refused figure is named with the line
+  it is on (#1013).
+- Giving: the HMRC claim file has one row per gift however many declarations cover it;
+  statements show a Gift Aid eligible figure for gifts in pounds only (#999).
+- Admin, Settings, Organisation: "The whole installation" card (global administrators) — the installation's country and
+  currency, which organisations set to "Same as the installation" follow (#967, #991).
+- My account, Outside services: a Save from a page opened before a change made elsewhere leaves that change in place
+  and says so (#815).
+- Roles: D-093 (only a global administrator hands out "Set up the public website") is judged again inside the save (#866).
 - Erasure request for an e-mail address (whether or not it also belongs to an account): the name and address on
   event suggestions made without signing in, every prayer request sent through the anonymous form with that address
   (name, address, network address, the sender's own words and any prayer partner's note emptied; the request kept),

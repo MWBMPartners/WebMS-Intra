@@ -4,6 +4,61 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Fixed — expense amounts read strictly, Gift Aid counted once and in pounds only, the giving job's selection held to one copy (#1013, #999, #820)
+
+- **Expense claims (#1013).** Every typed figure on a claim — unit cost, quantity and
+  the cost in the claim's currency — is now read by the one strict converter
+  (`Currency::parseAmount()`, #1004) through `ExpenseRules::expenseLine()`, on the
+  claim form, the edit page and the API alike. It used to go through a float: a unit
+  cost of "abc" became 0.00 without a word, "1e5" was taken as 100,000.00, "12.345"
+  was rounded, a quantity of "2.5" became 2, and a figure too large for the columns
+  (99,999,999.99) was not refused. Each is now refused with the reason and nothing is
+  stored. Quantity × unit cost and the claim total are worked out in whole
+  hundredths and refused when they would not fit. The API also accepts the same
+  figures as text; a JSON number is taken at its value. A claim that comes to nothing is refused at every
+  door, including the API, which stored a 0.00 claim; the edit page uses the claim form's sentence, "Total must
+  be greater than zero."
+- **Gift Aid (#999).** A donor with two overlapping Gift Aid declarations no longer
+  appears twice in the HMRC claim file for one gift (it would have been claimed
+  twice); the most recent declaration's address is used. A giving statement's "Gift
+  Aid eligible" figure now counts gifts in pounds only, matching the claim file;
+  beside a total in any other currency, or with none recorded, it says Gift Aid applies
+  only to gifts recorded in pounds sterling.
+- **Giving statements job (#820).** The scheduled job and Check this portal now read
+  one copy of which statements the job sends, which includes "the organisation is
+  active" — the job used to take a switched-off organisation's statements, skip them,
+  and use up its places on them on every run. A statement whose send failed is not
+  retried automatically (by design, so a misconfiguration cannot mail donors over and
+  over); the code comment that said otherwise is corrected. The Backup page's and the
+  Retention page's schedule sentences are now held to the jobs' timings by a test.
+
+### The installation's own country and currency, and an older Outside services page (#967, #991, #815)
+
+- **The installation's own country and currency can be changed after installation (#967, #991).** Admin, Settings,
+  Organisation has a "The whole installation" card for a global administrator: the same country list and usable
+  currencies as an organisation's, "none chosen" allowed, prefilled from the installation's own rows (#674). A
+  currency change applies to new records only (D-139); outside-provider spending figures are shown unconverted
+  (#993). The general Settings editor now refuses the country at either level (`Countries::lockedInGeneralEditor()`),
+  so text such as "GBR" can no longer silently mean "no country"; such text already stored is shown with a warning.
+- **An older page cannot switch an outside service back on (#815).** The member page sends the value each control was
+  drawn with; a control left as drawn is not written, and the member is told what is in force. A save from a page
+  drawn before this change is judged by its effect: anything that would share less is applied (a withdrawal is
+  never lost), anything that could turn sharing on is held back with "open the page again". Applies equally to the
+  installation card above.
+
+### Who may hand out "Set up the public website", and which organisation a kept e-mail belongs to (#866, #1039)
+
+- **Fixed — D-093 is judged again inside the save (#866).** An ordinary administrator giving
+  somebody a role at the same moment as a global administrator pointed "Set up the public
+  website" at that role could have both changes go through, handing out the job D-093 keeps for a
+  global administrator. The Users page and the Roles page's delete now ask the rule a second time
+  inside their own save, after waiting for any change to which roles open the job; changing or
+  resetting that choice waits the same way.
+- **Fixed — a message a scheduled job names for an organisation is kept and recorded under that
+  organisation (#1039).** An e-mail that could not be sent at once was kept in the mail queue, and
+  recorded in the send log, under whichever organisation the job happened to be working in. It now
+  goes under the organisation the sender named, everywhere it is recorded.
+
 ### Events, rota and mail on the right clock and in the send log (#1024, #1025, #1028, #1043, #1040)
 
 - **Lists and reminders on the right clock (#1024, #1025, #1028).** The calendar's list view now orders events by
