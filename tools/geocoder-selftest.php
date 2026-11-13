@@ -50,6 +50,11 @@
  *      the provider twice and cached twice; "GB" and "gb" share one row
  *   M  the Google leg is sent the country too, as `components=country:XX`
  *      (#1036); a "country" that is not two letters adds no filter
+ *   O  a HOME's remembered answer (D-183) is marked `home` and keyed with the
+ *      installation's secret, so it differs from the plain key a public place
+ *      gets for the same address; a missing or unknown kind is a home; and
+ *      the small-group form sends home, or public when "not anybody's home"
+ *      is ticked, driven over HTTP (the venue form's public mark is D5)
  *   N  the cache keeps no address text (#1037): no column for it, no value
  *      in any row this run wrote holds any part of an address, and a forward
  *      answer carries no wording of the address
@@ -157,7 +162,7 @@ if ($tables < 100) {
 const GT_MARK = 'Selftest1033';
 
 // ── The three settings it changes, read first so they can be put back ──────
-$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt'];
+$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt', 'small-groups.enabled'];
 $settingsBefore = [];
 foreach ($settingKeys as $key) {
     $st = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
@@ -200,6 +205,11 @@ $tidyRows = static function () use ($db, $cacheIdBefore): void {
     $st->close();
     $like = '%' . GT_MARK . '%';
     $st = $db->prepare('DELETE FROM `tblVenues` WHERE `venueName` LIKE ?');
+    $st->bind_param('s', $like);
+    $st->execute();
+    $st->close();
+    // Section O's small groups (#1037, D-183).
+    $st = $db->prepare('DELETE FROM `tblSmallGroups` WHERE `groupName` LIKE ?');
     $st->bind_param('s', $like);
     $st->execute();
     $st->close();
@@ -579,9 +589,20 @@ $freshToken = static function () use ($http, $tokenOn): string {
     return $t;
 };
 
-/** Ask the real `/geo/lookup` page. Returns the decoded JSON, or null. */
-$lookup = static function (string $address, string $country = '') use ($http, $freshToken): ?array {
-    $answer = $http('POST', '/geo/lookup', ['csrf_token' => $freshToken(), 'address' => $address, 'countryCode' => $country]);
+/**
+ * Ask the real `/geo/lookup` page. Returns the decoded JSON, or null.
+ *
+ * `$kind` is the `addressKind` the form's button sends (D-183). It defaults to
+ * 'public' so every section written before #1037 round 2 keeps the PLAIN key
+ * it checks with `$cacheRow()`; section O asks for 'home' (and for nothing at
+ * all, with null) on purpose.
+ */
+$lookup = static function (string $address, string $country = '', ?string $kind = 'public') use ($http, $freshToken): ?array {
+    $fields = ['csrf_token' => $freshToken(), 'address' => $address, 'countryCode' => $country];
+    if ($kind !== null) {
+        $fields['addressKind'] = $kind;
+    }
+    $answer = $http('POST', '/geo/lookup', $fields);
     $decoded = json_decode($answer['body'], true);
     return is_array($decoded) === true ? $decoded : null;
 };
@@ -612,6 +633,24 @@ $portalKey =static function (string $address, string $country): string {
  * which is stricter: it sees a row filed under any key, for any address.
  */
 $cacheMark = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(`cacheID`), 0) AS n FROM `tblGeocodeCache`')->fetch_assoc()['n'] ?? 0);
+/** The `addressKind` of every row written after a mark, oldest first. */
+$kindsSince = static function (int $mark) use ($db): array {
+    $st = $db->prepare('SELECT `addressKind` FROM `tblGeocodeCache` WHERE `cacheID` > ? ORDER BY `cacheID`');
+    $st->bind_param('i', $mark);
+    $st->execute();
+    $out = array_map(static fn (array $r): string => (string) $r['addressKind'], $st->get_result()->fetch_all(MYSQLI_ASSOC));
+    $st->close();
+    return $out;
+};
+/** The key of every row written after a mark, oldest first. */
+$hashesSince = static function (int $mark) use ($db): array {
+    $st = $db->prepare('SELECT `queryHash` FROM `tblGeocodeCache` WHERE `cacheID` > ? ORDER BY `cacheID`');
+    $st->bind_param('i', $mark);
+    $st->execute();
+    $out = array_map(static fn (array $r): string => (string) $r['queryHash'], $st->get_result()->fetch_all(MYSQLI_ASSOC));
+    $st->close();
+    return $out;
+};
 $rowsSince = static function (int $mark) use ($db): int {
     $st = $db->prepare('SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `cacheID` > ?');
     $st->bind_param('i', $mark);
@@ -703,12 +742,16 @@ $setSetting('geo.google.apiKey', '');
 // ── D ────────────────────────────────────────────────────────────────────────
 echo "D. A real caller that STORES: a venue saved with no position typed\n";
 $stubReset();
+$markD = $cacheMark();
 $venue = $saveVenue(GT_MARK . ' Fresh Venue', GT_MARK . ' Fresh Venue Lane');
 check('D1 the venue was saved', $venue['saved'] ?? false, true);
 check('D2 THE ISSUE\'S "DONE WHEN": the first live look-up stored the stand-in\'s position',
     [$venue['latitude'] ?? null, $venue['longitude'] ?? null], ['52.2053000', '0.1218000']);
 check('D3 ...recorded as found by Nominatim', $venue['geocodeSource'] ?? null, 'nominatim');
 check('D4 ...and it was a FRESH look-up, not a cached one', $stubCalls(), ['nominatim']);
+// D-183: a venue is a public place. With Venues.php sending no kind (a home,
+// the default) this goes red (planted).
+check('D5 the venue\'s remembered answer is marked a PUBLIC place (D-183)', $kindsSince($markD), ['public']);
 
 // ── E ────────────────────────────────────────────────────────────────────────
 echo "E. An answer that is not a real position is \"no answer\", never 0,0\n";
@@ -996,6 +1039,54 @@ check('N3 a forward answer passes on no wording of the address, fresh or cached'
     [array_key_exists('formatted', $fresh) ? $fresh['formatted'] : 'missing', array_key_exists('formatted', $cached) ? $cached['formatted'] : 'missing',
      array_key_exists('formatted', $freshG) ? $freshG['formatted'] : 'missing'],
     [null, null, null]);
+
+// ── O ────────────────────────────────────────────────────────────────────────
+echo "O. A home's remembered answer is marked, and keyed with the installation's secret (#1037, D-183)\n";
+$addrO = GT_MARK . ' Home Lane';
+$markO = $cacheMark();
+$stubReset();
+$homeO = $lookup($addrO, '', 'home');
+check('O1 a look-up marked as a HOME writes one row, marked home', [$stubCalls(), $kindsSince($markO)], [['nominatim'], ['home']]);
+$homeHash = $hashesSince($markO)[0] ?? '';
+check('O2 ...whose key is NOT the plain fingerprint of the address (it is mixed with the installation\'s secret), and no row has the plain key',
+    [$homeHash !== '' && $homeHash !== $portalKey($addrO, ''), $cacheRow($addrO)], [true, null]);
+$stubReset();
+check('O3 the same home again is served from its row, and the stand-in is not asked', [$lookup($addrO, '', 'home'), $stubCalls()], [$homeO, []]);
+$stubReset();
+check('O4 a request carrying NO kind is a home too, served from the home row (the safe default)', [$lookup($addrO, '', null), $stubCalls()], [$homeO, []]);
+$stubReset();
+check('O5 ...and so is a kind that is not exactly "public"', [$lookup($addrO, '', 'Public'), $stubCalls()], [$homeO, []]);
+$markO2 = $cacheMark();
+$stubReset();
+$lookup($addrO, '', 'public');
+check('O6 the same address as a PUBLIC place is its own row, asked of the provider, marked public, under the plain key',
+    [$stubCalls(), $kindsSince($markO2), $hashesSince($markO2)], [['nominatim'], ['public'], [$portalKey($addrO, '')]]);
+
+// The small-group form, over HTTP (automatic look-up is on, set at the top).
+$setSetting('small-groups.enabled', '1');
+$saveGroup = static function (string $name, string $line1, bool $notAHome) use ($http, $freshToken): int {
+    $fields = [
+        'csrf_token' => $freshToken(), 'action' => 'create', 'groupName' => $name,
+        'addressLine1' => $line1, 'city' => 'Testtown', 'postcode' => 'TE1 1ST', 'countryCode' => 'GB',
+        'latitude' => '', 'longitude' => '',
+    ];
+    if ($notAHome === true) {
+        $fields['notAHomeAsked'] = '1';
+        $fields['notAHome']      = '1';
+    }
+    return $http('POST', '/small-groups/save', $fields)['status'];
+};
+$markG = $cacheMark();
+$stubReset();
+$gHome = $saveGroup(GT_MARK . ' Group At Home', GT_MARK . ' Host Home Road', false);
+check('O7 a small group saved with an address and no "not anybody\'s home" mark remembers its answer as a HOME',
+    [$gHome === 302 || $gHome === 303, $stubCalls(), $kindsSince($markG)], [true, ['nominatim'], ['home']]);
+$markG2 = $cacheMark();
+$stubReset();
+$gPublic = $saveGroup(GT_MARK . ' Group At Hall', GT_MARK . ' Church Hall Road', true);
+check('O8 one saved with "not anybody\'s home" ticked remembers its answer as a PUBLIC place',
+    [$gPublic === 302 || $gPublic === 303, $stubCalls(), $kindsSince($markG2)], [true, ['nominatim'], ['public']]);
+$setSetting('small-groups.enabled', $settingsBefore['small-groups.enabled']);
 
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');

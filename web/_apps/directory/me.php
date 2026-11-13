@@ -102,6 +102,8 @@ $visRow = function (string $field, string $label, string $current, string $help 
                     'showAddress'         => false,
                     'compact'             => true,
                     'lookup'              => true,
+                    // 🏠 D-183: a member's own address is their home.
+                    'addressKind'         => 'home',
                     'w3wSuggest'          => true,
                     'lookupAddressField'  => 'displayAddress',
                 ]);

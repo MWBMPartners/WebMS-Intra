@@ -126,6 +126,14 @@ if (function_exists('portal_location_map_assets') === false) {
                         .filter(function (v) { return v !== ''; }).join(', ');
                 }
                 if (w3wVal) { body.set('w3w', w3wVal); }
+                // 🏠 D-183: a home or a public place, as the form says. A named
+                //    checkbox ticked ("not anybody's home") makes it public.
+                var kind = btn.dataset.addressKind === 'public' ? 'public' : 'home';
+                if (btn.dataset.addressKindPublicField) {
+                    var mark = form.querySelector('[name="' + btn.dataset.addressKindPublicField + '"]');
+                    if (mark && mark.checked) { kind = 'public'; }
+                }
+                body.set('addressKind', kind);
                 if (addressVal) { body.set('address', addressVal); }
                 var countryVal = get('addressCountry');
                 if (countryVal) { body.set('countryCode', countryVal); }

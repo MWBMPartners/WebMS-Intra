@@ -9,15 +9,22 @@
 --      (No page has ever called reverse(); in practice there are none.)
 --   B. Drops `tblGeocodeCache`.`queryText` — the address as somebody typed it.
 --   C. Drops `tblGeocodeCache`.`formatted` — the provider's wording of it.
---   D. Seeds `geo.cache.retentionDays` = '365', installation-wide: how long a
+--   D. Adds `tblGeocodeCache`.`addressKind` ('home' or 'public', D-183), and
+--      in the same step deletes every row the cache held before it: such a
+--      row cannot say whether its address was somebody's home, and a home
+--      row with a plain, unsalted key is exactly what D-183 rules out. The
+--      delete runs ONLY when the column is being added, so a second run, or
+--      the installer's replay over a fresh install, deletes nothing. The
+--      cost is one fresh look-up per address.
+--   E. Seeds `geo.cache.retentionDays` = '365', installation-wide: how long a
 --      remembered answer may go unused before the nightly clear-out deletes
 --      it (D-182). Each organisation may choose a shorter figure of its own;
 --      `Portal\Core\GeocodeCacheRetention` is the one place that decides.
 --      The usual settings-seed shape: it writes the built-in default and
 --      NEVER overwrites a value somebody has chosen.
 --
--- Forward rows stay, with their key, position and provider, so nothing has to
--- be looked up again.
+-- Steps A-C keep the forward rows; step D then removes every row there was,
+-- because none of them can say whether it was somebody's home (D-183).
 --
 -- -----------------------------------------------------------------------------
 -- WHY
@@ -34,7 +41,7 @@
 -- So rather than teach an erasure to find addresses, the cache stops keeping
 -- them (the second of the two remedies #1037 allows).
 --
--- How long a row is kept at all is step D (the owner's decision, D-182).
+-- How long a row is kept at all is step E (the owner's decision, D-182).
 --
 -- -----------------------------------------------------------------------------
 -- HOW IT IS WRITTEN
@@ -92,7 +99,22 @@ ALTER TABLE `tblGeocodeCache`
 ALTER TABLE `tblGeocodeCache`
     COMMENT = 'Geocoder result cache — an address geocodes once (Nominatim policy); keeps no address text (migrations 180, 290)';
 
--- 🗺️ D. how long a remembered answer is kept
+-- 🏠 D. home or public place, and the rows that cannot say which
+SET @kind_missing := (
+    SELECT COUNT(*) = 0 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblGeocodeCache'
+      AND COLUMN_NAME  = 'addressKind'
+);
+SET @sql := IF(@kind_missing = 1, 'DELETE FROM `tblGeocodeCache`', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql := IF(@kind_missing = 1,
+    'ALTER TABLE `tblGeocodeCache` ADD COLUMN `addressKind` ENUM(''home'',''public'') NOT NULL DEFAULT ''home'' COMMENT ''home: somebody''''s own address, personal data, key mixed with the installation''''s secret; public: a venue, business or the organisation (D-183, migration 290)'' AFTER `provider`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 🗺️ E. how long a remembered answer is kept
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'geo.cache.retentionDays', '365', '365', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);

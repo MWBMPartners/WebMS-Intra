@@ -710,7 +710,8 @@ if ($w3w !== null && What3Words::isConfigured() === true) {
 if ($coords === null && $positionKept === '' && Geocoder::autoEnabled() === true) {
     $formatted = GeoLocation::formatAddress($address);
     if ($formatted !== '') {
-        $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null);
+        // 🏛️ The organisation's own address is a public place (D-183).
+        $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null, Geocoder::KIND_PUBLIC);
         if ($geocoded !== null) {
             $coords = ['lat' => $geocoded['lat'], 'lng' => $geocoded['lng']];
         }

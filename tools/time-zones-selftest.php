@@ -4275,37 +4275,34 @@ ok(
 );
 // P19b (#1029): ONE rule for what a coordinate NUMBER is. Sabbath::coordinate()
 // held its own copy of GeoLocation's pattern; it now asks GeoLocation and adds
-// only the limit. Read with PHP's tokeniser (comments dropped), because the two
-// copies agreed, so no value can tell them apart: what is pinned is that the
-// method's body calls GeoLocation::coordinateNumber() and holds no pattern of
-// its own. Planted back to the copy, this goes red.
-$sabSrc = (string) file_get_contents(__DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Sabbath.php');
-$sabBody = '';
-$sabToks = token_get_all($sabSrc);
-for ($i = 0, $n = count($sabToks); $i < $n; $i++) {
-    if (is_array($sabToks[$i]) && $sabToks[$i][0] === T_FUNCTION) {
-        $j = $i + 1;
-        while ($j < $n && is_array($sabToks[$j]) && $sabToks[$j][0] === T_WHITESPACE) { $j++; }
-        if (is_array($sabToks[$j]) && $sabToks[$j][1] === 'coordinate') {
-            while ($j < $n && $sabToks[$j] !== '{') { $j++; }
-            $depth = 0;
-            for (; $j < $n; $j++) {
-                $t = $sabToks[$j];
-                if (is_array($t) && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true)) { continue; }
-                $text = is_array($t) ? $t[1] : $t;
-                if ($text === '{' || (is_array($t) && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) { $depth++; }
-                if ($text === '}') { $depth--; }
-                $sabBody .= $text;
-                if ($depth === 0) { break; }
-            }
-            break;
-        }
+// only the limit. DRIVEN, not read (#1037 round 2: a substring pin was
+// satisfied by a call inside a dead `if (false)`): the real method, loaded
+// from the repository, is asked a set of values covering what the rule
+// accepts and refuses, with the answers pinned here by hand.
+$coreDir = __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
+if (class_exists(\Portal\Core\GeoLocation::class, false) === false) {
+    require_once $coreDir . 'GeoLocation.php';
+}
+if (class_exists(\Portal\Core\Sabbath::class, false) === false) {
+    require_once $coreDir . 'Sabbath.php';
+}
+$coordCases = [
+    ['51.5', 90.0, 51.5], [' -0.12 ', 180.0, -0.12], ['.5', 90.0, 0.5], ['0', 90.0, 0.0], ['4.0E-5', 90.0, 4.0E-5],
+    [12, 90.0, 12.0], [-33.45, 90.0, -33.45], ['90', 90.0, 90.0], ['90.0000001', 90.0, null], ['-181', 180.0, null],
+    ['', 90.0, null], ['north', 90.0, null], ['51,5', 90.0, null], ['0x1A', 90.0, null], ['1e999', 90.0, null],
+    [['1'], 90.0, null], [true, 90.0, null], [null, 90.0, null], [INF, 90.0, null], [NAN, 90.0, null],
+];
+$coordWrong = [];
+foreach ($coordCases as [$in, $limit, $want]) {
+    $got = \Portal\Core\Sabbath::coordinate($in, $limit);
+    if ($got !== $want) {
+        $coordWrong[] = json_encode([$in, $limit]) . ' gave ' . var_export($got, true) . ', wanted ' . var_export($want, true);
     }
 }
 ok(
-    'P19b Sabbath::coordinate() asks GeoLocation::coordinateNumber() for the number and keeps no pattern of its own (#1029)',
-    str_contains($sabBody, 'GeoLocation::coordinateNumber(') === true && str_contains($sabBody, 'preg_match') === false,
-    $sabBody === '' ? 'the method was not found' : 'body: ' . preg_replace('/\s+/', ' ', $sabBody)
+    'P19b Sabbath::coordinate() reads ' . count($coordCases) . ' values as the one coordinate rule does (#1029), driven: numbers and numeric text in range kept, words, commas, hex, lists, true/false, infinity and out of range refused',
+    $coordWrong === [],
+    implode('; ', $coordWrong)
 );
 // P20: 0 and 0 typed on the Sabbath page is saved and used.
 $siteRow('org.latitude', '');

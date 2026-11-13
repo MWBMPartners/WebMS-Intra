@@ -2396,24 +2396,39 @@ return [
         'columns'  => ['latitude', 'longitude', 'what3words'],
     ],
     'tblGeocodeCache' => [
-        'decision' => 'not-personal',
-        // #1037: this entry used to say "A store of place names ... About
-        // places, not people", while the table kept every address as typed,
-        // which can be a member's home (a small group's host, #809). Migration
-        // 290 removed the text; what is left is described exactly below,
-        // including the one thing a fingerprint still lets somebody tell.
-        'reason'   => 'Keeps no address and names nobody: for each address that was'
-                    . ' looked up, a one-way fingerprint of it, the map position'
-                    . ' found and which service found it. The address itself is not'
-                    . ' kept (until migration 290 it was, and could be a member\'s'
-                    . ' home). Somebody who already knows an address can tell from'
-                    . ' the fingerprint that it was looked up here; nobody can read'
-                    . ' an address out of it, so there is nothing for an erasure to'
-                    . ' find. An answer not used for the period in force (each'
-                    . ' organisation\'s own, capped by the installation\'s; the'
-                    . ' shortest applies, as the cache is shared) is deleted by the'
-                    . ' nightly clear-out (D-182).',
-        'columns'  => ['latitude', 'longitude'],
+        'decision' => 'retain',
+        // #1037, D-183. This entry said "not-personal" twice, first as "a
+        // store of place names ... about places, not people" while the table
+        // kept every address as typed, then — after migration 290 removed the
+        // text — "nobody can read an address out of it". The second was
+        // untrue for a HOME: the position is kept to about a centimetre, so
+        // for a house it IS the house, and any online map turns it back into
+        // the address without knowing it first. The owner decided (D-183) a
+        // home's remembered answer is personal data and a public place's is
+        // not, and which an address is is chosen per form (`addressKind`).
+        //
+        // WHY 'retain' AND NOT 'erase': nothing on the row says whose home it
+        // is — no account number, no address — so an erasure request has
+        // nothing to match a person's rows against (the same position as
+        // `tblAnonymousCheckins` and `tblLiveRateLimits`). The protection is
+        // the keeping period, which 'period' states. Public rows sit in the
+        // same table and are swept by the same period; they are not personal.
+        'reason'   => 'When an address is looked up on a map, the position found is remembered so the map'
+                    . ' service is not asked again. A row keeps a fingerprint of the address, the position'
+                    . ' (to about a centimetre), which service found it and whether the address was marked'
+                    . ' as somebody\'s home or a public place. The address itself is not kept. For a home'
+                    . ' the position is the house, so anyone who can read the database can find the'
+                    . ' address with any online map: home rows are personal data, and their fingerprint is'
+                    . ' mixed with this installation\'s own secret key. Nothing on a row says whose home it'
+                    . ' is, so an erasure request cannot single out one person\'s rows; what removes them'
+                    . ' is the keeping period below. Rows for public places (venues, the organisation\'s'
+                    . ' own address) are not personal.',
+        'period'   => 'until the answer has not been used for the period in force: each organisation\'s'
+                    . ' own figure, held to the installation\'s (a year unless changed, at most ten years,'
+                    . ' never "for ever"), and because one remembered answer serves every organisation,'
+                    . ' the shortest of those applies (D-182). Deleted by the nightly clear-out, if that'
+                    . ' scheduled job has been set up.',
+        'columns'  => ['queryHash', 'latitude', 'longitude'],
     ],
     'tblResource' => [
         'decision' => 'not-personal',

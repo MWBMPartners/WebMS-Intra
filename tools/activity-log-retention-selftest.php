@@ -107,7 +107,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 94;  // 73 + 14 in section Q and 7 plants PG1-PG7 (#1037)
+const AL_EXPECTED_CHECKS = 96;  // 73 + 16 in section Q and 7 plants PG1-PG7 (#1037)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1030,6 +1030,16 @@ $scnGcReaderCaps = static function () use ($gcWorld, $signIn, $page): bool {
 $gcSaved = $activityCount('GeocodeCacheRetentionSaved');
 check('Q1 (scenario) an organisation\'s own administrator stores 30 days for their organisation', $scnGcOrgSaves(), true);
 check('Q1b ...and the change is recorded', $activityCount('GeocodeCacheRetentionSaved'), $gcSaved + 1);
+// (d) of #1037 round 2: the success message must say what is IN FORCE (the
+// shortest figure, the cache being shared) and the condition (the job set up),
+// never that this organisation's answers "are kept" for its own figure.
+$gcWorld('365', null, '20');
+$signIn('orgadmin');
+$q1c = $gcForOrg(['choice' => 'days', 'days' => '30']);
+check('Q1c the message names this organisation\'s 30 days, the 20 days really in force (another organisation\'s), and that the clear-out must be set up',
+    [$q1c['flash']['type'], str_contains($q1c['flash']['text'], 'own figure is now 30 days'),
+     str_contains($q1c['flash']['text'], 'which is now 20 days'), str_contains($q1c['flash']['text'], 'only if the nightly clear-out job has been set up')],
+    ['success', true, true, true]);
 check('Q2 (scenario) 366 under an installation of 365 is refused with the limit, not clamped, nothing stored, and recorded', $scnGcAboveRefused(), true);
 $gcWorld('365', null, null);
 $signIn('orgadmin');
@@ -1048,6 +1058,9 @@ $gcWorld('365', '200', null);
 $signIn('globaladmin');
 $q8 = $gcInstall(['choice' => 'days', 'days' => '500']);
 check('Q8 raising the installation to 500 days, which nobody\'s figure is above, is stored', [$q8['flash']['type'], $setting(GC_KEY, null)], ['success', '500']);
+check('Q8b ...and its message says the shortest figure in force is the organisation\'s 200 days, not 500, and names the condition',
+    [str_contains($q8['flash']['text'], 'which is now 200 days'), str_contains($q8['flash']['text'], 'only if the nightly clear-out job has been set up')],
+    [true, true]);
 $q9 = $gcInstall(['choice' => 'days', 'days' => '3651']);
 check('Q9 the installation\'s 3651 days is refused, not clamped', [$q9['flash']['type'], $setting(GC_KEY, null)], ['danger', '500']);
 check('Q10 (scenario) an organisation\'s figure stored above the installation\'s by SQL is held to the installation\'s on the page', $scnGcReaderCaps(), true);
@@ -1134,7 +1147,7 @@ $pg1 = $plant('_core/GeocodeCacheRetention.php', '$reason = SettingLimit::whyNot
 check('PG1 with the cap taken out of the organisation\'s save, 366 under 365 is stored and the cap scenario goes red', [$pg1['applied'], $pg1['result']], [true, false]);
 $pg2 = $plant('_core/GeocodeCacheRetention.php', 'if ($above !== []) {', 'if (false) {', $scnGcLoweringRefused);
 check('PG2 with the naming refusal taken out, the installation is lowered beneath an organisation\'s figure', [$pg2['applied'], $pg2['result']], [true, false]);
-$pg3 = $plant('_core/GeocodeCacheRetention.php', '$shortest = min($shortest, self::daysForSite((int) $one[\'siteID\']));',
+$pg3 = $plant('_core/GeocodeCacheRetention.php', '$shortest = min($shortest, $figure);',
     '// planted: the organisations are not asked', static fn (): bool => $scnGcSweep('30') === ['forty' => false, 'ten' => true, 'fourHundred' => false, 'reported' => 2]);
 check('PG3 with the clear-out using the installation\'s figure only, the 40-day answer survives an organisation\'s 30 and the sweep scenario goes red', [$pg3['applied'], $pg3['result']], [true, false]);
 $pg4 = $plant('_apps/cron/_retention-sweep.php', '$geocodeCacheDeleted   = run_geocode_cache_sweep(true);',

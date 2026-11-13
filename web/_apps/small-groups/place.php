@@ -162,6 +162,9 @@ $values = $place ?? [];
                     'w3w'         => $values['what3words'] ?? '',
                 ],
                 'lookup'     => true,
+                // 🏠 D-183: the host's home, unless "not anybody's home" (D-123) is ticked.
+                'addressKind'                 => 'home',
+                'addressKindPublicWhenTicked' => 'notAHome',
                 'w3wSuggest' => true,
                 // 🌍 #942: a NEW home starts on the organisation's own country,
                 //    else the installation's. The shared form used to fill an

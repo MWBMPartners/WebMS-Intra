@@ -441,12 +441,16 @@ $gcrOrganisationForm = static function () use ($gcrOwn, $gcrOwnMax, $gcrInstalla
 };
 
 /** What the card explains, in both views: what is kept, and why the shortest period decides. */
+// (c) of #1037 round 2: this said "a remembered answer holds no address", and
+//     the card went on to imply nobody could get one back. Untrue for a home:
+//     the position is kept to about a centimetre, so it IS the house (D-183).
 $gcrExplained = 'When an address is typed, the portal asks a map service where it is and remembers the answer so it '
-    . 'does not ask again. A remembered answer holds no address: only a one-way fingerprint of it, the map position '
-    . 'and which service answered. Somebody who already knows an address and can read the database could still tell '
-    . 'it was looked up, so the nightly clear-out deletes an answer not used for the period below, if that scheduled '
-    . 'job has been set up. One remembered answer serves every organisation on this installation, so the clear-out '
-    . 'uses the shortest period any organisation has chosen. A deleted answer is simply asked again when it is next needed.';
+    . 'does not ask again. The address itself is not kept, but the position is, to about a centimetre: for somebody\'s '
+    . 'home that is the house, and anyone who can read the database can find the address with any online map. So an '
+    . 'answer for an address marked as a home is personal data, and the nightly clear-out deletes every answer not used '
+    . 'for the period below, if that scheduled job has been set up. One remembered answer serves every organisation on '
+    . 'this installation, so the clear-out uses the shortest period any organisation has chosen. A deleted answer is '
+    . 'simply asked again when it is next needed.';
 
 // -----------------------------------------------------------------------------
 // 📜 The activity-log figures every view of this page draws (#932)

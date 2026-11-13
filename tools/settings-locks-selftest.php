@@ -27,6 +27,7 @@
  * THE ONE LIST is the set of those methods, read out of `web/_core/` by PHP's
  * tokeniser — never typed into this file, and WHICH keys are pressed in
  * section B is decided by that list alone. What IS typed by hand, and why:
+ *   - `geo.cache.retentionDays` (#1037), for the premise check B0c, the same way;
  *   - `audit.retentionDays` (#932), for the premise check B0b — a lock method
  *     answering `false` for everything drops its key from the enumeration
  *     and leaves the run green, so the key is named here on purpose;
@@ -1031,6 +1032,14 @@ check('B0 PREMISE: the issue\'s own key is among those the methods lock (so the 
 check('B0b PREMISE (#932): audit.retentionDays is locked, by ActivityLogRetention::lockedInGeneralEditor()',
     in_array('ActivityLogRetention::lockedInGeneralEditor', $locked['audit.retentionDays'] ?? [], true) === true,
     'locked by: ' . json_encode($locked['audit.retentionDays'] ?? null));
+// 🗺️ #1037 round 2: the same premise for how long remembered map answers are
+//    kept. Measured: with GeocodeCacheRetention::lockedInGeneralEditor()
+//    gutted to `return false;` the run stayed GREEN, the key simply dropping
+//    out of the enumeration — while the general editor would then let a global
+//    administrator delete the installation's row unrecorded.
+check('B0c PREMISE (#1037): geo.cache.retentionDays is locked, by GeocodeCacheRetention::lockedInGeneralEditor()',
+    in_array('GeocodeCacheRetention::lockedInGeneralEditor', $locked['geo.cache.retentionDays'] ?? [], true) === true,
+    'locked by: ' . json_encode($locked['geo.cache.retentionDays'] ?? null));
 
 // The controls: the very same request shapes DO delete, change and add an ordinary setting.
 foreach ([null, $site] as $level) {
@@ -1625,10 +1634,10 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 // ── Tidy up: only what this run made (the shutdown function would do it too) ─
 $cleanUp();
 
-// S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
+// S1 four times, S2, B0, B0b, B0c (#1037), B1a/b twice, B1c, B2 and B3 once per row, B4 once
 // per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5;
 // #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d; #967: P9b.
-$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
+$expected = 4 + 1 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
     + 1 + 10 + 3 + 1 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));

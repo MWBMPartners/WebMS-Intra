@@ -9475,7 +9475,10 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 --    `queryText` (the address as typed) and `formatted` (the provider's
 --    wording of it), and either can be a member's home address — a small
 --    group's host (#809), or any address a member typed. A row is found by
---    `queryHash` alone. The old "never PII" here was untrue.
+--    `queryHash` alone. The old "never PII" here was untrue — and for a HOME
+--    the position itself is the house (kept to about a centimetre), so a home
+--    row is personal data: marked by `addressKind`, keyed with the
+--    installation's secret, and kept only for D-182's period (D-183).
 CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
     `cacheID`     INT           NOT NULL AUTO_INCREMENT,
     `queryHash`   CHAR(64)      NOT NULL COMMENT 'sha256(direction | lowercased query text). One-way: the address itself is not stored (#1037)',
@@ -9483,6 +9486,7 @@ CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
     `latitude`    DECIMAL(10,7) DEFAULT NULL,
     `longitude`   DECIMAL(10,7) DEFAULT NULL,
     `provider`    VARCHAR(20)   NOT NULL COMMENT 'google or nominatim',
+    `addressKind` ENUM('home','public') NOT NULL DEFAULT 'home' COMMENT 'home: somebody''s own address, personal data, key mixed with the installation''s secret; public: a venue, business or the organisation (D-183, migration 290)',
     `hitCount`    INT           NOT NULL DEFAULT 1,
     `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `lastUsedAt`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -101,6 +101,25 @@ class Geocoder
     /** @var int Hard cap on the throttle sleep, in microseconds (1.2s). */
     private const NOMINATIM_MAX_SLEEP_US = 1200000;
 
+    /**
+     * 🏠 The address is somebody's HOME — a person's own address (D-183).
+     *
+     * A remembered answer for a home is personal data: the position is kept to
+     * about a centimetre (`DECIMAL(10,7)`), so for a house it IS the house, and
+     * any online map turns it back into the address without the address being
+     * known first. So a home row's key is mixed with the installation's own
+     * secret (homeCacheKey()), and the row is described as personal data.
+     *
+     * THE DEFAULT, on purpose. A caller that does not say is treated as a
+     * home: wrongly treating a public place as a home costs one more look-up
+     * and a stricter label; wrongly treating a home as public leaves a
+     * person's house under a fingerprint anybody can test.
+     */
+    public const KIND_HOME = 'home';
+
+    /** 🏛️ The address is a PUBLIC place: a venue, a business, the organisation's own address. Not personal. */
+    public const KIND_PUBLIC = 'public';
+
     /* ====================================================================== */
     /* Public surface                                                         */
     /* ====================================================================== */
@@ -109,11 +128,14 @@ class Geocoder
      * Address -> coordinates. Cache-first, then Google (if configured),
      * falling back to Nominatim. Best-effort — null on any failure.
      *
+     * `$kind` says whether the address is somebody's home or a public place
+     * (D-183); see KIND_HOME. Anything but KIND_PUBLIC is a home.
+     *
      * @return array{lat: float, lng: float, formatted: ?string, source: string}|null
      */
-    public static function forward(string $address, ?string $countryCode = null): ?array
+    public static function forward(string $address, ?string $countryCode = null, string $kind = self::KIND_HOME): ?array
     {
-        return self::lookUp($address, $countryCode, true);
+        return self::lookUp($address, $countryCode, true, $kind === self::KIND_PUBLIC ? self::KIND_PUBLIC : self::KIND_HOME);
     }
 
     /**
@@ -127,7 +149,7 @@ class Geocoder
      *
      * @return array{lat: float, lng: float, formatted: ?string, source: string}|null
      */
-    private static function lookUp(string $address, ?string $countryCode, bool $readCache): ?array
+    private static function lookUp(string $address, ?string $countryCode, bool $readCache, string $kind): ?array
     {
         $address = trim($address);
         if ($address === '') {
@@ -139,7 +161,13 @@ class Geocoder
         //    "Springfield" limited to Great Britain shared one cached answer,
         //    and whichever was asked second was given the first one's place —
         //    for ever, because the cache is asked first. See forwardKeyText().
-        $hash = self::cacheKey('forward', self::forwardKeyText($address, $countryCode));
+        //
+        // 🏠 And whether it is a home (D-183): a home's key is mixed with the
+        //    installation's secret, a public place's is not, so the same
+        //    address asked both ways is two rows that cannot be told to be the
+        //    same address from the database alone.
+        $keyText = self::forwardKeyText($address, $countryCode);
+        $hash    = $kind === self::KIND_PUBLIC ? self::cacheKey('forward', $keyText) : self::homeCacheKey($keyText);
         if ($readCache === true) {
             $cached = self::cacheGet($hash);
             if ($cached !== null) {
@@ -161,7 +189,7 @@ class Geocoder
         // 📐 Both legs built `$result` through answer(), which has already
         //    checked and rounded the position, so there is nothing to tidy here
         //    and nothing unchecked reaches the cache.
-        self::cachePut($hash, $result['lat'], $result['lng'], $result['source']);
+        self::cachePut($hash, $result['lat'], $result['lng'], $result['source'], $kind);
         return $result;
     }
 
@@ -248,7 +276,8 @@ class Geocoder
      */
     public static function testConnection(): array
     {
-        $result = self::lookUp('Westminster, London, United Kingdom', null, false);
+        // A landmark, so a public place (D-183).
+        $result = self::lookUp('Westminster, London, United Kingdom', null, false, self::KIND_PUBLIC);
         if ($result !== null) {
             return [
                 'success' => true,
@@ -536,6 +565,24 @@ class Geocoder
     }
 
     /**
+     * 🏠 A HOME's cache key (D-183): the same text as cacheKey() would use,
+     * fingerprinted by `AddressFingerprint::of()`, which mixes in the
+     * installation's own secret (the encryption key in `_auth_keys/enc.key`,
+     * outside the web root and outside the database, so not in a database
+     * backup). A plain SHA-256 of an address can be checked against any list
+     * of addresses; this one needs the key as well. The leading words keep it
+     * apart from every other value that class makes (network addresses).
+     *
+     * When the key cannot be read that class falls back to the portal's
+     * version as its salt — weaker, still not unsalted — and an upgrade then
+     * changes every home key, which costs only fresh look-ups.
+     */
+    private static function homeCacheKey(string $queryText): string
+    {
+        return AddressFingerprint::of('geocode-home|forward|' . mb_strtolower(trim($queryText)));
+    }
+
+    /**
      * 🌍 What a FORWARD look-up's cache key is made from (#1035): the country
      * it was limited to and the address, as a two-item JSON list —
      * `["gb","1 high street"]`, or `["","1 high street"]` when it was not
@@ -635,8 +682,9 @@ class Geocoder
     }
 
     /**
-     * 🔒 Keep a forward answer: its one-way key, the position and which
-     * provider gave it. NOTHING ELSE (#1037).
+     * 🔒 Keep a forward answer: its key, the position, which provider gave it
+     * and whether the address is a home or a public place. NOTHING ELSE
+     * (#1037, D-183).
      *
      * The row used to keep the address as typed (`queryText`) and the
      * provider's own wording of it (`formatted`). An address typed here can be
@@ -649,27 +697,32 @@ class Geocoder
      * Rows are now also deleted once unused for the period in force
      * (`GeocodeCacheRetention`, D-182), by the nightly clear-out.
      *
-     * What stays, said plainly: `queryHash` is SHA-256 of the lower-cased
-     * address and country. It is one-way, but an address is guessable, so
-     * somebody who already KNOWS an address and can read the database can tell
-     * that it was looked up here, and where it was placed — both things they
-     * could find out for themselves from the address. Nobody can read an
-     * address OUT of the table.
+     * WHAT STAYS IS STILL PERSONAL FOR A HOME, said plainly because the first
+     * version of this comment said the opposite. The position is kept to
+     * about a centimetre, so for a house it IS the house: anybody who can
+     * read the database can turn it back into the address with any online
+     * map, without knowing the address first. That is why a home row is
+     * marked (`addressKind`), keyed with the installation's secret
+     * (homeCacheKey()), described as personal data in the catalogue and the
+     * privacy notice, and deleted once unused for the period in force
+     * (D-182, D-183). A public place's row keeps a plain SHA-256 key, which
+     * anybody with an address list can test — harmless for a venue.
      */
-    private static function cachePut(string $hash, float $lat, float $lng, string $provider): void
+    private static function cachePut(string $hash, float $lat, float $lng, string $provider, string $kind): void
     {
         try {
             $db = App::db();
             $stmt = $db->prepare(
-                'INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`) '
-                . "VALUES (?, 'forward', ?, ?, ?) "
+                'INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`, `addressKind`) '
+                . "VALUES (?, 'forward', ?, ?, ?, ?) "
                 . 'ON DUPLICATE KEY UPDATE `latitude` = VALUES(`latitude`), `longitude` = VALUES(`longitude`), '
                 . '`provider` = VALUES(`provider`), `hitCount` = `hitCount` + 1, `lastUsedAt` = NOW()'
             );
             if ($stmt === false) {
                 return;
             }
-            $stmt->bind_param('sdds', $hash, $lat, $lng, $provider);
+            $kindToStore = $kind === self::KIND_PUBLIC ? self::KIND_PUBLIC : self::KIND_HOME;
+            $stmt->bind_param('sddss', $hash, $lat, $lng, $provider, $kindToStore);
             $stmt->execute();
             $stmt->close();
         } catch (\Throwable $e) {

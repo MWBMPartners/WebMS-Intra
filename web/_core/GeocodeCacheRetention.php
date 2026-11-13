@@ -11,14 +11,14 @@
  *
  * WHAT IS BEING KEPT
  * -----------------------------------------------------------------------------
- * Since #1037 (migration 290) a cache row holds no address: a one-way
- * fingerprint of the address and country, the map position found, which
- * service found it, a use count and two dates. The address could be a member's
- * home (a small group's host, #809), and the fingerprint has no secret added,
- * so somebody who already knows an address and can read the database can tell
- * it was looked up here. That is why the owner chose a keeping period (D-182)
- * even after the text was gone, and why "keep for ever" is NOT offered: D-182
- * rules it out by name. So unlike the activity log (D-117), 0 here means
+ * Since #1037 (migration 290) a cache row holds no address text: a fingerprint
+ * of the address and country, the map position found, which service found it,
+ * whether the address is a home or a public place, a use count and two dates.
+ * For a HOME the position is the house — it is kept to about a centimetre, and
+ * any online map turns it back into the address — so a home row is personal
+ * data (D-183) and its fingerprint is mixed with the installation's secret.
+ * That is why the owner chose a keeping period (D-182), and why "keep for
+ * ever" is NOT offered: D-182 rules it out by name. So unlike the activity log (D-117), 0 here means
  * nothing; a stored 0, empty or unreadable figure is "nothing chosen".
  *
  * THE RULE (D-182, following #668 and D-013)
@@ -35,6 +35,12 @@
  *   - An installation figure shorter than an organisation's own is REFUSED,
  *     naming the organisations (D-119's shape), read live and locked inside the
  *     transaction that writes (#687, #697).
+ *
+ * HOMES AND PUBLIC PLACES (D-183). A row is marked `addressKind`. A home's
+ * remembered position is personal data — it is kept to about a centimetre, so
+ * it is the house — while a public place's is not. Both kinds are swept by the
+ * same period: deleting a venue's answer early costs one look-up, and one rule
+ * is easier to state truthfully than two.
  *
  * THE CACHE IS SHARED, SO THE STRICTEST PERIOD DECIDES
  * -----------------------------------------------------------------------------
@@ -165,16 +171,89 @@ final class GeocodeCacheRetention
      */
     public static function periodInForce(\mysqli $db): int
     {
-        $shortest = self::installationDays();
-        $sites    = $db->query('SELECT `siteID` FROM `tblSites`');
-        if ($sites === false) {
-            throw new \RuntimeException('The organisations could not be read.');
+        self::needSettingLimit();
+
+        // 🔄 Read FRESH from the database, every row of the key at once, never
+        //    from start-up's settings layer: a save calls this straight after
+        //    its own commit to tell the person what is now in force, and the
+        //    layer still holds what the request started with. An organisation
+        //    with no usable row of its own follows the installation, which is
+        //    already in the minimum, so only usable own rows need reading.
+        $stmt = $db->prepare('SELECT `siteID`, `settingValue` FROM `tblSettings` WHERE `settingKey` = ?');
+        if ($stmt === false) {
+            throw new \RuntimeException('The periods could not be read.');
         }
-        while ($one = $sites->fetch_assoc()) {
-            $shortest = min($shortest, self::daysForSite((int) $one['siteID']));
+        $key = self::KEY;
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($result === false) {
+            throw new \RuntimeException('The periods could not be read.');
+        }
+        $installationStored = null;
+        $own                = [];
+        while ($row = $result->fetch_assoc()) {
+            if ($row['siteID'] === null) {
+                $installationStored = $row['settingValue'];
+            } elseif (($figure = self::usable($row['settingValue'])) !== null) {
+                $own[] = $figure;
+            }
+        }
+        $stmt->close();
+
+        $shortest = self::installationDaysFromStored($installationStored);
+        foreach ($own as $figure) {
+            // Each organisation's own figure is held to the installation's
+            // (the minimum does that by itself) and so to the hard maximum.
+            $shortest = min($shortest, $figure);
         }
 
         return $shortest;
+    }
+
+    /**
+     * 🗣️ What is in force, in words, for a success message or a page: the
+     *    shortest period and the condition that the clear-out runs at all.
+     *    "Could not read" names no figure rather than inventing one.
+     */
+    public static function inForceWords(\mysqli $db): string
+    {
+        try {
+            $shortest = self::inWords(self::periodInForce($db));
+
+            return 'One remembered answer serves every organisation on this installation, so an answer is deleted '
+                . 'once it has not been used for the shortest period any organisation has chosen, which is now '
+                . $shortest . ', and only if the nightly clear-out job has been set up.';
+        } catch (\Throwable $e) {
+            return 'One remembered answer serves every organisation on this installation, so an answer is deleted '
+                . 'once it has not been used for the shortest period any organisation has chosen, and only if the '
+                . 'nightly clear-out job has been set up. The period now in force could not be read just now.';
+        }
+    }
+
+    /**
+     * 📄 The privacy notice's sentence about remembered map positions of homes
+     *    (D-183), as plain text; the page escapes it. One place, so the notice
+     *    and the "what we store" list cannot say different things. Nothing on a
+     *    row says whose home it is, so an erasure request cannot single one
+     *    out — said, because a member deciding what to ask for needs it.
+     */
+    public static function privacyWords(\mysqli $db): string
+    {
+        try {
+            $period = 'once it has not been used for ' . self::inWords(self::periodInForce($db))
+                . ' (the shortest period any organisation on this portal has chosen)';
+        } catch (\Throwable $e) {
+            $period = 'once it has not been used for the shortest period any organisation on this portal has chosen';
+        }
+
+        return 'When an address marked as somebody\'s home (for example a small group\'s host, or your own address '
+            . 'in the directory) is looked up on a map, the portal remembers the position it was given so that it '
+            . 'need not ask the map service again. The position is precise enough to identify the house. It is '
+            . 'kept with a scrambled form of the address, mixed with a secret key belonging to this installation, '
+            . 'and not with the address itself, and it is deleted ' . $period . ', if the nightly clear-out has '
+            . 'been set up. Nothing on it says whose home it is, so an erasure request cannot pick it out; the time '
+            . 'limit is what removes it. Positions of public places, such as venues, are not about anybody.';
     }
 
     /**
@@ -299,8 +378,11 @@ final class GeocodeCacheRetention
 
         return [
             'saved' => true, 'type' => 'success', 'refusal' => '', 'outcome' => 'stored', 'blockedOrganisations' => 0,
-            'message' => 'Saved. A remembered map answer not used for ' . self::inWords($days)
-                . ' is now deleted, and no organisation may keep one longer.',
+            // (d) of #1037 round 2: this said an answer "not used for N days is
+            //     now deleted", untrue when an organisation has chosen fewer
+            //     days (the shortest wins) and when the job is not set up.
+            'message' => 'Saved. The installation\'s figure is now ' . self::inWords($days)
+                . ': no organisation may keep a remembered map answer longer. ' . self::inForceWords($db),
         ];
     }
 
@@ -406,14 +488,19 @@ final class GeocodeCacheRetention
         if ($days === null) {
             return [
                 'saved' => true, 'type' => 'success', 'refusal' => '', 'outcome' => 'cleared',
-                'message' => 'Saved. This organisation now follows the installation\'s figure for remembered map answers.',
+                'message' => 'Saved. This organisation now follows the installation\'s figure for remembered map answers. '
+                    . self::inForceWords($db),
             ];
         }
 
         return [
             'saved' => true, 'type' => 'success', 'refusal' => '', 'outcome' => 'stored',
-            'message' => 'Saved. This organisation now keeps a remembered map answer for '
-                . self::inWords($days) . ' after it was last used.',
+            // (d) of #1037 round 2: this said the organisation "now keeps" an
+            //     answer for N days, untrue when another organisation has
+            //     chosen fewer (the cache is shared and the shortest wins) and
+            //     when the job is not set up.
+            'message' => 'Saved. This organisation\'s own figure is now ' . self::inWords($days) . '. '
+                . self::inForceWords($db),
         ];
     }
 

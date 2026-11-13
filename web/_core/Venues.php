@@ -675,7 +675,9 @@ class Venues
                 'region' => $region ?? null, 'postcode' => $postcode ?? null,
             ]);
             if ($addressForGeocode !== '') {
-                $geocoded = Geocoder::forward($addressForGeocode, $countryCode);
+                // 🏛️ A venue is a public place (D-183), so its remembered
+                //    answer is not personal data.
+                $geocoded = Geocoder::forward($addressForGeocode, $countryCode, Geocoder::KIND_PUBLIC);
                 if ($geocoded !== null) {
                     $coords = ['lat' => $geocoded['lat'], 'lng' => $geocoded['lng']];
                     $geocodedAt = date('Y-m-d H:i:s');
