@@ -241,15 +241,19 @@ if ($eventName === '' || $startDateTime === '') {
 //    and `1900-01-01T00:30:00+01:00` reached the INSERT and failed with a
 //    bare database error 1292. The form's date-and-time box never sends an
 //    offset, so a value the helper cannot read — an offset, a five-digit
-//    year, anything else — is refused in plain words, for create and edit
-//    alike. There is deliberately NO fallback to the text: a fallback is how
+//    year (given the range's own words), anything else — is refused in plain
+//    words, for create and edit alike. There is deliberately NO fallback to the text: a fallback is how
 //    the unread value got to the database.
 $unreadableWords = static fn (string $which): string => 'The ' . $which . ' is not a date and time this form can save. '
     . 'Use the date and time boxes, or write it as YYYY-MM-DD HH:MM. Nothing was saved.';
 $startRead = I18n::wallClockFromInput($startDateTime);
 $endRead   = $endDateTime === '' ? '' : I18n::wallClockFromInput($endDateTime);
 if ($startRead === null || $endRead === null) {
-    $_SESSION['flash_msg']  = $unreadableWords($startRead === null ? 'start' : 'end');
+    // A five-digit year IS a year, just too large (a browser's box sends one
+    // if it is typed), so it gets the range's own words, not "use the boxes".
+    $_SESSION['flash_msg']  = preg_match('/^\s*\d{5,}-/', $startRead === null ? $startDateTime : $endDateTime) === 1
+        ? EventDateRange::refusalWords() . ' Nothing was saved.'
+        : $unreadableWords($startRead === null ? 'start' : 'end');
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('calendar/manage'));
     exit();
@@ -290,30 +294,13 @@ $endDateTime   = $endRead;
 //    started, and sailed through. Verified on this machine: 2026-03-29 01:45 in
 //    Europe/London becomes 02:45.
 //
-//    Both values come from the same form, from date-and-time fields that always
-//    produce the same fixed layout - year, month, day, hour, minute, in that
-//    order, largest unit first. Text sorted that way sorts in time order too,
-//    which is the whole reason dates are written that way round.
-$normaliseWhen = static function (string $when): string {
-    // The browser sends the date and time joined by a "T". The database uses a
-    // space. Same value, so make them look the same before comparing.
-    return trim(str_replace('T', ' ', $when));
-};
-
-$startWhen = $normaliseWhen($startDateTime);
-$endWhen   = $normaliseWhen($endDateTime);
-
-// Anything not in that layout is left to the existing handling rather than
-// rejected here with a message about the wrong problem.
-$looksLikeDateTime = static function (string $when): bool {
-    return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/', $when) === 1;
-};
-
-if (
-    $looksLikeDateTime($startWhen) === true
-    && $looksLikeDateTime($endWhen) === true
-    && $endWhen < $startWhen
-) {
+//    Both values are `I18n::wallClockFromInput()` readings by this point (see
+//    "ONLY WHAT ... READS IS STORED" above), always `YYYY-MM-DD HH:MM:SS` —
+//    largest unit first, so text sorted that way sorts in time order too.
+//    (A "T"-to-space normaliser and a shape test used to sit here, for raw
+//    posted text; with only readings left both had nothing to do and are
+//    gone — #1045 round 4.) An empty end means "no end" and is not compared.
+if ($endDateTime !== '' && $endDateTime < $startDateTime) {
     $_SESSION['flash_msg']  = 'The event cannot end before it starts. Please check the dates.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('calendar/manage'));
@@ -325,7 +312,7 @@ if (
 //    ONE place that decides (`EventDateRange`), for a new event and an edit
 //    alike. (A five-digit year, which a browser's box will send if one is
 //    typed, never gets here: the reading helper cannot read it, so it is
-//    refused above as not a date and time this form can save.)
+//    refused above — with these same range words, because it is a year.)
 // ⚠️ ASKED OF THE READING THAT IS STORED: by this point `$startDateTime` and
 //    `$endDateTime` ARE `I18n::wallClockFromInput()`'s readings (see "ONLY
 //    WHAT ... READS IS STORED" above), so ISO basic form (`20300601T100000`)
@@ -453,19 +440,14 @@ if ($keepsStoredZone === true) {
 //    moved here unchanged; the block after the insert uses `$worked`.
 $repeatFrequency = $action === 'create' ? (string) ($_POST['repeatFrequency'] ?? '') : '';
 if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'], true) === true) {
-    // The browser joins the date and time with a "T" and may leave the
-    // seconds off; the generator wants a full reading.
     // 📌 ONE READING, SLICED ONCE. Every date part below comes out of this
     //    text rather than out of a moment built from it (#777 round 10).
-    //    `I18n::wallClockFromInput()` is the ONE place a posted time
-    //    becomes a stored reading; the `?? $toReading(...)` keeps the old
-    //    normalisation for anything it refuses, so no form that worked
-    //    before stops working.
-    $toReading = static function (string $when): string {
-        $when = trim(str_replace('T', ' ', $when));
-        return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $when) === 1 ? $when . ':00' : $when;
-    };
-    $startReading = I18n::wallClockFromInput($startDateTime) ?? $toReading($startDateTime);
+    //    `$startDateTime` and `$endDateTime` are already
+    //    `I18n::wallClockFromInput()`'s full readings (a value it cannot read
+    //    was refused above, #1045 round 3), so the generator is given them
+    //    as they are. The `$toReading()` normaliser and its `?? ...` fallback
+    //    that used to sit here had nothing left to do and are gone.
+    $startReading = $startDateTime;
 
     $repeatDays = [];
     foreach ((array) ($_POST['repeatDays'] ?? []) as $day) {
@@ -523,8 +505,8 @@ if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly',
     //    customer's installation.
     $worked = EventRecurrence::datesFor(
         $rule,
-        $toReading($startDateTime),
-        $endDateTime === '' ? null : $toReading($endDateTime),
+        $startDateTime,
+        $endDateTime === '' ? null : $endDateTime,
         $timezone,
         EventRecurrence::limitsFrom($SETTINGS, InstallationSettings::layerOrNull())
     );
@@ -617,18 +599,19 @@ $websiteValues = $websiteJudged['values'];
 //    reading of 23:00-23:59 on the NEXT DAY on the night the clocks go
 //    forward at 23:00 (`America/Nuuk` and `America/Scoresbysund`, measured
 //    across every IANA zone, round 10). And anything in the date part that is
-//    not a digit becomes one hyphen: `$startDateTime` is shape-checked
-//    nowhere in this file, MySQL accepts any punctuation as a DATETIME
-//    delimiter, so `2026/06/01 10:00` used to be stored with the slash in its
-//    address, which made the event unreachable at its own clean address
-//    (round 11). `slugStem()` also cuts the name to 100 characters, which
+//    not a digit becomes one hyphen: before #1045 `$startDateTime` was the
+//    raw posted text, MySQL accepts any punctuation as a DATETIME delimiter,
+//    and `2026/06/01 10:00` was stored with the slash in its address, which
+//    made the event unreachable at its own clean address (round 11). Since
+//    #1045 round 3 it is `I18n::wallClockFromInput()`'s reading or the save
+//    was refused, so that cannot reach here; `slugStem()` keeps its own guard. `slugStem()` also cuts the name to 100 characters, which
 //    this file never did: a name longer than about 188 characters made an
 //    address too long for the 200-character column, and the INSERT failed.
 //
 //    `$slug` here is only the STEM: whether it is free is asked when the
 //    event is saved (see "Create event" below). The image uploads below name
 //    their files after the stem, as they always did.
-$slugStem = Events::slugStem($eventName, I18n::wallClockFromInput($startDateTime) ?? $startDateTime);
+$slugStem = Events::slugStem($eventName, $startDateTime);
 $slug     = $slugStem;
 
 // 🖼️ Handle image uploads
@@ -975,7 +958,7 @@ if ($action === 'create') {
     // ordinary event, so moving or cancelling ONE already works through the
     // normal edit and delete; shifting a whole run, or extending it, is its own
     // piece of work and the form does not offer it rather than half-offering.
-    // `$repeatFrequency`, `$rule`, `$toReading`, `$startReading` and `$worked`
+    // `$repeatFrequency`, `$rule`, `$startReading` and `$worked`
     // are worked out BEFORE anything is written (#1045) — see "THE WHOLE
     // REPEAT IS JUDGED BEFORE ANYTHING IS WRITTEN" above the uploads.
     $repeatMade      = 0;
@@ -1013,7 +996,7 @@ if ($action === 'create') {
         $firstWanted = $generated[0]['start'] ?? null;
         $movedFirst  = '';
 
-        if ($firstWanted !== null && $firstWanted !== $toReading($startDateTime)) {
+        if ($firstWanted !== null && $firstWanted !== $startDateTime) {
             $firstEndWanted = $generated[0]['end'];
             $moveFirst      = $mysqli->prepare(
                 'UPDATE tblEvents SET startDateTime = ?, endDateTime = ? '
@@ -1548,7 +1531,7 @@ if ($action === 'create') {
         //        ticked got the pattern sentence with no word about its hour
         //        moving to 02:30.
         if ($movedFirst !== '') {
-            $typedReading = $toReading($startDateTime);
+            $typedReading = $startDateTime;
             $why          = EventRecurrence::whyFirstDateMoved($typedReading, $movedFirst, $timezone);
 
             $movedOn = I18n::formatClockDateTime($movedFirst, 'j F Y');

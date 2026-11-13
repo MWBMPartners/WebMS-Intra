@@ -29,9 +29,12 @@
  *      stored (the moved case also with ONE date, so a check skipping the
  *      first date cannot pass), beside a repeat wholly inside that is made in
  *      full; a start in ISO basic form judged by the reading actually stored;
- *      and a value the reading helper cannot read — an offset at either edge,
- *      a five-digit year, an offset end on an EDIT — refused in plain words
- *      with nothing stored, since only the reading is ever bound
+ *      a value the reading helper cannot read — an offset at either edge, an
+ *      offset end on an EDIT — refused in plain words with nothing stored;
+ *      and, through create AND edit, a lower-case `t` and a fractional second
+ *      (values the helper reads differently from what MySQL makes of the raw
+ *      text) stored as the READING, which is what proves the raw post is
+ *      bound nowhere
  *   D  the public "suggest an event" form: refused with `?err=range`, and the
  *      form shows the range in words
  *   E  the series pattern page: a pattern outside the range is refused before
@@ -680,6 +683,10 @@ $formCases = [
     ['P1045 form day after', ($L + 1) . '-01-01T00:00',     '',                 0],
     ['P1045 form year 1',    '0001-01-01T10:00',            '',                 0],
     ['P1045 form year 9999', '9999-12-31T10:00',            '',                 0],
+    // A browser's date-and-time box sends a five-digit year if one is typed.
+    // The reading helper cannot read it, and it is refused with the range's
+    // own words because it IS a year, just too large (#1045 round 4).
+    ['P1045 form year 10000', '10000-01-01T10:00',          '',                 0],
     ['P1045 form end 9999',  '2030-06-01T10:00',            '9999-12-31T10:00', 0],
 ];
 $formRun = static function () use ($formCases, $formCreate): array {
@@ -793,7 +800,6 @@ $offsetRun = static function () use ($formCreate, $formEdit, $rowNamed): array {
         'start' => $formCreate('P1045 offset start', $L . '-12-31T23:30:00-05:00'),
         'end'   => $formCreate('P1045 offset end', '2030-06-01T10:00', $L . '-12-31T23:30:00-05:00'),
         '1900'  => $formCreate('P1045 offset 1900', '1900-01-01T00:30:00+01:00'),
-        '10000' => $formCreate('P1045 offset 10000', '10000-01-01T10:00'),
     ];
     $formCreate('P1045 offset edit', '2030-06-01T10:00', '2030-06-01T11:00');
     $row     = $rowNamed('P1045 offset edit');
@@ -805,13 +811,39 @@ $offsetRun = static function () use ($formCreate, $formEdit, $rowNamed): array {
 };
 $off = $offsetRun();
 foreach (['start' => 'a start carrying an offset (-05:00) at the far edge', 'end' => 'an end carrying an offset at the far edge',
-          '1900' => '1900-01-01T00:30:00+01:00', '10000' => 'a five-digit year'] as $k => $what) {
+          '1900' => '1900-01-01T00:30:00+01:00'] as $k => $what) {
     check("C {$what} is refused in plain words and nothing is stored",
         [$off[$k]['saved'], str_contains($off[$k]['message'], $unreadable), str_contains($off[$k]['message'], 'Nothing was saved.')],
         [0, true, true]);
 }
 check('C an EDIT whose end carries an offset is refused in plain words and the stored end is unchanged',
     [str_contains($off['edit']['message'], $unreadable), $off['edit']['end']], [true, '2030-06-01 11:00:00']);
+
+// THE READING IS WHAT IS BOUND, NEVER THE RAW TEXT — through create AND edit.
+// Two values the helper reads DIFFERENTLY from what MySQL would make of the
+// raw text, so binding the raw post shows: a lower-case `t` (RFC 3339 allows
+// it; the helper reads it, MySQL does not) and a fractional second (the
+// helper drops `.600`; MySQL ROUNDS it, to 10:00:46). Round 3 of the check
+// planted the raw post back into the INSERT and the UPDATE and both left
+// every check green, because every other value here reads the same either way.
+$rawRun = static function () use ($formCreate, $formEdit, $rowNamed): array {
+    $formCreate('P1045 raw t', '2030-06-01t10:00');
+    $formCreate('P1045 raw fraction', '2030-06-01T10:00:45.600', '2030-06-01T11:00:45.600');
+    $formCreate('P1045 raw edit', '2030-06-01T09:00', '2030-06-01T09:30');
+    $id = (int) ($rowNamed('P1045 raw edit')['eventID'] ?? 0);
+    $formEdit($id, 'P1045 raw edit', '2030-06-02t10:00', '2030-06-02T11:00:45.600');
+    $read = static function (string $name) use ($rowNamed): array {
+        $row = $rowNamed($name);
+        return $row === null ? [null, null] : [(string) $row['startDateTime'], $row['endDateTime'] === null ? null : (string) $row['endDateTime']];
+    };
+    return ['t' => $read('P1045 raw t'), 'fraction' => $read('P1045 raw fraction'), 'edit' => $read('P1045 raw edit')];
+};
+$raw = $rawRun();
+check('C create: a lower-case t (2030-06-01t10:00) is stored as the reading, 2030-06-01 10:00:00', $raw['t'][0], '2030-06-01 10:00:00');
+check('C create: a fractional second (10:00:45.600) is stored as the reading, 10:00:45, not MySQL\'s rounded 10:00:46',
+    $raw['fraction'], ['2030-06-01 10:00:45', '2030-06-01 11:00:45']);
+check('C edit: a lower-case t start and a fractional-second end are stored as the readings',
+    $raw['edit'], ['2030-06-02 10:00:00', '2030-06-02 11:00:45']);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nD  The public \"suggest an event\" form\n";
@@ -951,6 +983,23 @@ $pg  = $offsetRun();
 $unplant('_apps/calendar/manage/save.php', $was);
 check('P4e the text fallback back: the offset start is STORED past the range again', [$pg['start']['saved'], $rowNamed('P1045 offset start')['startDateTime'] ?? null],
     [1, ($L + 1) . '-01-01 04:30:00']);
+
+// Plant A: the INSERT binds the raw posted start again.
+$was = $plant('_apps/calendar/manage/save.php', '$eventName, $slug, $description, $startDateTime, $endDt,',
+    "\$eventName, \$slug, \$description, trim((string) \$_POST['startDateTime']), \$endDt,");
+$clearEvents();
+$pg  = $rawRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P10 the INSERT binding the raw post: the create checks go red (lower-case t and fraction no longer stored as the reading)',
+    [$pg['t'][0] === '2030-06-01 10:00:00', $pg['fraction'][0] === '2030-06-01 10:00:45'], [false, false]);
+
+// Plant B: the UPDATE binds the raw posted start and end again.
+$was = $plant('_apps/calendar/manage/save.php', '$eventName, $description, $startDateTime, $endDt,',
+    "\$eventName, \$description, trim((string) \$_POST['startDateTime']), (trim((string) \$_POST['endDateTime']) === '' ? null : trim((string) \$_POST['endDateTime'])),");
+$clearEvents();
+$pg  = $rawRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P11 the UPDATE binding the raw post: the edit check goes red', $pg['edit'] === ['2030-06-02 10:00:00', '2030-06-02 11:00:45'], false);
 
 $was = $plant('_apps/calendar/submit-save.php', 'if (EventDateRange::whyRefused([$startUtc, $endUtc]) !== null) {', 'if (false) {');
 $clearEvents();
