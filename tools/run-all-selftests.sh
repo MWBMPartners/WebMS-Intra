@@ -241,6 +241,7 @@ import-notifier|tools/import-notifier-selftest.php|selftest_notifier|
 feed-admin|tools/feed-admin-selftest.php|selftest_feedadmin|web:feed-admin
 calendar-import|tools/calendar-import-selftest.php|selftest_calimport|
 event-address|tools/event-address-selftest.php|selftest_eventaddress|
+event-date-range|tools/event-date-range-selftest.php|selftest_eventdaterange|
 event-suggester-privacy|tools/event-suggester-privacy-selftest.php|selftest_eventsuggester|
 page-head|tools/page-head-selftest.php|selftest_pagehead|SELFTEST_WEB_PORT=9674
 site-modes|tools/site-modes-selftest.php|selftest_sitemodes|web:site-modes SELFTEST_WEB_PORT=9461
@@ -260,6 +261,7 @@ htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
 currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
 assets-api-update|tools/assets-api-update-selftest.php|selftest_assetsapi|SELFTEST_WEB_PORT=9101
+assets-deleted-writes|tools/assets-deleted-writes-selftest.php|selftest_assetsdel|SELFTEST_WEB_PORT=9147
 money-amount|tools/money-amount-selftest.php|selftest_money|SELFTEST_WEB_PORT=9533
 uploads-and-media|tools/uploads-and-media-selftest.php|selftest_upmedia|
 geocoder|tools/geocoder-selftest.php|selftest_geocoder|SELFTEST_WEB_PORT=9871

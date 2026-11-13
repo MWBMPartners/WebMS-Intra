@@ -54,6 +54,15 @@ $disp      = (string) ($_POST['dataDisposition'] ?? 'retain');
 $effective = (string) ($_POST['effectiveDate'] ?? date('Y-m-d'));
 
 if ($userId <= 0 || $reason === '') {
+    // 📋 #982: this refusal said nothing either. The form marks the reason
+    //    as required, so a browser stops an empty one before it is sent; a
+    //    hand-made post, or a browser that ignores `required`, used to land
+    //    on the Users page with no word of why nothing happened. That page
+    //    prints the message.
+    $_SESSION['flash_msg']  = $userId <= 0
+        ? 'No account was named, so nobody was offboarded.'
+        : 'A reason is needed to offboard somebody. Nobody was offboarded.';
+    $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/users'));
     exit();
 }
@@ -118,11 +127,36 @@ $run = function (string $label, string $sql, array $params, string $types) use (
         $stepsLog[] = ['step' => $label, 'ok' => true, 'affected' => $affected];
         return $affected;
     } catch (\Throwable $e) {
+        // 🔁 A DEADLOCK (1213) ROLLS THE WHOLE TRANSACTION BACK - every
+        //    earlier step logged ok here included - and every statement after
+        //    it then runs on its own and is kept (#982 round 5, measured:
+        //    deactivate_user logged ok, isActive = 1 after the "commit"; and
+        //    driven by M13e of tools/erasure-pages-selftest.php, a real 1213
+        //    over HTTP with the offboarding chosen as the victim). It cannot be
+        //    recorded as one failed step and carried on from, so it ends the
+        //    offboarding: thrown to the catch below, which rolls back and says
+        //    nothing was done.
+        //
+        //    A LOCK-WAIT TIMEOUT (1205) IS DIFFERENT, and is re-thrown for a
+        //    different reason. With MySQL's default
+        //    (innodb_rollback_on_timeout = OFF, measured on 8.0.36) it undoes
+        //    ONLY the statement that waited; the transaction is still open and
+        //    earlier steps are intact. It is re-thrown anyway because a step
+        //    that waited that long means somebody else is changing this person
+        //    at the same moment, and an offboarding that rolls back whole and
+        //    says so is easier to trust than one committed with a step
+        //    silently missing.
+        if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
+            throw $e;
+        }
         $stepsLog[] = ['step' => $label, 'ok' => false, 'error' => $e->getMessage()];
         return 0;
     }
 };
 
+// Set true straight after the commit; only then is the outcome read and worded.
+$committed = false;
+$erasureNote = '';
 try {
     $db->begin_transaction();
 
@@ -139,8 +173,11 @@ try {
     );
 
     // 3. Disable the local-account password — clear hash so it's unusable.
-    //    A future rehire requires the user to reset via the forgot-password
-    //    flow.
+    //    A rehire does not put it back. The emptied row means the person can
+    //    set a new one with "Forgot your password?" if the portal can send
+    //    e-mail; an account that never had a row cannot use that page, which
+    //    is why rehire.php states what the account has rather than promising
+    //    a route (#982).
     $run('clear_password_hash',
         "UPDATE tblLocalAccounts SET passwordHash = '' WHERE userID = ?",
         [$userId], 'i'
@@ -305,14 +342,94 @@ try {
     }
 
     $db->commit();
-
-    $_SESSION['flash_msg']  = 'User offboarded. Audit row + per-step outcomes recorded.' . $erasureNote;
-    $_SESSION['flash_type'] = 'success';
+    $committed = true;
 } catch (\Throwable $e) {
     $db->rollback();
     \Portal\Core\Logger::errorPlatform('Offboarding', 'Critical', 'OFFBOARD_FAIL', $e->getMessage(), 'userID=' . $userId);
-    $_SESSION['flash_msg']  = 'Offboarding failed: ' . $e->getMessage();
+    // The exception's own words went to the page until #982 round 2; they
+    // are in the error record just written, and the page says what happened.
+    $_SESSION['flash_msg']  = 'Offboarding failed, and nothing was changed. The reason has been recorded on Admin, Errors.';
     $_SESSION['flash_type'] = 'danger';
+}
+
+if ($committed === true) {
+    // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after
+    //    the commit, and from nothing else (#982 round 5). Rounds 2-4 decided
+    //    it from the step log, and the step log can be wrong about what the
+    //    database kept: a failed step is caught and the transaction still
+    //    commits, and a deadlock rolls back steps that were already logged
+    //    ok. So the page says "switched off" only when tblUsers says so now.
+    //    The failed steps are still named, in plain words; the database's own
+    //    words go to Admin, Errors (OFFBOARD_STEP_FAILED), never the page.
+    $stepWords = [
+        'deactivate_user'             => 'switching the account off',
+        'delete_webauthn'             => 'removing passkeys',
+        'clear_password_hash'         => 'removing the password',
+        'end_site_memberships'        => 'ending organisation memberships',
+        'end_leadership_assignments'  => 'ending leadership roles',
+        'end_small_group_memberships' => 'ending small-group memberships',
+        'delete_user_roles'           => 'removing roles',
+        'delete_user_groups'          => 'removing group memberships',
+        'delete_user_depts'           => 'removing department memberships',
+        'delete_linked_accounts'      => 'removing Microsoft or Google sign-in links',
+        'revoke_trusted_devices'      => 'forgetting trusted devices',
+        'delete_push_subscriptions'   => 'removing notification subscriptions',
+    ];
+    $failedSteps = [];
+    foreach ($stepsLog as $step) {
+        if (($step['ok'] ?? false) !== true) {
+            $failedSteps[] = $stepWords[(string) ($step['step'] ?? '')] ?? (string) ($step['step'] ?? 'a step');
+        }
+    }
+    // The read has its own try (#982 round 6): it runs AFTER the commit, so a
+    // failure here must never reach the catch above, whose words are "nothing
+    // was changed" - under strict reporting a failed read THROWS, and the page
+    // then said nothing changed when everything had (planted: a renamed
+    // column in the server's copy, M13f). A read that fails leaves
+    // $isActiveNow null: "recorded, but whether … could not be read".
+    $isActiveNow = null;
+    try {
+        $check = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        if ($check !== false) {
+            $check->bind_param('i', $userId);
+            $check->execute();
+            $checkRow    = $check->get_result()->fetch_assoc();
+            $isActiveNow = $checkRow === null ? null : (int) $checkRow['isActive'];
+            $check->close();
+        }
+    } catch (\Throwable $readFailed) {
+        \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'OFFBOARD_READ_FAILED',
+            'Offboarding account #' . $userId . ' was recorded, but the account could not be read afterwards', $readFailed->getMessage());
+        $isActiveNow = null;
+    }
+    if ($failedSteps !== []) {
+        \Portal\Core\Logger::errorPlatform(
+            'Offboarding',
+            'Error',
+            'OFFBOARD_STEP_FAILED',
+            'Offboarding account #' . $userId . ' left ' . count($failedSteps) . ' step(s) undone',
+            (string) json_encode(array_values(array_filter($stepsLog, static fn (array $step): bool => ($step['ok'] ?? false) !== true)))
+        );
+    }
+    $failedWords = $failedSteps === []
+        ? ''
+        : ' These steps failed: ' . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.';
+    if ($isActiveNow === 0 && $failedSteps === []) {
+        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
+        $_SESSION['flash_type'] = 'success';
+    } elseif ($isActiveNow === 0) {
+        $_SESSION['flash_msg']  = 'The offboarding was recorded and their account is switched off, but not everything was done.'
+            . $failedWords . $erasureNote;
+        $_SESSION['flash_type'] = 'danger';
+    } else {
+        $_SESSION['flash_msg']  = ($isActiveNow === null
+                ? 'The offboarding was recorded, but whether their account is switched off could not be read, so they may '
+                  . 'still be able to sign in: check it, and switch it off, on the Users page.'
+                : 'The offboarding was recorded, but their account is NOT switched off, so they may still be able to sign '
+                  . 'in: switch it off on the Users page.')
+            . $failedWords . $erasureNote;
+        $_SESSION['flash_type'] = 'danger';
+    }
 }
 
 header('Location: ' . Site::url('offboarding'));

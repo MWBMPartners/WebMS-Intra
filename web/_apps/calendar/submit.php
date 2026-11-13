@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\EventDateRange;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -103,6 +104,10 @@ $errorCodes = [
     // #885: a category that is not one of this calendar's (the form offers
     //    only its own, so this is reached by an edited post or a stale page).
     'category' => 'Please choose one of the categories offered, or leave the category empty.',
+    // #1045 (D-181): a date outside the range events may be stored on. The
+    //    words come from the ONE place that applies the range, so they name
+    //    the same last year the handler refused against.
+    'range'    => EventDateRange::refusalWords(),
     'captcha'  => 'The anti-robot check did not pass. Please try again.',
     'csrf'     => 'The form expired while you were filling it in. Please try again.',
     'db'       => 'Something went wrong at our end and the event was not saved. Please try again.',

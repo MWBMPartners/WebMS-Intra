@@ -11,6 +11,7 @@
 # One name per line.
 endAt
 endDateTime
+reminderDate
 snapEnd
 snapStart
 startAt

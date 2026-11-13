@@ -1493,6 +1493,22 @@ jobs:
           docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_assetsapi < web/_sql/full_schema.sql > /dev/null
           php tools/assets-api-update-selftest.php
 
+      # 📦 #1047: nothing is written to an asset deleted while the write waited
+      #    for its lock (21 writes, two real connections each), every write
+      #    that locks several assets takes them lowest number first (section O
+      #    deadlocks without it), no kit loop, and the loans register over
+      #    HTTP. Needs performance_schema and proc_open. Makes its own database.
+      - name: "Assets: a deleted asset is never written; one lock order (#1047)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_assetsdel
+          SELFTEST_WEB_PORT: '9147'
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_assetsdel"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_assetsdel < web/_sql/full_schema.sql > /dev/null
+          php tools/assets-deleted-writes-selftest.php
+
       # 🧹 The other half of #668, which the test above cannot reach: that the
       #    readers the nightly clear-out ACTUALLY USES apply the rule, against
       #    rows really in a database — including an organisation holding more

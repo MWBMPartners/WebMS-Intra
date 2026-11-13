@@ -271,6 +271,8 @@ foreach ([
     // #493 P1 round 4: FeedResolver reads the copied-in events rule through it.
     'PublicWebsite.php',
     'TimeLimit.php',
+    // #1045: the range an event may be stored on, asked by the importer.
+    'EventDateRange.php',
     'FeedImporter.php',
 ] as $classFile) {
     require_once $coreDir . $classFile;
@@ -685,7 +687,7 @@ function fi_j4ClocksBack(): ?DateTimeImmutable
  * and G, and `fi_seriesPlan()` / `fi_nextClocksBack()` for part J. Check 0
  * reads them all back out of these files before anything else runs.
  *
- * @return array{files: list<string>, outsideOnPurpose: array<string, array<string, true>>}
+ * @return array{files: list<string>, outsideOnPurpose: array<string, array<string, true|string>>}
  *         The file names written, and — keyed by FILE NAME, then by date
  *         value — the few date values written to sit OUTSIDE the period on
  *         purpose in that one file (check 0 insists they really do). Keyed
@@ -758,6 +760,27 @@ function fi_writeCalendars(string $dir): array
     $put('class-private.ics', fi_wrap(
         fi_event('priv@p6.test', 'Confidential meeting', fi_local(12, '140000'), fi_local(12, '150000'), ['CLASS:PRIVATE'])
         . fi_event('open@p6.test', 'Open meeting', fi_local(12, '160000'), fi_local(12, '170000'))
+    ));
+
+    // --- #1045: ends outside the range an event may be stored on -----------
+    //    The range is 1 January 1900 to the end of the later of 2200 and this
+    //    year plus fifty (D-181). Worked out HERE, from today, never written
+    //    down — so the file stays right in 2160, when the far year is 2210.
+    //    Only an END can test it through a real refresh: the reader keeps a
+    //    date only when its START falls in the importer's period (a month
+    //    back, a year ahead), so a start outside the range never arrives.
+    $lastYear = max(2200, (int) (new DateTimeImmutable('now', new DateTimeZone(SITE_ZONE)))->format('Y') + 50);
+    $farEdge  = $lastYear . '1231T230000';
+    $pastEdge = ($lastYear + 1) . '0101T000000';
+    // 'after', not true: these sit AFTER the period, not before it.
+    $outsideOnPurpose['far-end.ics'][$farEdge]          = 'after';
+    $outsideOnPurpose['far-end.ics'][$pastEdge]         = 'after';
+    $outsideOnPurpose['far-end.ics']['99991231T235959'] = 'after';
+    $put('far-end.ics', fi_wrap(
+        fi_event('edge@p6.test', 'Ends on the last allowed day', fi_local(13, '100000'), ';TZID=' . SITE_ZONE . ':' . $farEdge)
+        . fi_event('past@p6.test', 'Ends the day after the last allowed one', fi_local(13, '110000'), ';TZID=' . SITE_ZONE . ':' . $pastEdge)
+        . fi_event('y9999@p6.test', 'Ends in the year 9999', fi_local(13, '120000'), ';TZID=' . SITE_ZONE . ':99991231T235959')
+        . fi_event('plain@p6.test', 'An ordinary hour', fi_local(13, '130000'), fi_local(13, '140000'))
     ));
 
     // --- categories ----------------------------------------------------------
@@ -1260,7 +1283,7 @@ function fi_unfoldIcsText(string $text): string
  * not its PHP source.
  *
  * @param list<string>                       $files
- * @param array<string, array<string, true>> $outsideOnPurpose Keyed by file
+ * @param array<string, array<string, true|string>> $outsideOnPurpose Keyed by file
  *        name, then by the date value written into that file — e.g.
  *        `$outsideOnPurpose['rdate-cut.ics']['20100101T090000Z']`.
  *
@@ -1331,6 +1354,19 @@ function fi_datesOutsideThePeriod(
             return;
         }
         $reads = $moment->setTimezone($zone)->format('Y-m-d H:i:s');
+        // #1045: an END may be written AFTER the period on purpose (part N's
+        //    far ends). The period is about where a date STARTS, so a far end
+        //    on an event starting inside it is read as normal; marked
+        //    'after', it must really sit after the period's end, and a value
+        //    that has drifted inside is still reported.
+        if (($purposeHere[$value] ?? null) === 'after') {
+            if ($reads <= $latest) {
+                $problems[] = $where . ': ' . $value . ' is meant to sit AFTER the period, but reads ' . $reads
+                    . ', which is inside it';
+            }
+
+            return;
+        }
         if (isset($purposeHere[$value]) === true) {
             if ($reads >= $startText) {
                 $problems[] = $where . ': ' . $value . ' is meant to sit BEFORE the period, but reads ' . $reads
@@ -1837,7 +1873,7 @@ function fi_runJob(string $token = 'p6-selftest-token', bool $standInForPass = f
         . "declare(strict_types=1);\n"
         . '$c = ' . var_export($config, true) . ";\n"
         . "foreach (['WindowsTimeZones.php','IcsReader.php','App.php','Settings.php','Site.php','ErrorMonitor.php',"
-        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','PublicWebsite.php','TimeLimit.php','FeedImporter.php',"
+        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','PublicWebsite.php','TimeLimit.php','EventDateRange.php','FeedImporter.php',"
         // The pass that tells administrators (#514 part 9), and every class it
         // can reach. With no mail route and no push set up, as here, it asks
         // only "can anything be sent?" and stops; the rest are loaded so that
@@ -3135,6 +3171,30 @@ try {
         $r['outcome'] === 'failed' && count($refreshLog) === 1 && $refreshLog[0]['errorCode'] === 'FeedRefreshFailed'
         && str_starts_with((string) $refreshLog[0]['errorTitle'], 'Refreshing calendar #' . $low . ' '), json_encode($refreshLog));
     $mysqli->query('DELETE FROM tblErrors');
+
+    // -------------------------------------------------------------------------
+    fi_heading('N. A date outside the range an event may be stored on is skipped and counted (#1045)');
+    // -------------------------------------------------------------------------
+    // The range is 1 January 1900 to the end of the later of 2200 and this
+    // year plus fifty (D-181), worked out from today exactly as the calendar
+    // file above did. Planted (the range test removed from FeedImporter), the
+    // two far ends are STORED and both checks below go red.
+    fi_reset();
+    $farFeed  = fi_addFeed('Far ends', fi_url('/f/far-end.ics'));
+    $farRun   = FeedImporter::refresh($mysqli, $farFeed, 'manual', VIEWER_6);
+    fi_ok('N1 the refresh still comes back ok', $farRun['outcome'] === 'ok', json_encode($farRun));
+    fi_ok('N2 the two events whose end is past the range are NOT stored; the last allowed day and an ordinary hour are',
+        fi_liveNames($farFeed) === ['Ends on the last allowed day', 'An ordinary hour'],
+        json_encode(fi_liveNames($farFeed)));
+    $farLast = fi_lastRun($farFeed);
+    fi_ok('N3 and the run history counts them as skipped, which the calendar\'s own page shows to an administrator',
+        $farLast !== null && (int) $farLast['rowsSkipped'] === 2,
+        json_encode($farLast === null ? null : ['rowsSkipped' => $farLast['rowsSkipped'], 'rowsAdded' => $farLast['rowsAdded']]));
+    $edgeRow    = array_values(array_filter(fi_live($farFeed), static fn (array $x): bool => $x['eventName'] === 'Ends on the last allowed day'));
+    $wantedYear = max(2200, (int) (new DateTimeImmutable('now', new DateTimeZone(SITE_ZONE)))->format('Y') + 50);
+    fi_ok('N4 the event ending on the last allowed day keeps that end exactly',
+        count($edgeRow) === 1 && $edgeRow[0]['endDateTime'] === $wantedYear . '-12-31 23:00:00',
+        json_encode($edgeRow === [] ? null : $edgeRow[0]['endDateTime']));
 
     // -------------------------------------------------------------------------
     fi_heading('M. A real Google or Microsoft 365 export');

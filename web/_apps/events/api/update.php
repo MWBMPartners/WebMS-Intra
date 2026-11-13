@@ -37,6 +37,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\EventCancelReason;
+use Portal\Core\EventDateRange;
 use Portal\Core\Events;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
@@ -194,6 +195,18 @@ foreach ($columnMap as $col => $type) {
     if ($col === 'startDateTime' || $col === 'endDateTime') {
         $newClock[$col] = $value;
     }
+}
+
+// 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181), asked of the
+//    readings THIS REQUEST writes, and only those: a stored date written
+//    before the range existed must not block an unrelated change such as a
+//    new title. The one place is `EventDateRange`.
+$rangeProblem = EventDateRange::whyRefused(array_values(array_filter(
+    $newClock,
+    static fn ($v): bool => is_string($v) === true && $v !== ''
+)));
+if ($rangeProblem !== null) {
+    ApiResponse::error($rangeProblem . ' Nothing was changed.', 400);
 }
 
 // ⏱️ AN END BEFORE ITS START IS REFUSED HERE TOO (#786, #777 round 10).

@@ -233,7 +233,39 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 229; // #1017 added six: a signed-in member's
+const EXPECTED_CHECKS = 247; // MERGED (p982-land): both sides grew from 223,
+                            // #982/#926 by 18 (to 241, the lines below) and
+                            // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
+                            // #982 round 12 added M13q (the Offboard page's
+                            // note and confirmation) and M13r (no Rehire
+                            // button for an account erased inside the undo
+                            // window). 241.
+                            // #982 round 11 added M13p (the Rehire button's
+                            // confirmation promises nothing). 239.
+                            // #982 round 10 added M13o (an e-mail address
+                            // over 50 characters: no promise of success). 238.
+                            // #982 round 9 added M13k (an organisation
+                            // administrator is told they can give a password,
+                            // and can), M13l (still linked: cannot), M13m (two
+                            // passkeys, Google with no hosted domain) and M13n
+                            // (could not be read). 237.
+                            // #982 round 8 added M13j (a password, a passkey
+                            // and Microsoft, each said as a fact). 233.
+                            // #982 round 7 added M13i (rehire where Google
+                            // sign-in is set up). 232.
+                            // #982 round 6 added M13e (a real deadlock),
+                            // M13f (a failed read after the commit) and
+                            // M13g/M13h (rehire, by kind of account). 231.
+                            // #982 round 5 added M13d (the account is read,
+                            // not the step log). 227.
+                            // #982 round 3 added M13c (a failed step is not
+                            // called a success). 226.
+                            // #982 added M13b (an offboarding post with no
+                            // reason is refused in words) and #926 added B4b
+                            // (Request erasure shows a member no developer
+                            // note, pinned as rendered). M12 and M13 now also
+                            // read the offboarding page's message. 223 + 2 = 225.
+                            // #1017 added six: a signed-in member's
                             // refused reCAPTCHA v3 answer on the anonymous form,
                             // on the score and on the action, recorded naming
                             // nobody, while the same refusal on another form
@@ -651,6 +683,13 @@ function removeWorld(): void
     // Section M (#977) offboards one live account through the real page.
     q('DELETE FROM tblOffboarding WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 917000 AND 917999');
+    // Section M (#982 round 9) puts a link and passkeys back with SQL. This
+    // clean-up runs with foreign-key checks OFF, so deleting tblUsers below
+    // does NOT cascade to them: left behind, an orphaned link made every
+    // later restore of a snapshot on the same database refuse (measured: the
+    // backup-page test went red on the next run).
+    q('DELETE FROM tblLinkedAccounts WHERE userID BETWEEN 917000 AND 917999');
+    q('DELETE FROM tblWebAuthnCredentials WHERE userID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblEmailLog WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     // Section N (#964): the visitor's suggestion and the rows put in by hand,
     // one of them a send-log row recorded under NO organisation.
@@ -1381,6 +1420,44 @@ ok('AN EXPENSE CLAIM THAT KEEPS THE ACCOUNT NUMBER SAYS SO IN ITS LABEL: Cal\'s 
     && str_contains($askClaimRow, 'kept, with some details about you removed but still carrying your account number')
     && str_contains($dataClaimRow, 'kept, with some details about you removed but still carrying your account number'),
     mb_substr($askClaimRow, 0, 400) . ' | ' . mb_substr($dataClaimRow, 0, 400));
+
+// 🧑 #926: Request erasure and My data print each kind of record's REASON to
+//    the member. The room booking's reason carried a developer's note ("CAN
+//    NEVER MATCH, because nothing writes it — the decline branch of
+//    resources/action.php ...") which is true and means nothing to the person
+//    reading it; the asset loan's reason carried another. The notes live in
+//    code comments now (GdprEraser::catalogue()). Mel booked a room, so her
+//    Request erasure page has a booking row: it is found exactly once and
+//    pinned AS RENDERED, and neither of her two pages carries any of the
+//    developer wording anywhere. The premise (a booking row exists at all) is
+//    part of the pin: an empty region fails it.
+$melAskHtml  = (string) req($jar['mel'], 'GET', '/account/erasure-request')['body'];
+$melDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
+$askBookingRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblResourceBooking') {
+            $rows[] = $li;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$askBookingPinned = renderedPin('request erasure tblResourceBooking', $askBookingRow);
+$developerWords   = ['CAN NEVER MATCH', 'resources/action.php', 'declineReason', 'counterpartyName', '#708', 'the limit is recorded'];
+$developerSeen    = [];
+foreach (['Request erasure' => text($melAskHtml), 'My data' => text($melDataHtml)] as $pageName => $pageText) {
+    foreach ($developerWords as $word) {
+        if (str_contains($pageText, $word) === true) {
+            $developerSeen[] = $pageName . ': ' . $word;
+        }
+    }
+}
+ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking row is found exactly once and as pinned, says in plain words what happens to the booking, and neither Request erasure nor My data carries the developers\' wording about columns that can never match (#926)',
+    $askBookingPinned === true && str_contains($askBookingRow, 'the booking is kept so the room') === true
+    && str_contains($askBookingRow, 'Any notes typed on the booking are kept unless the person handling your request decides they should be removed') === true && $developerSeen === [],
+    mb_substr($askBookingRow, 0, 500) . ' | seen: ' . json_encode($developerSeen));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
 //    erasure's words bare, so a record still held read "deleted" and an
@@ -3746,28 +3823,460 @@ $livAtB     = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userI
 $saidLivRm  = $siteUsersM('remove', LIV);
 $livAtBNow  = (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [LIV, ORG_B])['n'];
 ok('M11 CONTROL: the same page still adds a LIVE account to the organisation, and removes it again (#977)',
-    $livAtB === 1 && $livAtBNow === 0 && str_contains($saidLivAdd, 'User added to site.') === true && str_contains($saidLivRm, 'User removed from site.') === true,
+    $livAtB === 1 && $livAtBNow === 0 && str_contains($saidLivAdd, 'User added to the organisation.') === true && str_contains($saidLivRm, 'User removed from the organisation.') === true,
     json_encode([$livAtB, $livAtBNow, $saidLivAdd, $saidLivRm]));
 
 // Offboarding: the page offers no form for the erased account and says why,
-// and a hand-made post is refused. offboarding/index.php prints no message at
-// all (it never has), so what the post SAYS is not read here; what it WROTE is.
+// and a hand-made post is refused. Since #982 the page the post lands on
+// (offboarding/index.php) PRINTS the handler's answer; until then it printed
+// no message at all, so the refusal was read by the next page that printed
+// one (here, the Users page this helper fetched its form token from) or by
+// nobody. So the helper follows the redirect it is given and reads THAT page,
+// and M12 and M13 now require the words as well as what was written.
 $offPage    = req($jar['root'], 'GET', '/offboarding/user?id=' . ZED)['body'];
-$offboardM  = static function (int $uid) use ($jar): void {
-    $tok = token(req($jar['root'], 'GET', '/admin/users')['body']);
-    req($jar['root'], 'POST', '/offboarding/do', ['csrf_token' => $tok, 'userID' => $uid, 'reason' => 'Selftest #977', 'dataDisposition' => 'retain', 'effectiveDate' => gmdate('Y-m-d')]);
+$offboardM  = static function (int $uid, string $reason = 'Selftest #977') use ($jar, $flashOn): array {
+    $tok  = token(req($jar['root'], 'GET', '/admin/users')['body']);
+    $sent = req($jar['root'], 'POST', '/offboarding/do', ['csrf_token' => $tok, 'userID' => $uid, 'reason' => $reason, 'dataDisposition' => 'retain', 'effectiveDate' => gmdate('Y-m-d')]);
+    $to   = (string) parse_url((string) $sent['location'], PHP_URL_PATH);
+
+    // The redirect already carries the organisation's part, so it is asked
+    // as it stands (no second ADDR_A in front: #536's "never join two built
+    // addresses").
+    return [$to, $to === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $to, null, '')['body'])];
 };
 $beforeOff = $zedRowM();
-$offboardM(ZED);
+[$offTo, $offSaid] = $offboardM(ZED);
 $zedOffRows = (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [ZED])['n'];
-ok('M12 the offboarding page for the erased account shows the reason and no form, and a hand-made offboarding post for it writes no offboarding record and leaves the account row unchanged (#977)',
+ok('M12 the offboarding page for the erased account shows the reason and no form, and a hand-made offboarding post for it lands on the offboarding page, which SHOWS the refusal and its reason (#982), writes no offboarding record and leaves the account row unchanged (#977)',
     str_contains(text($offPage), ERASED_WORDS) === true && str_contains($offPage, 'name="dataDisposition"') === false
+    && str_ends_with($offTo, '/offboarding') === true && str_contains($offSaid, ERASED_WORDS) === true
     && $zedOffRows === 0 && $zedRowM() === $beforeOff,
-    json_encode([mb_substr(text($offPage), 0, 300), str_contains($offPage, 'name="dataDisposition"'), $zedOffRows]));
-$offboardM(OFF);
-ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written and the account is switched off (#977)',
+    json_encode([mb_substr(text($offPage), 0, 300), str_contains($offPage, 'name="dataDisposition"'), $offTo, $offSaid, $zedOffRows]));
+[$offToLive, $offSaidLive] = $offboardM(OFF);
+ok('M13 CONTROL: the same offboarding post still offboards a LIVE account: a record is written, the account is switched off, and the offboarding page says so (#977, #982)',
     (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [OFF])['n'] === 1
-    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0);
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [OFF])['isActive'] === 0
+    && str_ends_with($offToLive, '/offboarding') === true && str_contains($offSaidLive, 'Offboarded. Their account is switched off') === true,
+    json_encode([$offToLive, $offSaidLive]));
+// #982: a post with no reason used to send the administrator to the Users
+// page with nothing said at all. It says why now, and offboards nobody. UNP
+// is a live account nobody has offboarded, so a missing record is the
+// refusal's doing and not the account's state.
+[$offToBare, $offSaidBare] = $offboardM(UNP, '');
+ok('M13b a hand-made offboarding post with NO reason lands on the Users page, which says a reason is needed and that nobody was offboarded, and no offboarding record is written (#982)',
+    str_ends_with($offToBare, '/admin/users') === true && str_contains($offSaidBare, 'A reason is needed to offboard somebody. Nobody was offboarded.') === true
+    && (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [UNP])['n'] === 0,
+    json_encode([$offToBare, $offSaidBare]));
+
+// #982 round 3: a step that FAILS is caught, logged as ok:false and the
+// transaction still commits - and the page used to say "Their account is
+// switched off" regardless. Switching the account off is made to fail in the
+// copy the server runs (an unknown column, which is what a lock-wait timeout
+// also looks like from here), Liv - a live member of A nobody offboards
+// elsewhere - is offboarded, and the copy is put back byte for byte. The
+// premise is checked too: the account really is still switched on.
+$m13cPath     = $child . $sep . 'web' . $sep . '_apps' . $sep . 'offboarding' . $sep . 'do.php';
+$m13cOriginal = (string) file_get_contents($m13cPath);
+$m13cFrom     = "'UPDATE tblUsers SET isActive = 0 WHERE userID = ?'";
+$m13cApplied  = substr_count($m13cOriginal, $m13cFrom) === 1;
+$m13cSaid     = '(not run)';
+if ($m13cApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13cFrom, "'UPDATE tblUsers SET isActiveNoSuchColumn = 0 WHERE userID = ?'", $m13cOriginal));
+    try {
+        [, $m13cSaid] = $offboardM(LIV, 'Selftest #982 round 3');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+ok('M13c when switching the account off FAILS, the offboarding page does not say it is switched off: it says it was NOT, that they may still be able to sign in, and names the failed step - and the account really is still on (#982 round 3)',
+    $m13cApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [LIV])['isActive'] === 1
+    && str_contains($m13cSaid, 'their account is NOT switched off, so they may still be able to sign in') === true
+    && str_contains($m13cSaid, 'These steps failed: switching the account off.') === true
+    && str_contains($m13cSaid, 'Their account is switched off') === false && str_contains($m13cSaid, 'isActiveNoSuchColumn') === false,
+    ($m13cApplied === true ? 'applied' : 'NOT APPLIED') . ' | said: ' . $m13cSaid);
+
+// #982 round 5: the sentence is decided by READING the account after the
+// commit, never from the step log, which can say ok about a change the
+// database did not keep (a deadlock rolls back steps already logged ok). A
+// deadlock cannot be produced on demand here, so the shape it leaves is made
+// directly: switching the account off is replaced, in the server's copy, by a
+// statement that SUCCEEDS and changes nothing - the step log says ok while the
+// row stays switched on. Una (a live account nobody offboards elsewhere).
+$m13dFrom    = "'UPDATE tblUsers SET isActive = 0 WHERE userID = ?'";
+$m13dApplied = substr_count($m13cOriginal, $m13dFrom) === 1;
+$m13dSaid    = '(not run)';
+if ($m13dApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13dFrom, "'UPDATE tblUsers SET isActive = isActive WHERE userID = ?'", $m13cOriginal));
+    try {
+        [, $m13dSaid] = $offboardM(UNP, 'Selftest #982 round 5');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+// Decoded rather than searched: a JSON column is stored re-spaced by MySQL.
+$m13dSteps = json_decode((string) (one('SELECT `stepsLog` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [UNP])['stepsLog'] ?? ''), true);
+$m13dLogOk = is_array($m13dSteps) === true && array_filter($m13dSteps, static fn ($step): bool => is_array($step) === true
+    && ($step['step'] ?? '') === 'deactivate_user' && ($step['ok'] ?? false) === true) !== [];
+ok('M13d when the step log says the account was switched off but the account is still on (what a deadlock leaves), the page reads the ACCOUNT: it says it is NOT switched off, and never "Their account is switched off" (#982 round 5)',
+    $m13dApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal && $m13dLogOk === true
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [UNP])['isActive'] === 1
+    && str_contains($m13dSaid, 'their account is NOT switched off, so they may still be able to sign in') === true
+    && str_contains($m13dSaid, 'Their account is switched off') === false,
+    ($m13dApplied === true ? 'applied' : 'NOT APPLIED') . ' | step log said ok: ' . var_export($m13dLogOk, true) . ' | said: ' . $m13dSaid);
+
+// #982 round 6, M13e: A REAL DEADLOCK (1213), over HTTP. A second connection
+// makes its own transaction HEAVY (300 inserted rows, so InnoDB chooses the
+// offboarding - the smaller transaction - as the victim), locks Dee's
+// password row, and the offboarding is posted: it switches Dee off (locking
+// her tblUsers row) and then waits on the password row. The second connection
+// then updates Dee's tblUsers row: each now waits on the other, and MySQL
+// ends the lighter one. The check asserts THAT the offboarding was the
+// victim (the second connection's update went through), then that nothing
+// the offboarding did was kept: Dee is still on, her membership and password
+// are untouched, there is no offboarding record and no erasure request, and
+// the page says it failed and nothing was changed. Without do.php's re-throw
+// the steps after the deadlock run on their own and are kept (measured in
+// round 5): memberships ended, a record and an erasure request written, Dee on.
+// It needs `proc_open`-free curl_multi and a second connection only.
+const M13_DEE = 917062; // a live member of A with a password: the deadlock, then a rehire (#982)
+const M13_FAY = 917063; // a live member of A: the read after the commit fails (#982)
+const M13_GUS = 917064; // a live member of A with NO password row: rehired by an organisation administrator (#982 round 9)
+const M13_LEN = 917065; // a live member of A with NO password row, still linked to Microsoft when rehired (#982 round 9)
+const M13_PIP = 917066; // a live member of A: two passkeys and Google with no hosted domain when rehired (#982 round 9)
+const M13_RIA = 917067; // a live member of A: the rehire's read fails (#982 round 9)
+const M13_ELI = 917069; // a live member of A: offboarded, then ERASED inside the undo window (#982 round 12)
+const M13_OTT = 917068; // a live member of A with NO password row and an e-mail address over 50 characters (#982 round 10)
+// Ott's address is 75 characters: tblUsers.emailAddress holds 255, the sign-in
+// name the Users page would make from it (tblLocalAccounts.username) holds 50.
+const M13_OTT_MAIL = 'u917068.an-address-much-longer-than-a-sign-in-name-holds@selftest.invalid';
+foreach ([M13_GUS => 'Gus Grantable', M13_LEN => 'Len Linked', M13_PIP => 'Pip Passkeys', M13_RIA => 'Ria Readfail', M13_OTT => 'Ott Overlong', M13_ELI => 'Eli Erased'] as $m13Id => $m13Name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, $m13Id === M13_OTT ? M13_OTT_MAIL : 'u' . $m13Id . '.erasure@selftest.invalid']);
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
+}
+foreach ([M13_DEE => 'Dee Deadlock', M13_FAY => 'Fay Failread'] as $m13Id => $m13Name) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m13Id, $m13Name, 'u' . $m13Id . '.erasure@selftest.invalid']);
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$m13Id, ORG_A]);
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$m13Id, 'selftest-erasure-m13-' . $m13Id, $hash]);
+}
+$m13State = static fn (int $uid): array => [
+    'on'       => (int) (one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [$uid])['isActive'] ?? -1),
+    'member'   => (int) one('SELECT COUNT(*) AS `n` FROM `tblUserSites` WHERE `userID` = ? AND `isActive` = 1', 'i', [$uid])['n'],
+    'hashLen'  => (int) (one('SELECT LENGTH(`passwordHash`) AS `l` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [$uid])['l'] ?? -1),
+    'record'   => (int) one('SELECT COUNT(*) AS `n` FROM `tblOffboarding` WHERE `userID` = ?', 'i', [$uid])['n'],
+    'erasure'  => (int) one('SELECT COUNT(*) AS `n` FROM `tblErasureRequest` WHERE `userID` = ?', 'i', [$uid])['n'],
+];
+$m13Second = new mysqli(
+    getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1',
+    getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root',
+    getenv('SELFTEST_DB_PASS') !== false ? (string) getenv('SELFTEST_DB_PASS') : '',
+    $dbName,
+    getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
+);
+$m13Second->query('DROP TABLE IF EXISTS `zz_selftest_p982_heavy`');
+$m13Second->query('CREATE TABLE `zz_selftest_p982_heavy` (`id` INT PRIMARY KEY) ENGINE=InnoDB');
+$deeBefore = $m13State(M13_DEE);
+$m13Second->begin_transaction();
+for ($m13i = 1; $m13i <= 300; $m13i++) {
+    $m13Second->query('INSERT INTO `zz_selftest_p982_heavy` (`id`) VALUES (' . $m13i . ')');
+}
+$m13Second->query('SELECT `userID` FROM `tblLocalAccounts` WHERE `userID` = ' . M13_DEE . ' FOR UPDATE')->fetch_all();
+$m13Tok   = token(req($jar['root'], 'GET', '/admin/users')['body']);
+$m13Curl  = curl_init('http://127.0.0.1:' . $port . ADDR_A . '/offboarding/do');
+curl_setopt_array($m13Curl, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 120, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+    CURLOPT_COOKIEJAR => $jar['root'], CURLOPT_COOKIEFILE => $jar['root'], CURLOPT_POST => true, CURLOPT_HTTPHEADER => ['Expect:'],
+    CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $m13Tok, 'userID' => M13_DEE, 'reason' => 'Selftest #982 deadlock', 'dataDisposition' => 'erase', 'effectiveDate' => gmdate('Y-m-d')]),
+]);
+$m13Multi = curl_multi_init();
+curl_multi_add_handle($m13Multi, $m13Curl);
+// Wait until the offboarding is REALLY waiting on Dee's password row, asked
+// of performance_schema.data_lock_waits rather than guessed with a fixed
+// sleep (#982 round 7); ten seconds at most, after which the outcome below
+// says no deadlock happened rather than claiming one.
+$m13Until   = microtime(true) + 10.0;
+$m13Waiting = false;
+do {
+    curl_multi_exec($m13Multi, $m13Running);
+    curl_multi_select($m13Multi, 0.05);
+    // The waiting lock's table is on data_locks; data_lock_waits names the lock.
+    $m13Waiting = (int) (one('SELECT COUNT(*) AS `n` FROM `performance_schema`.`data_lock_waits` `w` '
+        . 'JOIN `performance_schema`.`data_locks` `l` ON `l`.`ENGINE_LOCK_ID` = `w`.`REQUESTING_ENGINE_LOCK_ID` '
+        . "WHERE `l`.`OBJECT_NAME` = 'tblLocalAccounts'")['n'] ?? 0) > 0;
+} while ($m13Running > 0 && $m13Waiting === false && microtime(true) < $m13Until);
+$m13Lost = null;
+try {
+    $m13Second->query('UPDATE `tblUsers` SET `isActive` = `isActive` WHERE `userID` = ' . M13_DEE);
+} catch (\mysqli_sql_exception $m13Thrown) {
+    $m13Lost = $m13Thrown;
+}
+$m13Second->rollback();
+do {
+    curl_multi_exec($m13Multi, $m13Running);
+    curl_multi_select($m13Multi, 0.1);
+} while ($m13Running > 0);
+$m13Raw = (string) curl_multi_getcontent($m13Curl);
+curl_multi_remove_handle($m13Multi, $m13Curl);
+curl_multi_close($m13Multi);
+$m13Second->query('DROP TABLE IF EXISTS `zz_selftest_p982_heavy`');
+$m13Second->close();
+$m13To   = preg_match('/^Location:\s*(\S+)\s*$/mi', $m13Raw, $m13Loc) === 1 ? (string) parse_url($m13Loc[1], PHP_URL_PATH) : '';
+$m13Said = $m13To === '' ? '(no redirect)' : $flashOn(req($jar['root'], 'GET', $m13To, null, '')['body']);
+$deeAfter = $m13State(M13_DEE);
+$m13Deadlock = one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'OFFBOARD_FAIL' AND `errorTitle` LIKE '%Deadlock%'");
+// Who MySQL stopped, said truly: the test's own connection, the offboarding
+// (its deadlock is on record), or nobody - no deadlock happened at all.
+$m13Victim = $m13Lost !== null
+    ? 'THE TEST\'S OWN CONNECTION (' . $m13Lost->getCode() . ')'
+    : ((int) ($m13Deadlock['n'] ?? 0) >= 1 ? 'the offboarding' : 'no deadlock happened');
+ok('M13e A REAL DEADLOCK in the middle of an offboarding (MySQL chose the offboarding as the victim, measured): the whole offboarding is rolled back - Dee still on, her membership and password untouched, no offboarding record, no erasure request - and the page says it failed and nothing was changed (#982 round 6)',
+    $m13Waiting === true && $m13Victim === 'the offboarding'
+    && $deeAfter === $deeBefore && $deeAfter['on'] === 1 && $deeAfter['record'] === 0 && $deeAfter['erasure'] === 0
+    && str_contains($m13Said, 'Offboarding failed, and nothing was changed.') === true,
+    'waited on the lock: ' . var_export($m13Waiting, true) . ' | victim: ' . $m13Victim . ' | deadlock recorded: ' . json_encode($m13Deadlock) . ' | before ' . json_encode($deeBefore)
+        . ' | after ' . json_encode($deeAfter) . ' | said: ' . $m13Said);
+
+// M13f: the read AFTER the commit fails (a renamed column in the server's
+// copy, for one press). Everything was committed, so the page must say the
+// offboarding was recorded and that whether the account is switched off
+// could not be read - never "nothing was changed", which is what it said
+// while the read sat inside the try whose catch says so.
+$m13fFrom    = 'SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1';
+$m13fApplied = substr_count($m13cOriginal, $m13fFrom) === 1;
+$m13fSaid    = '(not run)';
+if ($m13fApplied === true) {
+    file_put_contents($m13cPath, str_replace($m13fFrom, 'SELECT `isActiveNoSuchColumn` FROM `tblUsers` WHERE `userID` = ? LIMIT 1', $m13cOriginal));
+    try {
+        [, $m13fSaid] = $offboardM(M13_FAY, 'Selftest #982 round 6');
+    } finally {
+        file_put_contents($m13cPath, $m13cOriginal);
+    }
+}
+$fayAfter = $m13State(M13_FAY);
+ok('M13f when the account cannot be read AFTER the commit, the page says the offboarding was recorded and that whether the account is switched off could not be read - never "nothing was changed" - and it really was recorded (#982 round 6)',
+    $m13fApplied === true && (string) file_get_contents($m13cPath) === $m13cOriginal
+    && $fayAfter['on'] === 0 && $fayAfter['record'] === 1
+    && (int) one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'OFFBOARD_READ_FAILED'")['n'] >= 1
+    && str_contains($m13fSaid, 'The offboarding was recorded, but whether their account is switched off could not be read') === true
+    && str_contains($m13fSaid, 'nothing was changed') === false && str_contains($m13fSaid, 'isActiveNoSuchColumn') === false,
+    ($m13fApplied === true ? 'applied' : 'NOT APPLIED') . ' | after ' . json_encode($fayAfter) . ' | said: ' . $m13fSaid);
+
+// M13g/M13h: REHIRE, which nothing drove before. What the page says about
+// signing in must be true for the kind of account: Dee has a password row
+// (emptied by offboarding), Olly has none at all (Microsoft or Google only).
+[, $deeOffSaid] = $offboardM(M13_DEE, 'Selftest #982 rehire');
+$rehireM = static function (int $uid, string $who = 'root') use ($jar, $flashOn): string {
+    $id = (int) (one('SELECT `offboardingID` FROM `tblOffboarding` WHERE `userID` = ? AND `rehiredAt` IS NULL ORDER BY `offboardingID` DESC LIMIT 1', 'i', [$uid])['offboardingID'] ?? 0);
+    $tok  = token(req($jar[$who], 'GET', '/offboarding')['body']);
+    $sent = req($jar[$who], 'POST', '/offboarding/rehire', ['csrf_token' => $tok, 'offboardingID' => $id]);
+    $to   = (string) parse_url((string) $sent['location'], PHP_URL_PATH);
+
+    return $to === '' ? '(no redirect)' : $flashOn(req($jar[$who], 'GET', $to, null, '')['body']);
+};
+// Give an account a password on the Users page, as the Users page posts it:
+// what the rehire page says an administrator CAN do is proved by doing it.
+$givePasswordM = static function (string $who, int $uid) use ($jar, $flashOn): string {
+    $row = one('SELECT `fullName`, `emailAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [$uid]);
+    $tok = token(req($jar[$who], 'GET', '/admin/users')['body']);
+    req($jar[$who], 'POST', '/admin/users/save', ['csrf_token' => $tok, 'action' => 'update', 'userID' => $uid,
+        'fullName' => (string) $row['fullName'], 'emailAddress' => (string) $row['emailAddress'], 'phoneNumber' => '',
+        'isActive' => '1', 'password' => 'Selftest-982-Round9-Password!x7']);
+
+    return $flashOn(req($jar[$who], 'GET', '/admin/users')['body']);
+};
+$deeRehire = $rehireM(M13_DEE);
+// The rehire page states FACTS about what the account has, and promises no
+// route (#982 round 8). Every branch is pinned by a sentence only it writes.
+ok('M13g rehiring an account whose password offboarding EMPTIED, with nothing else set up: it says the password was removed and a new one can be set with "Forgot your password?" if this portal can send e-mail - and names no other route (#982 round 8)',
+    str_contains($deeOffSaid, 'Offboarded. Their account is switched off') === true
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_DEE])['isActive'] === 1
+    && str_contains($deeRehire, 'User rehired: their account is switched on again.') === true
+    && str_contains($deeRehire, 'Offboarding removed their password; they can set a new one with "Forgot your password?" on the sign-in page, if this portal can send e-mail.') === true
+    && str_contains($deeRehire, 'Microsoft') === false && str_contains($deeRehire, 'Google') === false && str_contains($deeRehire, 'passkey') === false,
+    'offboard said: ' . $deeOffSaid . ' | rehire said: ' . $deeRehire);
+$ollyRehire = $rehireM(OFF);
+ok('M13h rehiring (as a global administrator) an account with NO password row, no passkey, no link, and neither Microsoft nor Google set up says it has no way to sign in yet, who sets those up, and that you can TRY giving it a password on the Users page, which will say if it cannot - never a promise (round 9\'s "You can give it" was untrue when the save refuses) and never "cannot be given" (round 8) (#982 round 10)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [OFF])['n'] === 0
+    && str_contains($ollyRehire, 'This account has no way to sign in yet: no password, no passkey, and neither Microsoft nor Google sign-in is set up here; a global administrator sets those up on Admin, Settings. You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ollyRehire, 'You can give it') === false && str_contains($ollyRehire, 'cannot be given') === false
+    && str_contains($ollyRehire, 'Forgot your password') === false,
+    'rehire said: ' . $ollyRehire);
+// M13i: Google sign-in set up for the organisation, limited to a hosted domain.
+siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
+siteSetting(ORG_A, 'auth.google.hostedDomain', 'selftest-982.example');
+try {
+    $unaRehire = $rehireM(UNP);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey IN (?, ?)', 'iss', [ORG_A, 'auth.google.clientID', 'auth.google.hostedDomain']);
+}
+ok('M13i where Google sign-in IS set up (limited to a hosted domain), the page says so with its condition - the same e-mail address, in that domain - and names nothing else (#982 round 8)',
+    (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [UNP])['n'] === 0
+    && str_contains($unaRehire, 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail address in the selftest-982.example domain.') === true
+    && str_contains($unaRehire, 'Microsoft') === false && str_contains($unaRehire, 'no way to sign in') === false,
+    'rehire said: ' . $unaRehire);
+// M13j: the failed-step states, made with SQL between the offboarding and the
+// rehire: Fay's password is put back (the step that removes it "did not
+// complete"), a passkey is left registered, and Microsoft sign-in is set up.
+// One rehire, three sentences, each written by one branch only.
+q('UPDATE `tblLocalAccounts` SET `passwordHash` = ? WHERE `userID` = ?', 'si', [$hash, M13_FAY]);
+q("INSERT INTO `tblWebAuthnCredentials` (`userID`, `credentialID`, `publicKey`) VALUES (?, 'selftest-982-cred', 'selftest-982-key')", 'i', [M13_FAY]);
+siteSetting(ORG_A, 'auth.ms365.enduser.clientID', 'selftest-982-ms-client');
+try {
+    $fayRehire = $rehireM(M13_FAY);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.ms365.enduser.clientID']);
+    q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_FAY]);
+}
+ok('M13j a password on the account (said as a fact, with no cause the code cannot know), a passkey still registered and Microsoft sign-in set up are each said as a fact, with Microsoft\'s condition - and "Forgot your password?" is not offered (#982 round 8)',
+    str_contains($fayRehire, 'They have a password on this portal.') === true
+    && str_contains($fayRehire, 'did not complete') === false && str_contains($fayRehire, 'still have a password') === false
+    && str_contains($fayRehire, '1 passkey is still registered to the account.') === true
+    && str_contains($fayRehire, 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same e-mail address in the Microsoft tenant set up here.') === true
+    && str_contains($fayRehire, 'Forgot your password') === false && str_contains($fayRehire, 'Google') === false,
+    'rehire said: ' . $fayRehire);
+
+// M13k: an ORGANISATION administrator rehires an account with no password row
+// and no other way in. The page says they can give it a password on the Users
+// page - and they then do, through the real save (D-018 forbids a SECOND way
+// in, not a first: step 10b refuses only when another way in exists).
+[, $gusOff] = $offboardM(M13_GUS, 'Selftest #982 round 9');
+$gusRehire  = $rehireM(M13_GUS, 'adm');
+$gusSave    = $givePasswordM('adm', M13_GUS);
+$gusRows    = (int) one("SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ? AND `passwordHash` <> ''", 'i', [M13_GUS])['n'];
+ok('M13k an organisation administrator who rehires an account with no way in is told it has no way to sign in yet and that they can try giving it a password on the Users page - and the Users page really does store one when they do (#982 round 11)',
+    str_contains($gusRehire, 'User rehired: their account is switched on again.') === true
+    && str_contains($gusRehire, 'You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && $gusRows === 1,
+    'offboard said: ' . $gusOff . ' | rehire said: ' . $gusRehire . ' | save said: ' . $gusSave . ' | usable password rows: ' . $gusRows);
+
+// M13l: offboarding deletes links, so the link is put back with SQL between the
+// offboarding and the rehire (a step that did not complete). Microsoft is NOT
+// set up, so the account has no way in - but step 10b counts the link and
+// refuses a password. The page says so, and the save really refuses.
+[, $lenOff] = $offboardM(M13_LEN, 'Selftest #982 round 9');
+q("INSERT INTO `tblLinkedAccounts` (`userID`, `provider`, `providerSub`) VALUES (?, 'ms365', 'selftest-982-len-sub')", 'i', [M13_LEN]);
+try {
+    $lenRehire = $rehireM(M13_LEN);
+    $lenSave   = $givePasswordM('root', M13_LEN);
+} finally {
+    q('DELETE FROM `tblLinkedAccounts` WHERE `userID` = ?', 'i', [M13_LEN]);
+}
+$lenRows   = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_LEN])['n'];
+ok('M13l an account still LINKED to Microsoft (not set up here) is said to have no way in, and that it cannot be given a password on the Users page because of the link - and the save really refuses (#982 round 9)',
+    str_contains($lenRehire, 'This account has no way to sign in yet') === true
+    && str_contains($lenRehire, 'It is still linked to a Microsoft or Google account, so it cannot be given a password on the Users page.') === true
+    && str_contains($lenRehire, 'You can try giving it') === false && str_contains($lenRehire, 'You can give it') === false
+    && $lenRows === 0 && str_contains($lenSave, 'No password was set') === true,
+    'offboard said: ' . $lenOff . ' | rehire said: ' . $lenRehire . ' | save said: ' . $lenSave);
+
+// M13o: an account with no way in whose e-mail address is over 50 characters.
+// The Users page would make its sign-in name from that address and refuses it
+// (tblLocalAccounts.username holds 50). So the rehire must promise nothing: it
+// says to TRY, and the save really refuses - round 9's "You can give it a
+// password" was untrue for exactly this account.
+[, $ottOff] = $offboardM(M13_OTT, 'Selftest #982 round 10');
+// M13p: the offboarding list, with Ott waiting to be rehired, draws a Rehire
+// button whose confirmation promises nothing. It used to say "they'll need to
+// set a new password", untrue for an account with no password row ("Forgot
+// your password?" needs one) and for a Microsoft- or Google-only account.
+$offList = req($jar['root'], 'GET', '/offboarding')['body'];
+ok('M13p the Rehire button on the offboarding list asks "Rehire this user? Their account becomes active again, unless it has been erased by then. The next page says how they can sign in." and never says they will need to set a new password (#982 round 11)',
+    str_contains($offList, 'data-confirm="Rehire this user? Their account becomes active again, unless it has been erased by then. The next page says how they can sign in."') === true
+    && stripos($offList, 'set a new password') === false && stripos($offList, 'reset password') === false,
+    'confirmations on the page: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $offList, $offConfirm) > 0 ? $offConfirm[1] : ['(none)']));
+$ottRehire  = $rehireM(M13_OTT);
+$ottSave    = $givePasswordM('root', M13_OTT);
+$ottRows    = (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_OTT])['n'];
+ok('M13o an account with no way in and an e-mail address over 50 characters is promised nothing ("You can give it" / "can be given" absent) and told to TRY on the Users page - and the save really refuses, storing no password (#982 round 10)',
+    mb_strlen(M13_OTT_MAIL, 'UTF-8') > 50
+    && str_contains($ottRehire, 'This account has no way to sign in yet') === true
+    && str_contains($ottRehire, 'You can try giving it a password on the Users page, which will say if it cannot.') === true
+    && str_contains($ottRehire, 'You can give it') === false && str_contains($ottRehire, 'can be given') === false
+    && $ottRows === 0 && str_contains($ottSave, 'longer than 50 characters') === true,
+    'offboard said: ' . $ottOff . ' | rehire said: ' . $ottRehire . ' | save said: ' . $ottSave . ' | password rows: ' . $ottRows);
+
+// M13q: the Offboard page for a LIVE account carries the note and the Offboard
+// button's confirmation. Both used to promise a password reset or a re-enrolment,
+// which is untrue for an account with no password row or a Microsoft- or
+// Google-only one; both are facts now, with the erasure condition. The note and
+// the confirmation are drawn in the same block, only where offboarding is
+// possible, so one live page carries both.
+$eliPage = req($jar['root'], 'GET', '/offboarding/user?id=' . M13_ELI)['body'];
+ok('M13q the Offboard page for a live account says the removed password, passkeys and Microsoft or Google links are not put back, and that the account can be switched on again unless it has been erased by then - in the note AND the Offboard confirmation - and never "reset password" or "re-enrol" (#982 round 12)',
+    str_contains($eliPage, '— the account is switched on again, unless it has been erased by then. The password, passkeys and Microsoft or Google links that offboarding removed are not put back; the page shown after a rehire says what the account still has.') === true
+    && str_contains($eliPage, '? This removes their password, passkeys and Microsoft or Google links. Within the undo window the account can be switched on again, unless it has been erased by then, but those are not put back."') === true
+    && stripos($eliPage, 'reset password') === false && stripos($eliPage, 're-enrol') === false
+    && stripos($eliPage, "they'll need") === false && stripos($eliPage, 'they&#039;ll need') === false,
+    'confirmations: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $eliPage, $eliConfirm) > 0 ? $eliConfirm[1] : ['(none)']));
+
+// M13r: Eli is offboarded and his account is then ERASED while his offboarding
+// record is still there. rehire.php refuses an erased account (AccountGuard row
+// 3a), so the offboarding list must not offer a Rehire button for him: it used
+// to, because its "can undo" test asked about the window and not about erasure.
+// HOW THE STATE IS MADE, said plainly: a COMPLETED erasure DELETES the person's
+// tblOffboarding rows (the catalogue's 'erase' entry, matched by userID - measured
+// in the first version of this check, which ran a real request and found the
+// record gone), so the list cannot show such a row after a whole run. The row
+// survives when the account row has been emptied and the offboarding step has
+// not run - a run that stopped part-way. That state is made here directly: the
+// account row is given the erasure's tombstone (the three facts
+// GdprEraser::emptiedAccountSql() tests: '[Deleted User]', a deleted-...
+// address, switched off), exactly as the run's own step writes it.
+[, $eliOff] = $offboardM(M13_ELI, 'Selftest #982 round 12');
+$eliRecord  = (int) (one('SELECT `offboardingID` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [M13_ELI])['offboardingID'] ?? 0);
+$eliRun     = 'tombstone written directly';
+q("UPDATE `tblUsers` SET `fullName` = '[Deleted User]', `emailAddress` = ?, `isActive` = 0 WHERE `userID` = ?", 'si', ['deleted-' . M13_ELI . '@example.invalid', M13_ELI]);
+$eliRow     = one('SELECT `fullName`, `emailAddress`, `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_ELI]);
+$eliErased  = ($eliRow !== null && $eliRow['fullName'] === '[Deleted User]'
+    && str_starts_with((string) $eliRow['emailAddress'], 'deleted-') === true && (int) $eliRow['isActive'] === 0) ? 1 : 0;
+$eliList    = req($jar['root'], 'GET', '/offboarding')['body'];
+ok('M13r an account offboarded and then ERASED (its offboarding record still there) gets no Rehire button on the offboarding list (rehire.php would refuse it) and the list says it was erased so cannot be rehired (M13p is the control: a waiting account that is not erased does get the button) (#982 round 12)',
+    $eliRecord > 0 && $eliErased === 1
+    && str_contains($eliList, 'name="offboardingID" value="' . $eliRecord . '"') === false
+    && str_contains($eliList, 'Erased on request, so it cannot be rehired') === true,
+    'offboard said: ' . $eliOff . ' | erasure run: ' . $eliRun . ' | record ' . $eliRecord . ' | erased ' . $eliErased
+);
+
+// M13m: two passkeys (the plural sentence) and Google set up with NO hosted
+// domain (the sentence ends at the address, naming no domain).
+[, $pipOff] = $offboardM(M13_PIP, 'Selftest #982 round 9');
+q("INSERT INTO `tblWebAuthnCredentials` (`userID`, `credentialID`, `publicKey`) VALUES (?, 'selftest-982-pip-1', 'selftest-982-key'), (?, 'selftest-982-pip-2', 'selftest-982-key')", 'ii', [M13_PIP, M13_PIP]);
+siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
+try {
+    $pipRehire = $rehireM(M13_PIP);
+} finally {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.google.clientID']);
+    q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_PIP]);
+}
+ok('M13m two passkeys are said in the plural, and Google set up with no hosted domain is said with the same-address condition and no domain (#982 round 9)',
+    str_contains($pipRehire, '2 passkeys are still registered to the account.') === true
+    && str_contains($pipRehire, 'Google sign-in is set up on this portal: it works for a Google account with the same e-mail address.') === true
+    && str_contains($pipRehire, ' domain') === false && str_contains($pipRehire, 'no way to sign in') === false,
+    'offboard said: ' . $pipOff . ' | rehire said: ' . $pipRehire);
+
+// M13n: the rehire's read of what the account has fails (a renamed column in
+// the server's copy, for one press). The rehire was committed, so the page
+// says so and that how they can sign in could not be read.
+$m13nPath     = $child . $sep . 'web' . $sep . '_apps' . $sep . 'offboarding' . $sep . 'rehire.php';
+$m13nOriginal = (string) file_get_contents($m13nPath);
+$m13nFrom     = 'SELECT COUNT(*) AS `passkeys` FROM `tblWebAuthnCredentials`';
+$m13nApplied  = substr_count($m13nOriginal, $m13nFrom) === 1;
+[, $riaOff]   = $offboardM(M13_RIA, 'Selftest #982 round 9');
+$riaRehire    = '(not run)';
+if ($m13nApplied === true) {
+    file_put_contents($m13nPath, str_replace($m13nFrom, 'SELECT COUNT(`noSuchColumn`) AS `passkeys` FROM `tblWebAuthnCredentials`', $m13nOriginal));
+    try {
+        $riaRehire = $rehireM(M13_RIA);
+    } finally {
+        file_put_contents($m13nPath, $m13nOriginal);
+    }
+}
+ok('M13n when what the account has cannot be read after the rehire, the page says the rehire happened and that how they can sign in could not be read - with no column name (#982 round 9)',
+    $m13nApplied === true && (string) file_get_contents($m13nPath) === $m13nOriginal
+    && (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M13_RIA])['isActive'] === 1
+    && str_contains($riaRehire, 'User rehired: their account is switched on again. How they can sign in could not be read: check their account on the Users page.') === true
+    && str_contains($riaRehire, 'noSuchColumn') === false,
+    ($m13nApplied === true ? 'applied' : 'NOT APPLIED') . ' | offboard said: ' . $riaOff . ' | rehire said: ' . $riaRehire);
 
 // Every refusal is on the record, in both places #518 records one. Seven:
 // four saves, one placing, one organisation page, one offboarding. The

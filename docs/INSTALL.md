@@ -305,7 +305,7 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    the sign-in page; so does the portal's plain address.
 3. **Give the portal your organisation's name and time zone.** Until they are set, the portal calls itself
    "Portal" and keeps its clock on UTC (the world's standard time, which has no summer time).
-   - Open **Admin, then Sites**. Press "Edit" on the one organisation listed. Change "Site Name" and the
+   - Open **Admin, then Organisations**. Press "Edit" on the one organisation listed. Change "Organisation name" and the
      copyright name below it (printed at the foot of every page), choose your "Time zone" from the list, and
      save. This is the name on every page once somebody has signed in, and the time zone the portal's clock runs
      on. This page is the only place the time zone is set.

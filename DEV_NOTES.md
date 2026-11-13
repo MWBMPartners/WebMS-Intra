@@ -24296,3 +24296,159 @@ planted fault can deadlock such a test (the request's own row locks against the 
 (#683), the queue row, and every send-log line the request writes (`$message['logSite']`, `false`
 = this request's when the caller named none). The job's lines already follow the row
 (`queueRowSite()`, #1006).
+
+
+## Page messages that say what happened (#982, #922, #926, #973)
+
+- #922: `Auth::signInFacts()` + `signInVerdict()` are the ONE read and judgement of whether a
+  session's sign-in survives; `signInStateNow()` asks without ending. `DbBackup::signInsEndedByRestoring()`
+  counts accounts, not browsers. A restore line for a restorer not in the database goes through
+  `Logger::activityNamingNobody()` (#988), never `Logger::activity()`. After a restore, an account's
+  password, passkeys and Microsoft or Google links are as the snapshot held them - for both kinds of
+  snapshot, because none of the three tables is on `WHOLE_DATABASE_ONLY`; a snapshot holding tblUsers
+  but not one of them leaves it EMPTY (ON DELETE CASCADE), never "as it is today".
+- #982: a message about whether somebody can sign in states what the account HAS, read after the
+  commit; "set up" is not "works" (the callbacks match by e-mail address, within the tenant or hosted
+  domain), and "cannot be given a password" is true only while another way in exists (step 10b,
+  D-018); where the save might still refuse, the page says to TRY rather than promising, instead of
+  repeating the save's rules. `Auth::passwordState()` is the one read of the password row outside the
+  writer.
+- #926: a catalogue `reason` is read by members; developer notes go in the comment above it, and a
+  reason must not promise what a Data Controller's review (#724) can undo.
+
+## The range an event's dates may fall in (#1045, D-181)
+
+`Portal\Core\EventDateRange` is the ONE place. `lastYear()` = max(2200, this year + 50), worked out
+every time; `contains()` compares the reading's YEAR DIGITS (no moment is built — #777); `whyRefused()`
+takes the start and the end (null = no end) and answers the one sentence, `refusalWords()`.
+
+- **The end is checked too** (the builder's choice; the decision names the start). Nothing else stopped
+  an end in 9999 after a start in 2026, and it is the end that makes a page walk an event's days.
+- **Writers, and where each asks:** `calendar/submit-save.php` (after the end-before-start test,
+  `?err=range`); `events/api/create.php` (on the STORED readings, after any offset is put onto the
+  event's clock — `1900-01-01T00:30+01:00` is 23:30 on 31 December 1899 in London and is refused);
+  `events/api/update.php` (only the readings THIS request sends, so a stored date written before the
+  range existed does not block a rename); `calendar/manage/save.php` (the posted start and end are
+  REPLACED by `I18n::wallClockFromInput()`'s reading before anything else, so only that reading is ever
+  checked or bound — the "T"-to-space normaliser, the shape test, `$toReading()` and every `?? text`
+  fallback are deleted; a value it cannot read — an offset, which the form's box never sends, or anything
+  else — is refused as "not a date and time this form can save", nothing saved, on create and edit,
+  start and end (a five-digit year gets the range's own words instead, since it is a year). ISO basic form `20300601T100000` is read and stored as 2030-06-01 10:00:00.
+  Then, before the uploads and the insert, every date a repeat would make); `calendar/manage/series-repattern.php` (the new pattern's first date,
+  then every date it makes, before any preview); `calendar/manage/import.php` (inside the `$fmtStore` wrapper,
+  replacing the old "year before 1000" floor, so preview and store agree); `FeedImporter`
+  (`writeOccurrences()`, skipped and counted as `rowsSkipped`, beside the old `isStorableMoment()`).
+- **Never bind the raw posted text.** Round 2 fell back to the text for a value the helper could not
+  read and bound the raw text; MySQL then converted an offset: `{last}-12-31T23:30:00-05:00` was stored
+  as 1 January of the year after, past the range, "created successfully", and
+  `1900-01-01T00:30:00+01:00` failed at the INSERT with a bare error 1292. The fallback is removed.
+- **A repeat is judged WHOLE, before anything is written, and never shortened.** Manage Events now works
+  out a repeat's dates (the generator call that used to run after the insert, moved up unchanged) before
+  the uploads and the insert; if ANY date — the first included, after the pattern moves it — falls
+  outside, the whole save is refused with the range in words and "Nothing was saved." The pattern page
+  gives the same answer. Round 1 capped the pattern at the last allowed day and skipped a date whose end
+  spilled; that shortened a repeat silently (ten asked, four made, "3 more date(s) were added"),
+  withdrew its rule with only the error log saying so, and never checked a first date the pattern MOVED
+  (2200-12-30 22:00 with Wednesdays ticked was stored as 2200-12-31 22:00 to 2201-01-01 01:00,
+  "created successfully"). The cap and the skip are deleted, on both pages.
+- **What the importer check can reach today:** only an END. The reader keeps a date only when its START
+  falls in the importer's period (a month back, a year ahead), so the start half is a backstop until the
+  far edge is within a year.
+- **Which writers did NOT change:** `FeedResolver`, `HiddenSeriesDates`, `EventCancelReason`,
+  `Events::...timezone` and every soft-delete write a row's dates never. Found by searching for
+  `INSERT INTO tblEvents` and `UPDATE tblEvents ... SET` with a start or end column.
+- **How "only the reading is bound" is proved:** a lower-case `t` and a fractional second
+  (`10:00:45.600`) through create AND edit must be stored as the reading (10:00:00, 10:00:45); bound raw,
+  MySQL refuses the `t` and ROUNDS the fraction to 10:00:46 (plants P10 for the INSERT, P11 for the
+  UPDATE). Every other value reads the same either way, which is why binding the raw post once passed.
+- The end-before-start comparison (text, "before" not "before or equal") is pinned by an end equal to its
+  start (kept) and one second / one minute before on the same day (refused) — plants P12 (`<=`) and P13
+  (date only). A repeat posted at 19:30:15 must keep `:15` on every date (plant P14 drops seconds).
+- Tests: `tools/event-date-range-selftest.php` (118 checks, real HTTP, rule checked as of 2150/2151/2160;
+  plants P1-P14 with P4b-P4e and P6b, each proved applied and each bringing its fault back; run against
+  round 1's `web/` the ten repeat/basic-form checks go red, against round 2's the five unreadable-value
+  checks go red), section K08 of
+  `tools/clock-change-selftest.php`, part N of `tools/feed-importer-selftest.php` (planted: N2 and N3 red).
+
+
+## A deleted asset is never written, and assets are locked in ONE order (#1031, #1047)
+
+`AssetRegister::lockedLiveAsset()` is the ONE locked question "is this asset still here?"
+(`SELECT * … AND isDeleted = 0 FOR UPDATE`). It must run inside a transaction — outside one the
+lock ends with the statement. `withLiveAssetsLocked()` / `withLiveAssetLocked()` begin the
+transaction FIRST, lock every named asset lowest number first, and answer null without calling the
+work when a REQUIRED one is gone; `$alsoLockIfLive` names assets locked in the same order whose
+absence refuses nothing (a kit's components on checkout; everything a check-in touches, because
+ending a loan is never refused). The work must never answer null itself. Never call them inside
+another transaction (`begin_transaction()` silently commits what was open).
+
+**One lock order.** Every write that locks more than one asset goes through
+`withLiveAssetsLocked()`. Locking a second asset row any other way while one is held is a second
+order: round 2 measured a kit's checkout (kit, then component) deadlocking against a seat linked
+between them (lowest first) — the seat's save said "please try again". The `sort()` is the whole
+guarantee; section O of the test drives the overlaps that deadlock without it.
+
+Three single-asset writes already run inside `Currency::withParentLocked()` (updateAsset,
+addMaintenance, recordValueSnapshot) and ask `lockedLiveAsset()` directly; section S pins that
+list, because no race can tell a lock inside a transaction from one outside it.
+
+`attachToKit()` asks "kits are one level deep" again under both locks: the checks before the lock
+let two attaches at once make a loop.
+
+Judged NOT to refuse, each reason at the top of its method: ending a loan (decline, cancel,
+check-in — the loans register lists a deleted asset's loans, and ending them is the only way they
+leave the open lists), releasing a seat, removing a record of the asset, the scan and found-report
+records.
+
+Test: `tools/assets-deleted-writes-selftest.php` — per write: A control, B deleted before, W
+deleted while it waited (two real connections; the wait read from performance_schema), P the race
+against a copy with that method's deletion question planted out; K the kit component; O the lock
+order (with the sort planted out, each overlap deadlocks); L the kit loop; H the loans register
+over HTTP; S the source rules; Z the tidy-up.
+
+## Task reminders on the organisation's clock (#1041)
+
+- `tblTasks.reminderDate` is a WALL-CLOCK reading (migration 289 says so in the column comment; comment
+  only, the harness reports SAME_AS_FRESH), so it is now under `check_clock_time_not_a_moment.py`
+  (pinned set 6 → 7, `--repin`) and `check_wall_clock_writes_not_moments.py`. Declaring it is what found
+  the two readers: `tasks/index.php` (edit box, `date(strtotime())`) and `tasks/complete.php` (next
+  reminder, `new DateTime()` in PHP's default zone).
+- `cron/user-reminders.php`: `reminderDate <= ? AND reminderDate >= ?`, bound to
+  `I18n::wallClockNow(Site::timezone($siteId))` and that reading minus the look-back days (calendar
+  days, UTC arithmetic). Never `NOW()`.
+- `tasks/save.php`: `I18n::wallClockFromInput()` (shape and range, no moment), and "in the future" is
+  `strcmp($reading, I18n::wallClockNow(...)) > 0`. **Be exact about the old fault here:** start-up sets
+  PHP's default zone to the request's organisation, so `strtotime($r) > time()` agreed with the new test
+  on every ordinary day and differed only in the hour the clocks skip. The live fault in save.php was a
+  value that is not a real date reaching the database (strict mode refuses it → error page).
+- **`I18n::wallClockMovedOn($reading, $unit, $count)` moves a STORED reading on to its next occurrence**
+  by whole days/weeks/months/years, in UTC (no clock changes); null for a non-reading, an unknown unit or
+  a count below 1. `tasks/complete.php` calls it. **Do not call it "the one place a reading is moved
+  on"** — round 2 of the check caught that wording: `resources/resource.php` and the task look-back in
+  `cron/user-reminders.php` do the same `wallClockReading()->modify()` inline.
+  **Why it lives in I18n and not in the page — the lesson of round 1:** the write gate's probe cannot
+  tell a UTC-built reading from a moment, so arithmetic in the page needed an `ALLOWED` entry, and that
+  entry (keyed by file + variable + column + function, pinned to the line building the reading)
+  **forgave any OTHER faulty line filling the same variable** — measured: adding
+  `$nextReminder = date("Y-m-d H:i:s", strtotime(... " +1 day"));` below it left the gate OK. With the
+  arithmetic in I18n the page builds no moment, the exemption is DELETED, and that same added line
+  makes the gate FAIL (measured). **An exemption keyed by variable forgives the variable, not the line.**
+- Month/year roll-over is unchanged from before and not decided here: 31 Jan + 1 month = 3 March
+  (2 March in a leap year); 29 Feb + 1 year = 1 March (measured; pinned by N03).
+- Tests: L15-L26 of `tools/time-zones-selftest.php` (327 checks), and section N of
+  `tools/clock-change-selftest.php` (189 checks: N01 refusals, N02 each unit and a count of 2 onto
+  London's spring-forward morning with PHP's default zone set to London, N03 month-end roll-over).
+  - L15 premise: the OLD condition, run on the database with the job's clock, does not pick exactly the
+    tasks due an hour ago and six days ago.
+  - L16: an hour ago and six days ago reminded; two hours on and eight days ago not. The six-day task
+    pins the look-back's UNIT (round 1 found `' days'` → `' hours'` left everything green).
+  - L17-L20: save re-arms a future reminder and stores the reading; edit box shows it back; a past one
+    does not re-arm; 31 February refused with the message, nothing changed.
+  - L21 premise (01:30 on 28 March 2027 does not exist in London), L22-L26: completing a daily, weekly,
+    monthly, yearly and every-two-days task over HTTP with organisation 1 on London's clock gives the
+    next reminder 01:30 on that morning.
+  - Plants, each on a fresh database: old `NOW()` query → L16 red; look-back dropped → L16 red;
+    look-back unit `days` → `hours` → L16 red; old `save.php` → L20 red; monthly mapped to `days` →
+    L24 red; yearly mapped to `months` → L25 red; the interval forced to 1 → L26 red; `complete.php`
+    as before #1041 → L22-L24 red (L25/L26 added after that plant). L17-L19 pass on the old `save.php` too
+    (same answer on an ordinary day) and pin over-reach only.

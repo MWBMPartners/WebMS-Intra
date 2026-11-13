@@ -621,13 +621,15 @@ ok(
 // A and B. EVERY HELP PAGE OPENS
 // =============================================================================
 head('A. As an administrator, every help page answers a whole page');
-$seen = [];
+$seen        = [];
+$adminBodies = [];
 foreach ($routes as $route) {
     $path   = '/' . ltrim((string) $route['routeKey'], '/');
     $before = errorLogSize();
     $answer = req($jars['admin'], 'GET', $path);
     $wrong  = faultsIn($answer, false, errorLogSize() - $before);
     $seen[$path] = $answer['status'];
+    $adminBodies[$path] = (string) $answer['body']; // read again by section F
     ok(
         'A ' . $path . ' opens for an administrator',
         $wrong === [],
@@ -707,6 +709,92 @@ if ($drRoute !== null) {
         'the page names _uploads/photos/queue as something to clear — see #583'
     );
 }
+
+// =============================================================================
+// F. THE ORGANISATIONS PAGE HAS ONE NAME (#973)
+// =============================================================================
+// Sentences across the portal - the help, the time-zone refusals, the passkey
+// card, the installer - send people to "Admin, Organisations". The menu said
+// "Sites", the Admin page's button said "Sites" and the page itself was titled
+// "Site Management", so somebody told where to go found no such word. #973
+// made the page and the menu say "Organisations"; this section asks the
+// running portal what each place really says, as a global administrator, who
+// is the only person shown that menu item.
+//
+// WHAT IT CANNOT SEE: whether the NAME is the right one (that is a judgement,
+// recorded on #973), and a name assembled at run time from pieces
+// ("Admin, " . $where). F05 reads every PHP file's strings and markup for the
+// old names, so a sentence on a page nobody here opens is still caught.
+head('F. The organisations page has one name: in the menu, on its own page, on the Admin page and in every sentence (#973)');
+$innerText = static fn (string $html): string => trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($html), ENT_QUOTES, 'UTF-8')));
+$linksTo   = static function (string $html, string $target) use ($innerText): array {
+    // Every link whose address ENDS in the target, with its words. Anchored on
+    // the closing quote, so admin/sites/setup and admin/sites/users are not
+    // mistaken for the page itself.
+    preg_match_all('#<a\b[^>]*href="[^"]*/' . preg_quote($target, '#') . '"[^>]*>(.*?)</a>#s', $html, $found);
+
+    return array_map($innerText, $found[1]);
+};
+$helpIndex  = (string) ($adminBodies['/help'] ?? req($jars['admin'], 'GET', '/help')['body']);
+$menuWords  = $linksTo($helpIndex, 'admin/sites');
+$sitesPage  = req($jars['admin'], 'GET', '/admin/sites');
+$sitesHtml  = (string) $sitesPage['body'];
+$sitesH1    = preg_match('#<h1\b[^>]*>(.*?)</h1>#s', $sitesHtml, $h1) === 1 ? $innerText($h1[1]) : '(no h1)';
+$sitesTitle = preg_match('#<title>(.*?)</title>#s', $sitesHtml, $tt) === 1 ? $innerText($tt[1]) : '(no title)';
+$adminTile  = $linksTo((string) req($jars['admin'], 'GET', '/admin')['body'], 'admin/sites');
+ok('F01 the admin menu names the organisations page "Organisations", once (the premise: a global administrator IS shown the item)',
+    $menuWords === ['Organisations'], 'links to admin/sites on the help page (the menu): ' . json_encode($menuWords));
+ok('F02 the page itself says the same: its heading is "Organisations" and its title starts with it',
+    $sitesPage['status'] === 200 && $sitesH1 === 'Organisations' && str_starts_with($sitesTitle, 'Organisations') === true,
+    'HTTP ' . $sitesPage['status'] . ', h1 "' . $sitesH1 . '", title "' . $sitesTitle . '"');
+ok('F03 and the Admin page\'s button for it says "Organisations" too, never "Sites"',
+    in_array('Organisations', $adminTile, true) === true && preg_grep('/\bSites\b/', $adminTile) === [],
+    'links to admin/sites on the Admin page: ' . json_encode($adminTile));
+// Every help page, as served: no sentence uses an old name, and a link to the
+// page carries its name.
+$oldNames   = '/Admin(?:,|\s*(?:→|->|>|then))\s*Sites\b|Site Management/u';
+$helpWrong  = [];
+$helpLinked = 0;
+foreach ($adminBodies as $path => $body) {
+    $words = $innerText($body);
+    if (preg_match($oldNames, $words, $hit) === 1) {
+        $helpWrong[] = $path . ': "' . $hit[0] . '"';
+    }
+    // The menu is on every page and already asked by F01; only links in the
+    // help's own text are counted, so the "at least one" below cannot be met
+    // by the menu alone.
+    foreach ($linksTo((string) preg_replace('#<nav\b.*?</nav>#s', '', $body), 'admin/sites') as $linkWords) {
+        $helpLinked++;
+        if (str_contains($linkWords, 'Organisations') === false) {
+            $helpWrong[] = $path . ': a link to the page reads "' . $linkWords . '"';
+        }
+    }
+}
+ok('F04 no help page, as served, calls the page by an old name, and every link to it inside a help page says "Organisations" (' . $helpLinked . ' such links; at least one, or this proves nothing)',
+    $helpWrong === [] && $helpLinked > 0, implode(' | ', $helpWrong));
+// Every PHP file under web/ in the copy the server runs: only the words a
+// person can be shown (strings and markup), never comments, which record the
+// old names on purpose. Asked of PHP's own tokeniser rather than a pattern
+// over the raw file, so a comment explaining the rename is not read as the
+// fault.
+$codeWrong = [];
+$webTree   = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($child . $sep . 'web', FilesystemIterator::SKIP_DOTS));
+foreach ($webTree as $file => $info) {
+    if (str_ends_with((string) $file, '.php') === false) {
+        continue;
+    }
+    $shown = '';
+    foreach (token_get_all((string) file_get_contents((string) $file)) as $tok) {
+        if (is_array($tok) === true && in_array($tok[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE, T_INLINE_HTML], true) === true) {
+            $shown .= ' ' . (string) preg_replace('/<!--.*?-->/s', ' ', $tok[1]);
+        }
+    }
+    if (preg_match($oldNames, html_entity_decode($shown, ENT_QUOTES, 'UTF-8'), $hit) === 1) {
+        $codeWrong[] = substr((string) $file, strlen($child . $sep . 'web') + 1) . ': "' . $hit[0] . '"';
+    }
+}
+ok('F05 and no PHP file under web/ has a string or a piece of markup naming the page by an old name ("Admin, Sites", "Admin → Sites", "Site Management")',
+    $codeWrong === [], implode(' | ', $codeWrong));
 
 // =============================================================================
 // E. PLANTED FAULTS — this test must see a broken help page

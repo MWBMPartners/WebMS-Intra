@@ -710,7 +710,32 @@ class GdprEraser
             //       registering a table in this hand-written list makes
             //       `fromPersonalDataCatalogue()` SKIP IT ENTIRELY, so leaving
             //       `approvedByID` to the deriver would silently drop it.
-            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. `declineReason` is named here too and CAN NEVER MATCH, because nothing writes it — the decline branch of resources/action.php sets only status, approvedByID and approvedAt, and there is no form field for it: the limit is recorded rather than the column dropped, the #708 precedent, so that a decline reason stored in future is already reached. The booker\'s own `notes` are KEPT by the owner\'s decision of 3 November 2026, recorded in the catalogue (#723)'],
+            //
+            //    ⚠️ `declineReason` IS NAMED IN `nullCols` AND CAN NEVER MATCH,
+            //       because nothing writes it: the decline branch of
+            //       `_apps/resources/action.php` sets only status, approvedByID
+            //       and approvedAt, and there is no form field for it. The
+            //       limit is recorded rather than the column dropped (the
+            //       #708 precedent), so that a decline reason stored in future
+            //       is already reached. The booker's own `notes` are KEPT by
+            //       the owner's decision of 3 November 2026, recorded in the
+            //       catalogue's `notEmptiedHere` (#723) - and marked
+            //       `needsReview` there (#724), so the person handling a
+            //       request decides line by line whether to empty them. The
+            //       reason below says exactly that, and NOT "they stay"
+            //       (#926 round 2: the first rewording promised the notes
+            //       would stay, which a Data Controller's decision can undo).
+            //
+            //    🧑 THE `reason` BELOW IS READ BY MEMBERS (#926): Request
+            //       erasure and My data print it beside the row, as the
+            //       explanation of what will happen to their booking. Until
+            //       #926 this note sat inside it, so a member was shown "CAN
+            //       NEVER MATCH … resources/action.php …" - true, and
+            //       meaningless to the person reading it. Developer notes go
+            //       in this comment; the reason says what happens to the
+            //       member's record, in their words. Section B of
+            //       tools/erasure-pages-selftest.php pins the rendered row.
+            ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. Any notes typed on the booking are kept unless the person handling your request decides they should be removed'],
             ['table' => 'tblResourceBooking', 'userCol' => 'approvedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s booking stays; who approved it is detached'],
             // 🧾 #703, D-016: KEPT, number and name. See the long note above
             //    the #709 instruction. The reason is the sentence a worker
@@ -802,7 +827,12 @@ class GdprEraser
             //    copies the pair from the parent loan together, so it keeps
             //    that exclusivity. Naming it costs nothing and means a future
             //    writer that filled both would already be reached.
-            ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => ['counterpartyName', 'counterpartyContact'], 'reason' => 'the loan is kept so the asset\'s custody chain is intact — which item went out, when, and when it came back; who borrowed or lent it is detached, and so are the contact details typed about them. `counterpartyName` is named here too and CAN NEVER MATCH, because a loan names its counterparty by EITHER an account or that free-text name and never both: the limit is recorded rather than the column dropped, the #708 precedent, so that a row filling both in future is already reached'],
+            //
+            //    🧑 That note lived in the `reason` below until #926, which a
+            //       member reads on Request erasure and My data beside their
+            //       loan. It stays here, where a reviewer reads it; the reason
+            //       says only what happens to the member's record.
+            ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => ['counterpartyName', 'counterpartyContact'], 'reason' => 'the loan is kept so the asset\'s custody chain is intact — which item went out, when, and when it came back; who borrowed or lent it is detached, and so are the contact details typed about them'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
             ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'changes you made to equipment records: the equipment\'s change history is kept for ever (the owner\'s decision D-116). Your account number is removed from these entries; a scrambled form of the network address each change came from stays, which this installation can still match against an address it is given, and what each entry recorded is kept as written, so it can still mention you'],
             // #404 Phase 2 Pass 2 (#410). tblAssetScanLog rows are retained

@@ -542,7 +542,7 @@ function maintenance_health_probes(\mysqli $db): array
                 //    address is actually unreachable.
                 $firstKey = (string) reset($activeClashes)['siteKey'];
                 $detailParts[] = 'Its pages are answering /' . $firstKey . '/ now, so the portal\'s own '
-                    . 'address is unreachable for everyone. Change the key at Admin → Sites (Edit). '
+                    . 'address is unreachable for everyone. Change the key at Admin, Organisations (Edit). '
                     . 'Links already shared under /' . $firstKey . '/ will stop working when it changes.';
                 $probes['Organisation keys'] = [
                     'state'  => 'warn',
@@ -554,7 +554,7 @@ function maintenance_health_probes(\mysqli $db): array
                 $detailParts[] = 'Harmless while the portal is not using address prefixes and the '
                     . 'organisation is off; it would take over the address the moment that changes. The '
                     . 'save page now refuses to switch such an organisation on. Change the key at '
-                    . 'Admin → Sites (Edit).';
+                    . 'Admin, Organisations (Edit).';
                 $probes['Organisation keys'] = [
                     'state'  => 'ok',
                     'label'  => sprintf('%d reserved (not in use)', count($clashes)),

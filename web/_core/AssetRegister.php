@@ -652,6 +652,14 @@ class AssetRegister
     /** @var string[] tblAssetOwners.roleKind */
     public const OWNER_ROLE_KINDS = ['owner', 'co-owner', 'custodian', 'stakeholder'];
 
+    /**
+     * 🗑️ What a person reads when they press Approve or Check out on a loan
+     * whose asset has been deleted (#1047). The loans register still lists such
+     * a loan with its buttons, so it says what they CAN do with it: declining
+     * and cancelling are never refused for a deleted asset (see loanAction()).
+     */
+    public const LOAN_ASSET_DELETED_WORDS = 'This asset has been deleted, so the loan cannot be approved or checked out. Decline or cancel it instead.';
+
     /** @var string[] tblAssetLoans.direction — 'out' = we lend; 'in' = we borrow (#398) */
     public const LOAN_DIRECTIONS = ['out', 'in'];
 
@@ -752,16 +760,28 @@ class AssetRegister
         $oldToken = (string) ($old['publicToken'] ?? '');
         $newToken = self::generatePublicToken();
 
-        $stmt = $db->prepare('UPDATE tblAssets SET publicToken = ? WHERE assetID = ? AND siteID = ?');
-        if ($stmt === false) {
-            error_log('AssetRegister::regeneratePublicToken() prepare failed: ' . $db->error);
+        // 🗑️🔒 Written under the asset's lock, and only while it is still
+        //    there (#1047): an asset deleted while this waited for the lock is
+        //    refused (null, nothing written), exactly as self::get() above
+        //    refuses one deleted earlier. The "before" for the audit is the
+        //    token as the locked row holds it.
+        try {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $assetId, $siteId, $newToken, &$oldToken): bool {
+                    $oldToken = (string) ($locked['publicToken'] ?? '');
+                    $stmt = $db->prepare('UPDATE `tblAssets` SET `publicToken` = ? WHERE `assetID` = ? AND `siteID` = ?');
+                    $stmt->bind_param('sii', $newToken, $assetId, $siteId);
+                    $done = $stmt->execute();
+                    $stmt->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::regeneratePublicToken() failed: ' . $e->getMessage());
             return null;
         }
-        $stmt->bind_param('sii', $newToken, $assetId, $siteId);
-        $ok = $stmt->execute();
-        $stmt->close();
 
-        if ($ok === false) {
+        if ($ok !== true) {
             return null;
         }
 
@@ -1541,44 +1561,47 @@ class AssetRegister
 
         // 💾 Transaction — "clear other primaries" + "insert" are one
         // atomic unit whenever isPrimary is requested. See this section's
-        // header comment for why.
-        App::beginTransaction();
+        // header comment for why. 🗑️🔒 It is the transaction
+        // self::withLiveAssetLocked() opens (#1047): the asset's row is locked
+        // first and the identifier is written only while the asset is still
+        // there, so one deleted while this waited is refused like one deleted
+        // before the self::get() above. (The helper rolls back on any throw.)
         $newId = 0;
         try {
-            if ($isPrimary === 1) {
-                $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
-                if ($clearStmt === false) {
-                    throw new \RuntimeException('Failed to prepare primary-clear: ' . $db->error);
-                }
-                $clearStmt->bind_param('ii', $assetId, $siteId);
-                $clearStmt->execute();
-                $clearStmt->close();
-            }
+            $newId = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $assetId, $siteId, $isPrimary, $columns, $placeholders, $types, $params): int {
+                    if ($isPrimary === 1) {
+                        $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
+                        $clearStmt->bind_param('ii', $assetId, $siteId);
+                        $clearStmt->execute();
+                        $clearStmt->close();
+                    }
 
-            $stmt = $db->prepare('INSERT INTO tblAssetIdentifiers (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare identifier insert: ' . $db->error);
-            }
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-            $newId = (int) $stmt->insert_id;
-            $stmt->close();
+                    $stmt = $db->prepare('INSERT INTO tblAssetIdentifiers (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
 
-            App::commit();
+                    return $id;
+                });
         } catch (\mysqli_sql_exception $e) {
             // 🪞 Most likely cause: uq_asset_ident (assetID, typeCode,
             // value) — this exact type+value is already recorded for this
             // asset. A friendly, non-fatal warning rather than a 500 — see
-            // method doc.
-            App::rollback();
+            // method doc. (Already rolled back by the helper.)
             error_log('AssetRegister::addIdentifier() insert failed: ' . $e->getMessage());
             return ['id' => 0, 'warnings' => ['This identifier is already recorded on this asset.']];
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::addIdentifier() failed: ' . $e->getMessage());
             return ['id' => 0, 'warnings' => ['Could not save the identifier — please try again.']];
         }
 
+        if ($newId === null) {
+            // 🗑️ Deleted while this waited for the lock (#1047): the same
+            //    words as the check above gives an asset already gone.
+            return ['id' => 0, 'warnings' => ['Asset not found.']];
+        }
         if ($newId <= 0) {
             return ['id' => 0, 'warnings' => ['Could not save the identifier — please try again.']];
         }
@@ -1603,6 +1626,10 @@ class AssetRegister
      */
     public static function removeIdentifier(int $identifierId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    identifiers-save.php refuses a deleted asset with get() first; if the asset is
+        //    deleted while this runs, the only effect is that an identifier of an asset no page
+        //    shows is removed (and audited). Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -1670,29 +1697,30 @@ class AssetRegister
             return true; // 🔁 no-op — already primary
         }
 
-        App::beginTransaction();
+        // 🗑️🔒 One transaction, the asset's row locked first and the change
+        //    made only while the asset is still there (#1047) — see
+        //    self::lockedLiveAsset(). The helper rolls back on any throw.
         try {
-            $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
-            if ($clearStmt === false) {
-                throw new \RuntimeException('Failed to prepare primary-clear: ' . $db->error);
-            }
-            $clearStmt->bind_param('ii', $assetId, $siteId);
-            $clearStmt->execute();
-            $clearStmt->close();
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $identifierId, $assetId, $siteId): bool {
+                    $clearStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 0 WHERE assetID = ? AND siteID = ?');
+                    $clearStmt->bind_param('ii', $assetId, $siteId);
+                    $clearStmt->execute();
+                    $clearStmt->close();
 
-            $setStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 1 WHERE identifierID = ? AND assetID = ? AND siteID = ?');
-            if ($setStmt === false) {
-                throw new \RuntimeException('Failed to prepare primary-set: ' . $db->error);
-            }
-            $setStmt->bind_param('iii', $identifierId, $assetId, $siteId);
-            $setStmt->execute();
-            $setStmt->close();
+                    $setStmt = $db->prepare('UPDATE tblAssetIdentifiers SET isPrimary = 1 WHERE identifierID = ? AND assetID = ? AND siteID = ?');
+                    $setStmt->bind_param('iii', $identifierId, $assetId, $siteId);
+                    $setStmt->execute();
+                    $setStmt->close();
 
-            App::commit();
+                    return true;
+                });
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::setPrimaryIdentifier() failed: ' . $e->getMessage());
             return false;
+        }
+        if ($ok !== true) {
+            return false; // 🗑️ the asset is not there (deleted, even while this waited)
         }
 
         self::audit('identifier', $identifierId, $assetId, 'update', ['isPrimary' => 0], ['isPrimary' => 1]);
@@ -1973,7 +2001,9 @@ class AssetRegister
 
         if ($checkDigitOk === false) {
             $note = 'Check digit invalid';
-            self::applyVerifyResult($identifierId, $siteId, 0, $note);
+            if (self::applyVerifyResult($identifierId, $assetId, $siteId, 0, $note) === false) {
+                return ['ok' => false, 'msg' => 'Identifier not found.', 'verified' => false, 'note' => ''];
+            }
             self::audit(
                 'identifier',
                 $identifierId,
@@ -2001,7 +2031,14 @@ class AssetRegister
                 : $localNote . ' (GEPIR lookup unavailable)';
         }
 
-        self::applyVerifyResult($identifierId, $siteId, 1, $note);
+        // 🗑️ The look-up above may have taken a while (GEPIR is a network
+        //    call, made deliberately OUTSIDE any lock). applyVerifyResult()
+        //    asks again under the asset's lock and writes nothing to an asset
+        //    deleted meanwhile (#1047); the answer is then the same as for an
+        //    identifier that is not there.
+        if (self::applyVerifyResult($identifierId, $assetId, $siteId, 1, $note) === false) {
+            return ['ok' => false, 'msg' => 'Identifier not found.', 'verified' => false, 'note' => ''];
+        }
         self::audit(
             'identifier',
             $identifierId,
@@ -2021,21 +2058,33 @@ class AssetRegister
      * `verifiedAt` is ALWAYS stamped `NOW()` regardless of `$isVerified`
      * — see `verifyIdentifier()`'s own doc for why.
      */
-    private static function applyVerifyResult(int $identifierId, int $siteId, int $isVerified, string $note): bool
+    private static function applyVerifyResult(int $identifierId, int $assetId, int $siteId, int $isVerified, string $note): bool
     {
         $db = App::db();
-        $stmt = $db->prepare(
-            'UPDATE tblAssetIdentifiers SET isVerified = ?, verifiedAt = NOW(), verifyNote = ? '
-            . 'WHERE identifierID = ? AND siteID = ?'
-        );
-        if ($stmt === false) {
-            error_log('AssetRegister::applyVerifyResult() prepare failed: ' . $db->error);
+        // 🗑️🔒 Written under the asset's lock and only while it is still
+        //    there (#1047) — see self::lockedLiveAsset(). False means nothing
+        //    was written: the asset was deleted (perhaps while this waited),
+        //    or the write failed. The identifier must also belong to THIS
+        //    asset (assetID in the WHERE), because the lock is the asset's.
+        try {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $identifierId, $assetId, $siteId, $isVerified, $note): bool {
+                    $stmt = $db->prepare(
+                        'UPDATE tblAssetIdentifiers SET isVerified = ?, verifiedAt = NOW(), verifyNote = ? '
+                        . 'WHERE identifierID = ? AND assetID = ? AND siteID = ?'
+                    );
+                    $stmt->bind_param('isiii', $isVerified, $note, $identifierId, $assetId, $siteId);
+                    $done = $stmt->execute();
+                    $stmt->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::applyVerifyResult() failed: ' . $e->getMessage());
             return false;
         }
-        $stmt->bind_param('isii', $isVerified, $note, $identifierId, $siteId);
-        $ok = $stmt->execute();
-        $stmt->close();
-        return $ok;
+
+        return $ok === true;
     }
 
     /**
@@ -2385,6 +2434,141 @@ class AssetRegister
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
         return $row !== false && $row !== null ? $row : null;
+    }
+
+    /**
+     * 🗑️🔒 THE ONE LOCKED QUESTION "is this asset still here?" (#1031, #1047).
+     *
+     * Reads the asset's row with `FOR UPDATE` — so the caller now holds its
+     * lock until its transaction ends — and answers it only while it is on
+     * this organisation and NOT soft-deleted (`isDeleted` = 0). Null means
+     * "not there": deleted (perhaps a moment ago, by somebody else, while the
+     * caller waited for this very lock), or never on this organisation.
+     *
+     * Why it exists: every page that changes an asset asks self::get() first
+     * and refuses a deleted one, but that read takes no lock, so an asset
+     * soft-deleted between that read and the write used to be written anyway
+     * (#1031 found it in updateAsset(); #1047 found the same shape in every
+     * other single-asset write). softDeleteAsset() is an UPDATE of this same
+     * row, so it takes the same row lock: whichever runs second sees what the
+     * first committed. Asked under the lock, a deletion either happened before
+     * (null — nothing is written) or waits until the write has committed.
+     *
+     * ⚠️ MUST be called INSIDE an open transaction. Outside one, the lock is
+     * released the moment the statement ends and the answer is already stale
+     * when the write runs — a lock outside a transaction is decoration. Use
+     * self::withLiveAssetsLocked(), which begins the transaction first, unless
+     * the caller already runs inside one that locked this row (updateAsset(),
+     * addMaintenance() and recordValueSnapshot() run inside
+     * Currency::withParentLocked(), which does).
+     *
+     * Do not write a second `isDeleted` test for a locked write: ask this.
+     *
+     * @return array<string, mixed>|null The whole row as it is now, or null
+     */
+    private static function lockedLiveAsset(\mysqli $db, int $assetId, int $siteId): ?array
+    {
+        if ($assetId <= 0) {
+            return null;
+        }
+        $stmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? AND `isDeleted` = 0 FOR UPDATE');
+        $stmt->bind_param('ii', $assetId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return is_array($row) === true ? $row : null;
+    }
+
+    /**
+     * 🗑️🔒 Run $work with one or more assets' rows locked and still live,
+     * inside ONE transaction (#1047).
+     *
+     * Begins the transaction FIRST, then locks every asset named in $assetIds
+     * through self::lockedLiveAsset(), in ascending number order (two writers
+     * that lock the same pair always take them in the same order, so they
+     * queue rather than deadlock). If ANY of them is not there — deleted,
+     * including while this call waited for its lock — nothing is written, the
+     * transaction is rolled back and the answer is null. Otherwise $work is
+     * handed the locked rows (keyed by asset number), its answer is returned
+     * and the transaction is committed. A throw from $work rolls back and is
+     * thrown on, so a caller keeps its own catch and its own words.
+     *
+     * $alsoLockIfLive names assets locked IN THE SAME ascending order but whose
+     * absence refuses nothing: one that is gone is simply left out of the rows
+     * $work is handed. A kit's checkout uses it for the kit's components (a
+     * deleted component is skipped, the kit still goes out), and a check-in for
+     * every asset it touches (ending a loan is never refused, see loanAction()).
+     *
+     * 🔢 THE ONE LOCK ORDER (#1047 round 2). Every write that locks MORE THAN
+     * ONE asset takes them through here, so all of them take them lowest number
+     * first. A write that locked a kit and then its component in the kit's own
+     * order deadlocked against a seat being linked lowest-first (measured: the
+     * seat's save failed "please try again"). Never lock a second asset row any
+     * other way while one is held — add it to this call instead. The `sort()`
+     * is the whole guarantee, and tools/assets-deleted-writes-selftest.php
+     * section O drives two writes that deadlock without it.
+     *
+     * $work must never answer null itself: null is reserved for "an asset was
+     * not there", which is how every caller tells that refusal apart.
+     *
+     * Not to be called inside another transaction: mysqli's begin_transaction()
+     * silently commits whatever was open (App::beginTransaction() does not
+     * nest). A write that already runs inside one asks lockedLiveAsset().
+     *
+     * @template T
+     * @param list<int>                                      $assetIds       refused when any is gone
+     * @param callable(array<int, array<string, mixed>>): T  $work
+     * @param list<int>                                      $alsoLockIfLive locked, never refusing
+     * @return T|null
+     */
+    private static function withLiveAssetsLocked(\mysqli $db, array $assetIds, int $siteId, callable $work, array $alsoLockIfLive = []): mixed
+    {
+        $required = array_map('intval', $assetIds);
+        $ids      = array_values(array_unique(array_merge($required, array_map('intval', $alsoLockIfLive))));
+        sort($ids);
+        $db->begin_transaction();
+        try {
+            $rows = [];
+            foreach ($ids as $id) {
+                $row = self::lockedLiveAsset($db, $id, $siteId);
+                if ($row === null) {
+                    if (in_array($id, $required, true) === false) {
+                        continue;
+                    }
+                    $db->rollback();
+
+                    return null;
+                }
+                $rows[$id] = $row;
+            }
+            $result = $work($rows);
+            $db->commit();
+
+            return $result;
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+                // The connection itself has gone: there is nothing left to roll back.
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 🗑️🔒 self::withLiveAssetsLocked() for ONE asset: $work is handed that
+     * asset's locked row. Null means the asset was not there (deleted, even
+     * while this call waited for its lock) and nothing was written.
+     *
+     * @template T
+     * @param callable(array<string, mixed>): T $work
+     * @return T|null
+     */
+    private static function withLiveAssetLocked(\mysqli $db, int $assetId, int $siteId, callable $work): mixed
+    {
+        return self::withLiveAssetsLocked($db, [$assetId], $siteId,
+            static fn (array $rows): mixed => $work($rows[$assetId]));
     }
 
     /**
@@ -2825,12 +3009,11 @@ class AssetRegister
                     //    asset list saying it could not be found and nothing was
                     //    changed. There is no un-delete, so the after-the-fact
                     //    look the callers make cannot mislead the other way.
-                    $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? AND `isDeleted` = 0 FOR UPDATE');
-                    $lockedStmt->bind_param('ii', $assetId, $siteId);
-                    $lockedStmt->execute();
-                    $lockedRow = $lockedStmt->get_result()->fetch_assoc();
-                    $lockedStmt->close();
-                    if (is_array($lockedRow) === false) {
+                    //    The question is asked by self::lockedLiveAsset(), the
+                    //    ONE place it is written (#1047), inside the transaction
+                    //    withParentLocked() opened.
+                    $lockedRow = self::lockedLiveAsset($db, $assetId, $siteId);
+                    if ($lockedRow === null) {
                         // Deleted while this request waited (#1031) — or, in
                         // principle, gone from this organisation, though
                         // $lockedCurrency was read from this same row under
@@ -3290,24 +3473,29 @@ class AssetRegister
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
-        $stmt = $db->prepare('INSERT INTO tblAssetResources (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-        if ($stmt === false) {
-            error_log('AssetRegister::addResource() prepare failed: ' . $db->error);
-            return 0;
-        }
-
+        // 🗑️🔒 Inserted under the asset's lock, only while it is still there
+        //    (#1047) — see self::lockedLiveAsset(). This method asked nothing
+        //    about the asset before; its caller (resource-save.php) refuses a
+        //    deleted one with self::get() first, and now an asset deleted while
+        //    the upload was being handled is refused too (0, nothing written;
+        //    the caller then removes the file it saved).
         try {
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-        } catch (\mysqli_sql_exception $e) {
+            $newId = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $columns, $placeholders, $types, $params): int {
+                    $stmt = $db->prepare('INSERT INTO tblAssetResources (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
+
+                    return $id;
+                });
+        } catch (\Throwable $e) {
             error_log('AssetRegister::addResource() insert failed: ' . $e->getMessage());
-            $stmt->close();
             return 0;
         }
-        $newId = (int) $stmt->insert_id;
-        $stmt->close();
 
-        if ($newId <= 0) {
+        if ($newId === null || $newId <= 0) {
             return 0;
         }
 
@@ -3335,6 +3523,10 @@ class AssetRegister
      */
     public static function deleteResource(int $resourceId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record (and its
+        //    file). resource-save.php refuses a deleted asset with get() first; in the race, a
+        //    resource of an asset no page shows is removed (and audited). Nothing is created on
+        //    it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -3655,24 +3847,26 @@ class AssetRegister
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
-        $stmt = $db->prepare('INSERT INTO tblAssetOwners (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-        if ($stmt === false) {
-            error_log('AssetRegister::addOwner() prepare failed: ' . $db->error);
-            return 0;
-        }
-
+        // 🗑️🔒 Inserted under the asset's lock, only while it is still there
+        //    (#1047): an asset deleted while this waited is refused like one
+        //    deleted before the self::get() above. See self::lockedLiveAsset().
         try {
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-        } catch (\mysqli_sql_exception $e) {
+            $newId = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $columns, $placeholders, $types, $params): int {
+                    $stmt = $db->prepare('INSERT INTO tblAssetOwners (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
+
+                    return $id;
+                });
+        } catch (\Throwable $e) {
             error_log('AssetRegister::addOwner() insert failed: ' . $e->getMessage());
-            $stmt->close();
             return 0;
         }
-        $newId = (int) $stmt->insert_id;
-        $stmt->close();
 
-        if ($newId <= 0) {
+        if ($newId === null || $newId <= 0) {
             return 0;
         }
 
@@ -3697,6 +3891,10 @@ class AssetRegister
      */
     public static function removeOwner(int $ownerId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    owners-save.php refuses a deleted asset with get() first; if the asset is deleted
+        //    while this runs, an owner row of an asset no page shows is removed (and audited).
+        //    Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -3783,15 +3981,25 @@ class AssetRegister
             return true; // no-op — already at the requested state
         }
 
-        $updStmt = $db->prepare('UPDATE tblAssetOwners SET `' . $field . '` = ? WHERE ownerID = ? AND assetID = ? AND siteID = ?');
-        if ($updStmt === false) {
+        // 🗑️🔒 Under the asset's lock, only while it is still there (#1047):
+        //    who may lend or maintain an asset is not changed on one deleted
+        //    while this waited. See self::lockedLiveAsset().
+        try {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $field, $newVal, $ownerId, $assetId, $siteId): bool {
+                    $updStmt = $db->prepare('UPDATE tblAssetOwners SET `' . $field . '` = ? WHERE ownerID = ? AND assetID = ? AND siteID = ?');
+                    $updStmt->bind_param('iiii', $newVal, $ownerId, $assetId, $siteId);
+                    $done = $updStmt->execute();
+                    $updStmt->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::setOwnerAuthority() failed: ' . $e->getMessage());
             return false;
         }
-        $updStmt->bind_param('iiii', $newVal, $ownerId, $assetId, $siteId);
-        $ok = $updStmt->execute();
-        $updStmt->close();
 
-        if ($ok === false) {
+        if ($ok !== true) {
             return false;
         }
 
@@ -3824,16 +4032,25 @@ class AssetRegister
         $terms = trim($terms);
         $termsOrNull = $terms !== '' ? $terms : null;
 
-        $stmt = $db->prepare('UPDATE tblAssets SET ownershipTerms = ? WHERE assetID = ? AND siteID = ?');
-        if ($stmt === false) {
-            error_log('AssetRegister::updateOwnershipTerms() prepare failed: ' . $db->error);
+        // 🗑️🔒 Under the asset's lock, only while it is still there (#1047) —
+        //    see self::lockedLiveAsset(). The audit's "before" is the locked row's.
+        try {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $assetId, $siteId, $termsOrNull, &$old): bool {
+                    $old = $locked;
+                    $stmt = $db->prepare('UPDATE `tblAssets` SET `ownershipTerms` = ? WHERE `assetID` = ? AND `siteID` = ?');
+                    $stmt->bind_param('sii', $termsOrNull, $assetId, $siteId);
+                    $done = $stmt->execute();
+                    $stmt->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::updateOwnershipTerms() failed: ' . $e->getMessage());
             return false;
         }
-        $stmt->bind_param('sii', $termsOrNull, $assetId, $siteId);
-        $ok = $stmt->execute();
-        $stmt->close();
 
-        if ($ok === false) {
+        if ($ok !== true) {
             return false;
         }
 
@@ -4385,24 +4602,28 @@ class AssetRegister
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
-        $stmt = $db->prepare('INSERT INTO tblAssetLoans (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-        if ($stmt === false) {
-            error_log('AssetRegister::createLoanRequest() prepare failed: ' . $db->error);
-            return 0;
-        }
-
+        // 🗑️🔒 Inserted under the asset's lock, only while it is still there
+        //    (#1047): a loan is never requested for an asset deleted while this
+        //    waited. See self::lockedLiveAsset(). (The "one unresolved loan at a
+        //    time" probe above still runs before the lock, as it always has;
+        //    that is a separate question from deletion.)
         try {
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-        } catch (\mysqli_sql_exception $e) {
+            $newId = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $columns, $placeholders, $types, $params): int {
+                    $stmt = $db->prepare('INSERT INTO tblAssetLoans (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
+
+                    return $id;
+                });
+        } catch (\Throwable $e) {
             error_log('AssetRegister::createLoanRequest() insert failed: ' . $e->getMessage());
-            $stmt->close();
             return 0;
         }
-        $newId = (int) $stmt->insert_id;
-        $stmt->close();
 
-        if ($newId <= 0) {
+        if ($newId === null || $newId <= 0) {
             return 0;
         }
 
@@ -4463,6 +4684,16 @@ class AssetRegister
         $isRequester = (int) $loan['requestedByID'] === $actorUserId;
         $canApprove  = self::canApproveLoan($assetId, $actorUserId);
 
+        // 🗑️ A DELETED asset (#1047). 'approve' and 'checkout' START something
+        //    and refuse an asset that is not there, judged under its lock (see
+        //    each helper). 'decline', 'cancel' and 'checkin' END something and
+        //    are deliberately NOT refused: the loans register (listLoans())
+        //    lists every loan, a deleted asset's included, and loan-action.php
+        //    asks nothing about deletion, so ending a deleted asset's open loan
+        //    is how it ever leaves the open and overdue lists. Refusing them
+        //    would strand it there for ever with no page able to close it.
+        //    What they write to a deleted asset's own row (check-in sets its
+        //    status and condition) is shown by no page.
         return match ($action) {
             'approve'  => self::loanApprove($loan, $canApprove, $actorUserId),
             'decline'  => self::loanDecline($loan, $data, $canApprove, $actorUserId),
@@ -4499,20 +4730,37 @@ class AssetRegister
         $assetId = (int) $loan['assetID'];
         $siteId  = (int) $loan['siteID'];
 
-        $stmt = $db->prepare(
-            "UPDATE tblAssetLoans SET status = 'approved', approvedByID = ?, approvedAt = NOW() "
-            . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'requested'"
-        );
-        if ($stmt === false) {
-            error_log('AssetRegister::loanApprove() prepare failed: ' . $db->error);
+        // 🗑️🔒 Under the asset's lock, only while it is still there (#1047).
+        //    Nothing before this asked about deletion at all: the loans
+        //    register (listLoans()) lists every loan, a deleted asset's
+        //    included, and loan-action.php does not ask either. So approving a
+        //    loan of a deleted asset is refused now whether it was deleted long
+        //    ago or while this waited — a loan is never approved for an asset
+        //    the register no longer has. (Declining, cancelling and checking
+        //    in are deliberately NOT refused: see loanAction()'s note.)
+        try {
+            $affected = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $actorUserId, $loanId, $assetId, $siteId): int {
+                    $stmt = $db->prepare(
+                        "UPDATE tblAssetLoans SET status = 'approved', approvedByID = ?, approvedAt = NOW() "
+                        . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'requested'"
+                    );
+                    $stmt->bind_param('iiii', $actorUserId, $loanId, $assetId, $siteId);
+                    $stmt->execute();
+                    $n = $stmt->affected_rows;
+                    $stmt->close();
+
+                    return $n;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::loanApprove() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not approve the loan — please try again.'];
         }
-        $stmt->bind_param('iiii', $actorUserId, $loanId, $assetId, $siteId);
-        $ok = $stmt->execute();
-        $affected = $stmt->affected_rows;
-        $stmt->close();
 
-        if ($ok === false || $affected <= 0) {
+        if ($affected === null) {
+            return ['ok' => false, 'msg' => self::LOAN_ASSET_DELETED_WORDS];
+        }
+        if ($affected <= 0) {
             return ['ok' => false, 'msg' => 'Could not approve the loan — it may have already changed state.'];
         }
 
@@ -4539,6 +4787,7 @@ class AssetRegister
      */
     private static function loanDecline(array $loan, array $data, bool $canApprove, int $actorUserId): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false) {
             return ['ok' => false, 'msg' => 'You do not have lending authority for this asset.'];
         }
@@ -4638,58 +4887,79 @@ class AssetRegister
         $newAssetStatus = $direction === 'out' ? 'on-loan' : 'borrowed';
 
         $db = App::db();
-        App::beginTransaction();
+        // 🗑️🔒 The transaction is the one self::withLiveAssetLocked() opens
+        //    (#1047): the asset's row is locked first, and an asset that is
+        //    not there — deleted long ago (the loans register lists every
+        //    loan, and nothing before this asked) or while this waited — is
+        //    never handed over: nothing is written and the answer is "Asset
+        //    not found." Every throw below rolls the whole unit back, as the
+        //    App::beginTransaction() block it replaces did.
+        //
+        //    🔢 The kit's COMPONENTS are locked in the same call, up front and
+        //    lowest number first (#1047 round 2) — never one by one after the
+        //    kit, which is a second lock order and deadlocked against a seat
+        //    linked between a component and its kit (measured). A component
+        //    that is gone is left out, never refusing the kit's checkout.
+        //    Only a top-level checkout sweeps components (see below), so only
+        //    it locks them.
+        $kitSummary   = ['swept' => [], 'skipped' => []];
+        $components   = $loan['parentLoanID'] === null ? self::kitChildren($assetId, $siteId) : [];
+        $componentIds = array_map(static fn (array $c): int => (int) $c['assetID'], $components);
         try {
-            // approvedByID/approvedAt are backfilled via COALESCE so a
-            // direct requested→active checkout (the approver skipping the
-            // separate 'approve' step) still records who authorised it.
-            $stmt = $db->prepare(
-                "UPDATE tblAssetLoans SET status = 'active', dateOut = NOW(), "
-                . 'conditionOut = ?, conditionOutNotes = ?, '
-                . 'approvedByID = COALESCE(approvedByID, ?), approvedAt = COALESCE(approvedAt, NOW()) '
-                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status IN ('requested', 'approved')"
-            );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare loan checkout: ' . $db->error);
-            }
-            $stmt->bind_param('ssiiii', $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId);
-            $stmt->execute();
-            $affected = $stmt->affected_rows;
-            $stmt->close();
-            if ($affected <= 0) {
-                // 🏁 Race — status moved since loanAction()'s read. Thrown
-                // here so the catch block below rolls back cleanly and
-                // reports the same friendly message as every other guard.
-                throw new \RuntimeException('Loan row did not update — status already changed');
-            }
+            $live = self::withLiveAssetsLocked($db, [$assetId], $siteId,
+                static function (array $lockedRows) use ($db, $loan, $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId, $newAssetStatus, $components, &$kitSummary): bool {
+                    // approvedByID/approvedAt are backfilled via COALESCE so a
+                    // direct requested→active checkout (the approver skipping the
+                    // separate 'approve' step) still records who authorised it.
+                    $stmt = $db->prepare(
+                        "UPDATE tblAssetLoans SET status = 'active', dateOut = NOW(), "
+                        . 'conditionOut = ?, conditionOutNotes = ?, '
+                        . 'approvedByID = COALESCE(approvedByID, ?), approvedAt = COALESCE(approvedAt, NOW()) '
+                        . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status IN ('requested', 'approved')"
+                    );
+                    if ($stmt === false) {
+                        throw new \RuntimeException('Failed to prepare loan checkout: ' . $db->error);
+                    }
+                    $stmt->bind_param('ssiiii', $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId);
+                    $stmt->execute();
+                    $affected = $stmt->affected_rows;
+                    $stmt->close();
+                    if ($affected <= 0) {
+                        // 🏁 Race — status moved since loanAction()'s read. Thrown
+                        // here so the catch block below rolls back cleanly and
+                        // reports the same friendly message as every other guard.
+                        throw new \RuntimeException('Loan row did not update — status already changed');
+                    }
 
-            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
-            if ($assetStmt === false) {
-                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
-            }
-            $assetStmt->bind_param('sii', $newAssetStatus, $assetId, $siteId);
-            $assetStmt->execute();
-            $assetStmt->close();
+                    $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+                    if ($assetStmt === false) {
+                        throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+                    }
+                    $assetStmt->bind_param('sii', $newAssetStatus, $assetId, $siteId);
+                    $assetStmt->execute();
+                    $assetStmt->close();
 
-            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkout (this loan's own
-            // parentLoanID is null) of an asset that has kit components
-            // also sweeps every eligible, currently-available component
-            // into its own chained active loan (parentLoanID = this
-            // loan's id). A CHILD loan's own checkout never re-cascades —
-            // the guard below is what stops that, since a swept-in child
-            // loan always carries a non-null parentLoanID. Inside this
-            // same transaction so a failure here rolls back the parent's
-            // own checkout too — see cascadeKitCheckout()'s own doc.
-            $kitSummary = ['swept' => [], 'skipped' => []];
-            if ($loan['parentLoanID'] === null) {
-                $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId);
-            }
+                    // 🧰 Kit cascade (#413) — a TOP-LEVEL checkout (this loan's own
+                    // parentLoanID is null) of an asset that has kit components
+                    // also sweeps every eligible, currently-available component
+                    // into its own chained active loan (parentLoanID = this
+                    // loan's id). A CHILD loan's own checkout never re-cascades —
+                    // the guard below is what stops that, since a swept-in child
+                    // loan always carries a non-null parentLoanID. Inside this
+                    // same transaction so a failure here rolls back the parent's
+                    // own checkout too — see cascadeKitCheckout()'s own doc.
+                    if ($loan['parentLoanID'] === null) {
+                        $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId, $components, $lockedRows);
+                    }
 
-            App::commit();
+                    return true;
+                }, $componentIds);
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::loanCheckout() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not check out this loan — it may have already changed state.'];
+        }
+        if ($live === null) {
+            return ['ok' => false, 'msg' => self::LOAN_ASSET_DELETED_WORDS];
         }
 
         self::audit(
@@ -4706,9 +4976,12 @@ class AssetRegister
         $msg = 'Loan checked out — condition and dates recorded.';
         if (count($kitSummary['swept']) > 0) {
             $msg .= ' ' . count($kitSummary['swept']) . ' kit component(s) checked out too.';
-            if (count($kitSummary['skipped']) > 0) {
-                $msg .= ' (skipped: ' . implode(', ', $kitSummary['skipped']) . ')';
-            }
+        }
+        // ⏭️ Said even when NO component went out (#1047 round 3): a kit whose
+        //    only component was deleted, moved out or added a moment ago must
+        //    not read as if it had none.
+        if (count($kitSummary['skipped']) > 0) {
+            $msg .= ' Kit component(s) not checked out: ' . implode(', ', $kitSummary['skipped']) . '.';
         }
 
         return ['ok' => true, 'msg' => $msg];
@@ -4736,6 +5009,7 @@ class AssetRegister
      */
     private static function loanCheckin(array $loan, array $data, bool $canApprove, bool $isRequester): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false && $isRequester === false) {
             return ['ok' => false, 'msg' => 'Only the original requester or someone with lending authority can check this loan in.'];
         }
@@ -4756,53 +5030,76 @@ class AssetRegister
         $assetId = (int) $loan['assetID'];
         $siteId  = (int) $loan['siteID'];
 
+        $kitReturned = ['returned' => []];
         $db = App::db();
-        App::beginTransaction();
+        // 🔢 One lock order (#1047 round 2): the asset and, for a kit, every
+        //    component this check-in will write to are locked FIRST, together,
+        //    lowest number first, through self::withLiveAssetsLocked() — the
+        //    order every multi-asset write takes. Writing the kit's row and
+        //    then each component's (as this did) is a second order, the one
+        //    that deadlocked a kit's checkout against a seat. They are all
+        //    passed as "lock if live", so NOTHING here is refused for a deleted
+        //    asset: ending a loan is deliberately allowed (see loanAction()).
+        //    A deleted row is simply not locked first and is written as before.
+        $lockAlso = [$assetId];
+        if ($loan['parentLoanID'] === null) {
+            foreach (self::activeKitChildLoans($loanId, $siteId) as $childLoan) {
+                $lockAlso[] = (int) $childLoan['assetID'];
+            }
+        }
         try {
-            $stmt = $db->prepare(
-                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
-                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
-            );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare loan checkin: ' . $db->error);
-            }
-            $stmt->bind_param('ssiii', $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId);
-            $stmt->execute();
-            $affected = $stmt->affected_rows;
-            $stmt->close();
-            if ($affected <= 0) {
-                throw new \RuntimeException('Loan row did not update — status already changed');
-            }
+            $done = self::withLiveAssetsLocked($db, [], $siteId,
+                static function (array $lockedRows) use ($db, $loan, $data, $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId, &$kitReturned): bool {
+                    $stmt = $db->prepare(
+                        "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
+                        . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
+                    );
+                    if ($stmt === false) {
+                        throw new \RuntimeException('Failed to prepare loan checkin: ' . $db->error);
+                    }
+                    $stmt->bind_param('ssiii', $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId);
+                    $stmt->execute();
+                    $affected = $stmt->affected_rows;
+                    $stmt->close();
+                    if ($affected <= 0) {
+                        throw new \RuntimeException('Loan row did not update — status already changed');
+                    }
 
-            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
-            if ($assetStmt === false) {
-                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
-            }
-            $inService = 'in-service';
-            $assetStmt->bind_param('ssii', $inService, $conditionIn, $assetId, $siteId);
-            $assetStmt->execute();
-            $assetStmt->close();
+                    $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+                    if ($assetStmt === false) {
+                        throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+                    }
+                    $inService = 'in-service';
+                    $assetStmt->bind_param('ssii', $inService, $conditionIn, $assetId, $siteId);
+                    $assetStmt->execute();
+                    $assetStmt->close();
 
-            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
-            // parentLoanID is null) of a kit parent also checks in every
-            // one of its still-active swept-in component loans. A CHILD
-            // loan's own checkin never re-cascades, for the same reason as
-            // loanCheckout()'s mirror-image guard above. `childConditions`
-            // (an optional array<int assetID, string condition> posted by
-            // item.php's checkin form) lets the person checking the kit in
-            // record a DIFFERENT return condition per component; any
-            // component left unspecified falls back to the parent's own
-            // $conditionIn — see cascadeKitCheckin()'s own doc.
-            $kitReturned = ['returned' => []];
-            if ($loan['parentLoanID'] === null) {
-                $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
-                $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
-            }
+                    // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
+                    // parentLoanID is null) of a kit parent also checks in every
+                    // one of its still-active swept-in component loans. A CHILD
+                    // loan's own checkin never re-cascades, for the same reason as
+                    // loanCheckout()'s mirror-image guard above. `childConditions`
+                    // (an optional array<int assetID, string condition> posted by
+                    // item.php's checkin form) lets the person checking the kit in
+                    // record a DIFFERENT return condition per component; any
+                    // component left unspecified falls back to the parent's own
+                    // $conditionIn — see cascadeKitCheckin()'s own doc.
+                    if ($loan['parentLoanID'] === null) {
+                        $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
+                        $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
+                    }
 
-            App::commit();
+                    return true;
+                }, $lockAlso);
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::loanCheckin() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
+        }
+        // Nothing here is REQUIRED, so today the helper never answers null. Its
+        // answer is still asked (#1047 round 3): with the helper changed to
+        // refuse a gone asset, ignoring it reported "Loan checked in" while
+        // nothing had been written (measured). Null means nothing was written.
+        if ($done !== true) {
             return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
         }
 
@@ -4840,6 +5137,7 @@ class AssetRegister
      */
     private static function loanCancel(array $loan, bool $canApprove, bool $isRequester): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false && $isRequester === false) {
             return ['ok' => false, 'msg' => 'Only the requester or someone with lending authority can cancel this loan.'];
         }
@@ -5084,17 +5382,67 @@ class AssetRegister
         }
 
         // 🔒 Narrow, race-safe UPDATE — see method doc.
-        $stmt = $db->prepare(
-            'UPDATE tblAssets SET parentAssetID = ? WHERE assetID = ? AND siteID = ? AND parentAssetID IS NULL'
-        );
-        if ($stmt === false) {
-            error_log('AssetRegister::attachToKit() prepare failed: ' . $db->error);
+        // 🗑️🔒 Made with BOTH assets' rows locked (in number order, so two
+        //    writers on the same pair queue rather than deadlock), and only
+        //    while both are still there (#1047): a component is never put in a
+        //    kit that was deleted while this waited, nor a deleted component
+        //    into a kit. Which one went is said with the same words as the
+        //    checks above.
+        try {
+            $affected = self::withLiveAssetsLocked($db, [$childAssetId, $parentAssetId], $siteId,
+                static function (array $locked) use ($db, $parentAssetId, $childAssetId, $siteId): int|string {
+                    // 🧰 "Kits are one level deep", asked AGAIN under both locks
+                    //    (#1047 round 2). The checks above ran before any lock,
+                    //    so two attaches at once — 30 into 31 and 31 into 30 —
+                    //    each passed them and made a loop (measured). Under the
+                    //    locks the second sees the first: its kit is now itself
+                    //    a component, or its component now has components.
+                    //    Another ATTACH that adds a component to $childAssetId
+                    //    locks $childAssetId too, so it waits for us (or we for
+                    //    it); the count below is the transaction's first plain
+                    //    read, taken after the locks, so it sees what such a
+                    //    write committed. ⚠️ NOT every writer of parentAssetID
+                    //    is an attach: updateAsset() and createAsset() write it
+                    //    too (the edit page's "Parent asset (bundle/kit)" box,
+                    //    the API's _coerce.php) without this kit's lock and
+                    //    without these checks, so a loop through the edit page
+                    //    is NOT closed here — raised as its own issue.
+                    if ($locked[$parentAssetId]['parentAssetID'] !== null) {
+                        return 'The chosen parent is itself a component of another kit — kits are only one level deep.';
+                    }
+                    if ($locked[$childAssetId]['parentAssetID'] !== null) {
+                        return 'That asset is already part of a kit — detach it first.';
+                    }
+                    $kids = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblAssets` WHERE `parentAssetID` = ? AND `siteID` = ? AND `isDeleted` = 0');
+                    $kids->bind_param('ii', $childAssetId, $siteId);
+                    $kids->execute();
+                    $hasKids = (int) ($kids->get_result()->fetch_assoc()['n'] ?? 0) > 0;
+                    $kids->close();
+                    if ($hasKids === true) {
+                        return "That asset already has its own components, so it can't become a component of another kit.";
+                    }
+                    $stmt = $db->prepare(
+                        'UPDATE tblAssets SET parentAssetID = ? WHERE assetID = ? AND siteID = ? AND parentAssetID IS NULL'
+                    );
+                    $stmt->bind_param('iii', $parentAssetId, $childAssetId, $siteId);
+                    $stmt->execute();
+                    $n = $stmt->affected_rows;
+                    $stmt->close();
+
+                    return $n;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::attachToKit() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not attach that component — please try again.'];
         }
-        $stmt->bind_param('iii', $parentAssetId, $childAssetId, $siteId);
-        $stmt->execute();
-        $affected = $stmt->affected_rows;
-        $stmt->close();
+        if ($affected === null) {
+            return self::get($childAssetId) === null
+                ? ['ok' => false, 'msg' => 'Component asset not found.']
+                : ['ok' => false, 'msg' => 'Parent (kit) asset not found.'];
+        }
+        if (is_string($affected) === true) {
+            return ['ok' => false, 'msg' => $affected]; // refused under the locks, nothing written
+        }
         if ($affected <= 0) {
             return ['ok' => false, 'msg' => 'Could not attach that component — it may have changed since you loaded this page.'];
         }
@@ -5122,6 +5470,14 @@ class AssetRegister
      */
     public static function detachFromKit(int $childAssetId, int $actorUserId): array
     {
+        // 🗑️ Not given the locked refusal (#1047), on purpose — but be exact about what happens:
+        //    self::get() just below ALREADY refuses a component deleted before this call
+        //    ("Component asset not found.", measured in round 3). Only one deleted in the
+        //    instant between that read and the UPDATE is detached anyway: its link is removed
+        //    on a row no page shows (kitChildren() leaves deleted components out), and the only
+        //    new record is self::audit()'s line saying it was detached. Detaching an
+        //    already-deleted component is not offered, because
+        //    no page lists one to detach.
         $child = self::get($childAssetId);
         if ($child === null) {
             return ['ok' => false, 'msg' => 'Component asset not found.'];
@@ -5247,14 +5603,28 @@ class AssetRegister
      * since a future pass may want the components to inherit the
      * confirmed/overridden value instead.
      *
+     * 🔢🗑️ LOCKS (#1047 round 2): this takes NO lock of its own. loanCheckout()
+     * locked the kit and every component in $components in ONE call, lowest
+     * number first (self::withLiveAssetsLocked(), the one lock order), and
+     * hands over the rows it holds in $lockedRows. A component missing from
+     * them is not there any more (deleted, perhaps while the checkout waited)
+     * and is skipped. A component that is no longer part of THIS kit by the
+     * time its row was locked, or one added to the kit after the list was
+     * read (so not locked here), is skipped too, with its reason, rather than
+     * locked out of order.
+     *
      * @param array<string, mixed> $parentLoan The parent's own freshly
      *        (pre-UPDATE) loaded loan row, exactly as loanCheckout()
      *        received it.
+     * @param list<array<string, mixed>>      $components The kit's components
+     *        as kitChildren() read them before the lock.
+     * @param array<int, array<string, mixed>> $lockedRows The rows loanCheckout()
+     *        holds locked, keyed by asset number.
      *
      * @return array{swept: string[], skipped: string[]} Component asset
      *         names actually swept in, and names+reason for any skipped.
      */
-    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId): array
+    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId, array $components, array $lockedRows): array
     {
         $db            = App::db();
         $parentAssetId = (int) $parentLoan['assetID'];
@@ -5266,10 +5636,33 @@ class AssetRegister
 
         $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
 
-        foreach (self::kitChildren($parentAssetId, $siteId) as $child) {
+        // ➕ Added to the kit after loanCheckout() read the list: not locked
+        //    here, so not swept (locking it now would be out of order).
+        $listed = array_map(static fn (array $c): int => (int) $c['assetID'], $components);
+        foreach (self::kitChildren($parentAssetId, $siteId) as $late) {
+            if (in_array((int) $late['assetID'], $listed, true) === false) {
+                $skipped[] = (string) $late['name'] . ' (added to the kit just now — check it out on its own)';
+            }
+        }
+
+        foreach ($components as $child) {
             $childAssetId = (int) $child['assetID'];
             $childName    = (string) $child['name'];
-            $childStatus  = (string) $child['status'];
+
+            // 🗑️🔒 The component's own row as loanCheckout() holds it locked
+            //    (#1047). Missing means it is not there any more — deleted,
+            //    perhaps while this checkout waited — so it is skipped rather
+            //    than handed over. Its status is the locked row's, as it is now.
+            $lockedChild = $lockedRows[$childAssetId] ?? null;
+            if ($lockedChild === null) {
+                $skipped[] = $childName . ' (no longer in the register)';
+                continue;
+            }
+            if ((int) ($lockedChild['parentAssetID'] ?? 0) !== $parentAssetId) {
+                $skipped[] = $childName . ' (no longer part of this kit)';
+                continue;
+            }
+            $childStatus = (string) $lockedChild['status'];
 
             if (in_array($childStatus, ['in-service', 'in-storage'], true) === false) {
                 $skipped[] = $childName . ' (not available)';
@@ -5400,6 +5793,7 @@ class AssetRegister
      */
     private static function cascadeKitCheckin(array $parentLoan, string $conditionIn, array $childConditions): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         $db           = App::db();
         $parentLoanId = (int) $parentLoan['loanID'];
         $siteId       = (int) $parentLoan['siteID'];
@@ -5863,8 +6257,15 @@ class AssetRegister
         //    it and writing the repair; any throw rolls back.
         try {
             $newId = Currency::withParentLocked($db, 'tblAssets', $assetId, $siteId,
-                static function (?string $assetCurrency) use ($db, &$fields): int {
+                static function (?string $assetCurrency) use ($db, $assetId, $siteId, &$fields): int {
                     if ($assetCurrency === null) {
+                        return 0;
+                    }
+                    // 🗑️ withParentLocked() has locked the asset's row but asks
+                    //    nothing about deletion; asked here, under that lock
+                    //    (#1047), so a repair is never recorded against an
+                    //    asset deleted while this waited.
+                    if (self::lockedLiveAsset($db, $assetId, $siteId) === null) {
                         return 0;
                     }
                     $fields['currency'] = [$assetCurrency, 's'];
@@ -6007,23 +6408,26 @@ class AssetRegister
         $params[]  = $assetId;
         $params[]  = $siteId;
 
-        $stmt = $db->prepare('UPDATE tblAssetMaintenance SET ' . $setClause . ' WHERE maintID = ? AND assetID = ? AND siteID = ?');
-        if ($stmt === false) {
-            error_log('AssetRegister::updateMaintenance() prepare failed: ' . $db->error);
-            return false;
-        }
-
+        // 🗑️🔒 Under the asset's lock, only while it is still there (#1047):
+        //    the page refuses a deleted asset with self::get() first; one
+        //    deleted while this waited is refused the same way (false, nothing
+        //    written). See self::lockedLiveAsset().
         try {
-            $stmt->bind_param($types, ...$params);
-            $ok = $stmt->execute();
-        } catch (\mysqli_sql_exception $e) {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $setClause, $types, $params): bool {
+                    $stmt = $db->prepare('UPDATE tblAssetMaintenance SET ' . $setClause . ' WHERE maintID = ? AND assetID = ? AND siteID = ?');
+                    $stmt->bind_param($types, ...$params);
+                    $done = $stmt->execute();
+                    $stmt->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
             error_log('AssetRegister::updateMaintenance() update failed: ' . $e->getMessage());
-            $stmt->close();
             return false;
         }
-        $stmt->close();
 
-        if ($ok === false) {
+        if ($ok !== true) {
             return false;
         }
 
@@ -6050,6 +6454,9 @@ class AssetRegister
      */
     public static function deleteMaintenance(int $maintId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    maintenance-save.php refuses a deleted asset with get() first; in the race, a repair
+        //    of an asset no page shows is removed (and audited). Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -6736,23 +7143,33 @@ class AssetRegister
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
-        $stmt = $db->prepare('INSERT INTO tblAssetLicenseAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-        if ($stmt === false) {
-            error_log('AssetRegister::assignSeat() prepare failed: ' . $db->error);
-            return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
-        }
-
+        // 🗑️🔒 Inserted with the licence's row locked — and the device's, when
+        //    the seat is linked to one of this register's assets — only while
+        //    every one of them is still there (#1047): a seat is never handed
+        //    out on a licence deleted while this waited, nor linked to a
+        //    deleted device. Locked in number order (self::withLiveAssetsLocked()).
+        $lockIds = $deviceAssetId !== null ? [$licenseAssetId, $deviceAssetId] : [$licenseAssetId];
         try {
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-        } catch (\mysqli_sql_exception $e) {
+            $newId = self::withLiveAssetsLocked($db, $lockIds, $siteId,
+                static function (array $locked) use ($db, $columns, $placeholders, $types, $params): int {
+                    $stmt = $db->prepare('INSERT INTO tblAssetLicenseAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
+
+                    return $id;
+                });
+        } catch (\Throwable $e) {
             error_log('AssetRegister::assignSeat() insert failed: ' . $e->getMessage());
-            $stmt->close();
             return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
         }
-        $newId = (int) $stmt->insert_id;
-        $stmt->close();
 
+        if ($newId === null) {
+            return self::get($licenseAssetId) === null
+                ? ['id' => 0, 'warnings' => ['Licence asset not found.']]
+                : ['id' => 0, 'warnings' => ['That device asset was not found on this site.']];
+        }
         if ($newId <= 0) {
             return ['id' => 0, 'warnings' => ['Could not save the seat assignment — please try again.']];
         }
@@ -6793,6 +7210,10 @@ class AssetRegister
      */
     public static function releaseSeat(int $assignmentId, int $licenseAssetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a seat.
+        //    license-action.php asks nothing about deletion, and refusing would leave a seat
+        //    'active' for ever on a licence no page shows, counted against nothing. Nothing new is
+        //    created on the deleted licence.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -6887,6 +7308,11 @@ class AssetRegister
      */
     public static function createFoundReport(int $assetId, array $data, string $ipHash): int
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it RECORDS what a member of the
+        //    public told us. found-save.php resolves the token with isDeleted = 0 first; a report
+        //    landing in the instant after a deletion is still a true message from a stranger, kept
+        //    to its own retention period, and refusing it would throw it away with no way to say
+        //    why.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -7025,6 +7451,9 @@ class AssetRegister
      */
     public static function setFoundReportStatus(int $reportId, int $siteId, string $status, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it triages a REPORT, keyed by
+        //    the report, not the asset; marking a stranger's report handled is right whether or
+        //    not the asset is still in the register.
         if (in_array($status, ['new', 'actioned', 'closed'], true) === false) {
             return false;
         }
@@ -8071,16 +8500,24 @@ class AssetRegister
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
+        // 🗑️🔒 Inserted under the asset's lock, only while it is still there
+        //    (#1047): an asset deleted while this waited is not booked for an
+        //    event. See self::lockedLiveAsset().
         $newId = 0;
         try {
-            $stmt = $db->prepare('INSERT INTO tblAssetEventAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare event-assignment insert: ' . $db->error);
+            $newId = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $columns, $placeholders, $types, $params): int {
+                    $stmt = $db->prepare('INSERT INTO tblAssetEventAssignments (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
+                    $stmt->bind_param($types, ...$params);
+                    $stmt->execute();
+                    $id = (int) $stmt->insert_id;
+                    $stmt->close();
+
+                    return $id;
+                });
+            if ($newId === null) {
+                return ['id' => 0, 'warnings' => ['Asset not found.']];
             }
-            $stmt->bind_param($types, ...$params);
-            $stmt->execute();
-            $newId = (int) $stmt->insert_id;
-            $stmt->close();
         } catch (\mysqli_sql_exception $e) {
             // 🪞 Most likely cause: uq_astev_asset_event — this asset is
             // already assigned to this event. Friendly, non-fatal warning
@@ -8115,6 +8552,10 @@ class AssetRegister
      */
     public static function unassignFromEvent(int $assignmentId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a booking.
+        //    event-assign.php refuses a deleted asset with get() first; in the race, the booking
+        //    of an asset no page shows is removed (and audited), which is what nobody would want
+        //    kept anyway.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -8176,6 +8617,10 @@ class AssetRegister
      */
     public static function recordScan(int $assetId, string $context, ?int $actorUserId): void
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it RECORDS that somebody scanned
+        //    a label, a fact that happened. tag.php resolves the token with isDeleted = 0 first; a
+        //    scan landing in the instant after a deletion is still true, and the log is cleared on
+        //    its own retention period. Locking an asset on a public page would add nothing.
         if ($assetId <= 0) {
             return;
         }
@@ -8920,19 +9365,37 @@ class AssetRegister
             //    "recently updated" order meaningless. Explicitly setting
             //    the column (even to its own value) suppresses the auto-
             //    update on both MySQL 8 and MariaDB.
-            $upd = $db->prepare(
-                'UPDATE tblAssets SET currentValuePence = ?, valuationDate = ?, updatedAt = updatedAt '
-                . 'WHERE assetID = ? AND siteID = ?'
-            );
-            if ($upd === false) {
+            //
+            // 🗑️🔒 Each asset's value is written under ITS lock, only while it
+            //    is still there (#1047): the list above (isDeleted = 0) was read
+            //    without a lock, and on a busy register an asset can be deleted
+            //    between that read and this write. One that has gone is skipped,
+            //    its history row as well. One asset at a time, so this job never
+            //    holds more than one asset's lock.
+            try {
+                $changed = self::withLiveAssetLocked($db, $assetId, $siteId,
+                    static function (array $locked) use ($db, $value, $today, $assetId, $siteId): int {
+                        $upd = $db->prepare(
+                            'UPDATE tblAssets SET currentValuePence = ?, valuationDate = ?, updatedAt = updatedAt '
+                            . 'WHERE assetID = ? AND siteID = ?'
+                        );
+                        $upd->bind_param('isii', $value, $today, $assetId, $siteId);
+                        $upd->execute();
+                        $n = $upd->affected_rows;
+                        $upd->close();
+
+                        return $n;
+                    });
+            } catch (\Throwable $e) {
+                error_log('AssetRegister::persistCurrentValues() asset #' . $assetId . ': ' . $e->getMessage());
                 continue;
             }
-            $upd->bind_param('isii', $value, $today, $assetId, $siteId);
-            $upd->execute();
-            if ($upd->affected_rows > 0) {
+            if ($changed === null) {
+                continue;
+            }
+            if ($changed > 0) {
                 $written++;
             }
-            $upd->close();
 
             // 📈 #412 — record today's snapshot into the value-history
             // table regardless of $upd's own affected_rows (see method
@@ -9023,6 +9486,11 @@ class AssetRegister
             return Currency::withParentLocked($db, 'tblAssets', $assetId, $siteId,
                 static function (?string $assetCurrency) use ($db, $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById): bool {
                     if ($assetCurrency === null) {
+                        return false;
+                    }
+                    // 🗑️ Asked under the lock withParentLocked() took (#1047):
+                    //    no valuation is recorded for an asset deleted since.
+                    if (self::lockedLiveAsset($db, $assetId, $siteId) === null) {
                         return false;
                     }
                     $ins = $db->prepare(
@@ -9676,19 +10144,34 @@ class AssetRegister
 
         // 💾 UPSERT — uq_aststi_stocktake_asset makes a re-scan an in-place
         // update rather than a second row.
-        $upsert = $db->prepare(
-            'INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus, scannedByID, scannedAt, foundLocationID) '
-            . 'VALUES (?, ?, ?, ?, ?, NOW(), ?) '
-            . 'ON DUPLICATE KEY UPDATE verifyStatus = VALUES(verifyStatus), scannedByID = VALUES(scannedByID), '
-            . 'scannedAt = VALUES(scannedAt), foundLocationID = VALUES(foundLocationID)'
-        );
-        if ($upsert === false) {
-            error_log('AssetRegister::recordStocktakeScan() prepare failed: ' . $db->error);
+        //
+        // 🗑️🔒 Written under the asset's lock, only while it is still there
+        //    (#1047): findByScanCode() above leaves deleted assets out but
+        //    takes no lock, so one deleted while this scan waited is answered
+        //    exactly as a deleted one always was — not recognised — and
+        //    nothing is written. See self::lockedLiveAsset().
+        try {
+            $ok = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $stocktakeId, $siteId, $assetId, $verifyStatus, $actorUserId, $storedFoundLocationId): bool {
+                    $upsert = $db->prepare(
+                        'INSERT INTO tblAssetStocktakeItems (stocktakeID, siteID, assetID, verifyStatus, scannedByID, scannedAt, foundLocationID) '
+                        . 'VALUES (?, ?, ?, ?, ?, NOW(), ?) '
+                        . 'ON DUPLICATE KEY UPDATE verifyStatus = VALUES(verifyStatus), scannedByID = VALUES(scannedByID), '
+                        . 'scannedAt = VALUES(scannedAt), foundLocationID = VALUES(foundLocationID)'
+                    );
+                    $upsert->bind_param('iiisii', $stocktakeId, $siteId, $assetId, $verifyStatus, $actorUserId, $storedFoundLocationId);
+                    $done = $upsert->execute();
+                    $upsert->close();
+
+                    return $done;
+                });
+        } catch (\Throwable $e) {
+            error_log('AssetRegister::recordStocktakeScan() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
         }
-        $upsert->bind_param('iiisii', $stocktakeId, $siteId, $assetId, $verifyStatus, $actorUserId, $storedFoundLocationId);
-        $ok = $upsert->execute();
-        $upsert->close();
+        if ($ok === null) {
+            return ['ok' => false, 'msg' => 'Code not recognised on this site.'];
+        }
         if ($ok === false) {
             return ['ok' => false, 'msg' => 'Could not record the scan — please try again.'];
         }
@@ -10478,38 +10961,47 @@ class AssetRegister
 
         $newLoanId  = 0;
         $newStatus  = 'on-loan';
-        App::beginTransaction();
+        // 🗑️🔒 The transaction is the one self::withLiveAssetLocked() opens
+        //    (#1047): the asset's row is locked first and the item is handed
+        //    over only while it is still there, so one deleted while this
+        //    waited gets the same "Item not found." as one deleted earlier.
+        //    Any throw rolls the loan and the status back together.
         try {
-            $stmt = $db->prepare(
-                'INSERT INTO tblAssetLoans '
-                . '(siteID, assetID, direction, counterpartyType, counterpartyUserID, status, '
-                . 'conditionOut, dateOut, requestedByID, approvedByID, approvedAt) '
-                . "VALUES (?, ?, 'out', 'user', ?, 'active', ?, NOW(), ?, ?, NOW())"
-            );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare kiosk checkout: ' . $db->error);
-            }
-            $stmt->bind_param('iiisii', $siteId, $assetId, $kioskUserId, $conditionOut, $kioskUserId, $kioskUserId);
-            $stmt->execute();
-            $newLoanId = (int) $stmt->insert_id;
-            $stmt->close();
-            if ($newLoanId <= 0) {
-                throw new \RuntimeException('Kiosk checkout insert did not return an id');
-            }
+            $live = self::withLiveAssetLocked($db, $assetId, $siteId,
+                static function (array $locked) use ($db, $siteId, $assetId, $kioskUserId, $conditionOut, $newStatus, &$newLoanId): bool {
+                    $stmt = $db->prepare(
+                        'INSERT INTO tblAssetLoans '
+                        . '(siteID, assetID, direction, counterpartyType, counterpartyUserID, status, '
+                        . 'conditionOut, dateOut, requestedByID, approvedByID, approvedAt) '
+                        . "VALUES (?, ?, 'out', 'user', ?, 'active', ?, NOW(), ?, ?, NOW())"
+                    );
+                    if ($stmt === false) {
+                        throw new \RuntimeException('Failed to prepare kiosk checkout: ' . $db->error);
+                    }
+                    $stmt->bind_param('iiisii', $siteId, $assetId, $kioskUserId, $conditionOut, $kioskUserId, $kioskUserId);
+                    $stmt->execute();
+                    $newLoanId = (int) $stmt->insert_id;
+                    $stmt->close();
+                    if ($newLoanId <= 0) {
+                        throw new \RuntimeException('Kiosk checkout insert did not return an id');
+                    }
 
-            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
-            if ($assetStmt === false) {
-                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
-            }
-            $assetStmt->bind_param('sii', $newStatus, $assetId, $siteId);
-            $assetStmt->execute();
-            $assetStmt->close();
+                    $assetStmt = $db->prepare('UPDATE tblAssets SET status = ? WHERE assetID = ? AND siteID = ?');
+                    if ($assetStmt === false) {
+                        throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+                    }
+                    $assetStmt->bind_param('sii', $newStatus, $assetId, $siteId);
+                    $assetStmt->execute();
+                    $assetStmt->close();
 
-            App::commit();
+                    return true;
+                });
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::kioskCheckout() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not check out this item — please try again or ask a manager for help.'];
+        }
+        if ($live === null) {
+            return ['ok' => false, 'msg' => 'Item not found.'];
         }
 
         self::audit(
@@ -10554,6 +11046,9 @@ class AssetRegister
      */
     public static function kioskCheckin(int $assetId, int $kioskUserId, int $kioskTokenId, ?string $conditionIn): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan, for the same
+        //    reason loanAction() gives for check-in: refusing would leave the member's loan open
+        //    for ever.
         $db     = App::db();
         $siteId = Site::id();
 

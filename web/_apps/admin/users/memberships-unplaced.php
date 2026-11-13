@@ -31,7 +31,7 @@
  * It cannot guess where a group belongs; a person decides. It never creates
  * an organisation membership as a side effect: placing a person needs them
  * to be an ACTIVE member of that organisation already (add them first at
- * Admin → Sites → Users). A parked group's asset ownership was not kept by
+ * Admin, Organisations, Users). A parked group's asset ownership was not kept by
  * the migration (see migration 203's header); it has to be added again from
  * the asset's own page after placing the group.
  *
@@ -172,7 +172,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <strong>What to do.</strong> Place each group into the organisation it belongs to; its members who are
         active members of that organisation are added straight away, and anyone else stays listed below. Placing a
         person needs them to be an active member of that organisation already — add them first at
-        Admin &rarr; Sites &rarr; Users. Any asset a parked group owned was not kept; add it again from the asset's
+        Admin, Organisations, Users. Any asset a parked group owned was not kept; add it again from the asset's
         page once the group is placed.
     </p>
 </div>

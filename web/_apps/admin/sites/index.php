@@ -2,7 +2,7 @@
 // Path: public_html/admin/sites/index.php
 /**
  * -----------------------------------------------------------------------------
- * Admin — Site Management 🌐
+ * Admin — Organisations 🌐 (titled "Site Management" until #973)
  * -----------------------------------------------------------------------------
  * Lists all sites (active and inactive) for umbrella admins.
  * Provides create/edit forms and quick-glance site info cards.
@@ -68,26 +68,29 @@ $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 // 🎨 Page setup
-$pageTitle   = 'Site Management';
+// #973: "Organisations", the name every sentence in the portal sends people to
+// ("Admin, Organisations"). It was "Site Management" here and "Sites" in the
+// menu, so somebody told to open Admin, Organisations found no such word.
+$pageTitle   = 'Organisations';
 $pageSection = 'admin';
-$breadcrumbs = ['Admin' => Site::url('admin'), 'Sites' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Organisations' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
-        <i class="fa-solid fa-sitemap me-2"></i> Site Management
+        <i class="fa-solid fa-sitemap me-2"></i> Organisations
     </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#siteModal"
             data-site-new>
-        <i class="fa-solid fa-plus me-1"></i> New Site
+        <i class="fa-solid fa-plus me-1"></i> New organisation
     </button>
 </div>
 <noscript>
     <div class="alert alert-warning">
         <i class="fa-solid fa-triangle-exclamation me-1"></i>
-        <strong>JavaScript is disabled.</strong> The New Site and Edit buttons require JavaScript to open modal dialogs. Enable JavaScript for full site management functionality.
+        <strong>JavaScript is disabled.</strong> The New organisation and Edit buttons need JavaScript to open their forms. Turn JavaScript on to add or change an organisation.
     </div>
 </noscript>
 
@@ -134,7 +137,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 
 <?php if (count($sites) === 0): ?>
 <div class="alert alert-info">
-    <i class="fa-solid fa-info-circle me-1"></i> No sites configured yet.
+    <i class="fa-solid fa-info-circle me-1"></i> No organisations yet.
 </div>
 <?php else: ?>
 <div class="row g-3">
@@ -232,7 +235,7 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 </div>
 <?php endif; ?>
 
-<!-- 📝 Create/Edit Site Modal -->
+<!-- 📝 New / Edit organisation box (the "New Site" / "Edit Site" box until #973) -->
 <div class="modal fade" id="siteModal" tabindex="-1" aria-labelledby="siteModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-fullscreen-sm-down">
         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/sites/save'), ENT_QUOTES, 'UTF-8'); ?>" class="modal-content">
@@ -241,18 +244,18 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 
             <div class="modal-header">
                 <h5 class="modal-title" id="siteModalLabel">
-                    <i class="fa-solid fa-sitemap me-1"></i> <span id="modalTitleText">New Site</span>
+                    <i class="fa-solid fa-sitemap me-1"></i> <span id="modalTitleText">New organisation</span>
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
 
             <div class="modal-body">
                 <div class="mb-3">
-                    <label for="formSiteName" class="form-label">Site Name <span class="text-danger">*</span></label>
+                    <label for="formSiteName" class="form-label">Organisation name <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="formSiteName" name="siteName" required maxlength="255">
                 </div>
                 <div class="mb-3">
-                    <label for="formSiteKey" class="form-label">Site Key <span class="text-danger">*</span></label>
+                    <label for="formSiteKey" class="form-label">Organisation key <span class="text-danger">*</span></label>
                     <input type="text" class="form-control" id="formSiteKey" name="siteKey" required maxlength="50"
                            pattern="[a-z0-9\-]+" title="Lowercase letters, numbers, and hyphens only">
                     <div class="form-text">Machine-readable slug (e.g. <code>cambridge</code>, <code>leeds</code>)</div>
@@ -367,7 +370,7 @@ function resetSiteForm() {
         document.getElementById('formTimezone').value = '';
     }
     document.getElementById('formIsActive').checked = true;
-    document.getElementById('modalTitleText').textContent = 'New Site';
+    document.getElementById('modalTitleText').textContent = 'New organisation';
 }
 
 function editSite(site) {
@@ -386,19 +389,19 @@ function editSite(site) {
         document.getElementById('formTimezone').value = '';
     }
     document.getElementById('formIsActive').checked = (String(site.isActive) === '1');
-    document.getElementById('modalTitleText').textContent = 'Edit Site';
+    document.getElementById('modalTitleText').textContent = 'Edit organisation';
 }
 
-// 👂 "New Site" and each "Edit" button fill the box through the two functions
+// 👂 "New organisation" (was "New Site", #973) and each "Edit" button fill the box through the two functions
 // above. They used to call them with onclick="..." written on the button,
 // which browsers refuse on a page with the standard header (#144, 3 June 2026;
 // #625). The box still opened (Bootstrap opens it from data-bs-toggle), but
-// nothing filled it: "Edit" opened as an empty "New Site", so retyping and
+// nothing filled it: "Edit" opened as an empty "New organisation", so retyping and
 // saving would have made a SECOND site.
 //
 // It is now done the way the other Edit boxes do it (Departments, Groups,
 // Users): the box says it is about to open, and names the button that opened
-// it. "New Site" carries data-site-new. Each "Edit" carries the site's details
+// it. "New organisation" carries data-site-new. Each "Edit" carries the site's details
 // in data-site-edit, as the same JSON with the same escaping that used to be
 // printed into the handler. They are read here as data and never run as script.
 document.getElementById('siteModal').addEventListener('show.bs.modal', function (event) {
@@ -412,7 +415,7 @@ document.getElementById('siteModal').addEventListener('show.bs.modal', function 
         var site = null;
         try { site = JSON.parse(btn.getAttribute('data-site-edit')); } catch (e) { site = null; }
         // A site whose details cannot be read must NOT open as a form: an
-        // empty form here is a "New Site" form, and saving it would make a
+        // empty form here is a "New organisation" form, and saving it would make a
         // second site. So the box is stopped from opening instead.
         if (site === null || typeof site !== 'object') { event.preventDefault(); return; }
         editSite(site);

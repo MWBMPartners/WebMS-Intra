@@ -597,6 +597,10 @@ if ($foundBoth === false) {
     //    the closure, and the whole test stopped with "class not found" at the
     //    first ordinary cell -- so it is loaded here, before anything runs.
     require_once PORTAL_CORE . $sep . 'EventRecurrence.php';
+    // 📅 And the WRAPPER asks `\Portal\Core\EventDateRange` whether a stored
+    //    reading falls in the range an event may have (#1045, D-181), for the
+    //    same reason: loaded before the closure runs.
+    require_once PORTAL_CORE . $sep . 'EventDateRange.php';
     // The reader is defined FIRST: the wrapper binds it with `use (&...)`.
     eval($grabRaw[0]);
     eval($grabStore[0]);
@@ -995,6 +999,24 @@ if ($foundBoth === false) {
     }
     check('K05 each refusal says WHICH refusal it is, not "not parseable"',
         $reasonsWrong === [] ? 'all correct' : implode(' | ', $reasonsWrong), 'all correct');
+
+    // ── K08. THE RANGE AN EVENT MAY HAVE (#1045, D-181) ──
+    //    1 January 1900 to the end of the later of 2200 and this year plus
+    //    fifty. The far year is WORKED OUT here, never written down, so these
+    //    stay right when this year plus fifty passes 2200. Kept out of K01 and
+    //    K02 on purpose: those lists' lengths are pinned (K04, K04b) and a
+    //    computed year cannot sit in a fixed list. The HTTP half — the row
+    //    really refused at preview and not imported — is section F of
+    //    `tools/event-date-range-selftest.php`.
+    $kLast  = max(2200, (int) gmdate('Y') + 50);
+    $kWhy   = null;
+    $k1899  = $fmtStore('1899-12-31 10:00', $kWhy);
+    check('K08 31 December 1899 is refused, with the range as its reason',
+        [$k1899, str_contains((string) $kWhy, 'between 1 January 1900 and 31 December ' . $kLast)], [null, true]);
+    check('K08b 1 January 1900 at midnight is stored', $fmtStore('1900-01-01 00:00'), '1900-01-01 00:00:00');
+    check('K08c the last second of the last allowed year is stored', $fmtStore($kLast . '-12-31 23:59:59'), $kLast . '-12-31 23:59:59');
+    check('K08d the first moment of the year after is refused', $fmtStore(($kLast + 1) . '-01-01 00:00'), null);
+    check('K08e year 9999 is refused', $fmtStore('9999-12-31 10:00'), null);
 
     // ── K07. THE HOUR THAT DOES NOT EXIST, through the loose fallback (#785) ──
     //
@@ -1510,6 +1532,37 @@ check('M14b ...and across Nuuk\'s autumn one (a 25-hour day, 2027-10-30 into the
     I18n::wallClockDays('2027-10-29 22:00:00', '2027-10-31 01:00:00'), ['2027-10-29', '2027-10-30', '2027-10-31']);
 check('M15 a start that is not a reading gives no days and no span',
     [I18n::wallClockDays('2027-02-31 10:00:00', null), I18n::wallClockDaySpan('not a time', null)], [[], null]);
+
+// ---- N: a stored reading moved on to its next occurrence (#1041) ----
+// I18n::wallClockMovedOn() is what a recurring task's next reminder comes
+// from. PHP's default zone is London's here on purpose: the method must not
+// read it, so a 01:30 moved onto London's spring-forward morning stays 01:30.
+date_default_timezone_set('Europe/London');
+check('N01 it refuses (null) an unknown unit, a count of 0 or below, and text that is not a reading',
+    [
+        I18n::wallClockMovedOn('2027-03-01 09:00:00', 'hours', 1),
+        I18n::wallClockMovedOn('2027-03-01 09:00:00', 'days', 0),
+        I18n::wallClockMovedOn('2027-03-01 09:00:00', 'days', -1),
+        I18n::wallClockMovedOn('2027-02-31 09:00:00', 'days', 1),
+        I18n::wallClockMovedOn(null, 'days', 1),
+    ],
+    [null, null, null, null, null]);
+check('N02 onto the morning the clocks go forward in London, each unit keeps 01:30 (default zone London)',
+    [
+        I18n::wallClockMovedOn('2027-03-27 01:30:00', 'days', 1),
+        I18n::wallClockMovedOn('2027-03-21 01:30:00', 'weeks', 1),
+        I18n::wallClockMovedOn('2027-02-28 01:30:00', 'months', 1),
+        I18n::wallClockMovedOn('2026-03-28 01:30:00', 'years', 1),
+        I18n::wallClockMovedOn('2027-03-14 01:30:00', 'weeks', 2),
+    ],
+    array_fill(0, 5, '2027-03-28 01:30:00'));
+check('N03 a month-end rolls over as modify() does, as its docblock says: 31 Jan + 1 month is 3 March, 2 March in a leap year, and 29 Feb + 1 year is 1 March',
+    [
+        I18n::wallClockMovedOn('2027-01-31 09:00:00', 'months', 1),
+        I18n::wallClockMovedOn('2028-01-31 09:00:00', 'months', 1),
+        I18n::wallClockMovedOn('2028-02-29 09:00:00', 'years', 1),
+    ],
+    ['2027-03-03 09:00:00', '2028-03-02 09:00:00', '2029-03-01 09:00:00']);
 
 date_default_timezone_set($wasZoneL);
 

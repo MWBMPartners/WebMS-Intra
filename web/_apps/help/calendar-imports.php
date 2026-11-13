@@ -270,7 +270,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
     <p>
         <strong>When.</strong> The e-mail goes on the first run of the scheduled refresh at or after 07:00 on your
-        organisation's own clock (its time zone is set at <a href="<?php echo $esc($sitesUrl); ?>">Admin, Sites</a>,
+        organisation's own clock (its time zone is set at <a href="<?php echo $esc($sitesUrl); ?>">Admin, Organisations</a>,
         Edit). There is no cut-off hour: a refresh that first runs in the afternoon still sends that day's e-mail.
         There is one try a day: if the mail service refuses it, it is not tried again that day, and a message the
         mail service could not take at once is sent later the same day or not at all. The push notification goes on

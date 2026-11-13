@@ -2,7 +2,7 @@
 // Path: public_html/admin/sites/users.php
 /**
  * -----------------------------------------------------------------------------
- * Admin — Site User Assignments 🌐👥
+ * Admin — An organisation's users 🌐👥 ("Site User Assignments" until #973, D-179)
  * -----------------------------------------------------------------------------
  * Manage user-to-site assignments for a specific site. Umbrella admins can
  * add/remove users and toggle isSiteAdmin / isSiteRootAdmin flags.
@@ -52,7 +52,7 @@ $siteInfo = $siteStmt->get_result()->fetch_assoc();
 $siteStmt->close();
 
 if ($siteInfo === null) {
-    $_SESSION['flash_msg'] = 'Site not found.';
+    $_SESSION['flash_msg'] = 'That organisation was not found.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/sites'), true, 302);
     exit();
@@ -101,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $addStmt->execute();
                 $addStmt->close();
                 Logger::activity('SiteUserAdd', 'Added user #' . $addUserId . ' to site #' . $siteId);
-                $_SESSION['flash_msg'] = 'User added to site.';
+                $_SESSION['flash_msg'] = 'User added to the organisation.';
                 $_SESSION['flash_type'] = 'success';
             }
         }
@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rmStmt->execute();
                 $rmStmt->close();
                 Logger::activity('SiteUserRemove', 'Removed user #' . $removeUserId . ' from site #' . $siteId);
-                $_SESSION['flash_msg'] = 'User removed from site.';
+                $_SESSION['flash_msg'] = 'User removed from the organisation.';
                 $_SESSION['flash_type'] = 'success';
             }
         }
@@ -148,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tStmt->execute();
                 $tStmt->close();
                 Logger::activity('SiteUserRole', 'Toggled site admin for user #' . $toggleUserId . ' on site #' . $siteId);
-                $_SESSION['flash_msg'] = 'Site admin role updated.';
+                $_SESSION['flash_msg'] = 'Organisation administrator setting updated.';
                 $_SESSION['flash_type'] = 'success';
             }
         }
@@ -164,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tStmt->execute();
                 $tStmt->close();
                 Logger::activity('SiteUserRole', 'Toggled site root admin for user #' . $toggleUserId . ' on site #' . $siteId);
-                $_SESSION['flash_msg'] = 'Site root admin role updated.';
+                $_SESSION['flash_msg'] = 'Organisation root administrator setting updated.';
                 $_SESSION['flash_type'] = 'success';
             }
         }
@@ -231,7 +231,7 @@ $personName = static function (mixed $name): string {
 $siteName    = htmlspecialchars($siteInfo['siteName'], ENT_QUOTES, 'UTF-8');
 $pageTitle   = 'Users — ' . $siteInfo['siteName'];
 $pageSection = 'admin';
-$breadcrumbs = ['Admin' => Site::url('admin'), 'Sites' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
+$breadcrumbs = ['Admin' => Site::url('admin'), 'Organisations' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -241,7 +241,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-users me-2"></i> <?php echo $siteName; ?> — User Assignments
     </h1>
     <a href="<?php echo htmlspecialchars(Site::url('admin/sites'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
-        <i class="fa-solid fa-arrow-left me-1"></i> Back to Sites
+        <i class="fa-solid fa-arrow-left me-1"></i> Back to Organisations
     </a>
 </div>
 
@@ -260,7 +260,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="action" value="add">
             <div class="col-auto flex-grow-1">
-                <label for="addUserSelect" class="form-label">Add User to Site</label>
+                <label for="addUserSelect" class="form-label">Add a user to this organisation</label>
                 <select class="form-select" id="addUserSelect" name="userID" required>
                     <option value="">— Select user —</option>
                     <?php foreach ($unassignedUsers as $uu): ?>
@@ -284,7 +284,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 📋 Assigned users list -->
 <?php if (count($assignedUsers) === 0): ?>
 <div class="alert alert-info">
-    <i class="fa-solid fa-info-circle me-1"></i> No users assigned to this site yet.
+    <i class="fa-solid fa-info-circle me-1"></i> No users belong to this organisation yet.
 </div>
 <?php else: ?>
 <div class="table-responsive">
@@ -293,9 +293,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <tr>
                 <th>User</th>
                 <th>Email</th>
-                <th class="text-center">Site Admin</th>
-                <th class="text-center">Site Root Admin</th>
-                <th class="text-center">Umbrella</th>
+                <th class="text-center">Organisation administrator</th>
+                <th class="text-center">Organisation root administrator</th>
+                <th class="text-center">Global administrator</th>
                 <th class="text-end">Actions</th>
             </tr>
         </thead>
@@ -318,7 +318,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="toggle_admin">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">
                         <button type="submit" class="btn btn-sm <?php echo $isSA ? 'btn-success' : 'btn-outline-secondary'; ?>"
-                                title="<?php echo $isSA ? 'Remove site admin' : 'Make site admin'; ?>">
+                                title="<?php echo ($isSA ? 'Remove ' : 'Make ') . $auName . ($isSA ? ' as this organisation&#039;s administrator' : ' this organisation&#039;s administrator'); ?>">
                             <i class="fa-solid <?php echo $isSA ? 'fa-check' : 'fa-minus'; ?>"></i>
                         </button>
                     </form>
@@ -329,7 +329,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="toggle_root_admin">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">
                         <button type="submit" class="btn btn-sm <?php echo $isSRA ? 'btn-warning' : 'btn-outline-secondary'; ?>"
-                                title="<?php echo $isSRA ? 'Remove site root admin' : 'Make site root admin'; ?>">
+                                title="<?php echo ($isSRA ? 'Remove ' : 'Make ') . $auName . ($isSRA ? ' as this organisation&#039;s root administrator' : ' this organisation&#039;s root administrator'); ?>">
                             <i class="fa-solid <?php echo $isSRA ? 'fa-check' : 'fa-minus'; ?>"></i>
                         </button>
                     </form>
@@ -343,11 +343,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </td>
                 <td class="text-end">
                     <form method="post" class="d-inline"
-                          data-confirm="Remove this user from the site?" data-confirm-destructive="true">
+                          data-confirm="Remove this user from the organisation?" data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="action" value="remove">
                         <input type="hidden" name="userID" value="<?php echo $auId; ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove from site">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove from the organisation">
                             <i class="fa-solid fa-user-minus"></i>
                         </button>
                     </form>

@@ -60,6 +60,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventDateRange;
 use Portal\Core\EventRecurrence;
 use Portal\Core\Events;
 use Portal\Core\InstallationSettings;
@@ -384,6 +385,10 @@ if ($isPost === true) {
             $anchorEnd = trim($formEnd) === '' ? null : $toReading($formEnd);
             if ($anchorEnd !== null && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $anchorEnd) !== 1) {
                 $problem = 'The time the first date of the new pattern ends could not be read.';
+            } elseif (EventDateRange::whyRefused([$anchor, $anchorEnd]) !== null) {
+                // 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181),
+                //    asked by the ONE place that decides it.
+                $problem = EventDateRange::refusalWords();
             } else {
                 // 🧢 The ceilings are the installation's choice and this
                 //    organisation's within it, and the INSTALLATION'S value
@@ -414,7 +419,22 @@ if ($isPost === true) {
                 );
 
                 $newDates = $worked['dates'];
-                if ($newDates === []) {
+                // 📅 And every date the pattern makes is asked too (#1045):
+                //    a pattern whose first date fits can still run past the
+                //    last allowed day, or end there. Refused WHOLE rather
+                //    than capped or trimmed — Manage Events gives the same
+                //    answer, and a pattern quietly shortened is a change
+                //    nobody asked for.
+                foreach ($newDates as $newDate) {
+                    if (EventDateRange::whyRefused([(string) $newDate['start'], $newDate['end'] === null ? null : (string) $newDate['end']]) !== null) {
+                        $problem  = EventDateRange::refusalWords();
+                        $newDates = [];
+                        break;
+                    }
+                }
+                if ($problem !== '') {
+                    // Refused just above; nothing to preview.
+                } elseif ($newDates === []) {
                     $problem = $worked['why'] !== ''
                         ? (string) $worked['why']
                         : 'That pattern produced no dates, so there was nothing to change.';
