@@ -34,7 +34,9 @@
  *      and, through create AND edit, a lower-case `t` and a fractional second
  *      (values the helper reads differently from what MySQL makes of the raw
  *      text) stored as the READING, which is what proves the raw post is
- *      bound nowhere
+ *      bound nowhere; an end equal to its start kept, one second or one
+ *      minute before it on the same day refused; and a repeat posted with
+ *      seconds keeping them on every date it makes
  *   D  the public "suggest an event" form: refused with `?err=range`, and the
  *      form shows the range in words
  *   E  the series pattern page: a pattern outside the range is refused before
@@ -703,6 +705,45 @@ foreach ($formCases as [$name, $start, $end, $saved]) {
         check("C {$name}: the message names the range", str_contains($form[$name]['message'], $range), true);
     }
 }
+check('C a five-digit year also says nothing was saved', str_contains($form['P1045 form year 10000']['message'], 'Nothing was saved.'), true);
+
+// THE END-BEFORE-START COMPARISON, which nothing else here exercises (round 4
+// of the check: `<=` and a date-only comparison both left every check green).
+// "Before", not "before or equal": an end equal to its start is a moment in a
+// diary and is kept; one second or one minute earlier on the SAME day is
+// refused and nothing is stored.
+$orderRun = static function () use ($formCreate): array {
+    return [
+        'equal'  => $formCreate('P1045 end equal', '2030-06-01T10:00:00', '2030-06-01T10:00:00'),
+        'second' => $formCreate('P1045 end a second before', '2030-06-01T10:00:01', '2030-06-01T10:00:00'),
+        'minute' => $formCreate('P1045 end a minute before', '2030-06-01T10:01', '2030-06-01T10:00'),
+    ];
+};
+$order = $orderRun();
+$beforeWords = 'cannot end before it starts';
+check('C an end EQUAL to its start is accepted and saved', $order['equal']['saved'], 1);
+check('C an end one second before its start, same day, is refused and nothing is stored',
+    [$order['second']['saved'], str_contains($order['second']['message'], $beforeWords)], [0, true]);
+check('C an end one minute before its start, same day, is refused and nothing is stored',
+    [$order['minute']['saved'], str_contains($order['minute']['message'], $beforeWords)], [0, true]);
+
+// A REPEAT KEEPS ITS SECONDS. Every repeat case above was on the minute, so a
+// normaliser dropping seconds left everything green while a weekly repeat
+// posted at 19:30:15 was stored at 19:30:00 on every date (round 4).
+$secondsRun = static function () use ($formCreate, $db): array {
+    $formCreate('P1045 repeat seconds', '2031-03-04T19:30:15', '2031-03-04T20:30:15', ['repeatFrequency' => 'weekly', 'repeatCount' => '3']);
+    $rows = [];
+    $rs = $db->query("SELECT `startDateTime`, `endDateTime` FROM `tblEvents` WHERE `eventName` = 'P1045 repeat seconds' AND `isDeleted` = 0 ORDER BY `startDateTime`");
+    while ($row = $rs->fetch_assoc()) {
+        $rows[] = (string) $row['startDateTime'] . ' to ' . (string) $row['endDateTime'];
+    }
+    return $rows;
+};
+check('C a weekly repeat posted at 19:30:15 keeps the seconds on every date it makes', $secondsRun(), [
+    '2031-03-04 19:30:15 to 2031-03-04 20:30:15',
+    '2031-03-11 19:30:15 to 2031-03-11 20:30:15',
+    '2031-03-18 19:30:15 to 2031-03-18 20:30:15',
+]);
 
 // A REPEAT IS JUDGED WHOLE, BEFORE ANYTHING IS WRITTEN. If any date it would
 // make — the first one included, after the pattern moves it — falls outside
@@ -983,6 +1024,30 @@ $pg  = $offsetRun();
 $unplant('_apps/calendar/manage/save.php', $was);
 check('P4e the text fallback back: the offset start is STORED past the range again', [$pg['start']['saved'], $rowNamed('P1045 offset start')['startDateTime'] ?? null],
     [1, ($L + 1) . '-01-01 04:30:00']);
+
+// Plants C and D: the end-before-start comparison weakened two ways.
+$was = $plant('_apps/calendar/manage/save.php', "if (\$endDateTime !== '' && \$endDateTime < \$startDateTime) {",
+    "if (\$endDateTime !== '' && \$endDateTime <= \$startDateTime) {");
+$clearEvents();
+$pg  = $orderRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P12 "before or equal": an end equal to its start is refused (the check goes red)', $pg['equal']['saved'], 0);
+$was = $plant('_apps/calendar/manage/save.php', "if (\$endDateTime !== '' && \$endDateTime < \$startDateTime) {",
+    "if (\$endDateTime !== '' && substr(\$endDateTime, 0, 10) < substr(\$startDateTime, 0, 10)) {");
+$clearEvents();
+$pg  = $orderRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P13 comparing the DATE only: an end a second and a minute before the start are stored (the checks go red)',
+    [$pg['second']['saved'], $pg['minute']['saved']], [1, 1]);
+
+// Plant E: the generator given readings with their seconds dropped.
+$was = $plant('_apps/calendar/manage/save.php', "        \$startDateTime,\n        \$endDateTime === '' ? null : \$endDateTime,",
+    "        substr(\$startDateTime, 0, 16) . ':00',\n        \$endDateTime === '' ? null : substr(\$endDateTime, 0, 16) . ':00',");
+$clearEvents();
+$pg  = $secondsRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P14 a seconds-dropping normaliser before the generator: the repeat is stored at 19:30:00 (the check goes red)',
+    $pg !== [] && str_contains($pg[0], '19:30:00'), true);
 
 // Plant A: the INSERT binds the raw posted start again.
 $was = $plant('_apps/calendar/manage/save.php', '$eventName, $slug, $description, $startDateTime, $endDt,',
