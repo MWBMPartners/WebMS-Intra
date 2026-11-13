@@ -62,6 +62,9 @@
  *                          your address: the subject, when, and what became
  *                          of it — #592)
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
+ *   tblUserSites          (the organisations you belong to, with your
+ *                          administrator flags, whether active, and when you
+ *                          joined — #813)
  *   tblUserTranslationPref (your choice to have content translated — #813)
  *   tblUserSmsPreference  (your text-message settings, without the one-time
  *                          verification code — #813)
@@ -78,6 +81,11 @@
  *   tblDbsChecks          (the DBS checks recorded FOR you: type, certificate
  *                          reference, dates, status and notes, never who
  *                          recorded them — #1012)
+ *   tblCareCase, tblCareVisit (the pastoral care cases ABOUT you: organisation,
+ *                          your name as typed, category, summary, status,
+ *                          opened and closed; each visit's day and kind only.
+ *                          Never who opened it, its number, the visiting
+ *                          worker or the visit notes — #1015, D-184)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -239,12 +247,26 @@ $payload = [
         'outsideServiceChoices' => $fetchUserRows(
             'SELECT `serviceKey`, `choice`, `updatedAt` FROM `tblUserOutsideServicePref` WHERE `userID` = ?'
         ),
+        // 🏢 #813 check round 2 — the organisations you belong to: whether
+        //    you are an administrator there, whether the membership is
+        //    active, and when you joined. The erasure deletes these rows, and
+        //    the copy only ever named the table inside another entry's
+        //    sub-select, so they were handed over nowhere. The organisation's
+        //    NAME is given only while the organisation is switched on: the
+        //    copy already never names an organisation the person cannot open
+        //    (D-151, section O of tools/erasure-pages-selftest.php), and a
+        //    switched-off one is such an organisation; its number is given.
+        'organisationMemberships' => $fetchUserRows(
+            'SELECT us.`siteID`, CASE WHEN s.`isActive` = 1 THEN s.`siteName` ELSE NULL END AS `siteName`, '
+            . 'us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt` '
+            . 'FROM `tblUserSites` us LEFT JOIN `tblSites` s ON s.`siteID` = us.`siteID` WHERE us.`userID` = ? ORDER BY us.`siteID`'
+        ),
         // 🌐 #813 — your own choice to have the organisation's words
         //    translated for you (D-049, #485). It is a choice about you, kept
         //    until you are erased, and was missing from this copy. The next
         //    four are the same kind of record - one row per member (and per
         //    organisation), holding that member's own setting - found missing
-        //    by the check #813 asked for (section 23 of
+        //    by the check #813 asked for (section 26 of
         //    tools/gdpr-coverage-selftest.php), which finds such tables from
         //    the install script's own keys rather than from a list typed here.
         'translationChoice' => $fetchUserRows(
@@ -678,6 +700,15 @@ $payload = [
         //    list just above, which is the checks this person RECORDED for
         //    somebody else.
         'dbsChecksAboutYou' => GdprEraser::dbsChecksAboutYou($userId),
+        // 💛 #1015 (the owner's decision D-184): the pastoral care cases ABOUT
+        //    this person. My data counted them and this copy never handed them
+        //    over. Asked of GdprEraser::careCasesAboutYou(), the ONE place
+        //    they are read, which My data's counts ask too. Each case: the
+        //    organisation, the person's name as typed, category, summary,
+        //    status, opened and closed; each visit: its day and kind only.
+        //    Never who opened the case, its number, the visiting worker or the
+        //    visit notes (D-184 rules those out).
+        'careCasesAboutYou' => GdprEraser::careCasesAboutYou($userId),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 248; // #1018 added B4c: 247 + 1.
+const EXPECTED_CHECKS = 249; // #1018 added B4c and #1015 B4d: 247 + 2.
                              // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
@@ -1503,6 +1503,41 @@ ok('B4c NO REASON A MEMBER READS NAMES A DATABASE COLUMN: Mel\'s invitation row 
     && str_contains($askInvitationRow, 'only the link to you, as the person who made it, is removed') === true
     && $reasonsRead >= 10 && $reasonColumns === [],
     'read ' . $reasonsRead . '; columns: ' . json_encode($reasonColumns) . ' | ' . mb_substr($askInvitationRow, 0, 400));
+
+// 💛 #1015 (the owner's decision D-184): Cal's own pastoral care case is in
+//    her full data copy - the organisation, her name as typed, category,
+//    summary, status, opened and closed, and for each visit only its day and
+//    kind - and NOT who opened it, the case number, the visiting workers or
+//    their notes. Read from the REAL download, and its numbers must equal what
+//    Cal's My data page counts for the same records. Two visits are on her case
+//    (Mel's and Ada's), each with notes naming her, so the "no notes" half has
+//    something to find.
+$calCopyRaw = (string) req($jar['cal'], 'GET', '/account/data-export')['body'];
+$calCopy    = json_decode($calCopyRaw, true);
+$calCases   = is_array($calCopy) === true ? ($calCopy['data']['careCasesAboutYou'] ?? null) : null;
+$careCounts = ['tblCareCase' => 0, 'tblCareVisit' => 0];
+$calDataDoc = \Dom\HTMLDocument::createFromString($calDataHtml, LIBXML_NOERROR);
+foreach ($calDataDoc->querySelectorAll('.portal-data-list > .row') as $row) {
+    $code  = $row->querySelector('code');
+    $count = $row->querySelector('.col-md-1 strong');
+    $name  = $code === null ? '' : trim((string) $code->textContent);
+    if (isset($careCounts[$name]) === true && $count !== null) {
+        $careCounts[$name] += (int) trim((string) $count->textContent);
+    }
+}
+$firstCase = is_array($calCases) === true ? ($calCases[0] ?? []) : [];
+$visitKeys = array_map(static fn (array $v): array => array_keys($v), (array) ($firstCase['visits'] ?? []));
+ok('B4d A MEMBER\'S OWN CARE CASE IS IN HER DATA COPY, AS THE OWNER DECIDED: Cal\'s real download holds her one case with its organisation, category, summary and status, and each of its two visits as a day and a kind only; never who opened it, its number, the visiting workers or their notes; and My data counts the same one case and two visits (#1015, D-184)',
+    is_array($calCases) === true && count($calCases) === 1
+    && array_keys($firstCase) === ['organisation', 'yourNameOnTheCase', 'category', 'summary', 'status', 'openedAtServerTime', 'closedAtAsStored', 'visits']
+    && ($firstCase['organisation'] ?? '') === 'Selftest erasure A'
+    && ($firstCase['summary'] ?? '') === 'Cal is recovering from an operation.'
+    && $visitKeys === [['day', 'kind'], ['day', 'kind']]
+    && str_contains($calCopyRaw, 'Visited Cal at home') === false && str_contains($calCopyRaw, 'Ada rang Cal') === false
+    && str_contains($calCopyRaw, 'Ada Earlier-Name') === false && str_contains($calCopyRaw, 'openedBy') === false
+    && str_contains($calCopyRaw, '"caseID"') === false
+    && $careCounts === ['tblCareCase' => count($calCases), 'tblCareVisit' => count((array) ($firstCase['visits'] ?? []))],
+    'My data: ' . json_encode($careCounts) . ' | copy: ' . json_encode($calCases));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
 //    erasure's words bare, so a record still held read "deleted" and an

@@ -976,6 +976,15 @@ check('E07b ...and their translation choice, text-message settings, newsletter c
     && str_contains((string) $download['body'], 'ACCESS813SECRET') === false
     && str_contains((string) $download['body'], 'PINHASH813SECRET') === false,
     'status ' . $download['status'] . '; ' . json_encode(array_intersect_key($data, array_flip(['translationChoice', 'textMessageSettings', 'newsletterChoices', 'zoomAccounts', 'equipmentKioskPins']))));
+// #813 check round 2: the organisations M belongs to (A and B) are in the same
+// download, each with its administrator flags, whether active and when joined.
+// Until then the copy named `tblUserSites` only inside another entry's
+// sub-select, so no membership was handed over.
+$memberships = (array) ($data['organisationMemberships'] ?? []);
+check('E07c ...and the organisations they belong to, each with whether they are an administrator there, whether active, and when they joined (#813)',
+    array_map('intval', array_column($memberships, 'siteID')) === [ORG_A, ORG_B]
+    && array_keys((array) ($memberships[0] ?? [])) === ['siteID', 'siteName', 'isSiteAdmin', 'isSiteRootAdmin', 'isActive', 'joinedAt'],
+    json_encode($memberships));
 foreach (['tblUserTranslationPref', 'tblUserSmsPreference', 'tblNewsletterSubscription', 'tblZoomAccount', 'tblAssetKioskPins'] as $own813) {
     q('DELETE FROM `' . $own813 . '` WHERE `userID` = ?', 'i', [M]);
 }

@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 312; // #970 added one to section 23: 311 + 1.
+const EXPECTED_CHECKS = 313; // #970 added two to section 23: 311 + 2.
                              // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
                              // that answered "check round N-1" (the independent check of the
                              // round before). Counts, newest first:
@@ -407,6 +407,7 @@ const SG_HALL  = 960602;    // section 22: a group whose usual place is marked "
 const P_CL     = 920701; // section 23: her runs stop twice, the second clears her kept row, she gives again
 const P_CE     = 920702; // section 23: an emptied account beside a cleared row, with a gift still carrying the number
 const P_SELF   = 920705; // section 23: records a gift for herself and one for somebody else (#970 item 1)
+const REQ_SELF = 940705; // section 23: P_SELF's request, carried out to prove her own gift still loses recordedByID (#970)
 const REQ_CL   = 940701;
 const REQ_CE   = 940702;
 const REQ_CL2  = 940703; // section 23: her SECOND request, filed after the first was cancelled
@@ -6992,7 +6993,8 @@ $ce = ge_gift(SITE_C1, P_CE, $ago(20), 700, $catC1);
 // #970 item 3: a tax declaration recorded against the emptied account since,
 // still holding a home address - the keep step used to take the donor off the
 // gift beside it and leave this address in place.
-ge_q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `address`, `postcode`, `notes`, `validFrom`) VALUES (?, ?, '9 Since Road', 'ZZ9 7ZZ', 'written since', ?)", 'iis',
+ge_q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `address`, `postcode`, `acceptedIP`, `signaturePath`, `notes`, `validFrom`) "
+    . "VALUES (?, ?, '9 Since Road', 'ZZ9 7ZZ', '203.0.113.97', '_uploads/giving/signatures/ce-since.png', 'written since', ?)", 'iis',
     [SITE_C1, P_CE, $ago(20)]);
 $ceDeclaration = (int) $mysqli->insert_id;
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
@@ -7001,14 +7003,15 @@ $runCe  = ge_execute(REQ_CE, P_CE);
 $keptCe = $keptCl(SITE_C1, P_CE);
 $lineCe = ge_one("SELECT `action`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `tableName` = 'GivingRecords' AND `recordKey` = ?", 'is',
     [REQ_CE, 'organisation #' . SITE_C1]);
-$ceDeclarationNow = ge_one('SELECT `donorID`, `address`, `postcode`, `notes` FROM `tblGiftAidDeclaration` WHERE `declarationID` = ?', 'i', [$ceDeclaration]);
-ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name written, a gift still carrying the number loses it, a tax declaration written since loses its address and notes but keeps the account number (#970), the line says so, and the request completes',
+$ceDeclarationNow = ge_one('SELECT `donorID`, `address`, `postcode`, `acceptedIP`, `signaturePath`, `notes` FROM `tblGiftAidDeclaration` WHERE `declarationID` = ?', 'i', [$ceDeclaration]);
+ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name written, a gift still carrying the number loses it, a tax declaration written since loses its address, postcode, network address, signature and notes but keeps the account number (#970), the line says so, and the request completes',
     is_array($runCe) === true && (int) $runCe['failed'] === 0 && $statusCl(REQ_CE) === 'completed'
     && $keptCe !== null && $keptCe['clearedAt'] !== null && $keptCe['fullName'] === null && $keptCe['address'] === null
     && $donorCl($ce) === null && $lineCe !== null && $lineCe['action'] === 'anonymise'
     && str_contains((string) $lineCe['details'], 'recorded against the emptied account since then')
     && $ceDeclarationNow !== null && (int) $ceDeclarationNow['donorID'] === P_CE && $ceDeclarationNow['address'] === null
     && $ceDeclarationNow['postcode'] === null && $ceDeclarationNow['notes'] === null
+    && $ceDeclarationNow['acceptedIP'] === null && $ceDeclarationNow['signaturePath'] === null
     && str_contains((string) $lineCe['details'], '1 tax declaration recorded against it since then has had the home address'),
     json_encode(['run' => is_array($runCe) === true ? ['failed' => $runCe['failed']] : (string) $runCe, 'status' => $statusCl(REQ_CE),
         'row' => $keptCe, 'gift' => $donorCl($ce), 'declaration' => $ceDeclarationNow, 'line' => $lineCe]));
@@ -7024,23 +7027,51 @@ ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name writ
 ge_user(P_SELF, 'Selma Self', 'selma.self@selftest.invalid');
 $giftFields = ['siteID' => SITE_C1, 'donatedAt' => $ago(30), 'amountPence' => 500, 'categoryID' => $catC1, 'method' => 'bank-transfer',
     'donorName' => null, 'pledgeID' => null, 'campaignID' => null, 'currency' => 'GBP'];
-ge_insert('tblGivingEntry', ['donorID' => P_SELF, 'recordedByID' => P_SELF], $giftFields);
-ge_insert('tblGivingEntry', ['donorID' => ADMIN, 'recordedByID' => P_SELF], $giftFields);
-$selfRecorded = 0;
-$selfOwn      = 0;
+$selfGift  = ge_insert('tblGivingEntry', ['donorID' => P_SELF, 'recordedByID' => P_SELF], $giftFields);
+$otherGift = ge_insert('tblGivingEntry', ['donorID' => ADMIN, 'recordedByID' => P_SELF], $giftFields);
+// #970 check round 2: the same untruth on ANY "acted on it" line whose row is
+// also the person's own - a giving statement a treasurer issued to herself,
+// and a leadership assignment she made of herself. One of her own and one for
+// somebody else, each.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+foreach ([P_SELF, ADMIN] as $statementFor) {
+    ge_q('INSERT INTO `tblGivingStatementLog` (`siteID`, `donorID`, `periodKey`, `fromDate`, `toDate`, `createdByID`) VALUES (?, ?, ?, ?, ?, ?)', 'iisssi',
+        [SITE_C1, $statementFor, '2024-04-06_2025-04-05', '2024-04-06', '2025-04-05', P_SELF]);
+    ge_q('INSERT INTO `tblLeadershipAssignments` (`siteID`, `roleID`, `userID`, `createdByID`) VALUES (?, 970, ?, ?)', 'iii', [SITE_C1, $statementFor, P_SELF]);
+}
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+$selfRows = ['gift-else' => 0, 'gift-own' => 0, 'statement-else' => 0, 'leadership-else' => 0];
 foreach (GdprEraser::inventory(P_SELF) as $held) {
-    if ($held['table'] !== 'tblGivingEntry') {
-        continue;
-    }
-    if (str_starts_with((string) $held['reason'], 'somebody else\'s gift') === true) {
-        $selfRecorded += (int) $held['rows'];
-    } else {
-        $selfOwn += (int) $held['rows'];
+    $somebodyElse = str_starts_with((string) $held['reason'], 'somebody else\'s');
+    if ($held['table'] === 'tblGivingEntry') {
+        $selfRows[$somebodyElse === true ? 'gift-else' : 'gift-own'] += (int) $held['rows'];
+    } elseif ($held['table'] === 'tblGivingStatementLog' && $somebodyElse === true) {
+        $selfRows['statement-else'] += (int) $held['rows'];
+    } elseif ($held['table'] === 'tblLeadershipAssignments' && $somebodyElse === true) {
+        $selfRows['leadership-else'] += (int) $held['rows'];
     }
 }
-ge_ok('A GIFT SHE RECORDED FOR HERSELF is counted once, on her own gift rows, and NOT under "somebody else\'s gift ... who entered it is detached"; the gift she recorded for somebody else is the one counted there (#970)',
-    $selfRecorded === 1 && $selfOwn === 1,
-    json_encode(['somebodyElse' => $selfRecorded, 'own' => $selfOwn]));
+ge_ok('A RECORD THAT IS ALSO HER OWN is counted once, on her own rows, and NOT under "somebody else\'s ...": a gift she recorded for herself, a giving statement she issued to herself, a leadership assignment she made of herself - only the one she made for somebody else is counted there, each (#970)',
+    $selfRows === ['gift-else' => 1, 'gift-own' => 1, 'statement-else' => 1, 'leadership-else' => 1],
+    json_encode($selfRows));
+// ...and the COUNT is all that changed: carrying out her request still takes
+// her number off BOTH gifts as the one who recorded them (#970 check round 2:
+// a leave-out planted into the erasure's own match left every suite green).
+ge_request(REQ_SELF, P_SELF, 'selma.self@selftest.invalid', 'Selma Self', 'processing');
+$runSelf = ge_execute(REQ_SELF, P_SELF);
+$recordedNow = ge_q('SELECT `recordedByID` FROM `tblGivingEntry` WHERE `entryID` IN (?, ?)', 'ii', [(int) $selfGift['key']['entryID'], (int) $otherGift['key']['entryID']]);
+// The STATEMENT is what makes this check able to fail: the giving step takes
+// her off her own gift as DONOR before the walk reaches "who entered it", so by
+// then that gift no longer looks like hers and a leave-out planted into the
+// erasure's own match would still empty it. A statement keeps its donorID
+// (the database does not allow it to be empty), so a planted leave-out keeps
+// "who issued it" on the one she issued to herself - and this goes red.
+$issuedNow = ge_q('SELECT `createdByID` FROM `tblGivingStatementLog` WHERE `siteID` = ? AND `donorID` IN (?, ?) AND `periodKey` = ?', 'iiis',
+    [SITE_C1, P_SELF, ADMIN, '2024-04-06_2025-04-05']);
+ge_ok('...AND HER ERASURE STILL EMPTIES "who entered it" and "who issued it" on her OWN gift and statement as well as on those for somebody else - only the count leaves her own out (#970)',
+    is_array($runSelf) === true && count($recordedNow) === 2 && array_column($recordedNow, 'recordedByID') === [null, null]
+    && count($issuedNow) === 2 && array_column($issuedNow, 'createdByID') === [null, null],
+    json_encode(['run' => is_array($runSelf) === true ? ['failed' => $runSelf['failed']] : (string) $runSelf, 'gifts' => $recordedNow, 'statements' => $issuedNow]));
 
 // ---- What the line says when NO home address is kept (#941 check round 2) ----
 // The kept-record line used to say where the address CAME FROM, and was wrong

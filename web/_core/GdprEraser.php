@@ -842,7 +842,7 @@ class GdprEraser
             // ipHash/userAgentHash columns are ALREADY salted-hash-only
             // (never a raw IP/User-Agent — see AssetRegister::recordScan()),
             // so there is no separate PII column here to null out.
-            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the record that a piece of equipment was scanned is kept for counting how often it is scanned; your account number is removed from it. A scrambled form of the network address and browser each scan came from stays, as it does on the equipment\'s change history, which this installation can still match against an address it is given'],
+            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the record that a piece of equipment was scanned is kept for counting how often it is scanned; your account number is removed from it. A scrambled form of the network address and browser each scan came from is not removed, and this installation can still match it against an address it is given'],
             // #392 Phase 3 (#411/#412/#414). tblAssetKioskPins IS a hard
             // delete (not anonymise) — same rationale as tblAssetOwners
             // above: a PIN tied to an erased user is meaningless, and
@@ -1039,20 +1039,15 @@ class GdprEraser
             //    (AssetRegister::ipHash(), salted with this installation's key) is not emptied.
             ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'changes you made to records: the change history is kept for ever (the owner\'s decision D-116). Your account number and the network address each change came from are removed from these entries; which record changed, and what it held before and after, are kept as written, so an entry can still name you or give your account number (an entry about your own account, or your membership of an organisation, department, user group or role, has those values emptied by a separate step)'],
             ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
-            // 🎁 #970 item 1: `countLeavesOutWhere` is read by inventory()
-            //    ONLY, never by the erasure. A gift the person recorded for
-            //    THEMSELVES matches this instruction too (its `recordedByID`
-            //    and `donorID` are both theirs), and was counted here under
-            //    "somebody else's gift ... who entered it is detached" - so it
-            //    read as losing their number, while `donorID` on the same row
-            //    may still carry it when the gift is kept for tax. Such a gift
-            //    is counted, and worded, on the person's own gift rows
-            //    (givingRows(), from givingOutlook()), which say whether it
-            //    keeps their name; so this count leaves it out, and what is
-            //    left here really is somebody else's gift. The erasure still
-            //    empties `recordedByID` on every row, their own included.
-            ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached',
-                'countLeavesOutWhere' => 'donorID'],
+            // 🎁 #970 item 1: a gift the person recorded for THEMSELVES matches
+            //    this instruction too (its `recordedByID` and `donorID` are both
+            //    theirs), and was counted here under "somebody else's gift ...
+            //    who entered it is detached". inventory() now leaves such rows
+            //    out of EVERY "acted on it" count - worked out from the other
+            //    instructions on the same table, see ownedElsewhere() - so the
+            //    gift is counted, and worded, only on the person's own gift
+            //    rows. The erasure still empties `recordedByID` on every row.
+            ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'moderatorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who moderated it is detached'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'assignedToUserID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who it was given to is detached, so it is unassigned'],
             ['table' => 'tblPathwayEnrolments',       'userCol' => 'enrolledByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s enrolment stays; who enrolled them is detached'],
@@ -1567,42 +1562,6 @@ class GdprEraser
      *
      * @var string[]
      */
-    /**
-     * 🎁 Every organisation holding a giving record of this person's: a gift,
-     *    a tax declaration, a giving statement, or a counted envelope (the
-     *    gift made from it when the count is closed may be one that keeps the
-     *    donor's name). FIXED TEXT, four `?`, each the person's account
-     *    number, in that order.
-     *
-     * THE ONE LIST (#970 item 2), read by the keep step (keepGivingRecords())
-     * and by givingOutlook(), which used to hold its own copy without the
-     * giving statements.
-     */
-    private const GIVING_SITES_SQL = 'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
-        . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
-        . 'UNION SELECT siteID FROM tblGivingStatementLog WHERE donorID = ? '
-        . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
-        . 'WHERE ce.giverID = ?';
-
-    /**
-     * 🗣️ What each "acted on it" column means, in the words a member reads
-     *    (#1018). Used only by the instructions fromPersonalDataCatalogue()
-     *    makes for a second or later actor column, whose reason used to print
-     *    the column's name in backticks. A column not listed here reads "the
-     *    person who dealt with it", which is true of every actor column; a
-     *    listed one says more. Never put a column name in the words.
-     *
-     * @var array<string, string> Column => "the person who ..." ending.
-     */
-    private const ACTOR_COLUMN_WORDS = [
-        'createdByID'    => 'made it',
-        'updatedByID'    => 'last changed it',
-        'revokedByID'    => 'withdrew it',
-        'grantedByID'    => 'gave it',
-        'offboardedByID' => 'recorded somebody leaving',
-        'rehiredByID'    => 'recorded somebody coming back',
-    ];
-
     public const ACTOR_COLUMNS = [
         // Being GIVEN a record to work on, or being the person a request is
         // aimed at, is not the record being about you. These two were classed
@@ -1671,6 +1630,42 @@ class GdprEraser
         // a link column and NOT here), so erasing the typist must empty
         // nothing of it — which this list's guard on `nullCols` enforces.
         'placeEnteredByID',
+    ];
+
+    /**
+     * 🎁 Every organisation holding a giving record of this person's: a gift,
+     *    a tax declaration, a giving statement, or a counted envelope (the
+     *    gift made from it when the count is closed may be one that keeps the
+     *    donor's name). FIXED TEXT, four `?`, each the person's account
+     *    number, in that order.
+     *
+     * THE ONE LIST (#970 item 2), read by the keep step (keepGivingRecords())
+     * and by givingOutlook(), which used to hold its own copy without the
+     * giving statements.
+     */
+    private const GIVING_SITES_SQL = 'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+        . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
+        . 'UNION SELECT siteID FROM tblGivingStatementLog WHERE donorID = ? '
+        . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+        . 'WHERE ce.giverID = ?';
+
+    /**
+     * 🗣️ What each "acted on it" column means, in the words a member reads
+     *    (#1018). Used only by the instructions fromPersonalDataCatalogue()
+     *    makes for a second or later actor column, whose reason used to print
+     *    the column's name in backticks. A column not listed here reads "the
+     *    person who dealt with it", which is true of every actor column; a
+     *    listed one says more. Never put a column name in the words.
+     *
+     * @var array<string, string> Column => "the person who ..." ending.
+     */
+    private const ACTOR_COLUMN_WORDS = [
+        'createdByID'    => 'made it',
+        'updatedByID'    => 'last changed it',
+        'revokedByID'    => 'withdrew it',
+        'grantedByID'    => 'gave it',
+        'offboardedByID' => 'recorded somebody leaving',
+        'rehiredByID'    => 'recorded somebody coming back',
     ];
 
     /**
@@ -4267,6 +4262,50 @@ class GdprEraser
     }
 
     /**
+     * 🧾 The columns of `$table` through which a person OWNS a row, other than
+     *    the "acted on it" column `$actorCol` (#970, round 2 of its check).
+     *
+     * Worked out from catalogue() itself, never typed: every other instruction
+     * on the same table that matches directly on a column that is NOT an
+     * "acted on it" column (not in ACTOR_COLUMNS, not parent-matched). Such a
+     * row is counted, and worded, on that instruction's own line, so
+     * inventory() leaves it out of the "acted on it" count, whose words say
+     * "somebody else's". Measured cases: a gift recorded for oneself
+     * (`tblGivingEntry`: `recordedByID` beside `donorID`), a giving statement
+     * a treasurer issued to themselves (`tblGivingStatementLog`: `createdByID`
+     * beside `donorID`), a leadership assignment somebody made of themselves
+     * (`tblLeadershipAssignments`: `createdByID` beside `userID`).
+     *
+     * USED FOR THE COUNT ONLY. The erasure matches on whereForEntry() alone,
+     * so the "acted on it" column is still emptied on the person's own rows.
+     *
+     * @return list<string> Plain column names (each checked to be one).
+     */
+    private static function ownedElsewhere(string $table, string $actorCol): array
+    {
+        if (in_array($actorCol, self::ACTOR_COLUMNS, true) === false) {
+            return [];
+        }
+        // Built once per request: catalogue() reads the written list from
+        // disk, and inventory() asks this for every "acted on it" line.
+        static $ownBy = null;
+        if ($ownBy === null) {
+            $ownBy = [];
+            foreach (self::catalogue() as $other) {
+                $col = (string) ($other['userCol'] ?? '');
+                if ($col === '' || isset($other['subjectVia']) === true || in_array($col, self::ACTOR_COLUMNS, true) === true
+                    || preg_match('/\A[A-Za-z0-9_]+\z/', $col) !== 1
+                ) {
+                    continue;
+                }
+                $ownBy[(string) $other['table']][$col] = true;
+            }
+        }
+
+        return array_keys($ownBy[$table] ?? []);
+    }
+
+    /**
      * 🗣️ The words beside one inventory() row: what the erasure will do to
      *    those records, as a member reads it on Request erasure and My data.
      *
@@ -4407,15 +4446,27 @@ class GdprEraser
                 $stmt = false;
                 if ($table === 'tblDbsChecks' && $col === 'userID' && $via === null) {
                     $count = count(self::dbsChecksAboutYou($userId));
+                } elseif ($table === 'tblCareCase' && $col === 'personUserID' && $via === null) {
+                    // 💛 #1015 (D-184): the care cases ABOUT this person, and
+                    //    below the visits on them, counted by asking
+                    //    careCasesAboutYou(), the ONE place they are read, so
+                    //    My data's numbers ARE the numbers the copy hands over.
+                    $count = count(self::careCasesAboutYou($userId));
+                } elseif ($table === 'tblCareVisit' && $via !== null && (string) ($via['parent'] ?? '') === 'tblCareCase'
+                    && (string) ($via['personCol'] ?? '') === 'personUserID'
+                ) {
+                    $count = array_sum(array_map(static fn (array $case): int => count($case['visits']), self::careCasesAboutYou($userId)));
                 } else {
-                    // #970 item 1: an instruction may name a column whose rows
-                    // are the person's OWN and are counted elsewhere; those
-                    // are left out of this count (see the tblGivingEntry
-                    // `recordedByID` instruction). The column name is fixed
-                    // text from catalogue(), checked to be a plain name.
-                    $leaveOut = (string) ($entry['countLeavesOutWhere'] ?? '');
-                    if ($leaveOut !== '' && preg_match('/\A[A-Za-z0-9_]+\z/', $leaveOut) === 1) {
-                        $where = '(' . $where . ') AND (`' . $leaveOut . '` IS NULL OR `' . $leaveOut . '` <> ?)';
+                    // #970: an "acted on it" row that is ALSO the person's own
+                    // (a gift they recorded for themselves, a giving statement
+                    // a treasurer issued to themselves) is counted on the row
+                    // for their own records, so it is left out here, where the
+                    // words say "somebody else's". COUNT ONLY: the erasure's
+                    // own clause is whereForEntry(), untouched.
+                    if ($via === null && (string) $entry['action'] === 'anonymise') {
+                        foreach (self::ownedElsewhere($table, $col) as $ownCol) {
+                            $where = '(' . $where . ') AND (`' . $ownCol . '` IS NULL OR `' . $ownCol . '` <> ?)';
+                        }
                     }
                     $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE ' . $where);
                 }
@@ -4897,6 +4948,110 @@ class GdprEraser
                 'status'          => (string) $row['status'],
                 'recordedAtServerTime' => (string) $row['recordedAt'],
                 'notes'           => $row['notes'] === null ? null : (string) $row['notes'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * 💛 The pastoral care cases ABOUT this person - `tblCareCase.personUserID`
+     *    - and the visits on them, as their own data copy hands them over
+     *    (#1015, the owner's decision D-184, 13 November 2026).
+     *
+     * WHY THIS EXISTS. My data counted these cases (through the catalogue's
+     * `personUserID` instruction) and the visits on them (through the
+     * parent-matched `tblCareVisit` instruction, #709), but the full data copy
+     * (`account/data-export`) never read either - the shape #1012 fixed for
+     * DBS checks.
+     *
+     * THE ONE PLACE these rows are read, for BOTH answers: the copy hands over
+     * what this returns, and `inventory()` counts the cases and the visits by
+     * asking this method, so when the read works My data's numbers ARE the
+     * numbers in the copy. When it fails, neither says "none": this throws,
+     * and My data shows the row as "could not be read".
+     *
+     * WHICH COLUMNS (D-184). For each case: the organisation it is kept by
+     * (its name, read from `tblSites`), the member's name as typed on the case
+     * (`personName`), the category, the summary a worker wrote about their
+     * circumstances (the owner chose to include it, knowing it may mention
+     * family by name), the status, and the opened and closed readings. For
+     * each visit on the case: only its date and kind.
+     * LEFT OUT, on purpose (D-184's "rules out"):
+     *   - who opened the case (`openedByID`, `openedByName`), as D-154 leaves
+     *     out who recorded a DBS check;
+     *   - the case's own number (`caseID`);
+     *   - the visiting worker (`visitedByID`, `visitedByName`), the visit's
+     *     notes (they can name other people), and the follow-up date and who
+     *     it was given to.
+     *
+     * TIMES are handed over as stored, never turned into a moment (#777):
+     * `openedAt` and `visitedAt` are filled by the column's `DEFAULT
+     * CURRENT_TIMESTAMP` - the DATABASE SERVER's own clock - so their keys
+     * say `ServerTime`; the visit is handed over as its DAY only (D-184 says
+     * "its date"), cut as text. `closedAt` is written by no page today, so
+     * which clock it is on is not known and its key says `AsStored`.
+     *
+     * FAILURES: error 1146 (no such table - the care feature not installed)
+     * means none; any other database error is thrown, never answered "none".
+     *
+     * @return list<array{organisation: string, yourNameOnTheCase: string|null, category: string, summary: string|null, status: string, openedAtServerTime: string, closedAtAsStored: string|null, visits: list<array{day: string, kind: string}>}>
+     */
+    public static function careCasesAboutYou(int $userId): array
+    {
+        $db = App::db();
+        try {
+            // Every identifier backticked (#718). The column lists ARE the
+            // decision above: nothing not named here can reach the copy.
+            $stmt = $db->prepare(
+                'SELECT c.`caseID`, COALESCE(s.`siteName`, \'\') AS `siteName`, c.`siteID`, c.`personName`, c.`category`, c.`summary`, '
+                . 'c.`status`, c.`openedAt`, c.`closedAt` FROM `tblCareCase` c LEFT JOIN `tblSites` s ON s.`siteID` = c.`siteID` '
+                . 'WHERE c.`personUserID` = ? ORDER BY c.`caseID`'
+            );
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $cases = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+
+            // The visits are read only when there is a case to put them
+            // with: a person with no case has no visit about them, and a read
+            // that cannot change the answer is a read that can only fail it.
+            $visits = [];
+            $stmt   = $cases === [] ? false : $db->prepare(
+                'SELECT v.`caseID`, v.`visitedAt`, v.`kind` FROM `tblCareVisit` v INNER JOIN `tblCareCase` c ON c.`caseID` = v.`caseID` '
+                . 'WHERE c.`personUserID` = ? ORDER BY v.`visitedAt`, v.`visitID`'
+            );
+            if ($stmt !== false) {
+                $stmt->bind_param('i', $userId);
+                $stmt->execute();
+                foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $visit) {
+                    $visits[(int) $visit['caseID']][] = ['day' => substr((string) $visit['visitedAt'], 0, 10), 'kind' => (string) $visit['kind']];
+                }
+                $stmt->close();
+            }
+        } catch (\mysqli_sql_exception $failure) {
+            // Asked through isNoSuchTable(), not written out: section P of
+            // tools/erasure-pages-selftest.php plants a fault into
+            // dbsChecksAboutYou()'s own 1146 test by finding it exactly once.
+            if (self::isNoSuchTable($failure) === true) {
+                return [];
+            }
+            throw $failure;
+        }
+
+        $out = [];
+        foreach ($cases as $case) {
+            // The case number is used only to put each visit with its case;
+            // it is not handed over (D-184).
+            $out[] = [
+                'organisation'       => (string) $case['siteName'] !== '' ? (string) $case['siteName'] : 'organisation #' . (int) $case['siteID'],
+                'yourNameOnTheCase'  => $case['personName'] === null ? null : (string) $case['personName'],
+                'category'           => (string) $case['category'],
+                'summary'            => $case['summary'] === null ? null : (string) $case['summary'],
+                'status'             => (string) $case['status'],
+                'openedAtServerTime' => (string) $case['openedAt'],
+                'closedAtAsStored'   => $case['closedAt'] === null ? null : (string) $case['closedAt'],
+                'visits'             => $visits[(int) $case['caseID']] ?? [],
             ];
         }
 
@@ -6929,10 +7084,13 @@ class GdprEraser
         //     here exactly as clearKeptGivingIdentity() empties them (the same
         //     five columns); `donorID` stays, because the database does not
         //     allow it to be empty there. A declaration already emptied is
-        //     matched too and changes nothing. Read, not measured, that the
-        //     portal can produce such a declaration (its form matches a donor
-        //     by an active membership too): this keeps a completed request
-        //     from depending on that.
+        //     matched too and changes nothing. THIS IS A SAFEGUARD FOR A STATE
+        //     THE PORTAL IS NOT KNOWN TO PRODUCE: the one writer of a
+        //     declaration, `_apps/giving/gad-save.php`, records it for the
+        //     member who is signed in, and an emptied account cannot sign in.
+        //     A declaration against an emptied account would have to come
+        //     from somewhere else (an import, a restore, a hand edit); a
+        //     completed request must not depend on none ever doing so.
         //
         //     NOT CHANGED: the statement records beside a cleared row in case
         //     (b). Their mailed-to address and file were emptied by the same

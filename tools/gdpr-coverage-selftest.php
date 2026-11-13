@@ -3586,13 +3586,64 @@ check(
 //     (it reads CREATE TABLE only), a per-member table keyed some other way,
 //     and EVERY OTHER kind of record about the person - the much wider gap
 //     between what is erased and what is handed over is its own issue, #1063.
-//     It also asks only that the page READS
-//     the table, not which columns it hands over; outside-services-selftest.php
-//     E07b fetches the real page for that.
+//     It asks that a $fetchUserRows() entry's own SQL
+//     hands the table's rows over (outer FROM or a JOIN, sub-selects taken
+//     out); it does not judge which columns. outside-services-selftest.php
+//     E07b and E07c fetch the real page for that.
 // -----------------------------------------------------------------------------
 $exportCode  = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/data-export.php'));
+// #813 check round 2: "the page mentions the table" was not enough -
+// `tblUserSites` passed only because a sub-select inside ANOTHER entry named
+// it, while the member's memberships were handed over nowhere. So what counts
+// is a table whose ROWS a payload entry hands over: the SQL given to
+// $fetchUserRows(), its string pieces joined, every bracketed sub-select taken
+// out, and then the table named after the outer FROM or a JOIN.
+$handedOver = [];
+$at         = 0;
+while (($start = strpos($exportCode, '$fetchUserRows(', $at)) !== false) {
+    $open  = $start + strlen('$fetchUserRows');
+    $depth = 0;
+    $end   = $open;
+    for ($i = $open, $n = strlen($exportCode); $i < $n; $i++) {
+        $c = $exportCode[$i];
+        if ($c === '\'' || $c === '"') {
+            // Step over a string literal whole, so a bracket inside SQL text
+            // does not count.
+            for ($i++; $i < $n && $exportCode[$i] !== $c; $i++) {
+                if ($exportCode[$i] === '\\') {
+                    $i++;
+                }
+            }
+            continue;
+        }
+        if ($c === '(') {
+            $depth++;
+        } elseif ($c === ')' && --$depth === 0) {
+            $end = $i;
+            break;
+        }
+    }
+    $call = substr($exportCode, $open, $end - $open + 1);
+    $at   = $end + 1;
+    gc_findAll("/'((?:[^'\\\\]|\\\\.)*)'|\"((?:[^\"\\\\]|\\\\.)*)\"/", $call, $pieces, PREG_SET_ORDER);
+    $sql = '';
+    foreach ($pieces as $piece) {
+        $sql .= ($piece[2] ?? '') !== '' ? $piece[2] : $piece[1];
+    }
+    do {
+        $before = $sql;
+        $sql    = (string) preg_replace('/\(\s*SELECT[^()]*\)/i', ' ', $sql);
+    } while ($sql !== $before);
+    gc_findAll('/\b(?:FROM|JOIN)\s+`?(tbl\w+)`?/i', $sql, $named);
+    foreach ($named[1] as $name) {
+        $handedOver[$name] = true;
+    }
+}
 $ownSettings = [];
 $copyFaults  = [];
+if (count($handedOver) < 20) {
+    $copyFaults[] = 'premise: fewer than 20 tables found handed over by $fetchUserRows(), so the page is not being read as it should';
+}
 gc_findAll('/CREATE TABLE IF NOT EXISTS `(\w+)` \((.*?)\n\)/s', $schemaText, $created, PREG_SET_ORDER);
 foreach ($created as [, $table, $body]) {
     if ((string) ($catalogue[$table]['decision'] ?? '') !== 'erase') {
@@ -3606,8 +3657,8 @@ foreach ($created as [, $table, $body]) {
             continue;
         }
         $ownSettings[] = $table;
-        if (gc_find('/\b(FROM|JOIN)\s+`?' . preg_quote($table, '/') . '`?\s/', $exportCode) !== 1) {
-            $copyFaults[] = $table . ' (one row per member, erased with them) is never read by account/data-export';
+        if (isset($handedOver[$table]) === false) {
+            $copyFaults[] = $table . ' (one row per member, erased with them) has no rows handed over by account/data-export';
         }
         break;
     }
