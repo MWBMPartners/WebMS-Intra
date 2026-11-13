@@ -1126,6 +1126,52 @@ class I18n
     }
 
     /**
+     * 🔁 A stored wall-clock reading moved on by a whole number of calendar
+     *    days, weeks, months or years -- the ONE place a reading is moved on
+     *    as a reading (#1041). Answers the new reading as `Y-m-d H:i:s`, or
+     *    null when what it was given is not a real reading.
+     *
+     * It is a READING, never a moment, which is the whole point: "+1 day" is
+     * the same time of day on the next date, as the organisation's clock
+     * would say it. The arithmetic is done on `wallClockReading()`'s object,
+     * which is built in UTC, where there are no clock changes -- so a 01:30
+     * reading moved onto the morning the clocks go forward stays 01:30.
+     * `new DateTime($reading)` in PHP's default zone (what
+     * `tasks/complete.php` did before #1041) moved it to 02:30 there.
+     *
+     * Kept HERE, not written out in the page, for a second reason too:
+     * `check_wall_clock_writes_not_moments.py` cannot tell a UTC-built
+     * reading from a moment, so arithmetic written in a page that stores the
+     * result needed an exemption -- and an exemption on a variable forgave
+     * any OTHER faulty line filling that variable (round 1 of #1041's check
+     * measured it). With the arithmetic here, the page needs no exemption
+     * and every moment it builds is still reported.
+     *
+     * ⚠️ A month or a year moved on from a date the target month does not
+     *    have rolls over as PHP's `modify()` does (31 January + 1 month is
+     *    3 March). That is unchanged from before #1041 and is not decided
+     *    here.
+     *
+     * @param string|null $wallClock The stored reading.
+     * @param string      $unit      `days`, `weeks`, `months` or `years`.
+     * @param int         $count     How many; at least 1.
+     *
+     * @return string|null
+     */
+    public static function wallClockMovedOn(?string $wallClock, string $unit, int $count): ?string
+    {
+        if (\in_array($unit, ['days', 'weeks', 'months', 'years'], true) === false || $count < 1) {
+            return null;
+        }
+        $reading = self::wallClockReading($wallClock);
+        if ($reading === null) {
+            return null;
+        }
+
+        return $reading->modify('+' . $count . ' ' . $unit)->format('Y-m-d H:i:s');
+    }
+
+    /**
      * 📍 A stored wall-clock reading made into a real INSTANT, on the clock it
      *    was written on -- for the few places that must hand an instant to
      *    something else: a public feed's `startsAt`, a countdown in the

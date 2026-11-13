@@ -313,22 +313,6 @@ ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
         (_IMPORT_REASON, IMPORT_STEP3_GUARD),
     "web/_apps/calendar/manage/import.php::$endSql::tblEvents.endDateTime::$fmtclockraw":
         (_IMPORT_REASON, IMPORT_STEP3_GUARD),
-    # #1041: a recurring task's next reminder is the stored reading moved on by
-    # the task's own interval. The "moment" the probe sees is `->modify()` on
-    # the object `I18n::wallClockReading()` returns -- which is built in UTC,
-    # where there are no clock changes, so "+1 day" is the same time of day on
-    # the next date and nothing is moved. The probe cannot see that, because a
-    # call into another class is a wall to it. The pin is the line that builds
-    # the reading: replace it with `new DateTime(...)` (what it was before
-    # #1041, in PHP's default zone) and this exemption no longer applies.
-    "web/_apps/tasks/complete.php::$nextReminder::tblTasks.reminderDate::(top level)":
-        (
-            "The next reminder is the stored reading moved on by the task's own "
-            "interval, on a reading I18n::wallClockReading() builds in UTC, "
-            "which has no clock changes, so no hour is moved (#1041).",
-            "$rdt = $task['reminderDate'] !== null ? "
-            "I18n::wallClockReading((string) $task['reminderDate']) : null;",
-        ),
 }
 
 

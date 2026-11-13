@@ -127,7 +127,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 321;  // + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 325;  // + four in part L (#1041 round 2: L21-L24) on the 321 before: + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4904,6 +4904,10 @@ const L_SLOT_C4  = 961126; // the organisation's date + 4: outside it
 const L_TASK_DUE   = 961131; // an hour ago on A's clock: due
 const L_TASK_LATER = 961132; // two hours on, on A's clock: not yet
 const L_TASK_OLD   = 961133; // eight days ago: past the seven-day look-back
+const L_TASK_WEEK  = 961135; // six days ago: inside the look-back, and more than a day old (round 2)
+const L_TASK_DAILY   = 961141; // organisation 1, recurring daily, completed through /tasks/complete
+const L_TASK_WEEKLY  = 961142; // ... weekly
+const L_TASK_MONTHLY = 961143; // ... monthly
 const L_TASK_SAVE  = 961134; // organisation 1, the member's own: driven through /tasks/save
 $lNowUtc = time();
 $lZone   = null;
@@ -4969,7 +4973,7 @@ q('INSERT INTO `tblRotaSlot` (`slotID`, `siteID`, `roleTypeID`, `slotDate`, `ass
 // out on A's clock in UTC arithmetic (a reading has no clock changes).
 $lOrgNowReading = (new DateTimeImmutable('@' . time()))->setTimezone(new DateTimeZone($lZone))->format('Y-m-d H:i:s');
 $lReadingPlus   = static fn (string $shift): string => (new DateTimeImmutable($lOrgNowReading, new DateTimeZone('UTC')))->modify($shift)->format('Y-m-d H:i:s');
-$lTaskReadings  = [L_TASK_DUE => $lReadingPlus('-1 hour'), L_TASK_LATER => $lReadingPlus('+2 hours'), L_TASK_OLD => $lReadingPlus('-8 days')];
+$lTaskReadings  = [L_TASK_DUE => $lReadingPlus('-1 hour'), L_TASK_LATER => $lReadingPlus('+2 hours'), L_TASK_OLD => $lReadingPlus('-8 days'), L_TASK_WEEK => $lReadingPlus('-6 days')];
 foreach ($lTaskReadings as $task => $reading) {
     q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `reminderDate`, `reminderSent`) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0)",
         'iisiis', [$task, L_ORG_A, 'Selftest 1041 task ' . $task, L_MEMBER, L_MEMBER, $reading]);
@@ -4980,15 +4984,15 @@ foreach ($lTaskReadings as $task => $reading) {
 $lAsk = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
 $lAsk->query("SET time_zone = '" . $lAsk->real_escape_string($lDbZone) . "'");
 $lOldPicks = [];
-$lOldRes   = $lAsk->query('SELECT `taskID` FROM `tblTasks` WHERE `taskID` IN (' . L_TASK_DUE . ', ' . L_TASK_LATER . ', ' . L_TASK_OLD . ') '
+$lOldRes   = $lAsk->query('SELECT `taskID` FROM `tblTasks` WHERE `taskID` IN (' . L_TASK_DUE . ', ' . L_TASK_LATER . ', ' . L_TASK_OLD . ', ' . L_TASK_WEEK . ') '
     . 'AND `reminderDate` <= NOW() AND `reminderDate` >= DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY `taskID`');
 while ($lOldRow = $lOldRes->fetch_assoc()) {
     $lOldPicks[] = (int) $lOldRow['taskID'];
 }
 $lAsk->close();
 ok(
-    'L15 premise: with the database\'s clock at ' . $lDbZone . ', the OLD condition (the database\'s NOW()) does NOT pick exactly the task due an hour ago on the organisation\'s clock (' . $lOrgNowReading . ' in ' . $lZone . ') -- so L16 cannot pass on the old code by accident (#1041)',
-    $lOldPicks !== [L_TASK_DUE],
+    'L15 premise: with the database\'s clock at ' . $lDbZone . ', the OLD condition (the database\'s NOW()) does NOT pick exactly the tasks due an hour ago and six days ago on the organisation\'s clock (' . $lOrgNowReading . ' in ' . $lZone . ') -- so L16 cannot pass on the old code by accident (#1041)',
+    $lOldPicks !== [L_TASK_DUE, L_TASK_WEEK],
     'the old condition picks ' . json_encode($lOldPicks)
 );
 
@@ -5063,9 +5067,9 @@ ok(
 );
 $lTaskSent = static fn (int $task): int => (int) (one('SELECT `reminderSent` FROM `tblTasks` WHERE `taskID` = ?', 'i', [$task])['reminderSent'] ?? -1);
 ok(
-    'L16 task reminders are judged on the ORGANISATION\'s clock: the one an hour ago was reminded, the one two hours on and the one eight days ago (past the look-back) were not (#1041: it was the database\'s NOW())',
-    $lTaskSent(L_TASK_DUE) === 1 && $lTaskSent(L_TASK_LATER) === 0 && $lTaskSent(L_TASK_OLD) === 0,
-    'due ' . $lTaskSent(L_TASK_DUE) . ', later ' . $lTaskSent(L_TASK_LATER) . ', old ' . $lTaskSent(L_TASK_OLD)
+    'L16 task reminders are judged on the ORGANISATION\'s clock: the ones an hour ago and six days ago were reminded, the one two hours on and the one eight days ago (past the seven-day look-back) were not (#1041: it was the database\'s NOW(); round 2: the six-day one pins the look-back\'s UNIT)',
+    $lTaskSent(L_TASK_DUE) === 1 && $lTaskSent(L_TASK_WEEK) === 1 && $lTaskSent(L_TASK_LATER) === 0 && $lTaskSent(L_TASK_OLD) === 0,
+    'due ' . $lTaskSent(L_TASK_DUE) . ', six days ' . $lTaskSent(L_TASK_WEEK) . ', later ' . $lTaskSent(L_TASK_LATER) . ', old ' . $lTaskSent(L_TASK_OLD)
 );
 
 // ---- #1041: the task form stores the reading, and judges "in the future" on the organisation's clock ----
@@ -5110,6 +5114,48 @@ ok(
     'flash "' . $lFlash . '"; row ' . json_encode($lSavedRow())
 );
 
+// ---- #1041 round 2: completing a recurring task carries its reminder on as a READING ----
+// Organisation 1 is put on London's clock for this, and each task's next
+// reminder lands at 01:30 on 28 March 2027 -- the morning London's clocks go
+// forward, so 01:30 does not exist there. Moved on as a reading it stays
+// 01:30; moved on as a moment in London (what tasks/complete.php did) it
+// became 02:30. Daily, weekly and monthly each reach that same morning.
+$lCompleteZoneWas = zoneOfOrg(1);
+orgZone(1, 'Europe/London');
+$lGapShown = (new DateTimeImmutable('2027-03-28 01:30:00', new DateTimeZone('Europe/London')))->format('Y-m-d H:i:s');
+ok(
+    'L21 premise: 01:30 on 28 March 2027 does not exist on London\'s clock (PHP makes it ' . $lGapShown . '), so L22-L24 cannot pass on the old code by accident',
+    $lGapShown !== '2027-03-28 01:30:00',
+    'PHP kept ' . $lGapShown
+);
+$lRecurring = [
+    L_TASK_DAILY   => ['daily',   '2027-03-27 01:30:00', '2027-03-28 01:30:00'],
+    L_TASK_WEEKLY  => ['weekly',  '2027-03-21 01:30:00', '2027-03-28 01:30:00'],
+    L_TASK_MONTHLY => ['monthly', '2027-02-28 01:30:00', '2027-03-28 01:30:00'],
+];
+$lCompleteJar = signIn('member');
+foreach ($lRecurring as $task => [$type, $reminder]) {
+    q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `dueDate`, `isRecurring`, `recurrenceType`, `recurrenceInterval`, `reminderDate`, `reminderSent`) VALUES (?, 1, ?, ?, ?, 'pending', ?, 1, ?, 1, ?, 1)",
+        'isiisss', [$task, 'Selftest 1041 ' . $type . ' task', MEMBER, MEMBER, substr($reminder, 0, 10), $type, $reminder]);
+}
+try {
+    foreach ($lRecurring as $task => $ignored) {
+        post($lCompleteJar, '/tasks', '/tasks/complete', ['taskID' => (string) $task]);
+    }
+} finally {
+    orgZone(1, $lCompleteZoneWas);
+}
+$lNextOf = static fn (int $task): array => (array) one('SELECT `dueDate`, `reminderDate` FROM `tblTasks` WHERE `parentTaskID` = ?', 'i', [$task]);
+$lCheckNo = 22;
+foreach ($lRecurring as $task => [$type, $reminder, $wanted]) {
+    $next = $lNextOf($task);
+    ok(
+        'L' . $lCheckNo++ . ' completing a ' . $type . ' task whose reminder is ' . $reminder . ' gives the next one a reminder at ' . $wanted . ' -- the same time on the clock, on the morning London\'s clocks go forward (#1041 round 2: it was moved to 02:30)',
+        (string) ($next['reminderDate'] ?? '') === $wanted,
+        json_encode($next)
+    );
+}
+
 // ---- put everything back as part L found it ----------------------------------------
 foreach ($lKept as $key => $row) {
     if ($row === null) {
@@ -5119,7 +5165,8 @@ foreach ($lKept as $key => $row) {
     }
 }
 q('DELETE FROM `tblRotaSlot` WHERE `slotID` IN (?, ?, ?, ?)', 'iiii', [L_SLOT_ORG, L_SLOT_DB, L_SLOT_C3, L_SLOT_C4]);
-q('DELETE FROM `tblTasks` WHERE `taskID` IN (?, ?, ?, ?)', 'iiii', [L_TASK_DUE, L_TASK_LATER, L_TASK_OLD, L_TASK_SAVE]);
+q('DELETE FROM `tblTasks` WHERE `parentTaskID` IN (?, ?, ?)', 'iii', [L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY]);
+q('DELETE FROM `tblTasks` WHERE `taskID` IN (?, ?, ?, ?, ?, ?, ?, ?)', 'iiiiiiii', [L_TASK_DUE, L_TASK_LATER, L_TASK_OLD, L_TASK_WEEK, L_TASK_SAVE, L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY]);
 q('DELETE FROM `tblRotaRoleType` WHERE `roleTypeID` IN (?, ?)', 'ii', [L_ROLETYPE, L_ROLETYPE_C]);
 q("DELETE FROM `tblUserReminderLog` WHERE `refID` IN (?, ?, ?)", 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
 q('DELETE FROM `tblUserRoles` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);

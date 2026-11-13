@@ -121,31 +121,16 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
         //    spawn, so a recurring task only ever got ONE reminder ever.
         //
         //    The reminder is a reading on the organisation's clock (#1041), so
-        //    it is moved forward as a READING, built in UTC by
-        //    I18n::wallClockReading(), which has no clock changes: "+1 day"
-        //    is then the same time of day on the next date, as the
-        //    organisation's clock would say it. It used to be `new DateTime()`
-        //    in PHP's default zone, which on the morning the clocks go
-        //    forward moved a 01:30 reminder to 02:30 for every later
-        //    occurrence (#777). A stored value that is not a reading carries
-        //    nothing forward rather than guessing.
-        $rdt = $task['reminderDate'] !== null ? I18n::wallClockReading((string) $task['reminderDate']) : null;
-        if ($rdt !== null) {
-            switch ($task['recurrenceType']) {
-                case 'daily':
-                    $rdt = $rdt->modify('+' . $interval . ' days');
-                    break;
-                case 'weekly':
-                    $rdt = $rdt->modify('+' . $interval . ' weeks');
-                    break;
-                case 'monthly':
-                    $rdt = $rdt->modify('+' . $interval . ' months');
-                    break;
-                case 'yearly':
-                    $rdt = $rdt->modify('+' . $interval . ' years');
-                    break;
-            }
-            $nextReminder = $rdt->format('Y-m-d H:i:s');
+        //    it is moved on as a READING, by the same unit and count as the
+        //    due date, through I18n::wallClockMovedOn() -- the one place that
+        //    is done, in UTC, which has no clock changes. It used to be
+        //    `new DateTime()` in PHP's default zone, which on the morning the
+        //    clocks go forward moved a 01:30 reminder to 02:30 for every
+        //    later occurrence (#777). A stored value that is not a reading
+        //    carries nothing forward rather than guessing.
+        $reminderUnits = ['daily' => 'days', 'weekly' => 'weeks', 'monthly' => 'months', 'yearly' => 'years'];
+        if ($task['reminderDate'] !== null && isset($reminderUnits[$task['recurrenceType']]) === true) {
+            $nextReminder = I18n::wallClockMovedOn((string) $task['reminderDate'], $reminderUnits[$task['recurrenceType']], $interval);
         }
 
         // 🔍 Check if past recurrence end date
