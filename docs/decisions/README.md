@@ -238,7 +238,8 @@ appended with its real date and a note that it was added later.
 | [D-180](180-an-imported-date-is-decided-as-it-stands-now.md) | 2026-11-12 | An imported date is approved or declined as it stands now | in force |
 | [D-181](181-an-event-starts-between-1900-and-at-least-2200.md) | 2026-11-12 | An event's start must fall between 1900 and 2200, or fifty years ahead if that is later | in force |
 | [D-182](182-the-map-answer-memory-is-kept-for-a-capped-setting.md) | 2026-11-13 | How long a remembered map answer is kept is a setting, capped by the installation | in force |
+| [D-183](183-a-remembered-home-position-is-personal-data.md) | 2026-11-13 | A remembered map answer for a home is personal data; which addresses are homes is chosen | in force |
 
-*182 decisions. This index is checked against the folder by
+*183 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
