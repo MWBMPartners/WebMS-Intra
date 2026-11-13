@@ -552,11 +552,81 @@ if ($action === 'update') {
             //    written up as its own issue rather than guessed at here.
             $otherWays = Auth::countLoginMethods($userID, $mysqli);
             if ($otherWays > 0) {
-                $_SESSION['flash_msg']  = 'No password was set, and nothing else was saved either. This account has '
-                    . 'no password of its own — it signs in another way, with Microsoft or Google or with a passkey. '
-                    . 'This page does not add a password to such an account, because that would be a second way in '
-                    . 'rather than a correction. Clear the New Password box and press Save again to store your other '
-                    . 'changes.';
+                // 🗣️ SAY ONLY WHAT IS KNOWN (#1049). The count above is a
+                //    count of ROWS: every tblLinkedAccounts row and every
+                //    passkey. A link row is a way in only while that
+                //    provider's sign-in is SET UP here; with Microsoft or
+                //    Google switched off the link opens nothing. This used
+                //    to say "it signs in another way, with Microsoft or
+                //    Google or with a passkey" whatever the settings were,
+                //    which was untrue for an account whose only link is to
+                //    a switched-off provider: that account has no way in at
+                //    all, and the administrator was told it had one.
+                //    The DECISION is unchanged (D-018: still refused); only
+                //    the words follow the facts now. "Set up" is asked in
+                //    the same terms the rehire page uses
+                //    (Auth::isMS365Configured() / isGoogleConfigured()), so
+                //    the two pages cannot describe one account two ways.
+                //    If the facts cannot be read, the sentence falls back to
+                //    the one thing the count proves (a link or a passkey is
+                //    recorded) and claims no way in.
+                $refusalWhy = null;
+                try {
+                    $linkRead = $mysqli->prepare('SELECT `provider`, COUNT(*) AS `n` FROM `tblLinkedAccounts` WHERE `userID` = ? GROUP BY `provider`');
+                    $linkRead->bind_param('i', $userID);
+                    $linkRead->execute();
+                    $linkedBy = [];
+                    foreach ($linkRead->get_result()->fetch_all(MYSQLI_ASSOC) as $linkRow) {
+                        $linkedBy[(string) $linkRow['provider']] = (int) $linkRow['n'];
+                    }
+                    $linkRead->close();
+                    $keyRead = $mysqli->prepare('SELECT COUNT(*) AS `n` FROM `tblWebAuthnCredentials` WHERE `userID` = ?');
+                    $keyRead->bind_param('i', $userID);
+                    $keyRead->execute();
+                    $passkeyCount = (int) ($keyRead->get_result()->fetch_assoc()['n'] ?? 0);
+                    $keyRead->close();
+
+                    // Which links open something, and which are left
+                    // pointing at a sign-in that is not set up here. A
+                    // provider name this page does not know counts as not
+                    // set up: it cannot be shown to work.
+                    $setUp     = ['ms365' => Auth::isMS365Configured(), 'google' => Auth::isGoogleConfigured()];
+                    $named     = ['ms365' => 'Microsoft', 'google' => 'Google'];
+                    $waysIn    = [];
+                    $deadLinks = 0;
+                    foreach ($linkedBy as $provider => $linkCount) {
+                        if (($setUp[$provider] ?? false) === true) {
+                            $waysIn[] = 'with ' . $named[$provider];
+                        } else {
+                            $deadLinks += $linkCount;
+                        }
+                    }
+                    if ($passkeyCount > 0) {
+                        $waysIn[] = 'with a passkey';
+                    }
+                    if ($waysIn !== []) {
+                        $refusalWhy = 'This account has no password of its own — it signs in another way, '
+                            . implode(' or ', $waysIn) . '.'
+                            . ($deadLinks > 0
+                                ? ' It is also still linked to a Microsoft or Google account whose sign-in is not set up here.'
+                                : '')
+                            . ' This page does not add a password to such an account, because that would be a second '
+                            . 'way in rather than a correction.';
+                    } else {
+                        $refusalWhy = 'This account has no password of its own, and it is still linked to a Microsoft '
+                            . 'or Google account whose sign-in is not set up here, so it has no way to sign in at the '
+                            . 'moment. This page does not add a password to an account that is linked to Microsoft or '
+                            . 'Google.';
+                    }
+                } catch (\Throwable $whyUnread) {
+                    $refusalWhy = null;
+                }
+                if ($refusalWhy === null) {
+                    $refusalWhy = 'This account has no password of its own, and a link to Microsoft or Google or a '
+                        . 'passkey is recorded for it. This page does not add a password to such an account.';
+                }
+                $_SESSION['flash_msg']  = 'No password was set, and nothing else was saved either. ' . $refusalWhy
+                    . ' Clear the New Password box and press Save again to store your other changes.';
                 $_SESSION['flash_type'] = 'warning';
                 header('Location: ' . Site::url('admin/users'));
                 exit();

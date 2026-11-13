@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 163; // five added by #598 (part L); nine by #907 (K56-K64)
+const EXPECTED_CHECKS = 165; // five added by #598 (part L); nine by #907 (K56-K64); two by #1042 (part M)
 
 function refuse(string $why): never
 {
@@ -338,7 +338,10 @@ const PEOPLE = [
     'uma'   => 922031, // K: "C", with two-step sign-in on
     'vic'   => 922032, // K (#903): a GLOBAL administrator, who sets the passkey address on the Settings page
     'wes'   => 922033, // L (#598): half-way through signing in when the password is changed elsewhere
+    'xena'  => 922034, // M (#1042): her account as a whole restore puts it back - the OLD e-mail address, no Microsoft link
 ];
+/** #1042: the address Xena changed to AFTER the snapshot, which Microsoft now sends. The account the callback makes for it is numbered by the database, so it is found by this. */
+const P1042_NEW_EMAIL = 'xena.changed.p1042.twostep@selftest.invalid';
 /** Part K's invitation: the account it makes is a NEW person, numbered by the database, so it is found by these. */
 const INVITEE_EMAIL = 'invitee.twostep@selftest.invalid';
 const INVITEE_LOGIN = 'tss-invitee';
@@ -422,6 +425,12 @@ function removeWorld(): void
             }
         }
         q('DELETE FROM tblLocalAccounts WHERE username = ?', 's', [$inviteeLogin]);
+    }
+    // #1042: the NEW, empty account the Microsoft callback makes for Xena's changed address.
+    foreach (q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL]) as $madeFor1042) {
+        foreach (['tblActivityLogs', 'tblErrors', 'tblLinkedAccounts', 'tblLocalAccounts', 'tblUserSites', 'tblUsers'] as $table) {
+            q('DELETE FROM ' . $table . ' WHERE userID = ?', 'i', [(int) $madeFor1042['userID']]);
+        }
     }
     // #902: the test passkeys (they would go with their accounts anyway, by the cascade).
     q('DELETE FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999');
@@ -3026,6 +3035,55 @@ ok('L5 that browser, asking to be trusted at the code step after the change, is 
     describe($trusted) . '; live devices before ' . $devicesBefore . ', after ' . $liveDevices() . '; refusals recorded ' . records('wes', 'TotpDeviceTrustRefused'));
 
 // =============================================================================
+head('M. #1042: a Microsoft sign-in after a whole restore, for a member who changed their e-mail address after the snapshot');
+// =============================================================================
+// KNOWN OPEN FAULT, REPRODUCED AND NOT FIXED. What SHOULD happen is the
+// owner's decision (#1042): nothing in docs/decisions/ says whether a
+// Microsoft or Google sign-in may create an account at all, nor how a sign-in
+// that matches nobody should end. So this section proves the fault is real and
+// changes nothing. M02 PASSES WHILE THE FAULT IS PRESENT: when #1042 is
+// decided and built, M02 must be rewritten to the decided behaviour - it will
+// go red the moment the callback stops making the account, which is the point.
+//
+// THE STATE A WHOLE RESTORE LEAVES, made here with SQL rather than by running
+// a restore (a whole restore of this test's database would replace every
+// other part's world): the restore puts tblUsers and tblLinkedAccounts back as
+// they were at the snapshot, so Xena's account holds her OLD address and has
+// NO Microsoft link - she linked Microsoft and changed her address after the
+// snapshot was taken. Microsoft then sends her NEW address and her subject.
+// That is exactly the fixture below: her account as made for every person in
+// this test (old address, no link), and a sign-in naming the new address.
+$xenaJar = newJar();
+$xenaLinksBefore = (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['xena']])['n'];
+$newHoldersBefore = (int) one('SELECT COUNT(*) AS n FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL])['n'];
+ok('M01 premise: Xena\'s account is as a restore leaves it - her old address, no Microsoft link - and no account holds her new address',
+    $xenaLinksBefore === 0 && $newHoldersBefore === 0
+    && (string) one('SELECT emailAddress FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['xena']])['emailAddress'] === 'xena.twostep@selftest.invalid',
+    'links before ' . $xenaLinksBefore . ', accounts holding the new address before ' . $newHoldersBefore);
+// Part K put the scratch Auth.php back as copied, stubs removed; the provider
+// stubs go back in for this one sign-in and come out again straight after.
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+try {
+    $xenaStart = req($xenaJar, 'GET', '/login/ms365', null, ip(190));
+    $xenaState = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $xenaStart['location'], $xm) === 1 ? $xm[1] : '';
+    $xenaBack  = req($xenaJar, 'GET', '/login/ms365/callback?' . http_build_query(['state' => $xenaState, 'code' => STUB . json_encode(
+        ['sub' => 'p1042-ms-xena', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena']
+    )]), null, ip(190));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+$madeFor = q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL]);
+$madeId  = (int) ($madeFor[0]['userID'] ?? 0);
+$madeLinks = $madeId > 0 ? (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ? AND provider = 'ms365' AND providerSub = 'p1042-ms-xena'", 'i', [$madeId])['n'] : 0;
+ok('M02 KNOWN FAULT #1042 REPRODUCED (passes while the fault is present; rewrite when #1042 is decided): the callback found no link, no account with the new address and no switched-off one, so it MADE A NEW, EMPTY ACCOUNT for that address, linked Microsoft to it and signed the browser in as it - while Xena\'s real account was left with no link',
+    $xenaState !== '' && count($madeFor) === 1 && $madeId !== PEOPLE['xena'] && $madeLinks === 1
+    && (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['xena']])['n'] === 0
+    && signedIn($xenaJar, ip(190)) === true,
+    'callback ' . describe($xenaBack) . '; error records for this sign-in: ' . json_encode(array_column(q('SELECT errorCode FROM tblErrors WHERE visitorIP = ?', 's', [ip(190)]), 'errorCode')) . '; accounts now holding the new address ' . count($madeFor) . ' (number ' . $madeId . ', Xena is ' . PEOPLE['xena'] . '); its Microsoft links ' . $madeLinks);
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log  = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -3056,6 +3114,7 @@ $left = (int) one(
     . "+ (SELECT COUNT(*) FROM tblApiRateLimits WHERE bucket LIKE 'totp\\_%:9220__%') + (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = '" . TRIGGER . "') "
     . "+ (SELECT COUNT(*) FROM tblLinkedAccounts WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblInvitation WHERE email = '" . INVITEE_EMAIL . "') "
     . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . INVITEE_EMAIL . "') "
+    . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . P1042_NEW_EMAIL . "') "
     . "+ (SELECT COUNT(*) FROM tblInvitation WHERE email IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
     . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
     . "+ (SELECT COUNT(*) FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999) "

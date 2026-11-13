@@ -233,7 +233,11 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 247; // MERGED (p982-land): both sides grew from 223,
+const EXPECTED_CHECKS = 249; // #1049 added M13l2 and M13l3 (the Users page's
+                            // refusal says a link opens nothing when its
+                            // sign-in is not set up, and says "signs in
+                            // another way" only when it is). 247 + 2 = 249.
+                            // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
                             // #982 round 12 added M13q (the Offboard page's
@@ -4158,6 +4162,14 @@ q("INSERT INTO `tblLinkedAccounts` (`userID`, `provider`, `providerSub`) VALUES 
 try {
     $lenRehire = $rehireM(M13_LEN);
     $lenSave   = $givePasswordM('root', M13_LEN);
+    // #1049: the SAME account, with Microsoft sign-in now set up, so the link
+    // really is a way in. The refusal must say so - and only then.
+    siteSetting(ORG_A, 'auth.ms365.enduser.clientID', 'selftest-1049-ms-client');
+    try {
+        $lenSaveSetUp = $givePasswordM('root', M13_LEN);
+    } finally {
+        q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.ms365.enduser.clientID']);
+    }
 } finally {
     q('DELETE FROM `tblLinkedAccounts` WHERE `userID` = ?', 'i', [M13_LEN]);
 }
@@ -4168,6 +4180,18 @@ ok('M13l an account still LINKED to Microsoft (not set up here) is said to have 
     && str_contains($lenRehire, 'You can try giving it') === false && str_contains($lenRehire, 'You can give it') === false
     && $lenRows === 0 && str_contains($lenSave, 'No password was set') === true,
     'offboard said: ' . $lenOff . ' | rehire said: ' . $lenRehire . ' | save said: ' . $lenSave);
+// M13l2/M13l3 (#1049): the Users page's refusal says only what is known. With
+// Microsoft NOT set up the link opens nothing, so it must never say the account
+// "signs in another way"; with it set up, it must say exactly that.
+ok('M13l2 the Users page refuses a password to an account linked to Microsoft while Microsoft sign-in is NOT set up, and says it is still linked to a sign-in that is not set up here and has no way in - never that it "signs in another way" (#1049)',
+    str_contains($lenSave, 'No password was set, and nothing else was saved either. This account has no password of its own, and it is still linked to a Microsoft or Google account whose sign-in is not set up here, so it has no way to sign in at the moment.') === true
+    && str_contains($lenSave, 'signs in another way') === false,
+    'save said: ' . $lenSave);
+ok('M13l3 the same account with Microsoft sign-in SET UP is refused too, and the page says it signs in another way, with Microsoft - and nothing about a sign-in that is not set up (#1049)',
+    str_contains($lenSaveSetUp, 'No password was set, and nothing else was saved either. This account has no password of its own — it signs in another way, with Microsoft. This page does not add a password to such an account') === true
+    && str_contains($lenSaveSetUp, 'not set up here') === false
+    && (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_LEN])['n'] === 0,
+    'save said: ' . $lenSaveSetUp);
 
 // M13o: an account with no way in whose e-mail address is over 50 characters.
 // The Users page would make its sign-in name from that address and refuses it

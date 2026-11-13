@@ -690,8 +690,10 @@ ok('C07 the other field posted in the same form was saved too', storedPhone(NOPW
 head('D. The four refusals: no password set, nothing else saved either, and the reason in words');
 // [who, what the message must say, what it must not say]
 $refusals = [
-    [MSONLY,   'signs in another way',                   'an account that signs in with Microsoft'],
-    [KEYONLY,  'signs in another way',                   'an account that signs in with a passkey'],
+    // #1049: Microsoft sign-in is NOT set up in this test, so MSONLY's link
+    // opens nothing and the refusal must say that, not "signs in another way".
+    [MSONLY,   'still linked to a Microsoft or Google account whose sign-in is not set up here', 'an account linked to Microsoft while Microsoft sign-in is not set up'],
+    [KEYONLY,  'signs in another way, with a passkey.',  'an account that signs in with a passkey'],
     [LONGMAIL, 'longer than 50 characters',              'an address too long to be a sign-in name'],
     [CLASH,    'that sign-in name cannot be used',       'an address that is already a sign-in name'],
 ];
