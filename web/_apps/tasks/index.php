@@ -127,9 +127,25 @@ if ($isAdmin === true) {
     }
 }
 
+// 💬 The message a Tasks handler left (#1041). Nothing prints one centrally,
+//    and this page printed none, so every message `tasks/save.php` and
+//    `tasks/complete.php` set -- "Task updated.", "Title is required." and,
+//    since #1041, "The reminder must be a real date and time." -- was set and
+//    never shown: a refused save looked like a page that simply reloaded.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+if (in_array($flashType, ['success', 'danger', 'warning', 'info'], true) === false) {
+    $flashType = 'info';
+}
+
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>" role="alert"><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
 
 <!-- ✅ Task Management -->
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -206,8 +222,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                     <div class="col-md-3">
                         <label for="reminderDate" class="form-label">Reminder</label>
+                        <?php
+                        // 🕰️ The stored reminder is a reading on the organisation's
+                        //    clock (#1041), so it goes back into the box as that
+                        //    reading, built in UTC by I18n::wallClockReading() --
+                        //    never through strtotime(), which on the morning the
+                        //    clocks go forward moved a 01:30 reading to 02:30, so
+                        //    pressing Save untouched would have stored the moved
+                        //    hour (#777).
+                        $reminderShown = $editing !== null ? I18n::wallClockReading($editing['reminderDate'] !== null ? (string) $editing['reminderDate'] : null) : null;
+                        ?>
                         <input type="datetime-local" class="form-control" id="reminderDate" name="reminderDate"
-                               value="<?php echo $editing !== null && $editing['reminderDate'] !== null ? htmlspecialchars(date('Y-m-d\TH:i', strtotime($editing['reminderDate'])), ENT_QUOTES, 'UTF-8') : ''; ?>">
+                               value="<?php echo $reminderShown !== null ? htmlspecialchars($reminderShown->format('Y-m-d\TH:i'), ENT_QUOTES, 'UTF-8') : ''; ?>">
                     </div>
                 </div>
 

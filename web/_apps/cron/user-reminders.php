@@ -28,11 +28,13 @@
  * PHP's default zone, which is whichever organisation the request happened
  * to resolve to.
  *
- * ⚠️ ONE EXCEPTION, NOT YET PUT RIGHT: the task-reminder family still
- *    compares `tblTasks.reminderDate` (a time typed on the organisation's
- *    clock) with the database's NOW(), so a task reminder can go hours
- *    early or late for an organisation far from the database's clock. That
- *    is #1041.
+ * The task-reminder family is on the organisation's clock too (#1041).
+ *    `tblTasks.reminderDate` is a WALL-CLOCK reading typed on a
+ *    `datetime-local` box, so "is it due?" compares it, as text, with what
+ *    the organisation's clock reads now (`I18n::wallClockNow()`), bound as a
+ *    parameter. It used to compare with the database's NOW(), which is the
+ *    database server's clock in its own session zone, so a reminder went
+ *    hours early or late for an organisation far from it.
  *
  * TOKEN GATE: `?key=` vs `user_reminders.cron_token`, constant-time
  * `hash_equals()`, empty stored token ⇒ ALWAYS 403 — migration 171 seeds
@@ -108,6 +110,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\Mailer;
@@ -360,9 +363,25 @@ foreach ($siteIds as $siteId) {
     if (in_array($tasksEnabled, ['1', 'true'], true) === true && $taskRemindersOn !== '0') {
         $lookbackDays = (int) (App::settingForSite('tasks.reminder_lookback_days', $siteId) ?? '7');
 
-        // ⚠️ Still the DATABASE's NOW() against a time typed on the
-        //    organisation's clock -- the one exception named in the header,
-        //    #1041. Not changed by #1028.
+        // 🕰️ WHOSE CLOCK (#1041): `reminderDate` is a reading on THIS
+        //    organisation's clock, so it is compared with what that clock
+        //    reads now -- two readings, compared as `Y-m-d H:i:s` text, which
+        //    sorts in time order. Never the database's NOW(): that is the
+        //    database server's clock in its own session zone, and an
+        //    organisation hours away from it was reminded hours early or
+        //    late. And never a moment built from the stored reading: on the
+        //    morning the clocks go forward the hour it names does not exist
+        //    and PHP would move it (#777).
+        //
+        //    The look-back is counted back from the reading by CALENDAR days,
+        //    on a reading built in UTC (`I18n::wallClockReading()`), which
+        //    has no clock changes -- so "seven days ago" is the same time of
+        //    day seven dates back, as the organisation's clock would say it.
+        $taskNowReading = I18n::wallClockNow(new \DateTimeZone(Site::timezone($siteId)));
+        $taskNowAsDate  = I18n::wallClockReading($taskNowReading);
+        $taskEarliest   = $taskNowAsDate !== null
+            ? $taskNowAsDate->modify('-' . max(0, $lookbackDays) . ' days')->format('Y-m-d H:i:s')
+            : $taskNowReading;
 
         $stmt = $db->prepare(
             'SELECT t.taskID, t.title, t.description, t.priority, t.dueDate, '
@@ -371,10 +390,10 @@ foreach ($siteIds as $siteId) {
             . 'INNER JOIN tblUsers u ON u.userID = t.assignedToID AND u.isActive = 1 '
             . "WHERE t.siteID = ? AND t.isDeleted = 0 AND t.status IN ('pending','in_progress') "
             . 'AND t.reminderSent = 0 AND t.reminderDate IS NOT NULL '
-            . 'AND t.reminderDate <= NOW() AND t.reminderDate >= DATE_SUB(NOW(), INTERVAL ? DAY)'
+            . 'AND t.reminderDate <= ? AND t.reminderDate >= ?'
         );
         if ($stmt !== false) {
-            $stmt->bind_param('ii', $siteId, $lookbackDays);
+            $stmt->bind_param('iss', $siteId, $taskNowReading, $taskEarliest);
             $stmt->execute();
             $result = $stmt->get_result();
             while ($t = $result->fetch_assoc()) {

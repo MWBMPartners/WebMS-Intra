@@ -1915,7 +1915,7 @@ CREATE TABLE IF NOT EXISTS `tblTasks` (
     `parentTaskID`       INT          DEFAULT NULL COMMENT 'FK → tblTasks (parent recurring task)',
 
     -- 🔔 Reminder fields
-    `reminderDate`       DATETIME     DEFAULT NULL COMMENT 'When to send reminder',
+    `reminderDate`       DATETIME     DEFAULT NULL COMMENT 'When to send the reminder: a WALL-CLOCK reading on the organisation''s own clock (Site::timezone()), as typed on the form -- NOT a UTC moment. Compared as text with I18n::wallClockNow() (#1041)',
     `reminderSent`       TINYINT(1)   NOT NULL DEFAULT 0,
 
     `isDeleted`          TINYINT(1)   NOT NULL DEFAULT 0,
@@ -11812,6 +11812,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('287_scheduled_jobs_count_unfin
 -- migration rewrites only that comment on a database that already exists.
 -- This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('288_email_log_site_comment.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 289_task_reminder_wall_clock_comment.sql (#1041) ───────────────────
+-- tblTasks.reminderDate's comment is written above, in the table itself; the
+-- migration rewrites only that comment on a database that already exists.
+-- This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('289_task_reminder_wall_clock_comment.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

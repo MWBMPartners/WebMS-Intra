@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -118,20 +119,30 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
         // 🔔 Carry the reminder forward by the same interval (gap #439
         //    write-path fix) — previously dropped entirely on recurrence
         //    spawn, so a recurring task only ever got ONE reminder ever.
-        if ($task['reminderDate'] !== null) {
-            $rdt = new DateTime($task['reminderDate']);
+        //
+        //    The reminder is a reading on the organisation's clock (#1041), so
+        //    it is moved forward as a READING, built in UTC by
+        //    I18n::wallClockReading(), which has no clock changes: "+1 day"
+        //    is then the same time of day on the next date, as the
+        //    organisation's clock would say it. It used to be `new DateTime()`
+        //    in PHP's default zone, which on the morning the clocks go
+        //    forward moved a 01:30 reminder to 02:30 for every later
+        //    occurrence (#777). A stored value that is not a reading carries
+        //    nothing forward rather than guessing.
+        $rdt = $task['reminderDate'] !== null ? I18n::wallClockReading((string) $task['reminderDate']) : null;
+        if ($rdt !== null) {
             switch ($task['recurrenceType']) {
                 case 'daily':
-                    $rdt->modify('+' . $interval . ' days');
+                    $rdt = $rdt->modify('+' . $interval . ' days');
                     break;
                 case 'weekly':
-                    $rdt->modify('+' . $interval . ' weeks');
+                    $rdt = $rdt->modify('+' . $interval . ' weeks');
                     break;
                 case 'monthly':
-                    $rdt->modify('+' . $interval . ' months');
+                    $rdt = $rdt->modify('+' . $interval . ' months');
                     break;
                 case 'yearly':
-                    $rdt->modify('+' . $interval . ' years');
+                    $rdt = $rdt->modify('+' . $interval . ' years');
                     break;
             }
             $nextReminder = $rdt->format('Y-m-d H:i:s');

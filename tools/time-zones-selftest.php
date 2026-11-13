@@ -70,7 +70,9 @@
  *   L  The calendar's list view pages in REAL order across clocks (#1024),
  *      and the user reminders job picks rota duties and birthdays by each
  *      organisation's OWN date, with the database's clock chosen to be on a
- *      different date (#1028).
+ *      different date (#1028); and its task reminders, and the task form's
+ *      "is the reminder still to come?", by the organisation's own CLOCK,
+ *      with an impossible date refused with a message (#1041).
  *   P  No PLACE is built in either (#935): the Sabbath place ships empty and
  *      sunset follows the organisation's map position, or the fixed times
  *      when there is none, and a venue's country follows the organisation's
@@ -125,7 +127,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 315;  // + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 321;  // + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4898,6 +4900,11 @@ const L_ORG_C    = 961103; // three days' warning (rota.reminder_days_before = 3
 const L_ROLETYPE_C = 961124;
 const L_SLOT_C3  = 961125; // the organisation's date + 3: inside the warning
 const L_SLOT_C4  = 961126; // the organisation's date + 4: outside it
+// #1041: three task reminders in A, typed on A's clock.
+const L_TASK_DUE   = 961131; // an hour ago on A's clock: due
+const L_TASK_LATER = 961132; // two hours on, on A's clock: not yet
+const L_TASK_OLD   = 961133; // eight days ago: past the seven-day look-back
+const L_TASK_SAVE  = 961134; // organisation 1, the member's own: driven through /tasks/save
 $lNowUtc = time();
 $lZone   = null;
 foreach (DateTimeZone::listIdentifiers() as $name) {
@@ -4928,7 +4935,8 @@ ok(
 foreach ([L_ORG_A => 'a', L_ORG_B => 'b', L_ORG_C => 'c'] as $org => $letter) {
     q('INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `timezone`, `isActive`) VALUES (?, ?, ?, ?, 1)', 'isss', [$org, 'selftest-1028-' . $letter, 'Selftest 1028 ' . $letter, $lZone]);
     foreach (['rota.enabled' => '1', 'rota.reminders_enabled' => '1', 'rota.reminder_days_before' => ($org === L_ORG_C ? '3' : '0'), 'milestones.enabled' => '1',
-        'milestones.digest_enabled' => '1', 'milestones.digest_recipients' => 'selftest_1028_digest'] as $key => $value) {
+        'milestones.digest_enabled' => '1', 'milestones.digest_recipients' => 'selftest_1028_digest',
+        'tasks.enabled' => 'true', 'tasks.reminders_enabled' => '1', 'tasks.reminder_lookback_days' => '7'] as $key => $value) {
         q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)', 'isss', [$org, $key, $value, $value]);
     }
     q("INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`) VALUES (?, 'selftest_1028_digest', 'Selftest 1028 digest')", 'i', [$org]);
@@ -4954,6 +4962,35 @@ q("INSERT INTO `tblRotaRoleType` (`roleTypeID`, `siteID`, `name`) VALUES (?, ?, 
 $lPlusDays = static fn (int $days): string => (new DateTimeImmutable($lOrgDate . ' 00:00:00', new DateTimeZone('UTC')))->modify('+' . $days . ' days')->format('Y-m-d');
 q('INSERT INTO `tblRotaSlot` (`slotID`, `siteID`, `roleTypeID`, `slotDate`, `assignedToID`) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
     'iiisiiiisi', [L_SLOT_C3, L_ORG_C, L_ROLETYPE_C, $lPlusDays(3), L_MEMBER, L_SLOT_C4, L_ORG_C, L_ROLETYPE_C, $lPlusDays(4), L_MEMBER]);
+
+// #1041: task reminders are readings typed on the ORGANISATION's clock, and
+// the job compared them with the database's NOW() -- here eight hours behind
+// the organisation (or eighteen ahead). Three tasks in A, each reading worked
+// out on A's clock in UTC arithmetic (a reading has no clock changes).
+$lOrgNowReading = (new DateTimeImmutable('@' . time()))->setTimezone(new DateTimeZone($lZone))->format('Y-m-d H:i:s');
+$lReadingPlus   = static fn (string $shift): string => (new DateTimeImmutable($lOrgNowReading, new DateTimeZone('UTC')))->modify($shift)->format('Y-m-d H:i:s');
+$lTaskReadings  = [L_TASK_DUE => $lReadingPlus('-1 hour'), L_TASK_LATER => $lReadingPlus('+2 hours'), L_TASK_OLD => $lReadingPlus('-8 days')];
+foreach ($lTaskReadings as $task => $reading) {
+    q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `reminderDate`, `reminderSent`) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0)",
+        'iisiis', [$task, L_ORG_A, 'Selftest 1041 task ' . $task, L_MEMBER, L_MEMBER, $reading]);
+}
+// The premise, asked of the database itself with the job's own clock: which of
+// the three the OLD condition picks. It must not be "the due one alone", or
+// the checks below could pass on the old code by accident.
+$lAsk = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
+$lAsk->query("SET time_zone = '" . $lAsk->real_escape_string($lDbZone) . "'");
+$lOldPicks = [];
+$lOldRes   = $lAsk->query('SELECT `taskID` FROM `tblTasks` WHERE `taskID` IN (' . L_TASK_DUE . ', ' . L_TASK_LATER . ', ' . L_TASK_OLD . ') '
+    . 'AND `reminderDate` <= NOW() AND `reminderDate` >= DATE_SUB(NOW(), INTERVAL 7 DAY) ORDER BY `taskID`');
+while ($lOldRow = $lOldRes->fetch_assoc()) {
+    $lOldPicks[] = (int) $lOldRow['taskID'];
+}
+$lAsk->close();
+ok(
+    'L15 premise: with the database\'s clock at ' . $lDbZone . ', the OLD condition (the database\'s NOW()) does NOT pick exactly the task due an hour ago on the organisation\'s clock (' . $lOrgNowReading . ' in ' . $lZone . ') -- so L16 cannot pass on the old code by accident (#1041)',
+    $lOldPicks !== [L_TASK_DUE],
+    'the old condition picks ' . json_encode($lOldPicks)
+);
 
 // The job's own switches and token, and a mail route that is not set up: an
 // attempt is then written to the e-mail log with its subject and nothing
@@ -5024,6 +5061,54 @@ ok(
     in_array('reader.1028@selftest.invalid', mailTo($lSubject), true) === true,
     'addressed: ' . json_encode(mailTo("🎂 Today's milestones"))
 );
+$lTaskSent = static fn (int $task): int => (int) (one('SELECT `reminderSent` FROM `tblTasks` WHERE `taskID` = ?', 'i', [$task])['reminderSent'] ?? -1);
+ok(
+    'L16 task reminders are judged on the ORGANISATION\'s clock: the one an hour ago was reminded, the one two hours on and the one eight days ago (past the look-back) were not (#1041: it was the database\'s NOW())',
+    $lTaskSent(L_TASK_DUE) === 1 && $lTaskSent(L_TASK_LATER) === 0 && $lTaskSent(L_TASK_OLD) === 0,
+    'due ' . $lTaskSent(L_TASK_DUE) . ', later ' . $lTaskSent(L_TASK_LATER) . ', old ' . $lTaskSent(L_TASK_OLD)
+);
+
+// ---- #1041: the task form stores the reading, and judges "in the future" on the organisation's clock ----
+// The member's own task in organisation 1, already reminded. Saving it with a
+// reminder later on organisation 1's clock must re-arm it; earlier must not.
+q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `reminderDate`, `reminderSent`) VALUES (?, 1, 'Selftest 1041 saved task', ?, ?, 'pending', '2020-01-01 09:00:00', 1)",
+    'iii', [L_TASK_SAVE, MEMBER, MEMBER]);
+$lSaveZone  = new DateTimeZone(zoneOfOrg(1));
+$lSaveAt    = static fn (string $shift): DateTimeImmutable => (new DateTimeImmutable((new DateTimeImmutable('now', $lSaveZone))->format('Y-m-d H:i:00'), new DateTimeZone('UTC')))->modify($shift);
+$lMemberJar = signIn('member');
+$lSaveTask  = static fn (string $reminder): array => post($lMemberJar, '/tasks?edit=' . L_TASK_SAVE, '/tasks/save', [
+    'taskID' => (string) L_TASK_SAVE, 'title' => 'Selftest 1041 saved task', 'priority' => 'normal', 'assignedToID' => (string) MEMBER, 'reminderDate' => $reminder,
+]);
+$lSavedRow  = static fn (): array => (array) one('SELECT `reminderDate`, `reminderSent` FROM `tblTasks` WHERE `taskID` = ?', 'i', [L_TASK_SAVE]);
+$lLater     = $lSaveAt('+2 hours');
+$lSaveTask($lLater->format('Y-m-d\TH:i'));
+$lRow = $lSavedRow();
+ok(
+    'L17 a reminder two hours on, on the organisation\'s clock, re-arms an already-sent task and is stored as the reading typed (' . $lLater->format('Y-m-d H:i:s') . ') (#1041)',
+    (string) ($lRow['reminderDate'] ?? '') === $lLater->format('Y-m-d H:i:s') && (int) ($lRow['reminderSent'] ?? -1) === 0,
+    json_encode($lRow)
+);
+$lEditBox = tz_find('/id="reminderDate" name="reminderDate"\s+value="([^"]*)"/', req($lMemberJar, 'GET', '/tasks?edit=' . L_TASK_SAVE)['body'], $lBoxM) === 1 ? (string) $lBoxM[1] : '(no box)';
+ok(
+    'L18 the edit page puts the stored reading back in its box unchanged (' . $lLater->format('Y-m-d\TH:i') . ') (#1041)',
+    $lEditBox === $lLater->format('Y-m-d\TH:i'),
+    'the box holds ' . $lEditBox
+);
+q('UPDATE `tblTasks` SET `reminderSent` = 1 WHERE `taskID` = ?', 'i', [L_TASK_SAVE]);
+$lSaveTask($lSaveAt('-2 hours')->format('Y-m-d\TH:i'));
+ok(
+    'L19 a reminder two hours ago, on the organisation\'s clock, does NOT re-arm the task (#1041)',
+    (int) ($lSavedRow()['reminderSent'] ?? -1) === 1,
+    json_encode($lSavedRow())
+);
+$lBefore = $lSavedRow();
+$lSaveTask('2027-02-31T10:00');
+$lFlash  = flashAfter($lMemberJar, '/tasks');
+ok(
+    'L20 a reminder on a date that does not exist (31 February) is refused with a message and nothing is changed (#1041: it reached the database, which refuses it -- an error page)',
+    str_contains($lFlash, 'The reminder must be a real date and time') === true && $lSavedRow() === $lBefore,
+    'flash "' . $lFlash . '"; row ' . json_encode($lSavedRow())
+);
 
 // ---- put everything back as part L found it ----------------------------------------
 foreach ($lKept as $key => $row) {
@@ -5034,6 +5119,7 @@ foreach ($lKept as $key => $row) {
     }
 }
 q('DELETE FROM `tblRotaSlot` WHERE `slotID` IN (?, ?, ?, ?)', 'iiii', [L_SLOT_ORG, L_SLOT_DB, L_SLOT_C3, L_SLOT_C4]);
+q('DELETE FROM `tblTasks` WHERE `taskID` IN (?, ?, ?, ?)', 'iiii', [L_TASK_DUE, L_TASK_LATER, L_TASK_OLD, L_TASK_SAVE]);
 q('DELETE FROM `tblRotaRoleType` WHERE `roleTypeID` IN (?, ?)', 'ii', [L_ROLETYPE, L_ROLETYPE_C]);
 q("DELETE FROM `tblUserReminderLog` WHERE `refID` IN (?, ?, ?)", 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
 q('DELETE FROM `tblUserRoles` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
