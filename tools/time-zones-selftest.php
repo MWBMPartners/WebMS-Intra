@@ -127,7 +127,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 325;  // + four in part L (#1041 round 2: L21-L24) on the 321 before: + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 327;  // + two in part L (#1041 round 3: L25, L26) on the 325 before: + four in part L (#1041 round 2: L21-L24) on the 321 before: + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4908,6 +4908,8 @@ const L_TASK_WEEK  = 961135; // six days ago: inside the look-back, and more tha
 const L_TASK_DAILY   = 961141; // organisation 1, recurring daily, completed through /tasks/complete
 const L_TASK_WEEKLY  = 961142; // ... weekly
 const L_TASK_MONTHLY = 961143; // ... monthly
+const L_TASK_YEARLY  = 961144; // ... yearly (round 3)
+const L_TASK_EVERY2  = 961145; // ... every 2 days (round 3: the interval)
 const L_TASK_SAVE  = 961134; // organisation 1, the member's own: driven through /tasks/save
 $lNowUtc = time();
 $lZone   = null;
@@ -5119,24 +5121,26 @@ ok(
 // reminder lands at 01:30 on 28 March 2027 -- the morning London's clocks go
 // forward, so 01:30 does not exist there. Moved on as a reading it stays
 // 01:30; moved on as a moment in London (what tasks/complete.php did) it
-// became 02:30. Daily, weekly and monthly each reach that same morning.
+// became 02:30. Daily, weekly and monthly each reach that same morning, and so do a yearly task and one every two days (round 3).
 $lCompleteZoneWas = zoneOfOrg(1);
 orgZone(1, 'Europe/London');
 $lGapShown = (new DateTimeImmutable('2027-03-28 01:30:00', new DateTimeZone('Europe/London')))->format('Y-m-d H:i:s');
 ok(
-    'L21 premise: 01:30 on 28 March 2027 does not exist on London\'s clock (PHP makes it ' . $lGapShown . '), so L22-L24 cannot pass on the old code by accident',
+    'L21 premise: 01:30 on 28 March 2027 does not exist on London\'s clock (PHP makes it ' . $lGapShown . '), so L22-L26 cannot pass on the old code by accident',
     $lGapShown !== '2027-03-28 01:30:00',
     'PHP kept ' . $lGapShown
 );
 $lRecurring = [
-    L_TASK_DAILY   => ['daily',   '2027-03-27 01:30:00', '2027-03-28 01:30:00'],
-    L_TASK_WEEKLY  => ['weekly',  '2027-03-21 01:30:00', '2027-03-28 01:30:00'],
-    L_TASK_MONTHLY => ['monthly', '2027-02-28 01:30:00', '2027-03-28 01:30:00'],
+    L_TASK_DAILY   => ['daily',   '2027-03-27 01:30:00', '2027-03-28 01:30:00', 1],
+    L_TASK_WEEKLY  => ['weekly',  '2027-03-21 01:30:00', '2027-03-28 01:30:00', 1],
+    L_TASK_MONTHLY => ['monthly', '2027-02-28 01:30:00', '2027-03-28 01:30:00', 1],
+    L_TASK_YEARLY  => ['yearly',  '2026-03-28 01:30:00', '2027-03-28 01:30:00', 1],
+    L_TASK_EVERY2  => ['daily',   '2027-03-26 01:30:00', '2027-03-28 01:30:00', 2],
 ];
 $lCompleteJar = signIn('member');
-foreach ($lRecurring as $task => [$type, $reminder]) {
-    q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `dueDate`, `isRecurring`, `recurrenceType`, `recurrenceInterval`, `reminderDate`, `reminderSent`) VALUES (?, 1, ?, ?, ?, 'pending', ?, 1, ?, 1, ?, 1)",
-        'isiisss', [$task, 'Selftest 1041 ' . $type . ' task', MEMBER, MEMBER, substr($reminder, 0, 10), $type, $reminder]);
+foreach ($lRecurring as $task => [$type, $reminder, , $every]) {
+    q("INSERT INTO `tblTasks` (`taskID`, `siteID`, `title`, `assignedToID`, `createdByID`, `status`, `dueDate`, `isRecurring`, `recurrenceType`, `recurrenceInterval`, `reminderDate`, `reminderSent`) VALUES (?, 1, ?, ?, ?, 'pending', ?, 1, ?, ?, ?, 1)",
+        'isiissis', [$task, 'Selftest 1041 ' . $type . ' task', MEMBER, MEMBER, substr($reminder, 0, 10), $type, $every, $reminder]);
 }
 try {
     foreach ($lRecurring as $task => $ignored) {
@@ -5147,10 +5151,10 @@ try {
 }
 $lNextOf = static fn (int $task): array => (array) one('SELECT `dueDate`, `reminderDate` FROM `tblTasks` WHERE `parentTaskID` = ?', 'i', [$task]);
 $lCheckNo = 22;
-foreach ($lRecurring as $task => [$type, $reminder, $wanted]) {
+foreach ($lRecurring as $task => [$type, $reminder, $wanted, $every]) {
     $next = $lNextOf($task);
     ok(
-        'L' . $lCheckNo++ . ' completing a ' . $type . ' task whose reminder is ' . $reminder . ' gives the next one a reminder at ' . $wanted . ' -- the same time on the clock, on the morning London\'s clocks go forward (#1041 round 2: it was moved to 02:30)',
+        'L' . $lCheckNo++ . ' completing a ' . $type . ($every > 1 ? ' (every ' . $every . ')' : '') . ' task whose reminder is ' . $reminder . ' gives the next one a reminder at ' . $wanted . ' -- the same time on the clock, on the morning London\'s clocks go forward (#1041 round 2: it was moved to 02:30)',
         (string) ($next['reminderDate'] ?? '') === $wanted,
         json_encode($next)
     );
@@ -5165,8 +5169,8 @@ foreach ($lKept as $key => $row) {
     }
 }
 q('DELETE FROM `tblRotaSlot` WHERE `slotID` IN (?, ?, ?, ?)', 'iiii', [L_SLOT_ORG, L_SLOT_DB, L_SLOT_C3, L_SLOT_C4]);
-q('DELETE FROM `tblTasks` WHERE `parentTaskID` IN (?, ?, ?)', 'iii', [L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY]);
-q('DELETE FROM `tblTasks` WHERE `taskID` IN (?, ?, ?, ?, ?, ?, ?, ?)', 'iiiiiiii', [L_TASK_DUE, L_TASK_LATER, L_TASK_OLD, L_TASK_WEEK, L_TASK_SAVE, L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY]);
+q('DELETE FROM `tblTasks` WHERE `parentTaskID` IN (?, ?, ?, ?, ?)', 'iiiii', [L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY, L_TASK_YEARLY, L_TASK_EVERY2]);
+q('DELETE FROM `tblTasks` WHERE `taskID` IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 'iiiiiiiiii', [L_TASK_DUE, L_TASK_LATER, L_TASK_OLD, L_TASK_WEEK, L_TASK_SAVE, L_TASK_DAILY, L_TASK_WEEKLY, L_TASK_MONTHLY, L_TASK_YEARLY, L_TASK_EVERY2]);
 q('DELETE FROM `tblRotaRoleType` WHERE `roleTypeID` IN (?, ?)', 'ii', [L_ROLETYPE, L_ROLETYPE_C]);
 q("DELETE FROM `tblUserReminderLog` WHERE `refID` IN (?, ?, ?)", 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
 q('DELETE FROM `tblUserRoles` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);

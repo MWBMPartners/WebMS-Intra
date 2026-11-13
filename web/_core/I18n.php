@@ -1126,10 +1126,17 @@ class I18n
     }
 
     /**
-     * 🔁 A stored wall-clock reading moved on by a whole number of calendar
-     *    days, weeks, months or years -- the ONE place a reading is moved on
-     *    as a reading (#1041). Answers the new reading as `Y-m-d H:i:s`, or
-     *    null when what it was given is not a real reading.
+     * 🔁 A STORED wall-clock reading moved on to its next occurrence, by a
+     *    whole number of calendar days, weeks, months or years (#1041) --
+     *    the one place a stored reading is moved on that way, so a
+     *    recurring record can carry it forward. It is NOT the only place a
+     *    reading is ever moved: `resources/resource.php` and the task
+     *    look-back in `cron/user-reminders.php` call `wallClockReading()`
+     *    and `modify()` it themselves, which is the same UTC arithmetic.
+     *
+     * Answers the new reading as `Y-m-d H:i:s`, or null when what it was
+     * given is not a real reading, when the unit is not one of the four
+     * below, or when the count is below 1.
      *
      * It is a READING, never a moment, which is the whole point: "+1 day" is
      * the same time of day on the next date, as the organisation's clock
@@ -1148,9 +1155,10 @@ class I18n
      * and every moment it builds is still reported.
      *
      * ⚠️ A month or a year moved on from a date the target month does not
-     *    have rolls over as PHP's `modify()` does (31 January + 1 month is
-     *    3 March). That is unchanged from before #1041 and is not decided
-     *    here.
+     *    have rolls over as PHP's `modify()` does: 31 January + 1 month is
+     *    3 March, or 2 March in a leap year, and 29 February + 1 year is
+     *    1 March (measured). That is unchanged from before #1041 and is not
+     *    decided here.
      *
      * @param string|null $wallClock The stored reading.
      * @param string      $unit      `days`, `weeks`, `months` or `years`.

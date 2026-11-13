@@ -122,8 +122,9 @@ if ((int) $task['isRecurring'] === 1 && $task['recurrenceType'] !== null) {
         //
         //    The reminder is a reading on the organisation's clock (#1041), so
         //    it is moved on as a READING, by the same unit and count as the
-        //    due date, through I18n::wallClockMovedOn() -- the one place that
-        //    is done, in UTC, which has no clock changes. It used to be
+        //    due date, through I18n::wallClockMovedOn(), which moves a stored
+        //    reading on to its next occurrence in UTC, where there are no
+        //    clock changes. It used to be
         //    `new DateTime()` in PHP's default zone, which on the morning the
         //    clocks go forward moved a 01:30 reminder to 02:30 for every
         //    later occurrence (#777). A stored value that is not a reading
