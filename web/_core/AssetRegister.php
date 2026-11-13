@@ -652,6 +652,14 @@ class AssetRegister
     /** @var string[] tblAssetOwners.roleKind */
     public const OWNER_ROLE_KINDS = ['owner', 'co-owner', 'custodian', 'stakeholder'];
 
+    /**
+     * 🗑️ What a person reads when they press Approve or Check out on a loan
+     * whose asset has been deleted (#1047). The loans register still lists such
+     * a loan with its buttons, so it says what they CAN do with it: declining
+     * and cancelling are never refused for a deleted asset (see loanAction()).
+     */
+    public const LOAN_ASSET_DELETED_WORDS = 'This asset has been deleted, so the loan cannot be approved or checked out. Decline or cancel it instead.';
+
     /** @var string[] tblAssetLoans.direction — 'out' = we lend; 'in' = we borrow (#398) */
     public const LOAN_DIRECTIONS = ['out', 'in'];
 
@@ -1618,6 +1626,10 @@ class AssetRegister
      */
     public static function removeIdentifier(int $identifierId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    identifiers-save.php refuses a deleted asset with get() first; if the asset is
+        //    deleted while this runs, the only effect is that an identifier of an asset no page
+        //    shows is removed (and audited). Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -2482,6 +2494,21 @@ class AssetRegister
      * and the transaction is committed. A throw from $work rolls back and is
      * thrown on, so a caller keeps its own catch and its own words.
      *
+     * $alsoLockIfLive names assets locked IN THE SAME ascending order but whose
+     * absence refuses nothing: one that is gone is simply left out of the rows
+     * $work is handed. A kit's checkout uses it for the kit's components (a
+     * deleted component is skipped, the kit still goes out), and a check-in for
+     * every asset it touches (ending a loan is never refused, see loanAction()).
+     *
+     * 🔢 THE ONE LOCK ORDER (#1047 round 2). Every write that locks MORE THAN
+     * ONE asset takes them through here, so all of them take them lowest number
+     * first. A write that locked a kit and then its component in the kit's own
+     * order deadlocked against a seat being linked lowest-first (measured: the
+     * seat's save failed "please try again"). Never lock a second asset row any
+     * other way while one is held — add it to this call instead. The `sort()`
+     * is the whole guarantee, and tools/assets-deleted-writes-selftest.php
+     * section O drives two writes that deadlock without it.
+     *
      * $work must never answer null itself: null is reserved for "an asset was
      * not there", which is how every caller tells that refusal apart.
      *
@@ -2490,13 +2517,15 @@ class AssetRegister
      * nest). A write that already runs inside one asks lockedLiveAsset().
      *
      * @template T
-     * @param list<int>                                      $assetIds
+     * @param list<int>                                      $assetIds       refused when any is gone
      * @param callable(array<int, array<string, mixed>>): T  $work
+     * @param list<int>                                      $alsoLockIfLive locked, never refusing
      * @return T|null
      */
-    private static function withLiveAssetsLocked(\mysqli $db, array $assetIds, int $siteId, callable $work): mixed
+    private static function withLiveAssetsLocked(\mysqli $db, array $assetIds, int $siteId, callable $work, array $alsoLockIfLive = []): mixed
     {
-        $ids = array_values(array_unique(array_map('intval', $assetIds)));
+        $required = array_map('intval', $assetIds);
+        $ids      = array_values(array_unique(array_merge($required, array_map('intval', $alsoLockIfLive))));
         sort($ids);
         $db->begin_transaction();
         try {
@@ -2504,6 +2533,9 @@ class AssetRegister
             foreach ($ids as $id) {
                 $row = self::lockedLiveAsset($db, $id, $siteId);
                 if ($row === null) {
+                    if (in_array($id, $required, true) === false) {
+                        continue;
+                    }
                     $db->rollback();
 
                     return null;
@@ -3491,6 +3523,10 @@ class AssetRegister
      */
     public static function deleteResource(int $resourceId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record (and its
+        //    file). resource-save.php refuses a deleted asset with get() first; in the race, a
+        //    resource of an asset no page shows is removed (and audited). Nothing is created on
+        //    it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -3855,6 +3891,10 @@ class AssetRegister
      */
     public static function removeOwner(int $ownerId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    owners-save.php refuses a deleted asset with get() first; if the asset is deleted
+        //    while this runs, an owner row of an asset no page shows is removed (and audited).
+        //    Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -4718,7 +4758,7 @@ class AssetRegister
         }
 
         if ($affected === null) {
-            return ['ok' => false, 'msg' => 'Asset not found.'];
+            return ['ok' => false, 'msg' => self::LOAN_ASSET_DELETED_WORDS];
         }
         if ($affected <= 0) {
             return ['ok' => false, 'msg' => 'Could not approve the loan — it may have already changed state.'];
@@ -4747,6 +4787,7 @@ class AssetRegister
      */
     private static function loanDecline(array $loan, array $data, bool $canApprove, int $actorUserId): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false) {
             return ['ok' => false, 'msg' => 'You do not have lending authority for this asset.'];
         }
@@ -4853,10 +4894,20 @@ class AssetRegister
         //    never handed over: nothing is written and the answer is "Asset
         //    not found." Every throw below rolls the whole unit back, as the
         //    App::beginTransaction() block it replaces did.
-        $kitSummary = ['swept' => [], 'skipped' => []];
+        //
+        //    🔢 The kit's COMPONENTS are locked in the same call, up front and
+        //    lowest number first (#1047 round 2) — never one by one after the
+        //    kit, which is a second lock order and deadlocked against a seat
+        //    linked between a component and its kit (measured). A component
+        //    that is gone is left out, never refusing the kit's checkout.
+        //    Only a top-level checkout sweeps components (see below), so only
+        //    it locks them.
+        $kitSummary   = ['swept' => [], 'skipped' => []];
+        $components   = $loan['parentLoanID'] === null ? self::kitChildren($assetId, $siteId) : [];
+        $componentIds = array_map(static fn (array $c): int => (int) $c['assetID'], $components);
         try {
-            $live = self::withLiveAssetLocked($db, $assetId, $siteId,
-                static function (array $locked) use ($db, $loan, $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId, $newAssetStatus, &$kitSummary): bool {
+            $live = self::withLiveAssetsLocked($db, [$assetId], $siteId,
+                static function (array $lockedRows) use ($db, $loan, $conditionOut, $conditionOutNotes, $actorUserId, $loanId, $assetId, $siteId, $newAssetStatus, $components, &$kitSummary): bool {
                     // approvedByID/approvedAt are backfilled via COALESCE so a
                     // direct requested→active checkout (the approver skipping the
                     // separate 'approve' step) still records who authorised it.
@@ -4898,17 +4949,17 @@ class AssetRegister
                     // same transaction so a failure here rolls back the parent's
                     // own checkout too — see cascadeKitCheckout()'s own doc.
                     if ($loan['parentLoanID'] === null) {
-                        $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId);
+                        $kitSummary = self::cascadeKitCheckout($loan, $newAssetStatus, $actorUserId, $components, $lockedRows);
                     }
 
                     return true;
-                });
+                }, $componentIds);
         } catch (\Throwable $e) {
             error_log('AssetRegister::loanCheckout() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not check out this loan — it may have already changed state.'];
         }
         if ($live === null) {
-            return ['ok' => false, 'msg' => 'Asset not found.'];
+            return ['ok' => false, 'msg' => self::LOAN_ASSET_DELETED_WORDS];
         }
 
         self::audit(
@@ -4955,6 +5006,7 @@ class AssetRegister
      */
     private static function loanCheckin(array $loan, array $data, bool $canApprove, bool $isRequester): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false && $isRequester === false) {
             return ['ok' => false, 'msg' => 'Only the original requester or someone with lending authority can check this loan in.'];
         }
@@ -4975,52 +5027,68 @@ class AssetRegister
         $assetId = (int) $loan['assetID'];
         $siteId  = (int) $loan['siteID'];
 
+        $kitReturned = ['returned' => []];
         $db = App::db();
-        App::beginTransaction();
+        // 🔢 One lock order (#1047 round 2): the asset and, for a kit, every
+        //    component this check-in will write to are locked FIRST, together,
+        //    lowest number first, through self::withLiveAssetsLocked() — the
+        //    order every multi-asset write takes. Writing the kit's row and
+        //    then each component's (as this did) is a second order, the one
+        //    that deadlocked a kit's checkout against a seat. They are all
+        //    passed as "lock if live", so NOTHING here is refused for a deleted
+        //    asset: ending a loan is deliberately allowed (see loanAction()).
+        //    A deleted row is simply not locked first and is written as before.
+        $lockAlso = [$assetId];
+        if ($loan['parentLoanID'] === null) {
+            foreach (self::activeKitChildLoans($loanId, $siteId) as $childLoan) {
+                $lockAlso[] = (int) $childLoan['assetID'];
+            }
+        }
         try {
-            $stmt = $db->prepare(
-                "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
-                . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
-            );
-            if ($stmt === false) {
-                throw new \RuntimeException('Failed to prepare loan checkin: ' . $db->error);
-            }
-            $stmt->bind_param('ssiii', $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId);
-            $stmt->execute();
-            $affected = $stmt->affected_rows;
-            $stmt->close();
-            if ($affected <= 0) {
-                throw new \RuntimeException('Loan row did not update — status already changed');
-            }
+            self::withLiveAssetsLocked($db, [], $siteId,
+                static function (array $lockedRows) use ($db, $loan, $data, $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId, &$kitReturned): bool {
+                    $stmt = $db->prepare(
+                        "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
+                        . " WHERE loanID = ? AND assetID = ? AND siteID = ? AND status = 'active'"
+                    );
+                    if ($stmt === false) {
+                        throw new \RuntimeException('Failed to prepare loan checkin: ' . $db->error);
+                    }
+                    $stmt->bind_param('ssiii', $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId);
+                    $stmt->execute();
+                    $affected = $stmt->affected_rows;
+                    $stmt->close();
+                    if ($affected <= 0) {
+                        throw new \RuntimeException('Loan row did not update — status already changed');
+                    }
 
-            $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
-            if ($assetStmt === false) {
-                throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
-            }
-            $inService = 'in-service';
-            $assetStmt->bind_param('ssii', $inService, $conditionIn, $assetId, $siteId);
-            $assetStmt->execute();
-            $assetStmt->close();
+                    $assetStmt = $db->prepare('UPDATE tblAssets SET status = ?, conditionState = ? WHERE assetID = ? AND siteID = ?');
+                    if ($assetStmt === false) {
+                        throw new \RuntimeException('Failed to prepare asset status update: ' . $db->error);
+                    }
+                    $inService = 'in-service';
+                    $assetStmt->bind_param('ssii', $inService, $conditionIn, $assetId, $siteId);
+                    $assetStmt->execute();
+                    $assetStmt->close();
 
-            // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
-            // parentLoanID is null) of a kit parent also checks in every
-            // one of its still-active swept-in component loans. A CHILD
-            // loan's own checkin never re-cascades, for the same reason as
-            // loanCheckout()'s mirror-image guard above. `childConditions`
-            // (an optional array<int assetID, string condition> posted by
-            // item.php's checkin form) lets the person checking the kit in
-            // record a DIFFERENT return condition per component; any
-            // component left unspecified falls back to the parent's own
-            // $conditionIn — see cascadeKitCheckin()'s own doc.
-            $kitReturned = ['returned' => []];
-            if ($loan['parentLoanID'] === null) {
-                $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
-                $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
-            }
+                    // 🧰 Kit cascade (#413) — a TOP-LEVEL checkin (this loan's own
+                    // parentLoanID is null) of a kit parent also checks in every
+                    // one of its still-active swept-in component loans. A CHILD
+                    // loan's own checkin never re-cascades, for the same reason as
+                    // loanCheckout()'s mirror-image guard above. `childConditions`
+                    // (an optional array<int assetID, string condition> posted by
+                    // item.php's checkin form) lets the person checking the kit in
+                    // record a DIFFERENT return condition per component; any
+                    // component left unspecified falls back to the parent's own
+                    // $conditionIn — see cascadeKitCheckin()'s own doc.
+                    if ($loan['parentLoanID'] === null) {
+                        $childConditions = is_array($data['childConditions'] ?? null) ? $data['childConditions'] : [];
+                        $kitReturned = self::cascadeKitCheckin($loan, $conditionIn, $childConditions);
+                    }
 
-            App::commit();
+                    return true;
+                }, $lockAlso);
         } catch (\Throwable $e) {
-            App::rollback();
             error_log('AssetRegister::loanCheckin() failed: ' . $e->getMessage());
             return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
         }
@@ -5059,6 +5127,7 @@ class AssetRegister
      */
     private static function loanCancel(array $loan, bool $canApprove, bool $isRequester): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         if ($canApprove === false && $isRequester === false) {
             return ['ok' => false, 'msg' => 'Only the requester or someone with lending authority can cancel this loan.'];
         }
@@ -5311,7 +5380,31 @@ class AssetRegister
         //    checks above.
         try {
             $affected = self::withLiveAssetsLocked($db, [$childAssetId, $parentAssetId], $siteId,
-                static function (array $locked) use ($db, $parentAssetId, $childAssetId, $siteId): int {
+                static function (array $locked) use ($db, $parentAssetId, $childAssetId, $siteId): int|string {
+                    // 🧰 "Kits are one level deep", asked AGAIN under both locks
+                    //    (#1047 round 2). The checks above ran before any lock,
+                    //    so two attaches at once — 30 into 31 and 31 into 30 —
+                    //    each passed them and made a loop (measured). Under the
+                    //    locks the second sees the first: its kit is now itself
+                    //    a component, or its component now has components.
+                    //    Every attach locks both rows, so a component can only
+                    //    be added to $childAssetId by a write that waits for us;
+                    //    the count below is the transaction's first plain read,
+                    //    taken after the locks, so it sees what they committed.
+                    if ($locked[$parentAssetId]['parentAssetID'] !== null) {
+                        return 'The chosen parent is itself a component of another kit — kits are only one level deep.';
+                    }
+                    if ($locked[$childAssetId]['parentAssetID'] !== null) {
+                        return 'That asset is already part of a kit — detach it first.';
+                    }
+                    $kids = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblAssets` WHERE `parentAssetID` = ? AND `siteID` = ? AND `isDeleted` = 0');
+                    $kids->bind_param('ii', $childAssetId, $siteId);
+                    $kids->execute();
+                    $hasKids = (int) ($kids->get_result()->fetch_assoc()['n'] ?? 0) > 0;
+                    $kids->close();
+                    if ($hasKids === true) {
+                        return "That asset already has its own components, so it can't become a component of another kit.";
+                    }
                     $stmt = $db->prepare(
                         'UPDATE tblAssets SET parentAssetID = ? WHERE assetID = ? AND siteID = ? AND parentAssetID IS NULL'
                     );
@@ -5330,6 +5423,9 @@ class AssetRegister
             return self::get($childAssetId) === null
                 ? ['ok' => false, 'msg' => 'Component asset not found.']
                 : ['ok' => false, 'msg' => 'Parent (kit) asset not found.'];
+        }
+        if (is_string($affected) === true) {
+            return ['ok' => false, 'msg' => $affected]; // refused under the locks, nothing written
         }
         if ($affected <= 0) {
             return ['ok' => false, 'msg' => 'Could not attach that component — it may have changed since you loaded this page.'];
@@ -5358,6 +5454,9 @@ class AssetRegister
      */
     public static function detachFromKit(int $childAssetId, int $actorUserId): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a link. kitChildren()
+        //    already leaves a deleted component out of its kit, so detaching one changes nothing
+        //    any page shows; refusing would only stop a manager tidying the kit.
         $child = self::get($childAssetId);
         if ($child === null) {
             return ['ok' => false, 'msg' => 'Component asset not found.'];
@@ -5483,14 +5582,28 @@ class AssetRegister
      * since a future pass may want the components to inherit the
      * confirmed/overridden value instead.
      *
+     * 🔢🗑️ LOCKS (#1047 round 2): this takes NO lock of its own. loanCheckout()
+     * locked the kit and every component in $components in ONE call, lowest
+     * number first (self::withLiveAssetsLocked(), the one lock order), and
+     * hands over the rows it holds in $lockedRows. A component missing from
+     * them is not there any more (deleted, perhaps while the checkout waited)
+     * and is skipped. A component that is no longer part of THIS kit by the
+     * time its row was locked, or one added to the kit after the list was
+     * read (so not locked here), is skipped too, with its reason, rather than
+     * locked out of order.
+     *
      * @param array<string, mixed> $parentLoan The parent's own freshly
      *        (pre-UPDATE) loaded loan row, exactly as loanCheckout()
      *        received it.
+     * @param list<array<string, mixed>>      $components The kit's components
+     *        as kitChildren() read them before the lock.
+     * @param array<int, array<string, mixed>> $lockedRows The rows loanCheckout()
+     *        holds locked, keyed by asset number.
      *
      * @return array{swept: string[], skipped: string[]} Component asset
      *         names actually swept in, and names+reason for any skipped.
      */
-    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId): array
+    private static function cascadeKitCheckout(array $parentLoan, string $newAssetStatus, int $actorUserId, array $components, array $lockedRows): array
     {
         $db            = App::db();
         $parentAssetId = (int) $parentLoan['assetID'];
@@ -5502,19 +5615,30 @@ class AssetRegister
 
         $openPlaceholders = implode(', ', array_fill(0, count(self::LOAN_OPEN_STATUSES), '?'));
 
-        foreach (self::kitChildren($parentAssetId, $siteId) as $child) {
+        // ➕ Added to the kit after loanCheckout() read the list: not locked
+        //    here, so not swept (locking it now would be out of order).
+        $listed = array_map(static fn (array $c): int => (int) $c['assetID'], $components);
+        foreach (self::kitChildren($parentAssetId, $siteId) as $late) {
+            if (in_array((int) $late['assetID'], $listed, true) === false) {
+                $skipped[] = (string) $late['name'] . ' (added to the kit just now — check it out on its own)';
+            }
+        }
+
+        foreach ($components as $child) {
             $childAssetId = (int) $child['assetID'];
             $childName    = (string) $child['name'];
 
-            // 🗑️🔒 The component's own row, locked inside the parent's
-            //    transaction and asked whether it is still there (#1047):
-            //    kitChildren() above leaves deleted components out but takes
-            //    no lock, so one deleted while this checkout waited is skipped
-            //    rather than handed over. Its status is read from the locked
-            //    row too, so it is the status as it is now.
-            $lockedChild = self::lockedLiveAsset($db, $childAssetId, $siteId);
+            // 🗑️🔒 The component's own row as loanCheckout() holds it locked
+            //    (#1047). Missing means it is not there any more — deleted,
+            //    perhaps while this checkout waited — so it is skipped rather
+            //    than handed over. Its status is the locked row's, as it is now.
+            $lockedChild = $lockedRows[$childAssetId] ?? null;
             if ($lockedChild === null) {
                 $skipped[] = $childName . ' (no longer in the register)';
+                continue;
+            }
+            if ((int) ($lockedChild['parentAssetID'] ?? 0) !== $parentAssetId) {
+                $skipped[] = $childName . ' (no longer part of this kit)';
                 continue;
             }
             $childStatus = (string) $lockedChild['status'];
@@ -5648,6 +5772,7 @@ class AssetRegister
      */
     private static function cascadeKitCheckin(array $parentLoan, string $conditionIn, array $childConditions): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan — the reason is beside loanAction().
         $db           = App::db();
         $parentLoanId = (int) $parentLoan['loanID'];
         $siteId       = (int) $parentLoan['siteID'];
@@ -6308,6 +6433,9 @@ class AssetRegister
      */
     public static function deleteMaintenance(int $maintId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a record.
+        //    maintenance-save.php refuses a deleted asset with get() first; in the race, a repair
+        //    of an asset no page shows is removed (and audited). Nothing is created on it.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -7061,6 +7189,10 @@ class AssetRegister
      */
     public static function releaseSeat(int $assignmentId, int $licenseAssetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a seat.
+        //    license-action.php asks nothing about deletion, and refusing would leave a seat
+        //    'active' for ever on a licence no page shows, counted against nothing. Nothing new is
+        //    created on the deleted licence.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -7155,6 +7287,11 @@ class AssetRegister
      */
     public static function createFoundReport(int $assetId, array $data, string $ipHash): int
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it RECORDS what a member of the
+        //    public told us. found-save.php resolves the token with isDeleted = 0 first; a report
+        //    landing in the instant after a deletion is still a true message from a stranger, kept
+        //    to its own retention period, and refusing it would throw it away with no way to say
+        //    why.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -7293,6 +7430,9 @@ class AssetRegister
      */
     public static function setFoundReportStatus(int $reportId, int $siteId, string $status, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it triages a REPORT, keyed by
+        //    the report, not the asset; marking a stranger's report handled is right whether or
+        //    not the asset is still in the register.
         if (in_array($status, ['new', 'actioned', 'closed'], true) === false) {
             return false;
         }
@@ -8391,6 +8531,10 @@ class AssetRegister
      */
     public static function unassignFromEvent(int $assignmentId, int $assetId, int $actorUserId): bool
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a booking.
+        //    event-assign.php refuses a deleted asset with get() first; in the race, the booking
+        //    of an asset no page shows is removed (and audited), which is what nobody would want
+        //    kept anyway.
         $db     = App::db();
         $siteId = Site::id();
 
@@ -8452,6 +8596,10 @@ class AssetRegister
      */
     public static function recordScan(int $assetId, string $context, ?int $actorUserId): void
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it RECORDS that somebody scanned
+        //    a label, a fact that happened. tag.php resolves the token with isDeleted = 0 first; a
+        //    scan landing in the instant after a deletion is still true, and the log is cleared on
+        //    its own retention period. Locking an asset on a public page would add nothing.
         if ($assetId <= 0) {
             return;
         }
@@ -10877,6 +11025,9 @@ class AssetRegister
      */
     public static function kioskCheckin(int $assetId, int $kioskUserId, int $kioskTokenId, ?string $conditionIn): array
     {
+        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it ENDS a loan, for the same
+        //    reason loanAction() gives for check-in: refusing would leave the member's loan open
+        //    for ever.
         $db     = App::db();
         $siteId = Site::id();
 

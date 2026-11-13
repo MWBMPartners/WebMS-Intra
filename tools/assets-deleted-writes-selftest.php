@@ -30,13 +30,21 @@
  *      the shape #1031 fixed). The write must then LAND, which proves W can
  *      fail: a W that passed on the planted copy would be guarding nothing.
  *
- * Plus a kit's component deleted while the kit is being checked out (the
- * component is skipped and gets no loan), and Z: the tidy-up leaves every
- * table exactly as it found it.
+ * Plus: K a kit's component deleted while the kit is being checked out (the
+ * component is skipped and gets no loan); S the transaction-first rule, read
+ * from the source; O the ONE lock order — two writes on the same two assets,
+ * made to overlap the way that deadlocks if either takes them in its own
+ * order (round 2 measured a kit's checkout deadlocking against a seat), each
+ * proved to deadlock with the `sort()` planted out; L "kits are one level
+ * deep" asked again under the locks (two attaches at once made a loop); H
+ * the loans register over HTTP: Approve on a deleted asset's loan says what
+ * to do instead, and Decline still works; Z the tidy-up leaves every table
+ * exactly as it found it.
  *
  * WHAT IT CANNOT SHOW, said plainly:
- *   - the pages. It drives AssetRegister's methods as the pages call them, in
- *     a process that loads the portal's own start-up, not over HTTP;
+ *   - the pages, except the loans register (section H). It drives
+ *     AssetRegister's methods as the pages call them, in a process that loads
+ *     the portal's own start-up;
  *     tools/assets-api-update-selftest.php drives the API and the edit page for
  *     updateAsset() (#1031). What a page then SAYS is each page's own message
  *     for the method's ordinary failure.
@@ -46,8 +54,10 @@
  *   - the writes judged NOT to need the refusal (the ones that END something —
  *     declining, cancelling and checking in a loan, releasing a seat, removing
  *     an identifier, owner, resource, repair or event booking, detaching a kit
- *     component — and the public scan and found-report records). Their reasons
- *     are written beside AssetRegister::loanAction() and in #1047;
+ *     component — and the public scan and found-report records). Each one's
+ *     reason is written at the top of that method in AssetRegister.php
+ *     ("NOT refused for a DELETED asset, on purpose"), the loans' beside
+ *     loanAction();
  *   - MariaDB: performance_schema is OFF there by default, and this test
  *     REFUSES rather than guessing without it.
  *
@@ -113,8 +123,10 @@ $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (preg_match('/^selftest_[A-Za-z0-9_]+$/', $dbName) !== 1) {
     refuse("set SELFTEST_DB_NAME to a database whose name starts with selftest_ (got '{$dbName}'). This test writes rows");
 }
-if (function_exists('proc_open') === false) {
-    refuse('this test needs proc_open(), which this PHP does not have');
+foreach (['proc_open', 'curl_init'] as $needed) {
+    if (function_exists($needed) === false) {
+        refuse("this test needs {$needed}(), which this PHP does not have");
+    }
 }
 $dbHost = getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1';
 $dbUser = getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root';
@@ -279,9 +291,9 @@ $plant = static function (string $method) use ($liveRegister, $plantDir, $sep): 
         $stmt->close();
         return is_array($row) === true ? $row : null;
     }
-    private static function plantedLocksAnyway(\mysqli $db, array $assetIds, int $siteId, callable $work): mixed
+    private static function plantedLocksAnyway(\mysqli $db, array $assetIds, int $siteId, callable $work, array $alsoLockIfLive = []): mixed
     {
-        $ids = array_values(array_unique(array_map('intval', $assetIds)));
+        $ids = array_values(array_unique(array_merge(array_map('intval', $assetIds), array_map('intval', $alsoLockIfLive))));
         sort($ids);
         $db->begin_transaction();
         try {
@@ -315,6 +327,22 @@ PLANT;
     return $swapped;
 };
 
+/**
+ * 🌱 Plant a TEXT change into the planted copy (every other line as committed).
+ * Answers how many places changed (0 means the plant did not apply).
+ */
+$plantText = static function (array $swaps) use ($liveRegister, $plantDir, $sep): int {
+    $changed = 0;
+    $text    = $liveRegister;
+    foreach ($swaps as $from => $to) {
+        $changed += substr_count($text, $from);
+        $text = str_replace($from, $to, $text);
+    }
+    file_put_contents($plantDir . $sep . 'web' . $sep . '_core' . $sep . 'AssetRegister.php', $text);
+
+    return $changed;
+};
+
 // ── The worker: the portal's own start-up, then ONE AssetRegister call ──────
 $worker = $base . $sep . 'worker.php';
 file_put_contents($worker, <<<'WORKER'
@@ -339,6 +367,7 @@ $result = match ($j['op']) {
     'loanReq'      => R::createLoanRequest($a, ['direction' => 'out', 'counterpartyType' => 'other', 'counterpartyName' => 'Selftest borrower'], $u),
     'approve'      => R::loanAction((int) $j['l'], $a, 'approve', [], $u),
     'checkout'     => R::loanAction((int) $j['l'], $a, 'checkout', [], $u),
+    'checkin'      => R::loanAction((int) $j['l'], $a, 'checkin', ['conditionIn' => 'fair'], $u),
     'attach'       => R::attachToKit((int) $j['c'], (int) $j['p'], $u),
     'maintAdd'     => R::addMaintenance($a, ['maintType' => 'service', 'title' => 'Selftest service', 'status' => 'completed'], $u),
     'maintEdit'    => R::updateMaintenance((int) $j['m'], $a, ['maintType' => 'repair', 'title' => 'Changed by selftest', 'status' => 'completed'], $u),
@@ -393,9 +422,11 @@ $removeAll = static function () use ($db, $watermarks): void {
     foreach (AD_TABLES as $table => $key) {
         run($db, 'DELETE FROM `' . $table . '` WHERE `' . $key . '` > ?', 'i', [$watermarks[$table]]);
     }
+    run($db, 'DELETE FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [AD_USER]);
     run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [AD_USER]);
     run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [AD_USER]);
 };
+run($db, 'DELETE FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [AD_USER]);
 run($db, 'DELETE FROM `tblUserSites` WHERE `userID` = ?', 'i', [AD_USER]);
 run($db, 'DELETE FROM `tblUsers` WHERE `userID` = ?', 'i', [AD_USER]);
 $tableCounts = static function () use ($db): array {
@@ -814,6 +845,13 @@ $kit = $makeKit();
 $r   = $runJob($kit, $liveDir);
 check('K1 control: checking out a live kit also checks out its live component',
     ($r['result']['ok'] ?? null) === true && $count('tblAssetLoans', 'assetID', $kit['c']) === 1, $short($r));
+// The check-in now locks the kit and its components up front too (round 2,
+// one lock order) — and must still bring both back.
+$r = $runJob(['op' => 'checkin', 'a' => $kit['a'], 'l' => $kit['l']], $liveDir);
+check('K1b control: checking the kit back in returns the kit AND its component (the check-in locks them together, lowest first)',
+    ($r['result']['ok'] ?? null) === true && $field('tblAssetLoans', 'status', 'loanID', $kit['l']) === 'returned'
+    && one($db, "SELECT COUNT(*) FROM `tblAssetLoans` WHERE `assetID` = ? AND `status` = 'returned'", 'i', [$kit['c']]) === 1
+    && $field('tblAssets', 'conditionState', 'assetID', $kit['c']) === 'fair', $short($r));
 $kit    = $makeKit();
 $holder = $holdAsset($kit['c']);
 $r      = $runJob($kit, $liveDir, $holder, $kit['c']);
@@ -823,13 +861,288 @@ check('K3 the kit itself is checked out and the deleted component is SKIPPED: no
     ($r['result']['ok'] ?? null) === true && $field('tblAssetLoans', 'status', 'loanID', $kit['l']) === 'active'
     && $count('tblAssetLoans', 'assetID', $kit['c']) === 0 && $field('tblAssets', 'status', 'assetID', $kit['c']) === 'in-service',
     $short($r));
-$swapped = $plant('cascadeKitCheckout');
+$swapped = $plant('loanCheckout');
 $kit     = $makeKit();
 $holder  = $holdAsset($kit['c']);
 $r       = $runJob($kit, $plantDir, $holder, $kit['c']);
-check('K4 with the deletion question planted out of cascadeKitCheckout(), the same race hands the deleted component over — so K3 can fail',
+check('K4 with the deletion question planted out of loanCheckout()\'s one lock call (which locks the kit AND its components), the same race hands the deleted component over — so K3 can fail',
     $swapped > 0 && $r['seen'] === true && $count('tblAssetLoans', 'assetID', $kit['c']) === 1,
     'plant swapped ' . $swapped . '; ' . $short($r));
+
+// =============================================================================
+// O. ONE lock order: two writes on the same two assets never deadlock
+// =============================================================================
+// Round 2 of the check measured a NEW deadlock: a kit's checkout locked the
+// kit, then its component; a seat linked from that component (a licence) to
+// the kit locked them lowest number first — the other way round. Each held one
+// and waited for the other; InnoDB killed one and the seat's save said "please
+// try again". Every write that locks more than one asset now takes them
+// through withLiveAssetsLocked(), lowest first. These cases make two such
+// writes overlap exactly the way that deadlocks when either uses its own
+// order: this test holds BOTH rows (one per connection), starts the two
+// writes, lets go of the first row and then the second, and requires BOTH
+// writes to succeed. Then the same with the `sort()` planted out: one of them
+// must fail, which proves the case can see a missing order.
+echo "\nO — two writes on the same two assets take them in ONE order, so they queue rather than deadlock\n";
+$threadOf = static fn (mysqli $h): int => one($db, 'SELECT `THREAD_ID` FROM `performance_schema`.`threads` WHERE `PROCESSLIST_ID` = ?', 'i', [$h->thread_id]);
+/** How many lock waits are blocked by these connections, on any row. */
+$waitersOn = static function (array $holders) use ($db, $threadOf): int {
+    $n = 0;
+    foreach ($holders as $h) {
+        $n += one($db, 'SELECT COUNT(*) FROM `performance_schema`.`data_lock_waits` WHERE `BLOCKING_THREAD_ID` = ?', 'i', [$threadOf($h)]);
+    }
+    return $n;
+};
+$pollUntil = static function (callable $condition, int $tenths): bool {
+    for ($i = 0; $i < $tenths; $i++) {
+        if ($condition() === true) {
+            return true;
+        }
+        usleep(100000);
+    }
+    return $condition();
+};
+$startJob = static function (array $job, string $dir) use ($worker, $base, $env, $sep): array {
+    $job['user'] = AD_USER;
+    $out  = $base . $sep . 'worker-' . bin2hex(random_bytes(4)) . '.out';
+    $proc = proc_open([PHP_BINARY, '-d', 'display_errors=stderr', '-d', 'log_errors=0', $worker,
+        $dir . $sep . 'web' . $sep . '_core' . $sep . 'bootstrap.php', json_encode($job)],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $out . '.err', 'w']], $pipes, $base, $env);
+    return ['proc' => $proc, 'out' => $out];
+};
+$endJob = static function (array $started): array {
+    $exit    = proc_close($started['proc']);
+    $printed = (string) @file_get_contents($started['out']);
+    $said    = trim((string) @file_get_contents($started['out'] . '.err'));
+    @unlink($started['out']);
+    @unlink($started['out'] . '.err');
+    $pos = strrpos($printed, "\nRESULT:");
+    return ['exit' => $exit, 'result' => $pos === false ? '(no result)' : json_decode(substr($printed, $pos + 8), true), 'said' => $said, 'seen' => true];
+};
+/**
+ * Hold $first and $second (one connection each); start $job1 and $job2 and
+ * wait until both are WAITING on those holders; let go of $first, give the
+ * writes a moment to queue on $second, then let go of $second.
+ */
+$overlap = static function (array $job1, array $job2, int $first, int $second, string $dir)
+    use ($holdAsset, $waitersOn, $pollUntil, $startJob, $endJob): array {
+    $h1 = $holdAsset($first);
+    $h2 = $holdAsset($second);
+    $w1 = $startJob($job1, $dir);
+    $pollUntil(static fn (): bool => $waitersOn([$h1, $h2]) >= 1, 100);
+    $w2 = $startJob($job2, $dir);
+    $seen = $pollUntil(static fn (): bool => $waitersOn([$h1, $h2]) >= 2, 100);
+    $h1->commit();
+    $h1->close();
+    // With ONE order the second write is queued behind the first, not on $second,
+    // so this gives up after three seconds; with two orders both queue on it.
+    $pollUntil(static fn (): bool => $waitersOn([$h2]) >= 2, 30);
+    $h2->commit();
+    $h2->close();
+    return ['seen' => $seen, 'one' => $endJob($w1), 'two' => $endJob($w2)];
+};
+$okOf = static fn (mixed $r): bool => is_array($r) === true && (($r['ok'] ?? null) === true || (int) ($r['id'] ?? 0) > 0);
+$noSort = ["        sort(\$ids);\n        \$db->begin_transaction();" => "        \$db->begin_transaction();"];
+
+/** O1: a component put into a kit, and a seat linked the other way between the same two. */
+$makePair = static function () use ($asset): array {
+    $device  = $asset('order device');                                 // the LOWER number
+    $licence = $asset('order licence kit', ['assetKind' => 'digital']); // the higher
+    return [
+        ['op' => 'attach', 'c' => $device, 'p' => $licence],          // its own order: device, licence
+        ['op' => 'seatDevice', 'a' => $licence, 'd' => $device],      // its own order: licence, device
+        $device, $licence,
+    ];
+};
+[$j1, $j2, $lo, $hi] = $makePair();
+$o = $overlap($j1, $j2, $lo, $hi, $liveDir);
+check('O1 attachToKit(device into licence) and assignSeat(licence to device), overlapping: BOTH succeed (they queue on one order)',
+    $o['seen'] === true && $okOf($o['one']['result']) === true && $okOf($o['two']['result']) === true,
+    'seen ' . var_export($o['seen'], true) . '; attach ' . $short($o['one']) . ' | seat ' . $short($o['two']));
+$changed = $plantText($noSort);
+[$j1, $j2, $lo, $hi] = $makePair();
+$o = $overlap($j1, $j2, $lo, $hi, $plantDir);
+check('O1P with the sort() planted out of withLiveAssetsLocked(), the same overlap DEADLOCKS: one of the two fails — so O1 can fail',
+    $changed === 1 && $o['seen'] === true && ($okOf($o['one']['result']) === false || $okOf($o['two']['result']) === false),
+    'plant changed ' . $changed . '; attach ' . $short($o['one']) . ' | seat ' . $short($o['two']));
+
+/** O2: THE MEASURED CASE — kit #K holding licence #L (L lower), K checked out while a seat links L to K. */
+$makeKitSeat = static function () use ($asset, $lender, $requested, $db): array {
+    $licence = $asset('order kit licence', ['assetKind' => 'digital']); // the LOWER number, a component
+    $kit     = $asset('order kit');
+    run($db, 'UPDATE `tblAssets` SET `parentAssetID` = ? WHERE `assetID` = ?', 'ii', [$kit, $licence]);
+    $lender($kit);
+    $loan = $requested($kit);
+    return [
+        ['op' => 'checkout', 'a' => $kit, 'l' => $loan],                // round 1 locked: kit, then component
+        ['op' => 'seatDevice', 'a' => $licence, 'd' => $kit],            // locks: licence (lower), kit
+        $kit, $licence, $loan,
+    ];
+};
+[$j1, $j2, $kitId, $licId, $loanId] = $makeKitSeat();
+$o = $overlap($j1, $j2, $kitId, $licId, $liveDir);
+check('O2 the measured deadlock: a kit checked out while a seat links its component licence to it, overlapping — BOTH succeed, and the component goes out with the kit',
+    $o['seen'] === true && $okOf($o['one']['result']) === true && $okOf($o['two']['result']) === true
+    && $field('tblAssetLoans', 'status', 'loanID', $loanId) === 'active' && $count('tblAssetLoans', 'assetID', $licId) === 1,
+    'seen ' . var_export($o['seen'], true) . '; checkout ' . $short($o['one']) . ' | seat ' . $short($o['two']));
+$changed = $plantText($noSort);
+[$j1, $j2, $kitId, $licId, $loanId] = $makeKitSeat();
+$o = $overlap($j1, $j2, $kitId, $licId, $plantDir);
+check('O2P with the sort() planted out, the same overlap DEADLOCKS (the checkout then locks the kit before its component, as round 1 did) — so O2 can fail',
+    $changed === 1 && $o['seen'] === true && ($okOf($o['one']['result']) === false || $okOf($o['two']['result']) === false),
+    'plant changed ' . $changed . '; checkout ' . $short($o['one']) . ' | seat ' . $short($o['two']));
+
+// =============================================================================
+// L. Kits are one level deep — asked again UNDER the locks
+// =============================================================================
+// The round-2 check made a loop with two attaches at once: A into B and B into
+// A each passed attachToKit()'s checks (made before any lock) and both landed.
+// Now the checks are asked again under both rows' locks, so the second sees
+// the first. This test holds BOTH rows in one connection, starts both attaches,
+// waits until both are waiting, and lets go.
+echo "\nL — two attaches at once cannot make a kit loop\n";
+$holdBoth = static function (int $a, int $b) use ($dbHost, $dbUser, $dbPass, $dbName, $dbPort): mysqli {
+    $h = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $h->begin_transaction();
+    foreach ([$a, $b] as $id) {
+        $st = $h->prepare('SELECT 1 FROM `tblAssets` WHERE `assetID` = ? FOR UPDATE');
+        $st->bind_param('i', $id);
+        $st->execute();
+        $st->get_result()->fetch_all();
+        $st->close();
+    }
+    return $h;
+};
+$loopRace = static function (string $dir) use ($asset, $holdBoth, $startJob, $endJob, $waitersOn, $pollUntil, $field): array {
+    $a  = $asset('loop one');
+    $b  = $asset('loop two');
+    $h  = $holdBoth($a, $b);
+    $w1 = $startJob(['op' => 'attach', 'c' => $a, 'p' => $b], $dir);
+    $w2 = $startJob(['op' => 'attach', 'c' => $b, 'p' => $a], $dir);
+    $seen = $pollUntil(static fn (): bool => $waitersOn([$h]) >= 2, 100);
+    $h->commit();
+    $h->close();
+    $r1 = $endJob($w1);
+    $r2 = $endJob($w2);
+    return ['seen' => $seen, 'r1' => $r1, 'r2' => $r2,
+        'loop' => (int) $field('tblAssets', 'parentAssetID', 'assetID', $a) === $b && (int) $field('tblAssets', 'parentAssetID', 'assetID', $b) === $a];
+};
+$l = $loopRace($liveDir);
+check('L1 A-into-B and B-into-A at once: exactly ONE lands, the other is refused with the one-level-deep words, and there is no loop',
+    $l['seen'] === true && $l['loop'] === false && ($okOf($l['r1']['result']) xor $okOf($l['r2']['result']))
+    && str_contains(json_encode($l['r1']['result'], JSON_UNESCAPED_UNICODE) . json_encode($l['r2']['result'], JSON_UNESCAPED_UNICODE), 'one level deep') === true,
+    'seen ' . var_export($l['seen'], true) . '; ' . $short($l['r1']) . ' | ' . $short($l['r2']));
+$changed = $plantText([
+    "if (\$locked[\$parentAssetId]['parentAssetID'] !== null) {" => 'if (false) {',
+    'if ($hasKids === true) {' => 'if (false) {',
+]);
+$l = $loopRace($plantDir);
+check('L1P with the under-lock checks planted out, the same two attaches make a LOOP — so L1 can fail',
+    $changed === 2 && $l['seen'] === true && $l['loop'] === true,
+    'plant changed ' . $changed . '; ' . $short($l['r1']) . ' | ' . $short($l['r2']));
+
+// =============================================================================
+// H. The loans register over HTTP: what Approve says on a deleted asset's loan
+// =============================================================================
+echo "\nH — the loans register, signed in, on a deleted asset's loan\n";
+file_put_contents($base . $sep . 'router.php', <<<'ROUTER'
+<?php
+// Written by tools/assets-deleted-writes-selftest.php for ONE run. Imitates web/public_html/.htaccess.
+declare(strict_types=1);
+$root = (string) realpath(__DIR__ . '/live/web/public_html');
+$uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+if (preg_match('#(^|/)\.(?!well-known)#', $uri) === 1) { http_response_code(403); exit('403'); }
+if (preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
+$target = $root . '/index.php';
+$real   = ($uri === '/' || preg_match('#^/assets/?$#', $uri) === 1) ? false : realpath($root . $uri);
+if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
+    if (strtolower(pathinfo($real, PATHINFO_EXTENSION)) === 'php') { $target = $real; } else { readfile($real); return true; }
+}
+$_SERVER['SCRIPT_NAME']     = substr($target, strlen($root));
+$_SERVER['PHP_SELF']        = $_SERVER['SCRIPT_NAME'];
+$_SERVER['SCRIPT_FILENAME'] = $target;
+chdir(dirname($target));
+require $target;
+return true;
+ROUTER);
+$port = getenv('SELFTEST_WEB_PORT') !== false ? (int) getenv('SELFTEST_WEB_PORT') : 9147;
+$probe = @fsockopen('127.0.0.1', $port, $errNo, $errText, 0.5);
+if (is_resource($probe) === true) {
+    fclose($probe);
+    refuse("something already answers on port {$port}; choose another with SELFTEST_WEB_PORT");
+}
+@mkdir($base . $sep . 'sessions', 0700);
+$jar = $base . $sep . 'cookies.txt';
+$serverEnv = $env;
+unset($serverEnv['PHP_CLI_SERVER_WORKERS']);
+$state['server'] = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $base . $sep . 'sessions',
+    '-d', 'error_log=' . $base . $sep . 'php-errors.log', '-d', 'log_errors=1', '-d', 'display_errors=0',
+    '-S', '127.0.0.1:' . $port, '-t', $liveDir . $sep . 'web' . $sep . 'public_html', $base . $sep . 'router.php'],
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $base . $sep . 'server.log', 'a'], 2 => ['file', $base . $sep . 'server.log', 'a']],
+    $serverPipes, $base, $serverEnv);
+register_shutdown_function(static function () use (&$state): void {
+    if (isset($state['server']) === true && is_resource($state['server']) === true) {
+        proc_terminate($state['server']);
+        proc_close($state['server']);
+    }
+});
+$http = static function (string $method, string $path, array $post = []) use ($port, $jar): array {
+    $h = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($h, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60,
+        CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar]);
+    if ($method === 'POST') {
+        curl_setopt($h, CURLOPT_POST, true);
+        curl_setopt($h, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $body = curl_exec($h);
+    return ['status' => (int) curl_getinfo($h, CURLINFO_HTTP_CODE), 'body' => $body === false ? '' : (string) $body];
+};
+$tokenOn = static function (string $html): string {
+    if (preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $mm) === 1) {
+        return html_entity_decode($mm[1], ENT_QUOTES, 'UTF-8');
+    }
+    if (preg_match('/<meta\s+name="csrf-token"\s+content="([^"]+)"/i', $html, $mm) === 1) {
+        return html_entity_decode($mm[1], ENT_QUOTES, 'UTF-8');
+    }
+    return '';
+};
+if ($pollUntil(static fn (): bool => $http('GET', '/login')['status'] > 0, 200) === false) {
+    refuse('the test server never answered');
+}
+// The member is made an administrator for this section (they hold lending
+// authority anyway): the loans register draws its buttons for them.
+run($db, 'UPDATE `tblUsers` SET `isAdmin` = 1, `isRootAdmin` = 1 WHERE `userID` = ?', 'i', [AD_USER]);
+$password = 'Ad' . bin2hex(random_bytes(8)) . '!9x';
+run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
+    'iss', [AD_USER, 'selftest-assets-deleted', password_hash($password, PASSWORD_DEFAULT)]);
+$in = $http('POST', '/login', ['csrf_token' => $tokenOn($http('GET', '/login')['body']), 'username' => 'selftest-assets-deleted', 'password' => $password]);
+check('H0 the premise: signing in answers a redirect', $in['status'] === 302 || $in['status'] === 303, 'HTTP ' . $in['status']);
+$press = static function (int $assetId, int $loanId, string $action) use ($http, $tokenOn): string {
+    $token = $tokenOn($http('GET', '/assets/loans')['body']);
+    $http('POST', '/assets/loan-action', ['csrf_token' => $token, 'assetID' => $assetId, 'loanID' => $loanId,
+        'action' => $action, 'returnTo' => 'loans', 'declineReason' => '']);
+    return html_entity_decode($http('GET', '/assets/loans')['body'], ENT_QUOTES, 'UTF-8');
+};
+$words = 'This asset has been deleted, so the loan cannot be approved or checked out. Decline or cancel it instead.';
+foreach (['approve' => 'H1', 'checkout' => 'H2'] as $action => $tag) {
+    $a = $asset('http ' . $action);
+    $lender($a);
+    $loan = $requested($a);
+    $deleteAsset($db, $a);
+    $page = $press($a, $loan, $action);
+    check("{$tag} pressing " . ucfirst($action) . ' on a deleted asset\'s loan in the loans register SAYS it has been deleted and to decline or cancel it instead, and the loan is still requested',
+        str_contains($page, $words) === true && $field('tblAssetLoans', 'status', 'loanID', $loan) === 'requested',
+        'message shown: ' . var_export(str_contains($page, $words), true) . '; loan ' . var_export($field('tblAssetLoans', 'status', 'loanID', $loan), true));
+}
+$a = $asset('http decline');
+$lender($a);
+$loan = $requested($a);
+$deleteAsset($db, $a);
+$press($a, $loan, 'decline');
+check('H3 and the advice is true: Decline on that deleted asset\'s loan works (the loan is declined, so it leaves the open list)',
+    $field('tblAssetLoans', 'status', 'loanID', $loan) === 'declined', 'loan ' . var_export($field('tblAssetLoans', 'status', 'loanID', $loan), true));
+$serverErrors = is_file($base . $sep . 'php-errors.log') === true ? trim((string) file_get_contents($base . $sep . 'php-errors.log')) : '';
+check('H4 the web server logged no PHP error or warning', preg_match('/PHP (Fatal|Parse|Warning|Deprecated)/', $serverErrors) !== 1, mb_substr($serverErrors, 0, 400));
 
 // =============================================================================
 // S. What no race can show: the lock is taken INSIDE a transaction
@@ -877,8 +1190,8 @@ foreach ($fns[1] as $i => [$fnName, $offset]) {
     }
 }
 sort($askers);
-$expected = ['addMaintenance', 'cascadeKitCheckout', 'recordValueSnapshot', 'updateAsset', 'withLiveAssetsLocked'];
-check('S2 exactly these ask lockedLiveAsset() directly: the helper, the three writes inside Currency::withParentLocked(), and the kit cascade (inside loanCheckout()\'s helper transaction) — a new direct caller must be judged and added here',
+$expected = ['addMaintenance', 'recordValueSnapshot', 'updateAsset', 'withLiveAssetsLocked'];
+check('S2 exactly these ask lockedLiveAsset() directly: the helper and the three single-asset writes inside Currency::withParentLocked() — a new direct caller must be judged and added here (a second asset locked any other way is a second lock order, section O)',
     $askers === $expected, 'found: ' . json_encode($askers));
 $insideParentLock = true;
 foreach (['updateAsset', 'addMaintenance', 'recordValueSnapshot'] as $fnName) {
@@ -893,10 +1206,10 @@ check('S3 those three ask only inside Currency::withParentLocked(), which begins
     $insideParentLock === true);
 preg_match_all('/self::cascadeKitCheckout\(/', $code, $cascadeCalls, PREG_OFFSET_CAPTURE);
 $checkoutBody = $methodCode('loanCheckout');
-check('S4 cascadeKitCheckout() is called from ONE place, inside loanCheckout()\'s withLiveAssetLocked() transaction',
+check('S4 cascadeKitCheckout() is called from ONE place, inside loanCheckout()\'s withLiveAssetsLocked() call, which locked the kit and its components together',
     count($cascadeCalls[0]) === 1 && str_contains($checkoutBody, 'self::cascadeKitCheckout(') === true
-    && strpos($checkoutBody, 'self::withLiveAssetLocked(') !== false
-    && strpos($checkoutBody, 'self::withLiveAssetLocked(') < strpos($checkoutBody, 'self::cascadeKitCheckout('),
+    && strpos($checkoutBody, 'self::withLiveAssetsLocked(') !== false
+    && strpos($checkoutBody, 'self::withLiveAssetsLocked(') < strpos($checkoutBody, 'self::cascadeKitCheckout('),
     count($cascadeCalls[0]) . ' call(s)');
 
 // =============================================================================
