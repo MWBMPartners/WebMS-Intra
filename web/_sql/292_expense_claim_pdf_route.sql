@@ -1,7 +1,7 @@
 -- =============================================================================
--- Migration 290: a claim's generated PDF can be opened (#954)
+-- Migration 292: a claim's generated PDF can be opened (#954)
 --
--- Path: web/_sql/290_expense_claim_pdf_route.sql
+-- Path: web/_sql/292_expense_claim_pdf_route.sql
 --
 -- WHY THIS EXISTS
 --   The claim page listed the claim's own generated PDF by name with no link,
@@ -40,5 +40,5 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VAL
 -- 📋  B. Self-record (safe to run a second time)
 -- #############################################################################
 
-INSERT INTO `tblMigrations` (`filename`) VALUES ('290_expense_claim_pdf_route.sql')
+INSERT INTO `tblMigrations` (`filename`) VALUES ('292_expense_claim_pdf_route.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;

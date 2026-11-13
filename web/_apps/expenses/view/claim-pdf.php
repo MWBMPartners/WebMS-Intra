@@ -5,7 +5,7 @@
  * Expenses — open a claim's generated PDF 📄 (#954)
  * -----------------------------------------------------------------------------
  * Reached at `expenses/claim-pdf?claim=<claim number>` (registered in
- * `tblRoutes`, migration 290). Sends the claim's own generated PDF as a file
+ * `tblRoutes`, migration 292). Sends the claim's own generated PDF as a file
  * to save. Nothing else.
  *
  * WHY IT EXISTS. The claim page listed the generated PDF by name with no link,
