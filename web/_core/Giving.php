@@ -442,7 +442,8 @@ class Giving
     public static function statementHtml(int $siteId, int $donorId, string $fromDate, string $toDate, string $periodLabel): string|false
     {
         // 🛡️ Reject anything that isn't a real, ordered date range before
-        // it touches SQL or a filename — statementPeriodKey() below trusts
+        // it touches SQL — renderStatementPdf(), which calls this first,
+        // then builds a file name with statementPeriodKey(), which trusts
         // its callers to have already done this. isRealDay() first:
         // strtotime() alone accepted '2026-02-31' (#891, #892), and the gifts
         // below are read with BETWEEN, which answers differently for such a

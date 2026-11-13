@@ -1077,6 +1077,63 @@ check('H2i the REAL statement (Giving::statementHtml()) marks this donor\'s poun
     && array_filter($poundsLines, static fn (array $c): bool => $c[1] !== 'Yes') === []
     && array_filter($otherLines, static fn (array $c): bool => $c[1] !== '–') === [],
     json_encode($giftAidCells, JSON_UNESCAPED_UNICODE));
+// ⚠️ NOTHING HERE CAN RUN renderStatementPdf() (it ends in dompdf, which no test
+//    copy ships), so nothing proved it hands Pdf::create() the text
+//    statementHtml() built. Round 3 of #999's check kept
+//    `$html = self::statementHtml(...)` and then overwrote $html with a private
+//    copy using the old EXISTS: currency, gdpr-coverage and the eraser test all
+//    stayed green. Pinning a pattern would be the cleverer-pattern trap this
+//    repository has paid for (#485, #763); the method is small, so its WHOLE
+//    body is pinned as text — PHP's tokeniser, comments dropped, every run of
+//    whitespace one space. ANY change to it fails here on purpose: change the
+//    method, check it still makes the PDF from statementHtml()'s text and
+//    nothing else, then update the pinned text below.
+$wholeBody = static function (string $file, string $function): string {
+    $tokens = token_get_all((string) file_get_contents($file));
+    $out = '';
+    for ($i = 0; $i < count($tokens); $i++) {
+        if (is_array($tokens[$i]) === false || $tokens[$i][0] !== T_FUNCTION) {
+            continue;
+        }
+        $k = $i + 1;
+        while (is_array($tokens[$k]) === true && $tokens[$k][0] === T_WHITESPACE) {
+            $k++;
+        }
+        if (is_array($tokens[$k]) === false || $tokens[$k][1] !== $function) {
+            continue;
+        }
+        $depth = 0;
+        for ($j = $k; $j < count($tokens); $j++) {
+            $t = $tokens[$j];
+            if (is_array($t) === true && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+                continue;
+            }
+            $text = is_array($t) === true ? $t[1] : $t;
+            $out .= (is_array($t) === true && $t[0] === T_WHITESPACE) ? ' ' : $text;
+            if ($text === '{' || (is_array($t) === true && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true) === true)) {
+                $depth++;
+            } elseif ($text === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    break;
+                }
+            }
+        }
+        break;
+    }
+
+    return trim((string) preg_replace('/\s+/', ' ', $out));
+};
+$pinnedRender = 'renderStatementPdf(int $siteId, int $donorId, string $fromDate, string $toDate, string $periodLabel): string|false { '
+    . '$html = self::statementHtml($siteId, $donorId, $fromDate, $toDate, $periodLabel); if ($html === false) { return false; } '
+    . '$periodKey = self::statementPeriodKey($fromDate, $toDate); '
+    . "\$dir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'giving' . DIRECTORY_SEPARATOR . 'statements' . DIRECTORY_SEPARATOR . (string) \$siteId; "
+    . 'if (is_dir($dir) === false) { mkdir($dir, 0755, true); } '
+    . "\$path = \$dir . DIRECTORY_SEPARATOR . 'statement-' . \$donorId . '-' . \$periodKey . '.pdf'; "
+    . 'return Pdf::create($html, $path); }';
+$renderNow = $wholeBody($repo . $sep . 'web' . $sep . '_core' . $sep . 'Giving.php', 'renderStatementPdf');
+check('H2k renderStatementPdf() is EXACTLY the pinned text: it makes the PDF from statementHtml()\'s text and nothing else (nothing here can run it — no dompdf — so its whole body is pinned; any change fails here on purpose: re-check it, then update the pin)',
+    $renderNow === $pinnedRender, $renderNow);
 // The claim file and the left-out count must treat a gift stored as "gbp" as
 // pounds, as the SQL rule does (round 2's isGiftAidCurrency()). Nothing the
 // portal writes stores lower case, so the row is written straight to the

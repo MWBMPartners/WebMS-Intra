@@ -717,6 +717,11 @@ require_once $coreDir . 'PortalAddress.php';
 // (Giving), the activity log the job writes to (Logger, which asks Site for
 // the organisation), and the scheduled job's own code.
 require_once $coreDir . 'Giving.php';
+// #999 round 4: the two statement-refusal checks call Giving::statementHtml(),
+// which, once past the erased-donor refusal, writes amounts through Currency.
+// Without this line a deleted refusal made the test stop with "class not
+// found" rather than fail the check that names the fault.
+require_once $coreDir . 'Currency.php';
 require_once $coreDir . 'Site.php';
 require_once $coreDir . 'Logger.php';
 require_once $coreDir . 'AnonymousCheckins.php';
@@ -4335,9 +4340,14 @@ ge_ok('ANOTHER DONOR is untouched, and so is everything else: across the whole d
     implode('; ', array_slice($unexpectedH, 0, 8)));
 
 $preview = Giving::statementsPreview(SITE_G1, $ago(800), $todayG1);
+// ⚠️ statementHtml(), not renderStatementPdf() (#999 round 4): the PDF step
+//    needs dompdf, which no test copy ships, so renderStatementPdf() answered
+//    false here WHATEVER the erased-donor refusal did — measured, deleting the
+//    refusal left this check green. statementHtml() is where the refusal lives
+//    and answers without dompdf, so it fails if the refusal goes.
 ge_ok('an erased donor is never offered a new statement: the bulk list leaves them out (and still lists the two donors who have not been erased), and rendering one for them is refused',
     array_map('intval', array_column($preview, 'donorID')) === [P_I, P_K] && Giving::isErasedDonor(SITE_G1, P_H) === true
-    && Giving::isErasedDonor(SITE_G1, P_K) === false && Giving::renderStatementPdf(SITE_G1, P_H, $ago(330), $ago(250), 'x') === false
+    && Giving::isErasedDonor(SITE_G1, P_K) === false && Giving::statementHtml(SITE_G1, P_H, $ago(330), $ago(250), 'x') === false
     && file_get_contents($issuedH['file']) === 'made-up statement for ' . P_H, json_encode($preview));
 $regen = Giving::renderStatementBatch(SITE_G1, $ago(330), $ago(250), 0, true);
 ge_ok('"regenerate" for that period does not un-link the erased donor\'s kept statement (it would have been replaced by one in the name "[Deleted User]")',
@@ -4631,7 +4641,7 @@ ge_ok('A SECOND RUN changes nothing: nothing is cleared twice, no second line is
 ge_ok('once cleared, the gifts are no longer in the tax claim file under any name, and the donor is still not offered a statement',
     str_contains(Giving::buildHmrcCsv(SITE_G1, $ago(800), $todayG1), '12 Kept Lane') === false
     && str_contains(Giving::buildHmrcCsv(SITE_G1, $ago(800), $todayG1), 'Deleted') === false
-    && Giving::isErasedDonor(SITE_G1, P_H) === true && Giving::renderStatementPdf(SITE_G1, P_H, $ago(330), $ago(250), 'x') === false);
+    && Giving::isErasedDonor(SITE_G1, P_H) === true && Giving::statementHtml(SITE_G1, P_H, $ago(330), $ago(250), 'x') === false);
 
 // (f) A kept file that cannot be deleted: nothing is cleared, and the next run tries again.
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
