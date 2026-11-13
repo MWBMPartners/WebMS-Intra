@@ -946,6 +946,39 @@ $rows     = is_array($json) === true ? ($json['data']['outsideServiceChoices'] ?
 check('E07 the member\'s own data download carries their outside-services choices', is_array($rows) === true
     && in_array(['memberMap', 'off'], array_map(static fn ($r): array => [(string) ($r['serviceKey'] ?? ''), (string) ($r['choice'] ?? '')], $rows), true) === true,
     'status ' . $download['status'] . '; rows ' . json_encode($rows));
+// 🌐 #813: the member's OTHER own settings are in the same download - their
+//    choice to have content translated (the table #813 found missing) and the
+//    four more of the same kind that section 26 of gdpr-coverage-selftest.php
+//    then found: text-message settings, newsletter choices, a connected Zoom
+//    account and an equipment kiosk PIN. Fetched from the REAL page, as E07 is,
+//    and each secret beside them must NOT be in the file: a one-time
+//    verification code, an unsubscribe code, Zoom's sign-in keys and the
+//    scrambled PIN. Every row is made with a marker value so the check can
+//    tell this row from any other, and is removed by cleanup() with M.
+q('INSERT INTO `tblUserTranslationPref` (`userID`, `autoTranslate`) VALUES (?, 1)', 'i', [M]);
+q("INSERT INTO `tblUserSmsPreference` (`siteID`, `userID`, `phoneNumber`, `isVerified`, `verificationCode`, `categories`) VALUES (?, ?, '+447700900813', 1, 'VC813SEC', 'critical_alerts')", 'ii', [ORG_A, M]);
+q("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES (?, ?, 0, 'unsub813secretunsub813secretunsub813sec')", 'ii', [ORG_A, M]);
+q("INSERT INTO `tblZoomAccount` (`siteID`, `userID`, `zoomUserId`, `zoomAccountEmail`, `refreshTokenEnc`, `accessTokenEnc`, `scopes`) VALUES (?, ?, 'zoom813user', 'zoom813@selftest.invalid', 'REFRESH813SECRET', 'ACCESS813SECRET', 'meeting:write')", 'ii', [ORG_A, M]);
+q("INSERT INTO `tblAssetKioskPins` (`siteID`, `userID`, `pinHash`) VALUES (?, ?, 'PINHASH813SECRET')", 'ii', [ORG_A, M]);
+$download = req($jarM, 'GET', '/account/data-export');
+$json     = json_decode((string) $download['body'], true);
+$data     = is_array($json) === true ? (array) ($json['data'] ?? []) : [];
+$firstOf  = static fn (string $key): array => (array) (($data[$key] ?? [])[0] ?? []);
+check('E07b ...and their translation choice, text-message settings, newsletter choices, Zoom account and kiosk PIN, each without its secret (#813)',
+    (int) ($firstOf('translationChoice')['autoTranslate'] ?? -1) === 1
+    && (string) ($firstOf('textMessageSettings')['phoneNumber'] ?? '') === '+447700900813'
+    && (int) ($firstOf('newsletterChoices')['optedIn'] ?? -1) === 0
+    && (string) ($firstOf('zoomAccounts')['zoomAccountEmail'] ?? '') === 'zoom813@selftest.invalid'
+    && (int) ($firstOf('equipmentKioskPins')['isActive'] ?? -1) === 1
+    && str_contains((string) $download['body'], 'VC813SEC') === false
+    && str_contains((string) $download['body'], 'unsub813secret') === false
+    && str_contains((string) $download['body'], 'REFRESH813SECRET') === false
+    && str_contains((string) $download['body'], 'ACCESS813SECRET') === false
+    && str_contains((string) $download['body'], 'PINHASH813SECRET') === false,
+    'status ' . $download['status'] . '; ' . json_encode(array_intersect_key($data, array_flip(['translationChoice', 'textMessageSettings', 'newsletterChoices', 'zoomAccounts', 'equipmentKioskPins']))));
+foreach (['tblUserTranslationPref', 'tblUserSmsPreference', 'tblNewsletterSubscription', 'tblZoomAccount', 'tblAssetKioskPins'] as $own813) {
+    q('DELETE FROM `' . $own813 . '` WHERE `userID` = ?', 'i', [M]);
+}
 setAt(K_GRAV, ORG_B, null);
 setChoice(M, 'memberMap', null);
 setAt(K_GRAV, null, 'off');

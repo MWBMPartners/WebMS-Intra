@@ -189,7 +189,7 @@ class GdprEraser
             //    a correct instruction for an import or a future page rather than a
             //    live leak. `walkinName` on this table is a hand-typed name that no
             //    catalogue entry names at all - #706.
-            ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => ['notes'], 'reason' => 'aggregate attendance stats retained — userID nulled, and a note about this person goes with it'],
+            ['table' => 'tblEventAttendance',  'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => ['notes'], 'reason' => 'the attendance record is kept for the organisation\'s totals; your account number is removed from it, and so is any note about you on it'],
             // Expense claims live in `tblExpenseClaims`.`userID` — there is
             // no `tblExpenseClaim` (singular) table or `submittedByID` column.
             //
@@ -842,7 +842,7 @@ class GdprEraser
             // ipHash/userAgentHash columns are ALREADY salted-hash-only
             // (never a raw IP/User-Agent — see AssetRegister::recordScan()),
             // so there is no separate PII column here to null out.
-            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'scan-volume analytics retained; actor identity detached (ipHash/userAgentHash are already salted-hash-only, never raw)'],
+            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the record that a piece of equipment was scanned is kept for counting how often it is scanned; your account number is removed from it. A scrambled form of the network address and browser each scan came from stays, as it does on the equipment\'s change history, which this installation can still match against an address it is given'],
             // #392 Phase 3 (#411/#412/#414). tblAssetKioskPins IS a hard
             // delete (not anonymise) — same rationale as tblAssetOwners
             // above: a PIN tied to an erased user is meaningless, and
@@ -904,7 +904,7 @@ class GdprEraser
             // tblEventAttendance / tblAssetAudit convention above).
             ['table' => 'tblSmallGroupMembers',           'userCol' => 'userID',       'action' => 'delete'],
             ['table' => 'tblSmallGroupMembers',           'userCol' => 'addedByID',    'action' => 'anonymise', 'nullCols' => [], 'reason' => 'membership rows retained for the group; assigner identity detached'],
-            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'aggregate attendance stats retained — userID nulled (tblEventAttendance precedent)'],
+            ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the group\'s attendance record is kept for its totals; your account number is removed from it'],
             ['table' => 'tblSmallGroupMeetingAttendance', 'userCol' => 'markedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'roll history retained; recorder identity detached'],
             ['table' => 'tblSmallGroupMeetings',          'userCol' => 'recordedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'meeting history retained; recorder identity detached'],
             ['table' => 'tblSmallGroups',                 'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'group retained for the congregation; creator identity detached'],
@@ -1039,7 +1039,20 @@ class GdprEraser
             //    (AssetRegister::ipHash(), salted with this installation's key) is not emptied.
             ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'changes you made to records: the change history is kept for ever (the owner\'s decision D-116). Your account number and the network address each change came from are removed from these entries; which record changed, and what it held before and after, are kept as written, so an entry can still name you or give your account number (an entry about your own account, or your membership of an organisation, department, user group or role, has those values emptied by a separate step)'],
             ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
-            ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached'],
+            // 🎁 #970 item 1: `countLeavesOutWhere` is read by inventory()
+            //    ONLY, never by the erasure. A gift the person recorded for
+            //    THEMSELVES matches this instruction too (its `recordedByID`
+            //    and `donorID` are both theirs), and was counted here under
+            //    "somebody else's gift ... who entered it is detached" - so it
+            //    read as losing their number, while `donorID` on the same row
+            //    may still carry it when the gift is kept for tax. Such a gift
+            //    is counted, and worded, on the person's own gift rows
+            //    (givingRows(), from givingOutlook()), which say whether it
+            //    keeps their name; so this count leaves it out, and what is
+            //    left here really is somebody else's gift. The erasure still
+            //    empties `recordedByID` on every row, their own included.
+            ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached',
+                'countLeavesOutWhere' => 'donorID'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'moderatorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who moderated it is detached'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'assignedToUserID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who it was given to is detached, so it is unassigned'],
             ['table' => 'tblPathwayEnrolments',       'userCol' => 'enrolledByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s enrolment stays; who enrolled them is detached'],
@@ -1554,6 +1567,42 @@ class GdprEraser
      *
      * @var string[]
      */
+    /**
+     * 🎁 Every organisation holding a giving record of this person's: a gift,
+     *    a tax declaration, a giving statement, or a counted envelope (the
+     *    gift made from it when the count is closed may be one that keeps the
+     *    donor's name). FIXED TEXT, four `?`, each the person's account
+     *    number, in that order.
+     *
+     * THE ONE LIST (#970 item 2), read by the keep step (keepGivingRecords())
+     * and by givingOutlook(), which used to hold its own copy without the
+     * giving statements.
+     */
+    private const GIVING_SITES_SQL = 'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+        . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
+        . 'UNION SELECT siteID FROM tblGivingStatementLog WHERE donorID = ? '
+        . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+        . 'WHERE ce.giverID = ?';
+
+    /**
+     * 🗣️ What each "acted on it" column means, in the words a member reads
+     *    (#1018). Used only by the instructions fromPersonalDataCatalogue()
+     *    makes for a second or later actor column, whose reason used to print
+     *    the column's name in backticks. A column not listed here reads "the
+     *    person who dealt with it", which is true of every actor column; a
+     *    listed one says more. Never put a column name in the words.
+     *
+     * @var array<string, string> Column => "the person who ..." ending.
+     */
+    private const ACTOR_COLUMN_WORDS = [
+        'createdByID'    => 'made it',
+        'updatedByID'    => 'last changed it',
+        'revokedByID'    => 'withdrew it',
+        'grantedByID'    => 'gave it',
+        'offboardedByID' => 'recorded somebody leaving',
+        'rehiredByID'    => 'recorded somebody coming back',
+    ];
+
     public const ACTOR_COLUMNS = [
         // Being GIVEN a record to work on, or being the person a request is
         // aimed at, is not the record being about you. These two were classed
@@ -1847,8 +1896,15 @@ class GdprEraser
                         'userCol'  => $other,
                         'action'   => 'anonymise',
                         'nullCols' => [],
-                        'reason'   => 'somebody else\'s record of this kind is kept as it is; only who handled it (`'
-                            . $other . '`) is detached',
+                        // 🗣️ #1018: a member reads this reason on Request
+                        //    erasure and My data. It used to name the column
+                        //    in backticks ("only who handled it
+                        //    (`grantedByID`) is detached"), which means
+                        //    nothing to them. The column is `$other`, named
+                        //    here and in the audit trail (processEntry()
+                        //    writes userCol), never in the words.
+                        'reason'   => 'somebody else\'s record of this kind is kept as it is; only the link to you, as the '
+                            . 'person who ' . (self::ACTOR_COLUMN_WORDS[$other] ?? 'dealt with it') . ', is removed',
                     ];
                 }
             }
@@ -4352,10 +4408,20 @@ class GdprEraser
                 if ($table === 'tblDbsChecks' && $col === 'userID' && $via === null) {
                     $count = count(self::dbsChecksAboutYou($userId));
                 } else {
+                    // #970 item 1: an instruction may name a column whose rows
+                    // are the person's OWN and are counted elsewhere; those
+                    // are left out of this count (see the tblGivingEntry
+                    // `recordedByID` instruction). The column name is fixed
+                    // text from catalogue(), checked to be a plain name.
+                    $leaveOut = (string) ($entry['countLeavesOutWhere'] ?? '');
+                    if ($leaveOut !== '' && preg_match('/\A[A-Za-z0-9_]+\z/', $leaveOut) === 1) {
+                        $where = '(' . $where . ') AND (`' . $leaveOut . '` IS NULL OR `' . $leaveOut . '` <> ?)';
+                    }
                     $stmt = $db->prepare('SELECT COUNT(*) FROM `' . $table . '` WHERE ' . $where);
                 }
                 if ($stmt !== false) {
-                    $stmt->bind_param('i', $userId);
+                    $marks = substr_count($where, '?');
+                    $stmt->bind_param(str_repeat('i', $marks), ...array_fill(0, $marks, $userId));
                     $stmt->execute();
                     $stmt->bind_result($count);
                     $stmt->fetch();
@@ -6118,14 +6184,9 @@ class GdprEraser
             $doing = 'finding which organisations hold giving records for this person';
             $sites = [];
             $stmt  = $db->prepare(
-                'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
-                . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
-                . 'UNION SELECT siteID FROM tblGivingStatementLog WHERE donorID = ? '
-                // An organisation where the person is named only on a counted
-                // envelope: the gift made from it when the count is closed
-                // may be one that keeps the donor's name.
-                . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
-                . 'WHERE ce.giverID = ? ORDER BY siteID'
+                // #970 item 2: the ONE list of organisations, which
+                // givingOutlook() reads too (see GIVING_SITES_SQL).
+                self::GIVING_SITES_SQL . ' ORDER BY siteID'
             );
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
@@ -6499,16 +6560,20 @@ class GdprEraser
         // whichever organisation the person is looking from.
         $sites = [];
         $stmt  = $db->prepare(
+            // #970 item 2: the keep step's own list (GIVING_SITES_SQL), so an
+            // organisation where the person has only a giving statement is
+            // looked at here too. It changes no count today - the outlook
+            // counts gifts, envelopes and declarations, and such an
+            // organisation has none - but two lists of "where this person
+            // has giving records" were one edit from disagreeing.
             'SELECT x.siteID, COALESCE(s.siteName, \'\') AS siteName FROM ('
-            . 'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
-            . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
-            . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID WHERE ce.giverID = ?'
+            . self::GIVING_SITES_SQL
             . ') x LEFT JOIN tblSites s ON s.siteID = x.siteID ORDER BY siteName, x.siteID'
         );
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
         }
-        $stmt->bind_param('iii', $userId, $userId, $userId);
+        $stmt->bind_param('iiii', $userId, $userId, $userId, $userId);
         $stmt->execute();
         $result = $stmt->get_result();
         while ($row = $result->fetch_row()) {
@@ -6856,9 +6921,22 @@ class GdprEraser
         //         erasure deletes, so none is expected - read, not measured -
         //         but a completed request must not depend on that.)
         //
-        //     NOT CHANGED: the declarations and statement records beside a
-        //     cleared row in case (b). Their personal details were emptied by
-        //     the same clearing, and `donorID` cannot be emptied on them.
+        //     A TAX DECLARATION recorded against the emptied account since is
+        //     the same case (#970, item 3): the clearing emptied the address,
+        //     postcode, network address, signature and notes on every
+        //     declaration there at that moment, and one written since kept
+        //     them, with nothing keeping it. Its personal details are emptied
+        //     here exactly as clearKeptGivingIdentity() empties them (the same
+        //     five columns); `donorID` stays, because the database does not
+        //     allow it to be empty there. A declaration already emptied is
+        //     matched too and changes nothing. Read, not measured, that the
+        //     portal can produce such a declaration (its form matches a donor
+        //     by an active membership too): this keeps a completed request
+        //     from depending on that.
+        //
+        //     NOT CHANGED: the statement records beside a cleared row in case
+        //     (b). Their mailed-to address and file were emptied by the same
+        //     clearing, and `donorID` cannot be emptied on them.
         $reopenKeptDonorId = null;
         if ($existing !== null && $existing['clearedAt'] !== null) {
             if ($emptiedAlready === true) {
@@ -6871,22 +6949,43 @@ class GdprEraser
                 $stmt->execute();
                 $strays = (int) $stmt->affected_rows;
                 $stmt->close();
+                // #970 item 3: a declaration written since keeps its address
+                // otherwise. Only rows still holding something are changed,
+                // so the count is the declarations that really lost details.
+                $stmt = $db->prepare(
+                    'UPDATE `tblGiftAidDeclaration` SET `address` = NULL, `postcode` = NULL, `acceptedIP` = NULL, `signaturePath` = NULL, `notes` = NULL '
+                    . 'WHERE `siteID` = ? AND `donorID` = ? AND (`address` IS NOT NULL OR `postcode` IS NOT NULL OR `acceptedIP` IS NOT NULL '
+                    . 'OR `signaturePath` IS NOT NULL OR `notes` IS NOT NULL)'
+                );
+                if ($stmt === false) {
+                    throw new \RuntimeException((string) $db->error);
+                }
+                $stmt->bind_param('ii', $siteId, $userId);
+                $stmt->execute();
+                $strayDeclarations = (int) $stmt->affected_rows;
+                $stmt->close();
+                $changedHere = $strays > 0 || $strayDeclarations > 0;
                 self::logAudit(
                     $db,
                     $requestId,
-                    $strays > 0 ? 'anonymise' : 'retain',
+                    $changedHere === true ? 'anonymise' : 'retain',
                     'GivingRecords',
                     $where,
                     'Giving records at ' . $where . ' were already dealt with by an earlier run, and the name and address '
                     . 'kept then have since been cleared. '
-                    . ($strays === 0
+                    . ($changedHere === false
                         ? 'Nothing was changed.'
-                        : $plural($strays, 'gift', 'gifts') . ' recorded against the emptied account since then '
+                        : ($strays === 0 ? '' : $plural($strays, 'gift', 'gifts') . ' recorded against the emptied account since then '
                             . ($strays === 1 ? 'keeps' : 'keep') . ' the amount, date and method and no longer '
-                            . ($strays === 1 ? 'names' : 'name') . ' the donor: nothing there keeps the donor\'s name any more.')
+                            . ($strays === 1 ? 'names' : 'name') . ' the donor. ')
+                        . ($strayDeclarations === 0 ? '' : $plural($strayDeclarations, 'tax declaration', 'tax declarations')
+                            . ' recorded against it since then ' . ($strayDeclarations === 1 ? 'has' : 'have') . ' had the home address, '
+                            . 'network address, signature and notes emptied; ' . ($strayDeclarations === 1 ? 'it keeps' : 'they keep')
+                            . ' the account number, which the database does not allow to be empty there. ')
+                        . 'Nothing there keeps the donor\'s name any more.')
                 );
 
-                return ['changed' => $strays > 0, 'due' => null];
+                return ['changed' => $changedHere, 'due' => null];
             }
             // (a): a first run, except that the row is re-used.
             $reopenKeptDonorId = (int) $existing['keptDonorID'];

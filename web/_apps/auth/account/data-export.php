@@ -62,6 +62,15 @@
  *                          your address: the subject, when, and what became
  *                          of it — #592)
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
+ *   tblUserTranslationPref (your choice to have content translated — #813)
+ *   tblUserSmsPreference  (your text-message settings, without the one-time
+ *                          verification code — #813)
+ *   tblNewsletterSubscription (whether you receive each organisation's
+ *                          newsletter, without the unsubscribe code — #813)
+ *   tblZoomAccount        (a Zoom account you connected, without its sign-in
+ *                          keys — #813)
+ *   tblAssetKioskPins     (whether you have an equipment kiosk PIN, never the
+ *                          PIN — #813)
  *   tblCareVisit, tblCareCase, tblDbsChecks, tblKidCheckins (only a LIST of
  *                          the records that carry your name as the worker who
  *                          made them: kind, day and organisation, never the
@@ -229,6 +238,44 @@ $payload = [
         //    with the GdprEraser instruction added alongside it.
         'outsideServiceChoices' => $fetchUserRows(
             'SELECT `serviceKey`, `choice`, `updatedAt` FROM `tblUserOutsideServicePref` WHERE `userID` = ?'
+        ),
+        // 🌐 #813 — your own choice to have the organisation's words
+        //    translated for you (D-049, #485). It is a choice about you, kept
+        //    until you are erased, and was missing from this copy. The next
+        //    four are the same kind of record - one row per member (and per
+        //    organisation), holding that member's own setting - found missing
+        //    by the check #813 asked for (section 23 of
+        //    tools/gdpr-coverage-selftest.php), which finds such tables from
+        //    the install script's own keys rather than from a list typed here.
+        'translationChoice' => $fetchUserRows(
+            'SELECT `autoTranslate`, `updatedAt` FROM `tblUserTranslationPref` WHERE `userID` = ?'
+        ),
+        // 📱 Your text-message settings. The verification code and when it
+        //    runs out are left out: they are a one-time secret, not a fact
+        //    about you, and handing one over would let anybody holding this
+        //    file finish a verification in your name.
+        'textMessageSettings' => $fetchUserRows(
+            'SELECT `siteID`, `phoneNumber`, `isVerified`, `categories`, `updatedAt` FROM `tblUserSmsPreference` WHERE `userID` = ?'
+        ),
+        // 📰 Whether you receive each organisation's newsletter. The
+        //    unsubscribe code is left out: it is a key that works without
+        //    signing in.
+        'newsletterChoices' => $fetchUserRows(
+            'SELECT `siteID`, `optedIn`, `updatedAt` FROM `tblNewsletterSubscription` WHERE `userID` = ?'
+        ),
+        // 🎥 A Zoom account you connected. The two sign-in keys Zoom gave the
+        //    portal are left out (they are encrypted secrets, and a working
+        //    key in a downloaded file is a key anybody holding it can use);
+        //    what is handed over is which Zoom account it is and what it was
+        //    allowed to do.
+        'zoomAccounts' => $fetchUserRows(
+            'SELECT `siteID`, `zoomUserId`, `zoomAccountEmail`, `scopes`, `createdAt`, `updatedAt` FROM `tblZoomAccount` WHERE `userID` = ?'
+        ),
+        // 🔢 Whether you have a PIN for the equipment kiosk, and when it was
+        //    last used. The PIN itself is stored only scrambled and is never
+        //    handed over.
+        'equipmentKioskPins' => $fetchUserRows(
+            'SELECT `siteID`, `isActive`, `createdAt`, `lastUsedAt` FROM `tblAssetKioskPins` WHERE `userID` = ?'
         ),
         // 🏷️ Roles (#516) — export↔erasure parity with the GdprEraser
         // catalogue entries added alongside this block. `grantedByID` is

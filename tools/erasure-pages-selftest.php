@@ -233,7 +233,8 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 247; // MERGED (p982-land): both sides grew from 223,
+const EXPECTED_CHECKS = 248; // #1018 added B4c: 247 + 1.
+                             // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
                             // #982 round 12 added M13q (the Offboard page's
@@ -649,6 +650,7 @@ function removeWorld(): void
     q('DELETE FROM tblRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE a FROM tblErasureAudit a JOIN tblErasureRequest r ON r.requestID = a.requestID WHERE r.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblErasureRequest WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblInvitation WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]); // #1018
     q('DELETE FROM tblVisitorContact WHERE contactID = ?', 'i', [NOTE]);
     q('DELETE FROM tblVisitor WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblCareAccessLog WHERE caseID = ?', 'i', [CASE_ID]);
@@ -1146,6 +1148,10 @@ q("INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, cl
 q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments) VALUES (?, ?, 'Approved', 'Receipts all present.')", 'ii', [CLAIM, MEL]);
 q("INSERT INTO tblResource (resourceID, siteID, name, category, isActive) VALUES (?, ?, 'Selftest erasure hall', 'room', 1)", 'ii', [ROOM, ORG_A]);
 q("INSERT INTO tblResourceBooking (bookingID, resourceID, bookedByID, startAt, endAt, purpose, status) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 3 DAY), DATE_ADD(NOW(), INTERVAL 75 HOUR), 'Welcome team supper', 'pending')", 'iii', [BOOKING, ROOM, MEL]);
+// #1018: an invitation Mel sent, so her Request erasure page carries a row
+// whose reason used to print a column's name ("only who handled it
+// (`createdByID`) is detached").
+q("INSERT INTO tblInvitation (siteID, email, tokenHash, expiresAt, createdByID) VALUES (?, 'invitee.erasure@selftest.invalid', ?, DATE_ADD(NOW(), INTERVAL 7 DAY), ?)", 'isi', [ORG_A, str_repeat('e', 64), MEL]);
 // Requests that are already in some state when the run begins.
 $seed = static function (int $id, int $site, int $user, string $status, ?int $minutesAgo): void {
     q(
@@ -1458,6 +1464,45 @@ ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking ro
     $askBookingPinned === true && str_contains($askBookingRow, 'the booking is kept so the room') === true
     && str_contains($askBookingRow, 'Any notes typed on the booking are kept unless the person handling your request decides they should be removed') === true && $developerSeen === [],
     mb_substr($askBookingRow, 0, 500) . ' | seen: ' . json_encode($developerSeen));
+
+// 🧑 #1018: the REASON beside each row is read by the member, and several
+//    printed a database column's name - "only who handled it (`createdByID`)
+//    is detached", "userID nulled". Mel sent an invitation, so her Request
+//    erasure page has such a row: it is found exactly once and pinned AS
+//    RENDERED, and it must say in words what happens. Then every reason on
+//    Mel's and Cal's Request erasure and My data pages is read, and none may
+//    hold a word in backticks, a table name or a camel-case column name. The
+//    rows are counted, so a page that drew none cannot pass.
+$askInvitationRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblInvitation') {
+            $rows[] = $li;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$askInvitationPinned = renderedPin('request erasure tblInvitation', $askInvitationRow);
+$reasonsRead   = 0;
+$reasonColumns = [];
+$calAskHtml    = (string) req($jar['cal'], 'GET', '/account/erasure-request')['body'];
+foreach (['Mel, Request erasure' => [$melAskHtml, 'li > span.text-muted'], 'Cal, Request erasure' => [$calAskHtml, 'li > span.text-muted'],
+    'Mel, My data' => [$melDataHtml, '.portal-data-list > .row > .col-md-5'], 'Cal, My data' => [$calDataHtml, '.portal-data-list > .row > .col-md-5']] as $pageName => [$html, $selector]) {
+    $doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    foreach ($doc->querySelectorAll($selector) as $reasonNode) {
+        $reasonsRead++;
+        if (preg_match('/`|\btbl[A-Z]|\b[a-z]+[A-Z][A-Za-z0-9]*\b/', (string) $reasonNode->textContent, $hit) === 1) {
+            $reasonColumns[] = $pageName . ': "' . $hit[0] . '"';
+        }
+    }
+}
+ok('B4c NO REASON A MEMBER READS NAMES A DATABASE COLUMN: Mel\'s invitation row is found exactly once and as pinned, and says in words that only the link to her is removed; and of every reason on Mel\'s and Cal\'s Request erasure and My data pages (at least ten read) none holds a word in backticks, a table name or a column name (#1018)',
+    $askInvitationPinned === true
+    && str_contains($askInvitationRow, 'only the link to you, as the person who made it, is removed') === true
+    && $reasonsRead >= 10 && $reasonColumns === [],
+    'read ' . $reasonsRead . '; columns: ' . json_encode($reasonColumns) . ' | ' . mb_substr($askInvitationRow, 0, 400));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
 //    erasure's words bare, so a record still held read "deleted" and an

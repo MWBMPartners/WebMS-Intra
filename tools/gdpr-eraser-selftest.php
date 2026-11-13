@@ -226,7 +226,8 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 311; // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
+const EXPECTED_CHECKS = 312; // #970 added one to section 23: 311 + 1.
+                             // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
                              // that answered "check round N-1" (the independent check of the
                              // round before). Counts, newest first:
                              //   311 since round 5 (answering check round 4), which added one
@@ -405,6 +406,7 @@ const SG_HALL  = 960602;    // section 22: a group whose usual place is marked "
 // earlier section left at another organisation can answer for these.
 const P_CL     = 920701; // section 23: her runs stop twice, the second clears her kept row, she gives again
 const P_CE     = 920702; // section 23: an emptied account beside a cleared row, with a gift still carrying the number
+const P_SELF   = 920705; // section 23: records a gift for herself and one for somebody else (#970 item 1)
 const REQ_CL   = 940701;
 const REQ_CE   = 940702;
 const REQ_CL2  = 940703; // section 23: her SECOND request, filed after the first was cancelled
@@ -6987,19 +6989,58 @@ ge_q("UPDATE `tblUsers` SET `fullName` = '[Deleted User]', `emailAddress` = ?, `
 ge_q('INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `erasureRequestID`, `fullName`, `address`, `postcode`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`, `clearedAt`) '
     . "VALUES (?, ?, NULL, NULL, NULL, NULL, 'receipted', ?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())", 'iis', [SITE_C1, P_CE, $ago(4000)]);
 $ce = ge_gift(SITE_C1, P_CE, $ago(20), 700, $catC1);
+// #970 item 3: a tax declaration recorded against the emptied account since,
+// still holding a home address - the keep step used to take the donor off the
+// gift beside it and leave this address in place.
+ge_q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `address`, `postcode`, `notes`, `validFrom`) VALUES (?, ?, '9 Since Road', 'ZZ9 7ZZ', 'written since', ?)", 'iis',
+    [SITE_C1, P_CE, $ago(20)]);
+$ceDeclaration = (int) $mysqli->insert_id;
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
 ge_request(REQ_CE, P_CE, str_replace('{rid}', (string) REQ_CE, GdprEraser::TOMBSTONE_EMAIL), '[Deleted User]', 'processing');
 $runCe  = ge_execute(REQ_CE, P_CE);
 $keptCe = $keptCl(SITE_C1, P_CE);
 $lineCe = ge_one("SELECT `action`, `details` FROM `tblErasureAudit` WHERE `requestID` = ? AND `tableName` = 'GivingRecords' AND `recordKey` = ?", 'is',
     [REQ_CE, 'organisation #' . SITE_C1]);
-ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name written, a gift still carrying the number loses it, the line says so, and the request completes',
+$ceDeclarationNow = ge_one('SELECT `donorID`, `address`, `postcode`, `notes` FROM `tblGiftAidDeclaration` WHERE `declarationID` = ?', 'i', [$ceDeclaration]);
+ge_ok('BESIDE AN EMPTIED ACCOUNT the cleared row STAYS cleared with no name written, a gift still carrying the number loses it, a tax declaration written since loses its address and notes but keeps the account number (#970), the line says so, and the request completes',
     is_array($runCe) === true && (int) $runCe['failed'] === 0 && $statusCl(REQ_CE) === 'completed'
     && $keptCe !== null && $keptCe['clearedAt'] !== null && $keptCe['fullName'] === null && $keptCe['address'] === null
     && $donorCl($ce) === null && $lineCe !== null && $lineCe['action'] === 'anonymise'
-    && str_contains((string) $lineCe['details'], 'recorded against the emptied account since then'),
+    && str_contains((string) $lineCe['details'], 'recorded against the emptied account since then')
+    && $ceDeclarationNow !== null && (int) $ceDeclarationNow['donorID'] === P_CE && $ceDeclarationNow['address'] === null
+    && $ceDeclarationNow['postcode'] === null && $ceDeclarationNow['notes'] === null
+    && str_contains((string) $lineCe['details'], '1 tax declaration recorded against it since then has had the home address'),
     json_encode(['run' => is_array($runCe) === true ? ['failed' => $runCe['failed']] : (string) $runCe, 'status' => $statusCl(REQ_CE),
-        'row' => $keptCe, 'gift' => $donorCl($ce), 'line' => $lineCe]));
+        'row' => $keptCe, 'gift' => $donorCl($ce), 'declaration' => $ceDeclarationNow, 'line' => $lineCe]));
+
+// ---- #970 item 1: a gift the person recorded for THEMSELVES ----
+// Its `recordedByID` and its `donorID` are both theirs, so it matched the
+// "somebody else's gift ... who entered it is detached" instruction too and was
+// counted there - reading as losing their number, while the gift row beside it
+// may keep it for tax. That count now leaves out their own gifts, which are
+// counted (and worded) on their own gift rows. One gift for herself, one for
+// somebody else: the "somebody else's gift" row must count exactly ONE, and her
+// own gift rows exactly one between them.
+ge_user(P_SELF, 'Selma Self', 'selma.self@selftest.invalid');
+$giftFields = ['siteID' => SITE_C1, 'donatedAt' => $ago(30), 'amountPence' => 500, 'categoryID' => $catC1, 'method' => 'bank-transfer',
+    'donorName' => null, 'pledgeID' => null, 'campaignID' => null, 'currency' => 'GBP'];
+ge_insert('tblGivingEntry', ['donorID' => P_SELF, 'recordedByID' => P_SELF], $giftFields);
+ge_insert('tblGivingEntry', ['donorID' => ADMIN, 'recordedByID' => P_SELF], $giftFields);
+$selfRecorded = 0;
+$selfOwn      = 0;
+foreach (GdprEraser::inventory(P_SELF) as $held) {
+    if ($held['table'] !== 'tblGivingEntry') {
+        continue;
+    }
+    if (str_starts_with((string) $held['reason'], 'somebody else\'s gift') === true) {
+        $selfRecorded += (int) $held['rows'];
+    } else {
+        $selfOwn += (int) $held['rows'];
+    }
+}
+ge_ok('A GIFT SHE RECORDED FOR HERSELF is counted once, on her own gift rows, and NOT under "somebody else\'s gift ... who entered it is detached"; the gift she recorded for somebody else is the one counted there (#970)',
+    $selfRecorded === 1 && $selfOwn === 1,
+    json_encode(['somebodyElse' => $selfRecorded, 'own' => $selfOwn]));
 
 // ---- What the line says when NO home address is kept (#941 check round 2) ----
 // The kept-record line used to say where the address CAME FROM, and was wrong
