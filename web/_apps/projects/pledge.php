@@ -27,7 +27,7 @@ $siteId = Site::id();
 $slug   = (string) ($_POST['slug'] ?? '');
 
 $project = null;
-$stmt = $db->prepare('SELECT projectID, status FROM tblProject WHERE siteID = ? AND slug = ? AND isPublic = 1 LIMIT 1');
+$stmt = $db->prepare('SELECT projectID, status, `currency` FROM tblProject WHERE siteID = ? AND slug = ? AND isPublic = 1 LIMIT 1');
 if ($stmt !== false) {
     $stmt->bind_param('is', $siteId, $slug);
     $stmt->execute();
@@ -51,9 +51,18 @@ if ($donorId === null && Captcha::verify($_POST, 'pledge') === false) {
     exit();
 }
 
-$amountRaw  = (string) ($_POST['amount'] ?? '');
-$clean      = preg_replace('/[^0-9.]/', '', $amountRaw) ?? '';
-$amountPence = (int) round(((float) $clean) * 100);
+// 💷 Read by the ONE converter, Currency::parseAmount() (#1004), in the
+//    PROJECT's currency, which the pledge is stored in (D-139). It used to
+//    strip everything but figures and points and go through a float, so
+//    "1e5" was pledged as 15.00, "-5" as 5.00, and an absurd figure wrapped.
+$amountRaw   = $_POST['amount'] ?? '';
+$amountPence = \Portal\Core\Currency::parseAmount(is_string($amountRaw) === true ? $amountRaw : '', (string) ($project['currency'] ?? ''));
+if (is_string($amountPence) === true) {
+    $_SESSION['flash_msg']  = $amountPence . ' Nothing was pledged.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('projects/view') . '?slug=' . urlencode($slug));
+    exit();
+}
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum pledge is 1.00.';
     $_SESSION['flash_type'] = 'danger';

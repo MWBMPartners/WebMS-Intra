@@ -23796,8 +23796,9 @@ still read under the lock, and only an administrator with the form token can sen
   `gdpr-coverage-selftest.php` fails both ways.
 - Filing takes a required note (D-148), kept in the sealed audit trail; a filing that loses a deadlock (1213) is tried
   once more (untested, #1010).
-- Known limit: a queued approval e-mail later sent by the scheduled job through Microsoft 365 or Google is logged under
-  whichever organisation the job was working in (#1006), so such a send-log row is not reached.
+- Former limit, fixed by #1006: a queued approval e-mail later sent by the scheduled job through Microsoft 365 or Google
+  was logged under whichever organisation the job was working in, so such a send-log row was not reached. Rows written
+  before #1006 still may be.
 - Test: section N of `tools/erasure-pages-selftest.php` (it loads the real form, N3a), section 24 of
   `tools/gdpr-coverage-selftest.php`.
 
@@ -23947,3 +23948,282 @@ methods on 12 November 2026 — count them from the test, not from here).
 - The PHP built-in server writes its error-log lines as a request ENDS, which can be after
   the answer reaches the test; read at once, "nothing in the error log" can pass on broken
   code. E2 waits half a second.
+
+## A record that names nobody, on purpose (#988)
+
+- `Logger::activity($type, $words, null)` does NOT mean "nobody": null means
+  "I did not say", and #626 then fills `userID` from the session. The explicit
+  path is `Logger::activityNamingNobody()`.
+- Leaving out the account alone would not anonymise the record: the session
+  FINGERPRINT is the same as on the member's own sign-in record, so the two
+  join; the session facts hold the account number; the address and browser
+  match every other record of that visit. All six are left out.
+- It is for pages that PROMISE anonymity only. `check_activity_naming_nobody.py`
+  names every caller (two files, five calls) and fails both ways; it also pins
+  the method's statement writing literal NULLs.
+- `PrayerChain::maybeAutoAssign()` gained `$sentAnonymously`: its record runs
+  inside the sender's request, so it would otherwise name them.
+- Not reached (#1017): a REFUSED reCAPTCHA v3 check writes its own
+  `CaptchaRejected` record through `Logger::activity()`, naming a signed-in
+  member. Nothing is saved in that case.
+- `check_activity_descriptions_personal.py`'s probe now reads
+  `activityNamingNobody(` calls by the same rules (plant added to its self-test).
+- The visitor step's columns are `GdprEraser::VISITOR_PRAYER_NULL_COLS`, held
+  equal to the catalogue's member instruction by `gdpr-coverage-selftest.php`.
+- Migration 286's column comment (and `full_schema.sql`'s) widened in place to
+  name prayer requests: no installation exists (D-135). The e2e harness passed
+  all phases with it.
+
+- A member's OWN erasure never reaches a request they sent through the
+  anonymous form: it finds prayer requests by `submitterID`, which
+  `anonymous-save.php` never writes. Only a visitor-address request does. Every
+  member-facing sentence about prayer requests and erasure now says so, and
+  each is pinned as rendered in section N of `tools/erasure-pages-selftest.php`.
+- Not in scope, raised by the coordinator: a keeping period for
+  `tblPrayerRequests.submitterIP`.
+
+- A record must not assert a fact the code never checks. The filed line said
+  the address "has no account" while `fileVisitorAddressRequest()` never looks
+  in `tblUsers`; it became false the moment the page told administrators to use
+  this request for members too. Nothing deletes a prayer request (no DELETE of
+  `tblPrayerRequests` under `web/`), so a network address on one with no e-mail
+  address is kept with no end date until #1019 (D-178).
+
+## A partial update reads the fields it was not sent under the lock (#1001)
+
+`AssetRegister::updateAsset()` has two callers with different contracts: the
+edit page posts every field (a full write), the API posts some (a partial
+write). The API used to make its partial write LOOK full by filling the
+missing fields from a read made before the lock — so its write was "last
+writer wins" over fields it never mentioned. The fourth argument
+`$onlyFields` names what was sent; everything else is taken from the row
+re-read `FOR UPDATE` inside the same transaction. Two things worth keeping:
+(1) the old audit record could not show the fault — its "before" was the same
+stale read, so the revert diffed as "no change" (plant B: R6 green while R3-R5
+red); the "before" is now the locked row. (2) Dropping `FOR UPDATE` from that
+re-read is invisible over HTTP: a plain read there is correct today only
+because it happens to be the transaction's first plain read. Section S of the
+test reaches the other case without changing `Currency::withParentLocked()`:
+a separate process loads the portal's start-up and swaps in a connection
+whose `begin_transaction()` asks for a consistent snapshot, so the snapshot
+predates the other writer's commit; only `FOR UPDATE` then gets the right
+row. (3) Round 1's race changed three columns, and a rule exempting two others
+passed it. A race test for "the rest of the row survives" must change the
+WHOLE row and compare it whole, with the list of columns it leaves alone
+checked against the schema — otherwise it tests the columns its author
+thought of.
+
+## Five small fixes (#918, #987, #945, #1014, #960)
+
+- **A coordinate is a number or nothing (#945).** `GeoLocation::coordinateNumber()`
+  decides what a coordinate box holds; never `(float)` a posted coordinate —
+  `(float) 'north'` is 0, and 0, 0 is a real place. Making the shared function
+  strict was not enough on the organisation page: a null there meant "clear
+  the stored position", so the page now leaves the stored position as it was, saves the rest
+  of the form and says why (measured: with only the function fixed, a typo cleared both stored values).
+- **createFromFormat()'s space matches "zero or more" spaces, tabs and no-break
+  spaces (#960).** So `2027-03-0110:00` and a U+00A0 separator parse cleanly in
+  PHP and are misread by the databases. ReportBuilder refuses non-ASCII text and
+  requires a space or tab. A five-digit year is already refused by
+  createFromFormat() on PHP 8.4.27, 8.5.12 and 8.6.0RC4 (measured), so it has no
+  rule of its own.
+- **A test of "today" must put the organisation in a zone whose date differs
+  from the server's NOW (#987).** rota-swaps section Y picks UTC+14 or UTC-11,
+  whichever differs, and asserts both "today listed" and "yesterday not", so one
+  half fails on the old code at any hour. Both halves were driven by moving the
+  test server's `time_zone`.
+
+## Events and outside calendars (#885, #853, #854, #855, #811)
+
+- "Ordering by real moment is one helper" — `Events::soonestByRealStart()` is the ONE place; a caller keeps its
+  statement in a `$read(?string $upTo, ?int $max)` closure; it cannot page with OFFSET (the calendar list view still
+  orders by reading — see Found).
+- `Events::whyCategoryOrTypeRefused()` is the ONE place a category/type number is judged; round 2 of its check found
+  it pinned one way only (four writers could refuse the organisation's OWN numbers with every check green) — every
+  writer now has a "still accepts its own" case, with an own type whose number is not a category number; round 3
+  added another organisation's TYPE for every writer (it had been pinned on the update API only).
+- "A decision is made as it stands now (D-180, #855)": `decide()` resolves BEFORE and AFTER the decisions in one
+  lock. The count is the rows claimed directly. A named date whose claim failed is "changed"; whether it is worded
+  "now follows your decision" or "please review it again" depends only on whether the second resolve REPORTS writing
+  a follower row for that date following a row this call claimed (`resolveFeed()`'s `followers`). Lessons: a
+  condition that can never fail is not a guard; a count that includes "changed" dates contradicts the decision; and
+  a text test on a column a person can also type into is not a structural fact (round 3's `decisionNote` test).
+
+## Mail, event suggestions and the newsletter choice (#971, #972, #875, #1020)
+
+- `Mailer::looksLikeHtml()` is the ONE place the "is this HTML" guess is made; `send()` and
+  `renderBase()` both ask it (there were three copies of the pattern). It needs a real element name
+  (`Mailer::HTML_ELEMENTS`) or a doctype, followed by a space, `/` or `>`.
+- A body that looks like HTML is sent exactly as written, with NO branded layout and so no footer.
+  A name that happens to be an element (`St <Mark> & Co`) still trips it, so a caller whose body is
+  plain text passes `bodyIsText` (#859): the e-mail page's test (both branches; `testSmtp()` passes
+  `true` to `renderBase()`), `cron/backup-check`, `auth/account/add-password-save` and the event
+  broadcast.
+- **Test the CALLER with a name the guess treats as HTML.** Round 1 drove the callers with
+  `St <x> & "Co"`, which the new guess already treats as text, so taking the option out of any caller
+  left every check green (round 2 of the check). P15 now drives each caller with `St <Mark> & Co`.
+- Test trap: `tools/mail-pages-selftest.php` ran PHP's built-in server WITH opcache (it is
+  `opcache.enable`, not `enable_cli`, that governs the `cli-server` SAPI), so a planted line could go
+  unseen by the page. It now starts the server with `opcache.enable=0`.
+- The non-SMTP "Send test" cannot reach Microsoft from a test: P15 fills the route with made-up values
+  and leaves the hourly limit no room, so the message is KEPT in the queue, built exactly as it would
+  be sent, and the stored HTML is decrypted and read back.
+
+- `EventSuggestions::oneLine()` is the ONE rule; `calendar/submit-save.php` applies it to `eventName`
+  and `submitterName` before storing, and `approvalMessage()` applies it again to the row. Three
+  steps: `mb_scrub()` (substitute set to "?" in the method and the server's setting put back - E31
+  sets it to "*" first; plants P141 and P142 go red); remove U+202A–U+202E and U+2066–U+2069;
+  every run of `\p{Cc}` and `\p{Z}` to one space, then trim. It does NOT remove all of `\p{Cf}`
+  (joiners and marks stay). E29's fixtures hold EVERY removed character and EVERY kept one, because a
+  fixture with one example of each kind let a wrong range pass (round 3); plants P137, P138 and P140
+  pin both directions.
+
+- `Newsletter::choiceShownMarker($siteId, $drawnTicked)` is drawn beside the tick box; its value is
+  "<organisation>:<1 or 0>". `Newsletter::choiceShownHere()` says whether the posted form showed the
+  choice for THIS organisation (used for the "not changed" sentence), and
+  `Newsletter::choiceFromPost()` answers what to WRITE: null unless shown here AND the member moved
+  the box away from how it was drawn. When it answers, the choice is saved whether or not the
+  newsletter is switched on at that moment. A box left as drawn writes nothing, so an old page
+  cannot resubscribe somebody who left by a newsletter's own unsubscribe link. #677's rule (ask whether
+  a field ARRIVED) and #667's marker shape, for the one choice not stored in `tblUsers.notifyPrefs`.
+
+## Address look-ups: real positions, a cache per country (#1034, #1035)
+
+- `(float)` on a third party's coordinate turns garbage into 0,0, which is a real place: ask
+  `is_numeric()` first. `GeoLocation::validateCoords()` casts before it checks, so it is right for a
+  form and wrong for a provider.
+- A cache key must hold every input that changes the answer. Build it as a JSON list rather than
+  joining with a separator, which can be read two ways.
+- The geocoder test points a COPY of the class at a stand-in rather than giving the portal a setting
+  to redirect look-ups, which would be a way to send members' addresses to somebody else's server.
+
+## Queued mail logged under its own organisation; anonymous bot-check refusals (#1006, #1017)
+
+**A queued message's send-log line takes the ROW's organisation, whichever route writes it (#1006).**
+`Mailer::queueRowSite()` is the one place; Microsoft 365 and Google write their own line and are
+now handed it (`sendViaGraph()`/`MailerGoogle::send()`'s last argument, default `false` = this
+request's). The fallback from Microsoft to Google passes it on.
+**A bot-check refusal on a form that promises anonymity names nobody (#1017).**
+`Captcha::PROMISES_ANONYMITY` is the one list, `Captcha::recordV3Refusal()` the one writer;
+`check_activity_naming_nobody.py` pins the list whole.
+**Testing outside HTTPS services: `tools/https-standin.php`.** A proxy that answers for named hosts
+itself (its own authority), refuses all others, never forwards. Give the portal's server BOTH
+`openssl.cafile` and `curl.cainfo` — PHP's curl reads the first and ignores the second when it is
+set (measured, PHP 8.5.12) — and `https_proxy`; `tools/https-standin-client.php` does all three.
+
+## One converter for typed money (#1004)
+
+- Never `(int) round((float) $x * 100)`: on PHP 8.5 an absurd figure wraps (measured: 4096, -8446744073709551616,
+  8809040871136690176). Call `Currency::parseAmount($text, $currency, $max, $allowNegative, $fromFile)` with `$max` the most
+  the place the value finally LANDS can hold (`INT_COLUMN_MAX`, `DECIMAL_10_2_MAX`), never lower than a limit a later check
+  states. It answers an int (hundredths) or the refusal sentence.
+- `fromFile` is for the bank and asset imports only. It reads commas between groups of three, the organisation's code
+  (followed by an amount or a sign), and the symbol signs in `Currency::SIGNS_OF` (ICU 79.1's English data) for the
+  organisation's currency; letters-only signs never. A file refusal names a reason only where it is certain; otherwise
+  "That amount could not be read." plus `fileAdvice()`. A cell with more than one marker gets ONE fixed sentence
+  (`manyMarkersWords()`); one starting with a sign or code not ours, `otherCurrencyWords()` — both name no other
+  currency. The wrapper then adds, to every file refusal, "Amounts here cannot be negative." (no negatives) or
+  `FILE_ADVICE_PAID_OUT` (negatives), with no detector of "looks negative": rounds 16-19 each found a spelling one missed.
+- A figures-only box must be PREFILLED with figures only (`number_format($x, 2, '.', '')` or `hundredthsToDecimal()`), or a
+  plain Save is refused over a figure nobody typed. Stored DECIMAL text goes through `storedDecimalToHundredths()`; an API's
+  `…Pence` field through `parseHundredths()`.
+- Lesson from 21 rounds: every sentence built from what a cell looked like was found untrue for some cell. Prefer a fixed
+  sentence that is true of every cell it can be given to, and test the cells that must NOT get it.
+- Guard: `tools/audit-checks/check_no_float_money.py` (PHP's tokeniser; reports a `* 100` statement that also casts to a
+  float or reads a request array; `ALLOWED` empty, fails both ways; its header lists its blind spots). Test:
+  `tools/money-amount-selftest.php` (section A needs no database: `MONEY_SELFTEST_UNIT_ONLY=1`).
+
+## Sending media in pieces (#880)
+
+`Portal\Core\ByteRange` is the ONE place a `Range:` request is answered; never parse
+`HTTP_RANGE` in a page. Call `ByteRange::send($path)` AFTER every access check and after
+setting your own `Content-Type`/caching headers; do NOT set `Content-Length` yourself (for a
+piece it is the piece's). It answers false having sent nothing when the file cannot be
+opened, so a 404 is still possible. Ignored (whole 200): another unit, malformed, last<first,
+several pieces, any `If-Range`. 416 carries `no-store`. Tests: section R/N/S of
+`tools/uploads-and-media-selftest.php`, C14b–C14f and P23b of `tools/public-door-selftest.php`.
+
+## A deprecated function, not a deprecated name (#1003)
+
+`check_no_curl_close.py` guarded one NAME; the same deprecation came back as
+`finfo_close()` in eight handlers. `check_no_deprecated_php_functions.py` asks PHP which
+functions are deprecated (the measured 8.5.12 list, joined with the running PHP's answer).
+It cannot see a deprecated ARGUMENT — `fgetcsv()` without `escape` is #1038 — nor the four
+shapes `check_no_curl_close.py` lists. `php -l` exits 0 on a deprecation, so the proof
+that a handler is clean is to RUN it: `tools/uploads-and-media-selftest.php` section U,
+believed only because section P puts the call back and sees it caught.
+
+## Settings row rules and deleted assets (#1021, #1031)
+
+**The general settings editor's ROW rules are one class (#1021).** Two kinds of rule decide what
+`/settings` lets an administrator change: SETTING rules (each family's
+`…lockedInGeneralEditor()`) and ROW rules (portal-wide row, "public" name, unsafe stored name —
+refused for anybody but a global administrator). #845 made the page ask the setting rules; the
+row rules stayed inline in `save.php`, copied in the delete branch, with the SQL typed in both
+files, and the page asked none of them — 584 rows on a fresh install were offered Edit and
+refused. `SettingsRowRule::whyNotChangeable()` is now asked by the drawing, the save and the
+delete; `nameRuleSql()` is the one SQL text. Do not name a method in that class
+`…lockedInGeneralEditor`: the settings-locks test treats every such method as a SETTING lock.
+Section R of `tools/settings-locks-selftest.php` presses Save on every row the page draws and
+fails where drawing and save disagree; its "accepted" side reads back what the page SAYS,
+because the UPDATE carries the rules too and a silently thrown-away save is not a refusal.
+
+**A deleted asset is refused under the lock (#1031).** `AssetRegister::updateAsset()` re-reads
+the row `FOR UPDATE` with `isDeleted = 0`. The UPDATE's own `isDeleted = 0` is only a data
+backstop: alone it writes nothing but still lets the method report success (measured: API 200
+plus an "update" audit record). Sections D and E of `tools/assets-api-update-selftest.php`
+delete the asset while the API request and the edit page's Save wait on the lock.
+
+## The discipleship sweep and the offline page (#824, #865)
+
+**The discipleship sweep asks who still belongs (#824).** `Discipleship::autoSweep()`
+first builds `peopleWhoStillBelong()` — an active enrolment, an account switched
+on, and with several organisations `Site::isOwnOrganisation()` — and every rule is
+limited to that list through ONE clause in `runSweepRule()` (`AND e.userID IN
+(…)`, 500 at a time). Do not join `tblUserSites` in the sweep's statements: that is
+a second membership rule, wrong on a one-organisation installation (nobody need
+have a row) and for a global administrator. A question that cannot be answered
+leaves that person out for the run. Tests: X18m–X18q of
+`tools/time-zones-selftest.php`.
+
+**The offline page retries by itself (#865).** It reloads its own address once a
+minute (the worker shows it AS the answer to the failed page, so the address is
+that page's) and on `online`. A probe request cannot help: the worker answers a
+failed page fetch with this page and a 200. **Changing `offline/index.php` alone
+reaches no installed worker** — the copy is stored at install, and a worker
+re-installs only when `sw.js` changes; change both. `tools/offline-page-selftest.mjs`
+drives the real `sw.js` and the PHP-rendered offline page in a real browser
+(Chromium family, plus `php` on the PATH; it refuses without either). Two traps
+it found: count page LOADS in the tab, not requests at the server (Chromium
+retries a reset connection by itself, so one navigation counted three); and the
+old `<head>` theme script threw because `<body>` did not exist yet.
+
+
+## Ordering events across clocks in SQL (#1024, #1025, #1028)
+
+`Events::startAsUtcMoment()` is the ONE place a statement that pages or limits events across clocks gets its
+order: a per-zone `CASE` of reading stretches, each with the offset `I18n::wallClockInstant()` gives, bound by PHP
+(no `CONVERT_TZ()`). Order by it, then `startDateTime`, then `eventID` (the `sortByRealStart()` tie rule).
+Use `soonestByRealStart()` for a "next N" list that does not page; use this where OFFSET or COUNT must stay exact.
+Measured against `wallClockInstant()` for every half hour of two years in twelve zones, and every minute around
+spring 2026: no disagreement. A cron that runs over every organisation must read each one's clock inside its loop
+(`Site::timezone($siteId)`, `RotaSwaps::today($siteId)`): PHP's default zone is the request's organisation and
+`Site::forceContext()` does not change it (#1028).
+
+The window is `Events::momentWindow()` (inside 1900-2200, narrowed round now while the zones in use change clock more than `MOMENT_CHANGE_BUDGET` times); `zonesInUse()` binds at most `ZONE_TEXT_LIMIT` texts, live ones first, and a text left out reaches the statement's ELSE. `soonestByRealStart()`'s two-day widening at the cap is tested by nothing: it changes an answer only with over five hundred live zones.
+
+## One send-log line per attempt (#1043, #1040)
+
+**One send-log line per attempt, whichever road ends it (#1043).** The mail queue's
+`Mailer::deliverQueued()` marks the Microsoft 365 and Google routes' answer `ownLog`, and
+`logQueueAttempt()` then writes nothing, so the rule for those two routes is: every `return false`
+writes its own line, and every throw writes none (the queue's catch turns `ownLog` off and the
+queue writes it). `MailerGoogle::send()` broke the first half on its two network roads. Measured
+with the fix taken back out (`git show HEAD:web/_core/MailerGoogle.php`): a message dropped three
+times was given up on with ZERO lines, and its row read "Its own line in the send log says why".
+With the queue's early return switched off instead (the "two lines" direction), the same checks
+and the Microsoft one went red too, so they fail both ways. The stand-in (`tools/https-standin.php`)
+gained a `"drop": true` answer: it reads the request and hangs up, which libcurl reports as
+"Empty reply from server" — the one road no status code reaches. **Microsoft falling back to Google
+writes one line per route tried** when Google's half fails on the network (Microsoft's failure, then Google's).
+NOT when Google's SIGN-IN fails inside the fallback: that still writes only Microsoft's line (#1051).

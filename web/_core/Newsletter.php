@@ -40,6 +40,104 @@ use mysqli;
 class Newsletter
 {
     /**
+     * 📰 The hidden field a form draws beside the newsletter choice (#875).
+     * Its value is "<organisation number>:<1 or 0>": the organisation the box
+     * was about, and whether the box was drawn TICKED.
+     */
+    public const CHOICE_SHOWN_FIELD = 'newsletterShown';
+
+    /** The newsletter choice's own tick box. Its value, when ticked, is exactly '1'. */
+    public const CHOICE_FIELD = 'newsletterOptedIn';
+
+    /**
+     * 📰 The hidden "this form drew the newsletter choice" marker (#875).
+     * Printed beside the tick box and ONLY there, the way
+     * NotifyPrefs::shownMarker() is printed beside each notification switch
+     * (#667). It carries the number of the organisation whose newsletter the
+     * box was about, because a subscription belongs to one organisation and
+     * the tick box says nothing about which; and whether the box was drawn
+     * ticked, so the save can tell what the member CHANGED (see
+     * choiceFromPost()).
+     *
+     * @param int  $siteId      The organisation the box is about.
+     * @param bool $drawnTicked Whether the box is drawn ticked (subscribed).
+     */
+    public static function choiceShownMarker(int $siteId, bool $drawnTicked): string
+    {
+        return '<input type="hidden" name="' . self::CHOICE_SHOWN_FIELD . '" value="' . $siteId . ':' . ($drawnTicked === true ? '1' : '0') . '">';
+    }
+
+    /**
+     * 📰 Did the posted form show the newsletter choice for organisation
+     * `$siteId`? True only when the marker arrived naming THAT organisation
+     * (#875). The save uses this to say, truthfully, when the choice was left
+     * alone because the page never showed it.
+     *
+     * WHY THE ORGANISATION (round 2 of #875's check). The save writes the
+     * subscription of the organisation the request is in when it is POSTED,
+     * which need not be the one the page was drawn for: with the organisation
+     * chosen per session, a member can switch organisation in another tab. A
+     * box drawn for one organisation must never set another's choice. Through
+     * the real switch page the open form's token is also spent by the switch,
+     * so that post is refused before it gets here (measured, section D of
+     * tools/notify-prefs-selftest.php); this is the second line, and it does
+     * not depend on how the form token is handled.
+     *
+     * @param array<string,mixed> $post Normally `$_POST`.
+     */
+    public static function choiceShownHere(array $post, int $siteId): bool
+    {
+        return in_array($post[self::CHOICE_SHOWN_FIELD] ?? null, [$siteId . ':0', $siteId . ':1'], true);
+    }
+
+    /**
+     * 📰 What a posted form asks to WRITE for the member's newsletter choice
+     * in organisation `$siteId` (#875): true (subscribe), false (unsubscribe),
+     * or NULL - write nothing.
+     *
+     * NULL when the form did not show the choice for this organisation
+     * (choiceShownHere()), AND when the member left the box as it was drawn.
+     *
+     * WHY THE MARKER AND NOT THE TICK BOX. An unticked box is not sent at
+     * all, so "the box did not arrive" is the same post as "the box was never
+     * drawn". The preferences page draws it only while the newsletter is
+     * switched on, so a page opened while it was OFF and saved after it was
+     * switched ON wrote "opted out" for a member who was never shown a
+     * choice. Ask whether the field ARRIVED, never what it contains (#677).
+     *
+     * WHY ONLY A CHANGE (round 4 of the check). The page can be stale. A
+     * member opens it while subscribed (the box drawn ticked), then leaves by
+     * the link at the bottom of a newsletter, which works signed out and
+     * stores "opted out"; then presses Save on the old tab. Writing what the
+     * old page posted put them back on the list they had just left - while
+     * the newsletter was on (a window older than #875) and, since round 3
+     * saved a shown choice whatever the switch said, while it was off too. So
+     * a choice is written only where the member moved the box away from what
+     * the page drew: an untick of a ticked box is always written, and so is a
+     * tick of an unticked one, and a box left as drawn writes nothing. What
+     * is lost is only the case where nothing was asked: a page left as drawn
+     * does not re-assert the old value over a newer one.
+     *
+     * EXACTLY '1' is a tick, nothing looser, as NotifyPrefs::changesFromPost()
+     * decided for the switches.
+     *
+     * @param array<string,mixed> $post   Normally `$_POST`.
+     * @param int                 $siteId The organisation the save would write for.
+     */
+    public static function choiceFromPost(array $post, int $siteId): ?bool
+    {
+        if (self::choiceShownHere($post, $siteId) === false) {
+            return null;
+        }
+        // The organisation was settled by choiceShownHere() just above, which is
+        // the ONE place it is judged; this reads only the "drawn ticked" half.
+        $drawnTicked = str_ends_with((string) $post[self::CHOICE_SHOWN_FIELD], ':1');
+        $postedTick  = ($post[self::CHOICE_FIELD] ?? null) === '1';
+
+        return $postedTick === $drawnTicked ? null : $postedTick;
+    }
+
+    /**
      * Render an HTML body from a newsletter's block list. Pulls dynamic
      * content (announcements / events / prayers / sermon) at render time
      * so previews stay accurate up until send.
@@ -811,26 +909,41 @@ class Newsletter
                 //    inside SQL, so `LIMIT 20` is filled from the right rows;
                 //    the expression appears twice, so its values are bound twice.
                 $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
-                $stmt = $db->prepare(
-                    'SELECT e.eventName, e.startDateTime FROM tblEvents e '
-                    . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
-                    . 'AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL ? DAY) '
-                    . 'AND e.status = "published"'
-                    . $visibility['sql'] . ' '
-                    . 'ORDER BY e.startDateTime LIMIT 20'
-                );
-                if ($stmt !== false) {
+                // ⏱️ SOONEST BY THE REAL MOMENT (#811). `ORDER BY startDateTime`
+                //    compared readings from different clocks, so an Auckland
+                //    20:00 was listed after a New York 10:00 on the same date
+                //    although it happens first — and with `LIMIT 20` the sooner
+                //    one could be the one left out of an e-mail that cannot be
+                //    corrected once sent. `Events::soonestByRealStart()` is the
+                //    ONE place that orders a "next N" list; the statement stays
+                //    here, with an optional upper bound and limit.
+                $read = static function (?string $upTo, ?int $max) use ($db, $siteId, $nowOnClock, $days, $visibility): array {
+                    // The rule from EventVisibility::where() above (bulk-members
+                    // mode) is appended to this statement as `$visibility['sql']`.
+                    $stmt = $db->prepare(
+                        'SELECT e.eventID, e.eventName, e.startDateTime, e.timezone FROM tblEvents e '
+                        . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
+                        . 'AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL ? DAY) '
+                        . ($upTo === null ? '' : 'AND `e`.`startDateTime` <= CAST(? AS DATETIME) ')
+                        . 'AND e.status = "published"'
+                        . $visibility['sql'] . ' '
+                        . 'ORDER BY e.startDateTime, e.eventID' . ($max === null ? '' : ' LIMIT ?')
+                    );
+                    if ($stmt === false) {
+                        return [];
+                    }
                     $stmt->bind_param(
-                        'i' . $nowOnClock['types'] . $nowOnClock['types'] . 'i' . $visibility['types'],
-                        ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], [$days], $visibility['params'])
+                        'i' . $nowOnClock['types'] . $nowOnClock['types'] . 'i' . ($upTo === null ? '' : 's') . $visibility['types'] . ($max === null ? '' : 'i'),
+                        ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], [$days], $upTo === null ? [] : [$upTo],
+                            $visibility['params'], $max === null ? [] : [$max])
                     );
                     $stmt->execute();
-                    $rs = $stmt->get_result();
-                    while ($r = $rs->fetch_assoc()) {
-                        $items[] = $r;
-                    }
+                    $got = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
                     $stmt->close();
-                }
+
+                    return $got;
+                };
+                $items = Events::soonestByRealStart($db, $siteId, 20, $read);
                 if ($items === []) {
                     return '';
                 }

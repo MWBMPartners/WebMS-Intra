@@ -102,8 +102,9 @@ $endDateTime   = trim($_POST['endDateTime'] ?? '');
 // "Europe/London", typed in here.)
 $timezone      = trim((string) ($_POST['timezone'] ?? ''));
 $isAllDay      = isset($_POST['isAllDay']) === true ? 1 : 0;
-$categoryID    = ((int) ($_POST['categoryID'] ?? 0)) ?: null;
-$typeID        = ((int) ($_POST['typeID'] ?? 0)) ?: null;
+// 🏷️ Read strictly and judged below, before anything is stored (#885).
+$categoryID    = \Portal\Core\Events::postedIdOrNone($_POST['categoryID'] ?? null);
+$typeID        = \Portal\Core\Events::postedIdOrNone($_POST['typeID'] ?? null);
 $seriesID      = ((int) ($_POST['seriesID'] ?? 0)) ?: null;
 $status        = (string) ($_POST['status'] ?? 'draft');
 // ⚠️ This went in UNCHECKED until #676: whatever was posted was bound straight
@@ -138,6 +139,23 @@ if ($cancelReasonRefusal !== null) {
     exit();
 }
 $cancelReason = $cancelReasonArrived === true ? EventCancelReason::normalise((string) $_POST['cancelReason']) : null;
+
+// 🏷️ THE CATEGORY AND THE TYPE MUST BE THIS ORGANISATION'S (#885). The form
+//    offers only its own, but a `<select>` is a courtesy, not a boundary: a
+//    posted number nobody has made the database refuse the save (the reason
+//    went to the error log and the person read "not saved"), and another
+//    organisation's number was STORED. `Events::whyCategoryOrTypeRefused()` is
+//    the ONE place that decides, with the same words for both. Refused here,
+//    before any upload is stored, like the reason above.
+$taxonomyRefusal = ($categoryID === false || $typeID === false)
+    ? 'The category or type sent is not a number the calendar knows.'
+    : \Portal\Core\Events::whyCategoryOrTypeRefused($mysqli, Site::id(), $categoryID, $typeID);
+if ($taxonomyRefusal !== null) {
+    $_SESSION['flash_msg']  = $taxonomyRefusal . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
 // A reason typed (or left in the box) while choosing a status that carries
 // none is not stored — and the message says so, because quietly dropping
 // words somebody typed is how they come to believe members can read them.

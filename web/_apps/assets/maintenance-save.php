@@ -98,15 +98,24 @@ $action = (string) ($_POST['action'] ?? 'add');
 // 💷 Pounds → pence — the house minor-units convention (#266). The
 // add/edit forms collect pounds (human-friendly); AssetRegister persists
 // pence only, matching tblAssetMaintenance.costPence and every other
-// money column in this app. is_numeric() guards against a non-numeric
-// submission ever reaching (float) below; a blank/invalid input is simply
-// treated as "no cost recorded" (null) rather than rejecting the whole
-// entry over an optional field.
+// money column in this app. A BLANK box is "no cost recorded" (null). Any
+// other text is read by the ONE converter, Currency::parseAmount() (#1004),
+// never a float: `(int) round((float) $v * 100)` wrapped an absurd figure into
+// a small or negative one, and text that was not a figure used to become "no
+// cost" without a word. A refused figure goes back with the reason, and
+// nothing is saved. Figures only (D-152); no currency is passed.
 // -----------------------------------------------------------------------
-$costPoundsRaw = trim((string) ($_POST['costPounds'] ?? ''));
+$costPosted    = $_POST['costPounds'] ?? '';
+$costPoundsRaw = is_string($costPosted) === true ? trim($costPosted) : '';
 $costPence = null;
-if ($costPoundsRaw !== '' && is_numeric($costPoundsRaw) === true) {
-    $costPence = (int) round(((float) $costPoundsRaw) * 100);
+if ($costPoundsRaw !== '') {
+    $costPence = \Portal\Core\Currency::parseAmount($costPoundsRaw, '');
+    if (is_string($costPence) === true) {
+        $_SESSION['flash_msg']  = 'Cost: ' . $costPence . ' Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $redirect);
+        exit();
+    }
 }
 
 // 📋 Shared $data shape for both add/update — AssetRegister::

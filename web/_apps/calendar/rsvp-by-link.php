@@ -6,8 +6,16 @@
  * -----------------------------------------------------------------------------
  * Public, no-login endpoint. ?t=<token> → fetch the invite, show event
  * details + 3 buttons (Going / Maybe / Declined). POST records the
- * response on the invite row AND inserts an anonymous tblEventRSVPs row
- * so downstream tooling (broadcast, headcount) sees the attendee.
+ * response on the invite row (tblEventRSVPInvites) and nowhere else.
+ * It writes NO tblEventRSVPs row: that table needs a portal account
+ * (userID NOT NULL), so the invite row is the record, and anything that
+ * counts a guest's answer reads tblEventRSVPInvites. (This header used to
+ * say an anonymous tblEventRSVPs row was inserted too. The first version,
+ * 37b1b07a, tried to, and the insert was taken out in 83b0ae72 because it
+ * could never succeed -- `git log --oneline -S"INSERT INTO tblEventRSVPs"
+ * 83b0ae72 -- <this file>` names exactly those two (the end commit keeps
+ * later edits of this very comment, which quote the text, out of the
+ * answer) -- see the note at the POST handler. Corrected under #824.)
  *
  * Single-file landing + POST handler.
  *

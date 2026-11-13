@@ -1672,6 +1672,15 @@ jobs:
         if: always()
         run: node tools/brand-colour-selftest.mjs
 
+      # 📵 #865: the offline page tries again by itself, and sw.js never keeps a
+      #    copy of anything marked "private" -- both in a real browser. Needs a
+      #    browser and PHP (the runner image has both); it REFUSES rather than
+      #    skipping without them.
+      - name: 'Offline page retries, and sw.js refuses private copies, in a real browser (#865)'
+        id: offline_page_browser
+        if: always()
+        run: node tools/offline-page-selftest.mjs
+
       # 🌍 #942, D-133: the installer's country suggestion promises to send
       #    nothing anywhere. Every installer answer carries a strict Content
       #    Security Policy (web/_install/csp.php). It refuses scripts without the
@@ -2039,6 +2048,21 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_currency_writes.py
 
+      # 💷 #1004: money is never turned into hundredths through a float. Its
+      #    own --self-test is found and run by the audit self-tests step (#919).
+      - name: 'Money is never multiplied as a float (hard gate)'
+        id: no_float_money
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_float_money.py
+
+      # 🧹 #1003: no call to a function PHP deprecates (asks PHP for the list;
+      #    php -l exits 0 on a deprecation). Its own --self-test is found and
+      #    run by the audit self-tests step (#919).
+      - name: 'No deprecated PHP function called (hard gate, #1003)'
+        id: no_deprecated_php_functions
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_deprecated_php_functions.py
+
       # 🗂️ A worker's data download lists every record that keeps their name
       #    as the worker (#929, D-142): each `retain` instruction on a worker
       #    column in GdprEraser::catalogue() must be in
@@ -2050,6 +2074,15 @@ jobs:
         id: worker_records_listed
         if: always()
         run: python3 -I tools/audit-checks/check_worker_records_listed.py
+
+      # 🙈 #988: a record that names nobody is written only where a page
+      #    promises anonymity. Logger::activityNamingNobody() leaves out the
+      #    account, session fingerprint and facts, address, browser and headers;
+      #    this names every file allowed to call it, failing both ways.
+      - name: 'Records that name nobody are only where anonymity is promised (hard gate, #988)'
+        id: activity_naming_nobody
+        if: always()
+        run: python3 -I tools/audit-checks/check_activity_naming_nobody.py
 
       # 🧪 EVERY AUDIT CHECK'S OWN SELF-TEST, FOUND RATHER THAN LISTED (#919).
       #

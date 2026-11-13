@@ -129,11 +129,13 @@ and that runs **only** from the scheduled job `cron/retention-sweep` or when a
 global administrator presses Run Sweep Now on Admin → Maintenance → Retention.
 Where neither happens, they stay.
 
-What it **cannot** reach today, said plainly: an approval e-mail that waited in
-the queue and was later sent by the scheduled job through Microsoft 365 or
-Google is recorded in the send log under whichever organisation the job was
-working in, not the message's (#1006). If that is another organisation, this
-request does not find the row and the address stays in it. The address is
+What it **cannot** reach, said plainly: a send-log row recorded under another
+organisation. Since #1006 (12 November 2026) an approval e-mail that waited in
+the queue and was later sent by the scheduled job is recorded under the
+message's own organisation whatever the route; before that, one sent through
+Microsoft 365 or Google was recorded under whichever organisation the job was
+working in. A row written by an earlier version can therefore still sit under
+another organisation, and this request does not find it. The address is
 matched exactly apart from capitals and the spaces round it: the database's own
 comparison would also treat an accented address as the same, so it only finds
 candidates.

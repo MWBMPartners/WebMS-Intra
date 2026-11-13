@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Newsletter;
 use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 
@@ -145,13 +146,36 @@ if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabb
 //    row keeps the token it already has, so unsubscribe links already sent out
 //    in earlier newsletters keep working.
 //
-//    Only touched when the Newsletter app is switched on for this site — the
-//    checkbox is not shown otherwise, and an absent checkbox must not be read
-//    as "unsubscribe me".
-$newsletterOn = (string) (App::settings()['newsletter']['enabled'] ?? '0');
-if ($newsletterOn === '1' || $newsletterOn === 'true') {
-    $siteId       = Site::id();
-    $optedIn      = isset($_POST['newsletterOptedIn']) === true ? 1 : 0;
+//    Written ONLY when the form that was posted DREW the choice, for THIS
+//    organisation, and the member MOVED the box away from how it was drawn
+//    (#875). The page draws Newsletter::choiceShownMarker() beside the box,
+//    carrying the organisation and whether the box was ticked, and
+//    Newsletter::choiceFromPost() answers null - write nothing - otherwise.
+//    - Asking whether the newsletter is on NOW decided the wrong thing both
+//      ways. A page opened while it was off has no tick box, and saved after
+//      it was switched on that read as "unticked", so a member was
+//      unsubscribed from a list they were never shown a choice about.
+//    - And the other way round (round 3 of the check): a member who saw the
+//      box, unticked it and saved after the newsletter had been switched off
+//      was told "Preferences saved." while nothing was written, so when the
+//      newsletter came back on they were still subscribed after asking to
+//      leave. So a change the member made is saved whether or not the
+//      newsletter is on at that moment.
+//    - But only a CHANGE (round 4 of the check). Saving whatever an old page
+//      posted resubscribed a member who had left by a newsletter's own
+//      unsubscribe link after opening the page: the box was drawn ticked, the
+//      link stored "opted out", and the unchanged tick wrote "opted in" over
+//      it. A box left as drawn now writes nothing.
+//    - The marker also names the organisation the box was drawn for, and a
+//      marker for any other organisation changes nothing (round 2 of #875's
+//      check): this request writes the subscription of the organisation it
+//      is in NOW, which a switch in another tab can have changed.
+$newsletterOn     = (string) (App::settings()['newsletter']['enabled'] ?? '0');
+$siteId           = Site::id();
+$newsletterShown  = Newsletter::choiceShownHere($_POST, $siteId);
+$newsletterChoice = Newsletter::choiceFromPost($_POST, $siteId);
+if ($newsletterChoice !== null) {
+    $optedIn      = $newsletterChoice === true ? 1 : 0;
     $freshToken   = bin2hex(random_bytes(20));
     $nlStmt = $mysqli->prepare(
         'INSERT INTO tblNewsletterSubscription (siteID, userID, optedIn, unsubToken) '
@@ -170,7 +194,15 @@ if ($newsletterOn === '1' || $newsletterOn === 'true') {
 }
 
 Logger::activity('NotificationPrefsUpdated', 'User updated notification preferences');
-$_SESSION['notifications_flash']      = 'Preferences saved.';
+// 📰 "Preferences saved." must not read as covering the newsletter when the
+//    newsletter choice was left alone (#875): it is on, so the page this
+//    answer returns to shows the choice, but the form that was posted did not
+//    show it for this organisation. One plain line says so. While the
+//    newsletter is off there is no choice on the page to speak of, and none
+//    is added.
+$_SESSION['notifications_flash']      = (($newsletterOn === '1' || $newsletterOn === 'true') && $newsletterShown === false)
+    ? 'Preferences saved. Your newsletter choice was not changed, because the page you saved did not show it for this organisation. You can change it below.'
+    : 'Preferences saved.';
 $_SESSION['notifications_flash_type'] = 'success';
 header('Location: ' . Site::url('account/notifications'), true, 302);
 exit();

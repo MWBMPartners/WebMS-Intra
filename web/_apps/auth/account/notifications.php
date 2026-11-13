@@ -55,6 +55,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\MailQueue;
+use Portal\Core\Newsletter;
 use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
@@ -345,6 +346,11 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-header"><h2 class="h6 mb-0">Newsletter</h2></div>
         <div class="card-body">
             <div class="form-check form-switch py-2">
+                <?php /* #875: "this form drew the newsletter choice, for this
+                         organisation, ticked or not". Without it, for another
+                         organisation, or with the box left as drawn, the
+                         handler leaves the member's choice as stored. */
+                      echo Newsletter::choiceShownMarker($siteId, $newsletterOptedIn); ?>
                 <input class="form-check-input" type="checkbox" role="switch"
                        name="newsletterOptedIn" value="1" id="np-newsletterOptedIn"
                        <?php echo $newsletterOptedIn === true ? 'checked' : ''; ?>>

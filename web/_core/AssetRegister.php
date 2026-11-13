@@ -2713,8 +2713,15 @@ class AssetRegister
      * @param list<string>|null    $onlyFields Field names the caller was
      *        actually SENT (partial write), or null for a full write.
      *
+     * 🗑️ A DELETED asset is never written (#1031), including one soft-deleted
+     * by somebody else while this call waited for the asset's lock: the row is
+     * read again under the lock with `isDeleted` = 0, and the answer is false.
+     * A caller that wants to say WHY asks self::get() afterwards — null means
+     * the asset is gone (there is no un-delete), so the API answers 404.
+     *
      * @return bool True on success, false if the asset doesn't exist (or
-     *              isn't on this site) or the update failed
+     *              isn't on this site, or has been deleted — even while this
+     *              call waited for its lock) or the update failed
      */
     public static function updateAsset(int $assetId, array $data, int $actorUserId, ?array $onlyFields = null): bool
     {
@@ -2803,17 +2810,31 @@ class AssetRegister
                     //    tools/assets-api-update-selftest.php begins the
                     //    transaction WITH a consistent snapshot, and goes red
                     //    when FOR UPDATE is removed.)
-                    $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? FOR UPDATE');
+                    //
+                    //    🗑️ `isDeleted` = 0 IS PART OF THE QUESTION (#1031). The
+                    //    caller's own check (self::get(), above, and the API's
+                    //    existence check) ran BEFORE this lock. An asset
+                    //    soft-deleted by somebody else while this request
+                    //    waited for the lock used to be written anyway — and
+                    //    the API answered 200 — because nothing after the wait
+                    //    asked again. A deleted asset is now "not there" here,
+                    //    exactly as self::get() says it is anywhere else, and
+                    //    nothing is written. The callers then find it gone:
+                    //    the API answers 404 with the words it gives any
+                    //    missing asset, and the edit page sends the person to the
+                    //    asset list saying it could not be found and nothing was
+                    //    changed. There is no un-delete, so the after-the-fact
+                    //    look the callers make cannot mislead the other way.
+                    $lockedStmt = $db->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? AND `isDeleted` = 0 FOR UPDATE');
                     $lockedStmt->bind_param('ii', $assetId, $siteId);
                     $lockedStmt->execute();
                     $lockedRow = $lockedStmt->get_result()->fetch_assoc();
                     $lockedStmt->close();
                     if (is_array($lockedRow) === false) {
-                        // Cannot happen once $lockedCurrency was read from this
-                        // same row under this same lock; refused rather than
-                        // writing from nothing. (A row soft-deleted while the
-                        // request waited is still updated, as it always was;
-                        // changing that is outside #1001.)
+                        // Deleted while this request waited (#1031) — or, in
+                        // principle, gone from this organisation, though
+                        // $lockedCurrency was read from this same row under
+                        // this same lock. Either way: refused, nothing written.
                         return false;
                     }
                     $old = $lockedRow;
@@ -2845,7 +2866,14 @@ class AssetRegister
                     $types    .= 'ii';
                     $params[]  = $assetId;
                     $params[]  = $siteId;
-                    $stmt = $db->prepare('UPDATE tblAssets SET ' . $setClause . ' WHERE assetID = ? AND siteID = ?');
+                    // `isDeleted` = 0 here as well (#1031): under the lock the
+                    // read above has already settled it, so this changes
+                    // nothing today. It is a backstop for the DATA only: with
+                    // the read above's `isDeleted` test removed, this alone
+                    // writes nothing yet still lets the method report success
+                    // (measured: the API answered 200 and an audit record of
+                    // an "update" was written). The read is the guard.
+                    $stmt = $db->prepare('UPDATE `tblAssets` SET ' . $setClause . ' WHERE `assetID` = ? AND `siteID` = ? AND `isDeleted` = 0');
                     $stmt->bind_param($types, ...$params);
                     $done = $stmt->execute();
                     $stmt->close();

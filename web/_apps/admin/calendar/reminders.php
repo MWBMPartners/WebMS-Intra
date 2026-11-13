@@ -48,27 +48,38 @@ while ($r = $result->fetch_assoc()) { $recent[] = $r; }
 //    zone was far from the database host's. Exact inside SQL, so `LIMIT 20` is
 //    filled from the right rows. This list is not scoped to one organisation
 //    (see above), so every organisation's zones are read (siteId null).
-$upcoming   = [];
 $nowOnClock = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', null);
-$stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.startDateTime, '
-    . '  (SELECT COUNT(*) FROM tblEventReminderLog WHERE eventID = e.eventID) AS sentCount '
-    . 'FROM tblEvents e '
-    . 'WHERE e.isDeleted = 0 AND e.status = "published" AND e.externalFeedID IS NULL '
-    . '  AND `e`.`startDateTime` >= ? '
-    . '  AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL 48 HOUR) '
-    . 'ORDER BY e.startDateTime ASC LIMIT 20'
-);
-if ($stmt !== false) {
+// ⏱️ SOONEST BY THE REAL MOMENT (#811): ordered by
+//    `Events::soonestByRealStart()`, not by readings from different clocks
+//    (an Auckland 20:00 happens before a New York 10:00 on the same date).
+//    The statement is unchanged apart from the optional upper bound and limit
+//    that helper asks for.
+$readUpcoming = static function (?string $upTo, ?int $max) use ($mysqli, $nowOnClock): array {
+    $stmt = $mysqli->prepare(
+        'SELECT e.eventID, e.eventName, e.startDateTime, e.timezone, '
+        . '  (SELECT COUNT(*) FROM tblEventReminderLog WHERE eventID = e.eventID) AS sentCount '
+        . 'FROM tblEvents e '
+        . 'WHERE e.isDeleted = 0 AND e.status = "published" AND e.externalFeedID IS NULL '
+        . '  AND `e`.`startDateTime` >= ? '
+        . '  AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL 48 HOUR) '
+        . ($upTo === null ? '' : '  AND `e`.`startDateTime` <= CAST(? AS DATETIME) ')
+        . 'ORDER BY e.startDateTime ASC, e.eventID ASC' . ($max === null ? '' : ' LIMIT ?')
+    );
+    if ($stmt === false) {
+        return [];
+    }
     $stmt->bind_param(
-        's' . $nowOnClock['types'] . $nowOnClock['types'],
-        ...array_merge([\Portal\Core\Events::looseUtcBound('-1 day')], $nowOnClock['params'], $nowOnClock['params'])
+        's' . $nowOnClock['types'] . $nowOnClock['types'] . ($upTo === null ? '' : 's') . ($max === null ? '' : 'i'),
+        ...array_merge([\Portal\Core\Events::looseUtcBound('-1 day')], $nowOnClock['params'], $nowOnClock['params'],
+            $upTo === null ? [] : [$upTo], $max === null ? [] : [$max])
     );
     $stmt->execute();
-    $result = $stmt->get_result();
-    while ($r = $result->fetch_assoc()) { $upcoming[] = $r; }
+    $got = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
-}
+
+    return $got;
+};
+$upcoming = \Portal\Core\Events::soonestByRealStart($mysqli, null, 20, $readUpcoming);
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');

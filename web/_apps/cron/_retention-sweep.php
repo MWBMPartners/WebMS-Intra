@@ -409,9 +409,11 @@ function log_sweep(string $which, bool $reallyDelete): int
  *     kept for ten years puts every event of the organisation on a ten-year
  *     window.
  *   - A row whose zone was written in the instant between the method's two
- *     statements (so it is not in the list) reads `Etc/GMT+12`, the clock
- *     that reads earliest anywhere on Earth, so it waits until the period is
- *     up on every clock there is.
+ *     statements, or whose zone text `Events::zonesInUse()` left out because
+ *     more than `Events::ZONE_TEXT_LIMIT` distinct texts exist (so either
+ *     way it is not in the list), reads `Etc/GMT+12`, the clock that reads
+ *     earliest anywhere on Earth, so it waits until the period is up on
+ *     every clock there is: late, never early.
  *   - "Now" is worked out in PHP a moment BEFORE the statement runs, so by
  *     the time the statement runs it is a little behind, never ahead.
  * A FAILED READ IS NOT A CASE HERE. `bootstrap.php` sets

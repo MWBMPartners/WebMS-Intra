@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 381; // #882 (D-129) and #898 add N01-N21, H06, PN1-PN18 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 387; // #880 adds C14b-C14f and P23b to the 381 below; #882 (D-129) and #898 add N01-N21, H06, PN1-PN18 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -488,6 +488,10 @@ $http = static function (string $method, string $path, array $opt = []) use ($po
     }
     if (($opt['direct'] ?? false) === true) {
         $headers[] = 'X-Selftest-Direct: 1';
+    }
+    // #880: a byte-range request, as a browser playing a poster video sends.
+    if (isset($opt['range']) === true) {
+        $headers[] = 'Range: ' . $opt['range'];
     }
     $curl = [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
@@ -1986,6 +1990,36 @@ check('C13 nothing in the posters answer names a database number or the poster\'
 $md = $feedA('media/' . $upA);
 check('C14 the door serves a ticked poster\'s upload: the file\'s own bytes, as image/png',
     [$md['status'], $md['body'] === $png, $md['headers']['content-type'] ?? ''], [200, true, 'image/png']);
+// #880: the door's media answers a byte-range request, which Safari needs
+// before it will play a poster VIDEO. The bytes come from
+// `Portal\Core\ByteRange`, the one place every media route asks; the full
+// matrix (chunk boundaries, If-Range, several pieces) is in
+// tools/uploads-and-media-selftest.php. Here: that the DOOR uses it, and that
+// every question the door asks still comes first.
+$pngLen = strlen($png);
+$piece  = static fn (array $r): array => [$r['status'], $r['headers']['accept-ranges'] ?? '', $r['headers']['content-range'] ?? '',
+    $r['headers']['content-length'] ?? '', $r['body']];
+check('C14b a whole answer says Accept-Ranges: bytes, so a browser knows it may ask for pieces',
+    $md['headers']['accept-ranges'] ?? '', 'bytes');
+check('C14c bytes=0-1 (Safari\'s first question), an open-ended piece and the last ten bytes: 206, Content-Range, and exactly those bytes',
+    [$piece($feedA('media/' . $upA, ['range' => 'bytes=0-1'])), $piece($feedA('media/' . $upA, ['range' => 'bytes=5-'])),
+        $piece($feedA('media/' . $upA, ['range' => 'bytes=-10']))],
+    [[206, 'bytes', 'bytes 0-1/' . $pngLen, '2', substr($png, 0, 2)],
+        [206, 'bytes', 'bytes 5-' . ($pngLen - 1) . '/' . $pngLen, (string) ($pngLen - 5), substr($png, 5)],
+        [206, 'bytes', 'bytes ' . ($pngLen - 10) . '-' . ($pngLen - 1) . '/' . $pngLen, '10', substr($png, -10)]]);
+$past = $feedA('media/' . $upA, ['range' => 'bytes=' . $pngLen . '-']);
+check('C14d a piece starting past the end: 416, Content-Range: bytes */size, no body, and never kept by a cache',
+    [$past['status'], $past['headers']['content-range'] ?? '', $past['body'], $past['headers']['cache-control'] ?? ''],
+    [416, 'bytes */' . $pngLen, '', 'no-store']);
+check('C14e a piece keeps the door\'s own headers (loadable from any website, data only, a minute\'s caching)',
+    array_map(static fn (string $k): string => $feedA('media/' . $upA, ['range' => 'bytes=0-1'])['headers'][$k] ?? '',
+        ['access-control-allow-origin', 'cross-origin-resource-policy', 'cache-control', 'x-content-type-options']),
+    ['*', 'cross-origin', 'public, max-age=60', 'nosniff']);
+$rangedRefusals = [$feedA('media/' . $upA2, ['range' => 'bytes=0-1']), $http('GET', '/w/' . $nameB . '/media/' . $upA, ['range' => 'bytes=0-1']),
+    $feedA('media/' . str_repeat('e', 32) . '.png', ['range' => 'bytes=0-1'])];
+check('C14f asked WITH a Range header, an unticked poster\'s upload, another organisation\'s, and a name that is no upload are still the door\'s one 404 — no Accept-Ranges, no Content-Range, no byte',
+    array_map(static fn (array $r): array => [$r['status'], $r['headers']['accept-ranges'] ?? '', $r['headers']['content-range'] ?? '', $r['body']], $rangedRefusals),
+    array_fill(0, 3, [404, '', '', "Not found.\n"]));
 $refusals['an unticked poster\'s media'] = $feedA('media/' . $upA2);
 $refusals['media that is not an upload'] = $feedA('media/' . str_repeat('e', 32) . '.png');
 check('C15 an unticked poster\'s upload, and a name that is no upload, are refused', [$refusals['an unticked poster\'s media']['status'],
@@ -3905,7 +3939,8 @@ check('U16 open to anybody: EVERY surface — both feeds, the script, the page a
     [$uOpen, $sessionFiles() - $uOpenBefore], [$uOpenWant, 0]);
 /** A media answer's whole header set, as it must be: `$cache` and `$vary` differ by who may be served. */
 $uMediaWant = static function (array $r, string $cache, string $vary, string $perm) use ($uHeaderSet): array {
-    $want = ['Access-Control-Allow-Origin: *', 'Cache-Control: ' . $cache, 'Content-Length: ' . strlen($r['body']),
+    // `Accept-Ranges: bytes` since #880: the door's media can be sent in pieces.
+    $want = ['Accept-Ranges: bytes', 'Access-Control-Allow-Origin: *', 'Cache-Control: ' . $cache, 'Content-Length: ' . strlen($r['body']),
         "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox", 'Content-Type: image/png',
         'Cross-Origin-Resource-Policy: cross-origin', 'Referrer-Policy: no-referrer', 'X-Content-Type-Options: nosniff',
         'X-Robots-Tag: noindex, nofollow, noarchive'];
@@ -4575,6 +4610,13 @@ $p = $plant('_core/PublicDoor.php', "header('Access-Control-Allow-Origin: *');\n
     "header('Access-Control-Allow-Origin: *');\n        header('Content-Security-Policy: ' . self::DATA_CSP);\n        header('Referrer-Policy: no-referrer');\n        header('X-Content-Type-Options: nosniff');\n        if (\$testersOnly",
     $hdr('cross-origin-resource-policy', 'media/' . $upA));
 check('P23 with Cross-Origin-Resource-Policy taken out, media carries none (start-up\'s same-origin is removed, not left behind)', [$p['applied'], $p['result']], [true, '']);
+// #880: with the door's media sent whole again (the code before ByteRange),
+// a browser asking for the first two bytes gets the whole file and a 200.
+$p = $plant('_core/PublicDoor.php', "            if (ByteRange::send(\$file['path']) === false) {",
+    "            header('Content-Length: ' . (string) \$file['size']); readfile(\$file['path']); if (false) {",
+    static fn (): array => array_slice($piece($feedA('media/' . $upA, ['range' => 'bytes=0-1'])), 0, 3));
+check('P23b with the door\'s media sent whole again, a request for two bytes gets a 200 and no range headers (C14c catches it)',
+    [$p['applied'], $p['result']], [true, [200, '', '']]);
 $p = $plant('_core/PublicDoor.php', "header('Content-Security-Policy: ' . self::DATA_CSP);\n        header('Referrer-Policy: no-referrer');\n        header('X-Content-Type-Options: nosniff');\n        if (\$testersOnly",
     "header('Referrer-Policy: no-referrer');\n        header('X-Content-Type-Options: nosniff');\n        if (\$testersOnly", $hdr('content-security-policy'));
 check('P24 with the content rule taken out, a feed carries none', [$p['applied'], $p['result']], [true, '']);
@@ -4685,11 +4727,15 @@ $p = $plant('_core/PublicDoor.php', '$noEnd  = PublicWebsiteSetup::noEndListingF
     static fn (): array => [$nClockAt('PDS N clock 25-hour day', ['2026-10-25 23:45:00']), $nClockAt('PDS N clock 23-hour day', ['2027-03-28 23:15:00'])]);
 check('PN6 with "the end of its day" taken as 24 real hours, the 25-hour day drops it before its midnight and the 23-hour day keeps it past it (N12 and N13 catch it)',
     [$p['applied'], $p['result']], [true, [['2026-10-25 23:45:00' => false], ['2027-03-28 23:15:00' => true]]]);
-$p = $plant('_core/PublicDoor.php', 'usort($rows, static function (array $a, array $b): int {', 'if (false) usort($rows, static function (array $a, array $b): int {',
+// #811: the order moved, unchanged, to Events::sortByRealStart(), which the door now asks.
+$p = $plant('_core/Events.php', 'usort($keyed, static function (array $a, array $b): int {', 'if (false) usort($keyed, static function (array $a, array $b): int {',
     static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
 check('PN7 (#898) with the order left as the READINGS\' (the code before #898), the limited list gives the later event and drops the sooner (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
-$p = $plant('_core/PublicDoor.php', '$latest + self::maxOffsetOfZones(Events::zonesInUse($db, $siteId), $siteId)', '$latest',
+// #811: the window moved, unchanged, to Events::soonestByRealStart().
+// #1024 round 3: the widening is worked out into `$ahead` first (two days
+// when zonesInUse() stopped at its limit), so the plant drops that.
+$p = $plant('_core/Events.php', '$latest + $ahead', '$latest',
     static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
 check('PN8 (#898) with the second read\'s window not widened by the clocks\' offsets, the sooner event on the clock furthest ahead is never read (N10 catches it)',
     [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
@@ -4710,20 +4756,22 @@ $p = $plant('_core/PublicDoor.php', "'(((e.`isAllDay` = 1 OR e.`endDateTime` IS 
 check('PN11 with the fixed time\'s rule forgetting all-day events, an all-day event with no end time vanishes while a fixed time is chosen (N06 catches it)',
     [$p['applied'], $p['result']], [true, []]);
 // Round 1 of #882's check: three faults that left every check above green.
+// (#811 moved `maxOffsetOfZones()`, unchanged, from PublicDoor to Events, so
+// PN12 and PN16-PN18 plant it there.)
 $nLoop = "                foreach (\$states as \$state) {\n";
-$p = $plant('_core/PublicDoor.php', "            if (is_array(\$states) === true) {\n" . $nLoop . "                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
+$p = $plant('_core/Events.php', "            if (is_array(\$states) === true) {\n" . $nLoop . "                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
     '', $nWindows);
 check('PN12 (plant A) with the second read\'s window built from each zone\'s CURRENT offset only, the sooner event is never read and the later one is given (N20 and N21 catch it)',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
 // Round 2 of #882's check: three more wrong windows, which the first version
 // of N20 (held up by Pago Pago's +12:37 local mean time) let through.
-$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, 1) as \$state) {\n", $nWindows);
+$p = $plant('_core/Events.php', $nLoop, "                foreach (array_slice(\$states, 0, 1) as \$state) {\n", $nWindows);
 check('PN16 (V1) with only the FIRST entry of each zone\'s history read (its local mean time), both sooner events are missed (N20 and N21 catch it)',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
-$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, intdiv(count(\$states), 2)) as \$state) {\n", $nWindows);
+$p = $plant('_core/Events.php', $nLoop, "                foreach (array_slice(\$states, 0, intdiv(count(\$states), 2)) as \$state) {\n", $nWindows);
 check('PN17 (V3) with only the FIRST HALF of each zone\'s history read: London\'s 1941 +2 is in its first half, so N20 rightly still passes; the Azores\' 1993 +1 is in its second half, so N21 catches it',
     [$p['applied'], $p['result']], [true, [['PDS N historic London'], ['PDS N late New York']]]);
-$p = $plant('_core/PublicDoor.php', '            $states = $zone->getTransitions();',
+$p = $plant('_core/Events.php', '            $states = $zone->getTransitions();',
     "            \$states = \$zone->getName() === 'Europe/London' ? false : \$zone->getTransitions();", $nWindows);
 check('PN18 (V5) with London\'s history ignored (its offset today only), N20 catches it; N21, with no London in it, is rightly unaffected',
     [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late Azores']]]);

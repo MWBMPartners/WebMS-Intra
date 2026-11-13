@@ -1582,6 +1582,20 @@ try {
         (fr_apprWith($s5, 'approved')[0]['reason'] ?? '') === 'series_match' && fr_ls($s5) === 'public/series'
         && (fr_apprWith($s6, 'pending')[0]['reason'] ?? '') === 'new_match' && fr_ls($s6) === 'members/waiting',
         fr_ls($s5) . ' ' . fr_ls($s6));
+    // #855: resolveFeed() reports every follower row it WROTE (`followers`),
+    // which FeedAdmin::decide() relies on instead of a row's note text. The
+    // date added later is a NEW row (the INSERT branch of writePlan()); the
+    // date that waits is no follower at all. Planted, an INSERT branch that
+    // stops recording followers turns this red (the UPDATE branch is covered
+    // by feed-admin-selftest's D20 cases).
+    $s5Row = fr_apprWith($s5, 'approved')[0] ?? null;
+    $s5Followed = ($s5Row === null || preg_match('/\(approval #(\d+)\)$/', (string) $s5Row['decisionNote'], $m5) !== 1) ? 0 : (int) $m5[1];
+    $s6Ids = array_map(static fn (array $a): int => (int) $a['approvalID'], fr_appr($s6));
+    fr_ok('#855: the refresh that ADDED a date following its siblings reports that new row in `followers`, with the row it follows and its date — and the date left waiting is not in it',
+        $s5Row !== null && $s5Followed > 0
+        && ($r['followers'][(int) $s5Row['approvalID']] ?? null) === ['follows' => $s5Followed, 'eventID' => $s5]
+        && array_intersect($s6Ids, array_keys((array) ($r['followers'] ?? []))) === [],
+        json_encode([$s5Row, $r['followers'] ?? null]));
     fr_ok('KEEP-WORKING: approvedBySave is 0 on an ordinary refresh', $r['approvedBySave'] === 0, json_encode($r));
     fr_q("UPDATE tblEvents SET eventName = 'Weekly gathering, renamed' WHERE eventID = ?", 'i', [$s[1]]);
     fr_resolve($c1);

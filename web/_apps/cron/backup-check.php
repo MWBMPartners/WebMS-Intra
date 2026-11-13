@@ -112,7 +112,15 @@ if ($state !== 'ok' && count($recipients) > 0) {
         try {
             // "true" is sent OR kept in the mail queue (#592): only one a
             // mail service took is an alert that was sent.
-            if (Mailer::send($to, $subject, $body) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
+            // `bodyIsText` (#971): the body is plain text, so it is said. Today
+            // it changes nothing that can be measured: the body is fixed words,
+            // numbers and the review address, and the organisation's name is in
+            // the SUBJECT only (which Mailer never guesses about). It is there
+            // so that a later edit putting a name into this body cannot turn
+            // the alert into raw HTML with no footer. P15 of
+            // tools/mail-pages-selftest.php drives this page; its plant X4
+            // stays green for exactly this reason, and says so.
+            if (Mailer::send($to, $subject, $body, [], ['bodyIsText' => true]) === true && Mailer::lastOutcome() === Mailer::OUTCOME_SENT) {
                 $alertsSent++;
             }
         } catch (\Throwable $e) {

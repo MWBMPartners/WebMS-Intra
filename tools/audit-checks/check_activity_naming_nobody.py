@@ -30,6 +30,22 @@ file whose count has changed (a promise quietly dropped, or a new record added
 without a decision). It also pins the method's own statement, so the method
 cannot start keeping what it promises to leave out.
 
+Since #1017 one caller is not a page: `Captcha::recordV3Refusal()`, which
+records a refused reCAPTCHA v3 answer and must name nobody when the form being
+checked promises anonymity. Which forms do is ONE list in Captcha.php,
+`PROMISES_ANONYMITY`, and this check pins it WHOLE (as `php -w` prints it), so
+a form cannot be added to it - and its refusals taken off the record - without
+this check changing too; and it requires the anonymous form to name itself by
+the constant that list holds, so the form and the list cannot drift apart.
+
+And since round 2 of #1017's check, nothing ELSE may name itself as that form:
+the constant `FOR_ANONYMOUS_PRAYER_REQUEST` and its value
+('anonymous-prayer-request', a word used for nothing else) are COUNTED in every
+PHP file under web/ (USES below), failing both ways. Without that, any form
+could pass the constant, or its value as a literal, to `Captcha::verify()` and
+have its refused bot checks recorded naming nobody, while the list still read
+"today only the anonymous prayer form".
+
 WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 -----------------------------------------------------
 - Whether a listed call is really on the path it is listed for: that is
@@ -41,6 +57,17 @@ WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
 - A call written through a variable class name or a wrapper.
 - Whether the words passed name somebody: `check_activity_descriptions_personal.py`
   reads this method's calls by the same rules as `activity()`'s.
+- USES (#1017) counts the constant's NAME `FOR_ANONYMOUS_PRAYER_REQUEST` and its
+  value written as ONE literal ('anonymous-prayer-request' or
+  "anonymous-prayer-request"). Another form naming itself as the anonymous form
+  by any other spelling walks past it, and these were each measured by the
+  round-2 check of #1017: the value built in pieces
+  ('anonymous-' . 'prayer-request'), built by sprintf("%s-prayer-request",
+  "anonymous"), written with an escape ("anonymous\x2Dprayer-request"), held in
+  a heredoc, and the constant looked up as text
+  (constant(Captcha::class . "::FOR_ANONYMOUS_" . "PRAYER_REQUEST")). So "only the
+  anonymous prayer form" is enforced against the plain spellings only; anything
+  else is for review.
 
 Comments are left out by PHP's own `php -w` (strip comments and white space),
 never a regular expression, so a comment mentioning the method is not a call.
@@ -77,6 +104,36 @@ ON_PURPOSE = {
         "a whole restore run by an administrator whose account is not in the restored database: naming it would be "
         "refused by the account link, so the line names nobody and says in its words which account ran it (#922)",
     ),
+    "_core/Captcha.php": (
+        1,
+        "the bot check's record of a refused reCAPTCHA v3 answer on a form in Captcha::PROMISES_ANONYMITY - today only the "
+        "anonymous prayer form (#1017)",
+    ),
+}
+
+# Statements pinned whole, as `php -w` prints them, each exactly ONCE in its
+# file. File (relative to web/) -> list of (statement, why).
+PINNED_STATEMENTS = {
+    "_core/Captcha.php": [
+        ("private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+         "the ONE list of forms whose bot-check refusals name nobody (#1017): a form added to it has its refusals "
+         "taken off the record, which is a decision, so this pin changes with it"),
+    ],
+    "_apps/prayer-requests/anonymous-save.php": [
+        ("Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)",
+         "the anonymous form names itself to the bot check by the constant Captcha::PROMISES_ANONYMITY holds, so a "
+         "refused reCAPTCHA v3 answer on it names nobody either (#1017)"),
+    ],
+}
+
+# Every use of the anonymous form's name for the bot check, file by file (as
+# `php -w` prints the file). The constant twice in Captcha.php (its definition
+# and PROMISES_ANONYMITY) and once in the form; the value once, in its
+# definition. Any other file, or any other count, fails.
+USES = {
+    "FOR_ANONYMOUS_PRAYER_REQUEST": {"_core/Captcha.php": 2, "_apps/prayer-requests/anonymous-save.php": 1},
+    "'anonymous-prayer-request'": {"_core/Captcha.php": 1},
+    '"anonymous-prayer-request"': {},
 }
 
 LOGGER = "_core/Logger.php"
@@ -113,17 +170,26 @@ def method_body(text: str) -> str:
 
 def problems(web: str) -> list[str]:
     found: dict[str, int] = {}
+    used: dict[str, dict[str, int]] = {needle: {} for needle in USES}
     for root, _dirs, files in os.walk(web):
         for name in files:
             if name.endswith(".php") is False:
                 continue
             path = os.path.join(root, name)
             with open(path, encoding="utf-8", errors="replace") as fh:
-                if METHOD not in fh.read():
-                    continue  # the cheap test first: php -w only on files that mention it
-            count = len(CALL.findall(stripped(path)))
+                raw = fh.read()
+            wanted = [needle for needle in USES if needle.strip("'\"") in raw]
+            if METHOD not in raw and wanted == []:
+                continue  # the cheap test first: php -w only on files that mention one of them
+            text = stripped(path)
+            rel = os.path.relpath(path, web).replace(os.sep, "/")
+            count = len(CALL.findall(text))
             if count > 0:
-                found[os.path.relpath(path, web).replace(os.sep, "/")] = count
+                found[rel] = count
+            for needle in wanted:
+                seen = text.count(needle)
+                if seen > 0:
+                    used[needle][rel] = seen
 
     wrong: list[str] = []
     for rel, count in sorted(found.items()):
@@ -141,6 +207,28 @@ def problems(web: str) -> list[str]:
                 "should name nobody (anonymity, #988, or an account not in the database, #922) now names somebody "
                 "again, or a new one was added without a decision: change the list only on purpose."
             )
+
+    for needle, expected in USES.items():
+        for rel in sorted(set(expected) | set(used[needle])):
+            want = expected.get(rel, 0)
+            got = used[needle].get(rel, 0)
+            if got != want:
+                wrong.append(
+                    f"{rel} uses {needle} {got} time(s); USES says {want}. Only the anonymous prayer form may name itself "
+                    "to the bot check as that form: anything else passing it has its refused bot checks recorded naming "
+                    "nobody (#1017). Change the list only on purpose."
+                )
+
+    for rel, pins in sorted(PINNED_STATEMENTS.items()):
+        path = os.path.join(web, rel)
+        if os.path.isfile(path) is False:
+            wrong.append(f"{rel} is missing, and holds a statement this check pins")
+            continue
+        text = stripped(path)
+        for statement, why in pins:
+            seen = text.count(statement)
+            if seen != 1:
+                wrong.append(f"{rel} holds `{statement}` {seen} time(s), not exactly once: {why}")
 
     logger = os.path.join(web, LOGGER)
     if os.path.isfile(logger) is False:
@@ -181,7 +269,7 @@ def self_test() -> int:
         tmp = tempfile.mkdtemp(prefix="p988-nobody-")
         try:
             web = os.path.join(tmp, "web")
-            for rel in list(ON_PURPOSE) + [LOGGER]:
+            for rel in sorted(set(list(ON_PURPOSE) + list(PINNED_STATEMENTS) + [LOGGER])):
                 dst = os.path.join(web, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copyfile(os.path.join(real, rel), dst)
@@ -242,19 +330,89 @@ def self_test() -> int:
     ok("the method keeping the network address is reported",
        applied2["v"] is True and any("literal NULLs" in g for g in got), "; ".join(got))
 
-    # 5. The backup page's restore line goes back to Logger::activity(): the
+    # 5. #1017: the bot check's refusal goes back to naming the session's account.
+    applied5 = {"v": False}
+
+    def captcha_back_to_activity(w: str) -> None:
+        applied5["v"] = replace(
+            w, "_core/Captcha.php",
+            "Logger::activityNamingNobody('CaptchaRejected',",
+            "Logger::activity('CaptchaRejected',",
+        )
+    got = with_copy(captcha_back_to_activity)
+    ok("the bot check's refusal on an anonymous form going back to Logger::activity() is reported (#1017)",
+       applied5["v"] is True and any("_core/Captcha.php calls" in g for g in got), "; ".join(got))
+
+    # 6. #1017: a second form added to the list of forms promising anonymity.
+    applied6 = {"v": False}
+
+    def list_widened(w: str) -> None:
+        applied6["v"] = replace(
+            w, "_core/Captcha.php",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST, self::FOR_SIGN_IN];",
+        )
+    got = with_copy(list_widened)
+    ok("a form added to Captcha::PROMISES_ANONYMITY without this check changing is reported (#1017)",
+       applied6["v"] is True and any("PROMISES_ANONYMITY" in g for g in got), "; ".join(got))
+
+    # 7. #1017: the anonymous form no longer names itself by the constant.
+    applied7 = {"v": False}
+
+    def form_by_literal(w: str) -> None:
+        applied7["v"] = replace(
+            w, "_apps/prayer-requests/anonymous-save.php",
+            "Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)",
+            "Captcha::verify($_POST, 'anonymous-prayer')",
+        )
+    got = with_copy(form_by_literal)
+    ok("the anonymous form naming itself to the bot check by anything but the constant is reported (#1017)",
+       applied7["v"] is True and any("FOR_ANONYMOUS_PRAYER_REQUEST" in g for g in got), "; ".join(got))
+
+    # 8. A comment quoting the pinned list does not count as the statement.
+    applied8 = {"v": False}
+
+    def list_only_in_comment(w: str) -> None:
+        applied8["v"] = replace(
+            w, "_core/Captcha.php",
+            "private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];",
+            "// private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];\n"
+            "    private const PROMISES_ANONYMITY = [];",
+        )
+    got = with_copy(list_only_in_comment)
+    ok("the list emptied, with the old statement left in a comment, is reported (a comment is not the statement)",
+       applied8["v"] is True and any("PROMISES_ANONYMITY" in g for g in got), "; ".join(got))
+
+    # 9. #1017 round 2: another form names itself as the anonymous form, by the constant.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/save.php",
+                                    "<?php\nuse Portal\\Core\\Captcha;\nCaptcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST);\n"))
+    ok("another form passing Captcha::FOR_ANONYMOUS_PRAYER_REQUEST is reported (#1017)",
+       any("zzplant/save.php uses FOR_ANONYMOUS_PRAYER_REQUEST" in g for g in got), "; ".join(got))
+
+    # 10. ... and by the literal value.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/save.php",
+                                    "<?php\n\\Portal\\Core\\Captcha::verify($_POST, 'anonymous-prayer-request');\n"))
+    ok("another form passing the value 'anonymous-prayer-request' as a literal is reported (#1017)",
+       any("zzplant/save.php uses 'anonymous-prayer-request'" in g for g in got), "; ".join(got))
+
+    # 11. A comment naming the constant is not a use.
+    got = with_copy(lambda w: write(w, "_apps/zzplant/note.php",
+                                    "<?php\n// Captcha::FOR_ANONYMOUS_PRAYER_REQUEST and 'anonymous-prayer-request' are the form's.\n"))
+    ok("a comment naming the constant or its value is not reported", got == [], "; ".join(got))
+
+    # 12. The backup page's restore line goes back to Logger::activity(): the
     #    line for a restorer who is not in the database would be refused again.
-    applied3 = {"v": False}
+    applied12 = {"v": False}
 
     def backup_back(w: str) -> None:
-        applied3["v"] = replace(
+        applied12["v"] = replace(
             w, "_apps/admin/maintenance/backup.php",
             "Logger::activityNamingNobody($type, $what);",
             "Logger::activity($type, $what);",
         )
     got = with_copy(backup_back)
     ok("the backup page's restore line going back to Logger::activity() is reported",
-       applied3["v"] is True and any("maintenance/backup.php" in g for g in got), "; ".join(got))
+       applied12["v"] is True and any("maintenance/backup.php" in g for g in got), "; ".join(got))
 
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1
@@ -279,8 +437,9 @@ def main() -> int:
         return 1
     total = sum(n for n, _ in ON_PURPOSE.values())
     print(f"OK: Logger::{METHOD}() is called {total} time(s), only in the {len(ON_PURPOSE)} file(s) listed for "
-          "anonymity (#988) or an account not in the database (#922), and still writes the account and the browser columns as empty. (A presence check: see this "
-          "file's header for what it cannot see.)")
+          "anonymity (#988) or an account not in the database (#922), and still writes the account and the browser "
+          "columns as empty; the bot check's list of forms promising anonymity is as pinned. (A presence check: see "
+          "this file's header for what it cannot see.)")
     return 0
 
 

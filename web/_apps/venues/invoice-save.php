@@ -82,13 +82,16 @@ $userId    = (int) ($_SESSION['user_id'] ?? 0);
 $action    = (string) ($_POST['action'] ?? 'save');
 $invoiceId = (int) ($_POST['invoiceID'] ?? 0);
 
-$toPence = static function (string $raw): ?int {
-    $v = trim($raw);
-    if ($v === '' || is_numeric($v) === false) {
-        return null;
-    }
-    return (int) round(((float) $v) * 100);
-};
+// 💷 A typed amount becomes whole hundredths through the ONE converter,
+//    Currency::parseAmount() (#1004), never `(int) round((float) $v * 100)`.
+//    That wrapped an absurd figure into a small or negative one: measured on
+//    PHP 8.5, "184467440737095557.12" was stored as 40.96, and "1e17" came out
+//    negative so the page said "Amount cannot be negative", which was untrue.
+//    It answers an int, or the true reason the text was refused, which is
+//    shown and nothing is written. A typed box takes figures only (D-152):
+//    no comma and no currency sign. No currency is passed, so a "too large"
+//    refusal states the limit as a plain number.
+$readAmount = static fn (string $raw): int|string => \Portal\Core\Currency::parseAmount($raw, '');
 
 $backToInvoice = static function (int $id) use ($invoiceId): never {
     header('Location: ' . Site::url('venues/invoice') . '?id=' . ($id > 0 ? $id : $invoiceId));
@@ -138,7 +141,19 @@ if ($action === 'set-status') {
 // -----------------------------------------------------------------------------
 if ($action === 'allocate') {
     $bookingId = (int) ($_POST['bookingID'] ?? 0);
-    $amountPence = $toPence((string) ($_POST['amount'] ?? ''));
+    // A BLANK box allocates the booking with no amount of its own (null). Any
+    // other text must be an amount: a figure that could not be read used to
+    // become "no amount" without a word (#1004).
+    $amountRaw   = trim((string) ($_POST['amount'] ?? ''));
+    $amountPence = null;
+    if ($amountRaw !== '') {
+        $amountPence = $readAmount($amountRaw);
+        if (is_string($amountPence) === true) {
+            $_SESSION['flash_msg']  = $amountPence . ' Nothing was allocated.';
+            $_SESSION['flash_type'] = 'danger';
+            $backToInvoice($invoiceId);
+        }
+    }
     $result = Venues::allocateInvoiceLine($siteId, $invoiceId, $bookingId, $amountPence, $userId);
     $_SESSION['flash_msg']  = $result['lineID'] > 0 ? 'Booking allocated.' : ($result['error'] ?? 'Could not allocate booking.');
     $_SESSION['flash_type'] = $result['lineID'] > 0 ? 'success' : 'danger';
@@ -172,6 +187,15 @@ $backToForm = static function () use ($invoiceId, $venueId): never {
     exit();
 };
 
+// 💷 The amount is read BEFORE anything else is done, so a refused figure
+//    stores nothing and uploads nothing (#1004).
+$amountPence = $readAmount((string) ($_POST['amount'] ?? ''));
+if (is_string($amountPence) === true) {
+    $_SESSION['flash_msg']  = $amountPence . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    $backToForm();
+}
+
 $data = [
     'venueID'      => $venueId,
     'agreementID'  => (int) ($_POST['agreementID'] ?? 0),
@@ -181,7 +205,7 @@ $data = [
     'periodEnd'    => (string) ($_POST['periodEnd'] ?? ''),
     'issueDate'    => (string) ($_POST['issueDate'] ?? ''),
     'dueDate'      => (string) ($_POST['dueDate'] ?? ''),
-    'amountPence'  => $toPence((string) ($_POST['amount'] ?? '')) ?? -1,
+    'amountPence'  => $amountPence,
     // Absent means "keep" on an edit (Venues::saveInvoice() decides), never today's currency (D-139).
     'currency'     => (string) ($_POST['currency'] ?? ''),
     'notes'        => (string) ($_POST['notes'] ?? ''),
@@ -227,7 +251,8 @@ if (isset($_FILES['file']) === true && (int) $_FILES['file']['error'] !== UPLOAD
         $backToForm();
     }
     $sniffedMime = finfo_buffer($finfo, $binary);
-    finfo_close($finfo);
+    // ⚠️ No `finfo_close()` (#1003): it has done nothing since PHP 8.1 (the finfo
+    // object is freed when it goes out of scope) and PHP 8.5 marks it deprecated.
     if ($sniffedMime === false
         || in_array($sniffedMime, VENUES_INVOICE_ALLOWED_MIME, true) === false
         || array_key_exists($sniffedMime, Venues::AGREEMENT_FILE_MIME_EXT) === false

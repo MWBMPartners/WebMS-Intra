@@ -3263,7 +3263,7 @@ class Venues
         $dueDate = self::nullableDate($data['dueDate'] ?? null);
         $amountPence = (int) ($data['amountPence'] ?? -1);
         if ($amountPence <= 0) {
-            $errors[] = 'Amount must be a positive number of pence.';
+            $errors[] = 'The amount must be more than zero.';
         }
         // 💷 A currency the portal cannot store in hundredths, or does not know,
         //    is REFUSED (it used to become GBP without a word). A NEW invoice takes
@@ -3605,7 +3605,7 @@ class Venues
         $errors = [];
         $amountPence = (int) ($data['amountPence'] ?? -1);
         if ($amountPence <= 0) {
-            $errors[] = 'Amount must be a positive number of pence.';
+            $errors[] = 'The amount must be more than zero.';
         }
         $paidDate = self::nullableDate($data['paidDate'] ?? null);
         if ($paidDate === null) {

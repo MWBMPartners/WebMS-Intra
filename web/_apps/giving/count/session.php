@@ -85,6 +85,7 @@ if ($session === null) {
 // -----------------------------------------------------------------------------
 $envelopes = [];
 $envelopeSum = 0.0;
+$envelopeSumPence = 0;
 $stmt = $db->prepare(
     'SELECT ce.envelopeID, ce.giverID, ce.giverName, ce.amount, ce.method, ce.createdAt, '
     . '       u.fullName AS giverFullName '
@@ -98,7 +99,9 @@ if ($stmt !== false) {
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
         $envelopes[] = $r;
-        $envelopeSum += (float) $r['amount'];
+        $envelopeSum += (float) $r['amount']; // for display only
+        // 💷 The sum that is COMPARED is kept in hundredths, read without a float (#1004).
+        $envelopeSumPence += \Portal\Core\Currency::storedDecimalToHundredths((string) $r['amount']);
     }
     $stmt->close();
 }
@@ -130,14 +133,14 @@ $bothSubmitted = $session['cashTotal1'] !== null && $session['chequeTotal1'] !==
 
 // 💷 Pence-integer comparisons throughout — never compare DECIMAL/float
 // values with == directly (rounding drift).
-$toPence = static fn (?string $v): ?int => $v === null ? null : (int) round(((float) $v) * 100);
+//    Stored DECIMAL text is read by Currency::storedDecimalToHundredths() (#1004).
+$toPence = static fn (?string $v): ?int => $v === null ? null : \Portal\Core\Currency::storedDecimalToHundredths($v);
 
 $diffCash     = $bothSubmitted === true ? $toPence($session['cashTotal1']) - $toPence($session['cashTotal2']) : null;
 $diffCheque   = $bothSubmitted === true ? $toPence($session['chequeTotal1']) - $toPence($session['chequeTotal2']) : null;
 $diffEnvelope = $bothSubmitted === true ? $toPence($session['envelopeTotal1']) - $toPence($session['envelopeTotal2']) : null;
 
 $agreedSet = $session['cashTotal'] !== null && $session['chequeTotal'] !== null && $session['envelopeTotal'] !== null;
-$envelopeSumPence   = (int) round($envelopeSum * 100);
 $agreedEnvelopePence = $session['envelopeTotal'] !== null ? $toPence($session['envelopeTotal']) : null;
 // 🛡️ Named envelopes may UNDER-shoot the agreed envelope-total bucket (the
 // remainder posts as one aggregate "loose envelope" entry on close — see
@@ -229,17 +232,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <input type="hidden" name="action" value="count">
                         <input type="hidden" name="countSessionID" value="<?php echo $countSessionId; ?>">
                         <input type="hidden" name="slot" value="<?php echo $slot; ?>">
+                        <?php /* 💷 The boxes are prefilled with PLAIN figures ("1234.50"),
+                                  never number_format()'s "1,234.50": a typed box takes figures
+                                  only (D-152), so a counter re-entering after a discrepancy
+                                  would be refused over a figure they never typed (#1004). */ ?>
                         <div class="col-4">
                             <label class="form-label small">Loose cash</label>
-                            <input type="text" class="form-control form-control-sm" name="cashAmount" value="<?php echo $cash !== null ? htmlspecialchars(number_format((float) $cash, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="cashAmount" value="<?php echo $cash !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $cash)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-4">
                             <label class="form-label small">Loose cheque</label>
-                            <input type="text" class="form-control form-control-sm" name="chequeAmount" value="<?php echo $cheque !== null ? htmlspecialchars(number_format((float) $cheque, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="chequeAmount" value="<?php echo $cheque !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $cheque)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-4">
                             <label class="form-label small">Envelope total</label>
-                            <input type="text" class="form-control form-control-sm" name="envelopeAmount" value="<?php echo $envelope !== null ? htmlspecialchars(number_format((float) $envelope, 2), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
+                            <input type="text" class="form-control form-control-sm" name="envelopeAmount" value="<?php echo $envelope !== null ? htmlspecialchars(\Portal\Core\Currency::hundredthsToDecimal(\Portal\Core\Currency::storedDecimalToHundredths((string) $envelope)), ENT_QUOTES, 'UTF-8') : ''; ?>" placeholder="0.00" required>
                         </div>
                         <div class="col-12 mt-2">
                             <button type="submit" class="btn btn-primary btn-sm w-100">

@@ -31,16 +31,12 @@
  * traversal component before joining. The resulting absolute path is
  * NEVER echoed back to the client in any header or error body.
  *
- * HTTP RANGE: parses a single `bytes=start-end` (or `bytes=start-`) Range
- * header with the SAME lenient regex `Recordings::streamFile()` already
- * uses (missing start defaults to 0, missing end defaults to EOF) — 206 +
- * `Content-Range` when present and valid, 416 when the range is
- * unsatisfiable, else a plain 200 covering the whole file. A full-file
- * response is emitted via `readfile()`; a genuinely bounded sub-range
- * (end short of EOF) is emitted via `stream_copy_to_stream()` with an
- * explicit length — the bounded-length equivalent of `fpassthru()`, which
- * has no length parameter of its own and would over-send past a bounded
- * range's requested end.
+ * HTTP RANGE: answered by `Portal\Core\ByteRange::send()` (#880), the one
+ * place a `Range:` request is answered for every media route — 206 with
+ * `Content-Range` for one piece, 416 when the piece starts beyond the end,
+ * otherwise 200 with the whole file, `Accept-Ranges: bytes` on all of them,
+ * and the file copied in chunks, never read whole into memory. (This file
+ * used to parse the header itself; see the note above the send.)
  *
  * @package   Portal\Recordings
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -54,6 +50,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\ByteRange;
 use Portal\Core\Recordings;
 use Portal\Core\Site;
 
@@ -108,75 +105,31 @@ if (is_file($path) === false || is_readable($path) === false) {
     exit('Not found');
 }
 
-$size = filesize($path);
-if ($size === false) {
+// -----------------------------------------------------------------------------
+// 📤 Headers — Content-Type from the stored mimeType (fallback audio/mpeg),
+// nosniff + inline so a browser navigating here directly plays/downloads it
+// as media rather than treating it as an arbitrary download or attachment.
+//
+// 🎞️ The status, `Accept-Ranges`, `Content-Length`, `Content-Range` and the
+// bytes are `ByteRange::send()`'s (#880), the ONE place a `Range:` request is
+// answered. This file used to parse the header itself, with a copy of
+// `Recordings::streamFile()`'s regex, and the two shared two faults: a
+// suffix request (`bytes=-500`, "the last 500 bytes") was read as bytes 0
+// to 500, and an end beyond the file was not shortened, so `Content-Length`
+// promised more bytes than were sent. The token gate and the published,
+// self-hosted, this-organisation lookup above have both passed by now.
+// -----------------------------------------------------------------------------
+header('Content-Type: ' . $mime);
+header('X-Content-Type-Options: nosniff');
+header('Content-Disposition: inline');
+header('Cache-Control: public, max-age=3600');
+
+if (ByteRange::send($path) === false) {
+    // Could not be opened after all; nothing was sent, so a clean 404.
+    header_remove('Content-Disposition');
+    header_remove('Cache-Control');
     http_response_code(404);
     header('Content-Type: text/plain; charset=utf-8');
     exit('Not found');
 }
-
-// -----------------------------------------------------------------------------
-// 📏 Range parsing — same lenient `bytes=(\d*)-(\d*)` shape
-// Recordings::streamFile() already uses, so behaviour stays consistent
-// across both recordings-streaming endpoints.
-// -----------------------------------------------------------------------------
-$start   = 0;
-$end     = $size - 1;
-$isRange = false;
-
-$rangeHeader = (string) ($_SERVER['HTTP_RANGE'] ?? '');
-if ($rangeHeader !== '' && preg_match('/bytes=(\d*)-(\d*)/', $rangeHeader, $m) === 1) {
-    if ($m[1] !== '') {
-        $start = (int) $m[1];
-    }
-    if ($m[2] !== '') {
-        $end = (int) $m[2];
-    }
-    if ($start > $end || $start >= $size) {
-        http_response_code(416);
-        header('Content-Range: bytes */' . $size);
-        exit();
-    }
-    $isRange = true;
-}
-
-$length = $end - $start + 1;
-
-// -----------------------------------------------------------------------------
-// 📤 Headers — Content-Type from the stored mimeType (fallback audio/mpeg),
-// Accept-Ranges so clients know they MAY seek, nosniff + inline so a
-// browser navigating here directly plays/downloads it as media rather than
-// treating it as an arbitrary download or attachment.
-// -----------------------------------------------------------------------------
-header('Content-Type: ' . $mime);
-header('Accept-Ranges: bytes');
-header('X-Content-Type-Options: nosniff');
-header('Content-Disposition: inline');
-header('Content-Length: ' . $length);
-header('Cache-Control: public, max-age=3600');
-
-if ($isRange === true) {
-    http_response_code(206);
-    header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
-}
-
-if ($start === 0 && $length === $size) {
-    // 📀 Whole file — the simplest, most efficient built-in dump.
-    readfile($path);
-    exit();
-}
-
-// 📀 A Range request — seek then copy EXACTLY $length bytes.
-// stream_copy_to_stream() is the bounded-length equivalent of fpassthru()
-// (which takes no length and would over-send past a bounded range's `end`
-// when it falls short of EOF).
-$fp = fopen($path, 'rb');
-if ($fp === false) {
-    exit();
-}
-$out = fopen('php://output', 'wb');
-if ($out !== false) {
-    stream_copy_to_stream($fp, $out, $length, $start);
-}
-fclose($fp);
 exit();

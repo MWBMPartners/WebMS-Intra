@@ -72,7 +72,11 @@ $siteId = Site::id();
 $assetId = (int) ($_GET['id'] ?? 0);
 $asset   = $assetId > 0 ? AssetRegister::get($assetId) : null;
 if ($assetId > 0 && $asset === null) {
-    $_SESSION['flash_msg']  = 'Asset not found.';
+    // 🗑️ Also where the edit page's Save ends when somebody deleted the asset
+    //    while it was being saved (#1031): the save refuses it (nothing is
+    //    written) and sends the person back here, and this is the message they
+    //    read, on the asset list. So it says plainly that nothing changed.
+    $_SESSION['flash_msg']  = 'That asset could not be found — it may have been deleted. Nothing was changed.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('assets'));
     exit();

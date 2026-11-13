@@ -4,6 +4,210 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events, rota and mail on the right clock and in the send log (#1024, #1025, #1028, #1043, #1040)
+
+- **Lists and reminders on the right clock (#1024, #1025, #1028).** The calendar's list view now orders events by
+  the real moment each starts, so events in different time zones come out in the right order on every page
+  (it sorted by each event's own clock reading). "My volunteering" does the same, keeps the thirty genuinely
+  soonest, and its one day of grace is a day on each event's own clock (it was the database server's). Rota
+  reminders and the morning birthday digest now go by each organisation's own date and hour, not the database
+  server's date, so an organisation far from the server is no longer reminded a day early or late around midnight.
+- **Far-off and odd dates cannot disturb the order.** The span read covers live events only and is held inside 1900-2200; the offset window is narrowed round today while the zones in use would change clock more than 2000 times in it; a reading outside the window takes the nearer end's offset; a reading at 9999-12-31 can no longer become an empty value that sorted first. At most `Events::ZONE_TEXT_LIMIT` (500) zone texts are bound, texts of live events first; a text left out is read on the organisation's clock for a page and on the earliest clock on Earth for the registrations clear-out, so such a row is only ever deleted late.
+- **A message tried through Google and lost on the network is in the send log now (#1043).** When
+  `MailerGoogle::send()` could not start a connection (`curl_init()` failed) or got no answer at all,
+  it answered "not sent" and wrote NO line in the send log (`tblEmailLog`), while the mail queue —
+  told the Google route writes its own line — wrote none either. So a waiting message could be
+  tried, tried again and finally given up on with nothing recorded about any of those tries, and the
+  queue row's own words ("Its own line in the send log says why") pointed at a line that did not
+  exist. Both failures now write the route's own `failed` line (`CURL_INIT` / `CURL_FAIL`), under the
+  message's own organisation (`Mailer::queueRowSite()`, #1006). One line per attempt: a throw (the
+  sign-in getting no answer) still writes nothing in the route and the queue writes the line.
+  Microsoft 365 was checked the same way and never had the fault: it writes its failure line for any
+  answer outside 200-299, and a dropped connection reads as code 0.
+- **The send log's organisation column says what it holds (#1040, migration 288).** Its comment said
+  "NULL when sent outside site context (e.g. cron)", untrue since #683/#1006. Comment only; no row,
+  type, key or link changes.
+
+### Money boxes read amounts strictly (#1004; D-152, D-153, D-165, D-177)
+
+- **Money boxes read amounts strictly, and never wrap an absurd one (#1004).** Every typed amount — venues, giving,
+  offering counts, projects, payments, assets, resources, the AI and translation caps — goes through one converter,
+  `Currency::parseAmount()`, which never uses a float and refuses with the reason instead of storing a wrong figure (an
+  absurd "184467440737095557.12" used to be stored as 40.96). A box takes figures only (D-152). The bank-statement and
+  asset imports also read a file's thousands commas, the organisation's three-letter code, and a symbol sign its currency
+  is written with — "$" is the organisation's own dollars (D-153, D-165) — but never a letters-only sign such as "R"
+  (D-177). An import cell that cannot be read says so plainly and what IS read; in the asset import every refusal adds
+  "Amounts here cannot be negative.", and in the bank import every refusal asks for a minus sign in front of money paid out.
+  A bank debit too large to store is skipped and named instead of stopping the import. Offering counts are refused above
+  21,474,836.47 so a count can always be closed. The asset API refuses a fraction of a penny instead of dropping it.
+
+### Uploads write no deprecation; media answer byte ranges (#1003, #880)
+
+- **Fixed (#1003):** six upload handlers (poster media, the documents API, photos, venue
+  agreement files, asset resources, venue import) no longer call `finfo_close()`, which
+  PHP 8.5 deprecates; each upload had written a deprecation line into the error log. The
+  type of each upload is judged exactly as before. The seventh,
+  `venues/invoice-save.php`, was removed once the money package had landed.
+  `check_no_deprecated_php_functions.py` refuses a call to any function PHP deprecates.
+- **Fixed (#880):** poster videos on the noticeboard and the public door, and recordings,
+  can now be sent in pieces (`Range:` → 206 with `Content-Range`, 416 past the end,
+  `Accept-Ranges: bytes` always), which Safari needs to play a video.
+  `Portal\Core\ByteRange` is the one place this is done. The recordings routes' own
+  copies are replaced, fixing three faults in them: "the last N bytes" was read as the
+  first N, an end past the file was not shortened, and `/recordings/stream` answered 404
+  where it meant 416.
+
+### Settings rows and deleted assets (#1021, #1031)
+
+- **Settings: no Edit button where the save would refuse it (#1021).** An administrator of one
+  organisation was offered Edit on every portal-wide setting, every "public." setting and every
+  setting with an unusual name, and pressing Save was refused. Those rules now live in one place,
+  `Portal\Core\SettingsRowRule`, asked by the page, the save and the delete alike; the page shows
+  a short note saying why instead of the button.
+- **Assets: an asset deleted while it was being saved is no longer saved (#1031).** If somebody
+  deleted an asset while an edit or an API update was waiting to write it, the write still went
+  through and the API answered 200. Now nothing is written: the API answers 404 "Asset not
+  found", as for any missing asset, and the person is sent to the asset list, which says the asset could
+  not be found and nothing was changed.
+- **Assets: the asset list shows its messages again.** The list page never printed the message
+  another page left for it, so "Asset deleted." and similar confirmations were silently lost.
+
+### Discipleship sweep and the offline page (#824, #865)
+
+- **Fixed (#824):** the discipleship sweep no longer completes pathway steps for
+  somebody who has left the organisation. Before any of its three rules runs it
+  asks, for each enrolled person, the one rule the members-only gate uses
+  (`Site::isOwnOrganisation()` with several organisations; the account's own
+  switch with one) and completes steps only for those who still belong. Their
+  enrolment is left as it is, and a person who comes back is caught up by the
+  next sweep. Also corrected `calendar/rsvp-by-link.php`'s header, which said it
+  wrote an anonymous `tblEventRSVPs` row (the insert was removed in `83b0ae72`).
+- **Fixed (#865):** the offline page now tries again by itself once a minute, and
+  at once when the browser says it is back on line, so a screen nobody touches
+  (the noticeboard foyer screen) comes back after an outage. Its dark theme no
+  longer throws. `sw.js`'s bytes changed so installed workers fetch the new page.
+  New browser test `tools/offline-page-selftest.mjs` pins the retry AND sw.js's
+  refusal to keep anything marked `Cache-Control: private`.
+
+### Address look-ups store only real positions, cached per country (#1034, #1035)
+
+- Geocoding (#1034): a map position from Google or OpenStreetMap that is empty, not a number, or not
+  on the Earth is now treated as "no answer". It used to be stored as 0,0 (a real place in the Gulf of
+  Guinea) or as given on the venue, event, organisation or small group, and cached for ever. A cached
+  row with no position is now asked again rather than read as 0,0. A bad Google answer now falls
+  through to OpenStreetMap.
+- Geocoding (#1035): the cache now keeps a separate answer for each country a look-up is limited to.
+  "Springfield" limited to the US and to Great Britain used to share one cached place. Answers cached
+  before this change are asked once more.
+- Geocoding (#1034, round 3): "Test connection" on Admin, Integrations, Geocoding now really asks the providers (it skips reading the cache, and still keeps the fresh answer), and the page no longer says it converts coordinates back to an address or that Nominatim calls are always a second apart.
+
+### Queued mail through Microsoft 365 or Google, and a refused bot check on the anonymous form (#1006, #1017)
+
+- **Fixed — a waiting message sent later through Microsoft 365 or Google is recorded under its own
+  organisation (#1006).** The two routes wrote their send-log line under whichever organisation the
+  scheduled job happened to be working in, so an erasure that finds sent mail by organisation
+  (an e-mail address request) could miss it. The help page's limit about this is gone.
+- **Fixed — a refused reCAPTCHA v3 check on the anonymous prayer form names nobody (#1017).** Its
+  record no longer carries the signed-in member's account, network address, browser or session,
+  matching the form's own records (#988). Every other form's record is unchanged.
+
+### Events and outside calendars: five faults a member or administrator would see (#885, #853, #854, #855, #811; D-180)
+
+- The events API refuses a category or event type that is not the organisation's own with 422 and a plain reason,
+  instead of answering 500; another organisation's number is no longer stored, by the API, the Manage Events form,
+  a series' bulk edit or the public suggestion form, and the two cases cannot be told apart (#885).
+- An outside calendar's page no longer shows "On the public website" for an event the website leaves out (calendar
+  paused, or its stored answer waiting for the next refresh); it says why instead (#853).
+- A new "who sees every date" choice starts with nothing chosen, so saving it untouched can no longer open every
+  date of a series to the audience of the one date it was opened from (#854).
+- Approving or declining an outside-calendar date now decides it as it stands now (D-180): its calendar is re-worked
+  under the rules in force first, so a request made under the other copied-in rule, or under a rule that has since
+  run out, is reported "changed" rather than decided on its old basis; when such a date ends carrying the decision
+  through another date of the same repeating event, the message says so instead of asking for a review (#855).
+- "Next" lists — the newsletter's upcoming events, the reminder preview and the "all upcoming" calendar download —
+  are ordered by each event's real moment, not by readings on different clocks; and an event ending at exactly
+  midnight is no longer drawn as a 15-minute sliver on the next day in the day and week views (#811).
+
+### Mail, event suggestions and the newsletter choice (#971, #972, #875, #1020)
+
+- **Mail (#971).** A plain message is no longer mistaken for HTML because a name in it holds "<".
+  `Mailer::looksLikeHtml()` is now the one guess, and it counts only a real HTML element. A name that
+  happens to be one (`St <Mark> & Co`, `<Main Hall>`, `<Title>`) still would be, so the callers that
+  send plain text now say so: the e-mail page's test message (both routes), the "password sign-in
+  added" notice and the backup alert. Before this an organisation named, say, `St <x> & Co` turned the
+  test message into raw HTML with no footer, and a product named so did the same to the "password
+  added" notice. The event broadcast is sent as plain text, so it now carries the organisation's
+  layout and footer (it had none); it was never escaped twice.
+- **Event suggestions (#972, #1020).** A visitor's event name and own name are stored as one line
+  each (Unicode line breaks and spaces included), with any characters that reverse the order text
+  reads in removed, so the approval e-mail says them exactly as the moderation page shows them.
+- **Notification preferences (#875).** Saving the page no longer unsubscribes a member from the
+  newsletter when the page was opened before the newsletter was switched on, or was drawn for another
+  organisation: the choice is saved only when the member changed the box on a form that showed it
+  for this organisation (even if the newsletter has since been switched off), and an old page left
+  as drawn cannot undo an unsubscribe made by a newsletter's own link, nor a subscription made
+  elsewhere. When the newsletter is on and the form did not show the choice for this organisation,
+  the page says the newsletter choice was not changed; every other save says plain "Preferences saved."
+
+### Anonymous prayer requests name nobody, and an e-mail-address erasure reaches them (#988, #1009; D-176, D-178)
+
+- **The anonymous prayer form no longer ties a request to a signed-in member's account (#988).** Its activity records
+  (the saved request, the form-token, captcha and too-many refusals) and the record of its automatic assignment to a
+  prayer partner are written by the new `Logger::activityNamingNobody()`, which keeps the type, the words and the
+  organisation and leaves out the account, the session fingerprint and facts, the network address, the browser and
+  the headers. Before, a member who used the form while signed in got records naming their account.
+- **What a member is told is true.** A signed-in member opening the form is told the request is not linked to their
+  account, that the network address it keeps could be compared with their own sign-ins by somebody with access to the
+  records, and that erasing their account does not reach it — only asking the organisation does, and only if they gave
+  an e-mail address. A visitor is told how to have a request erased. The privacy notice, the prayer-requests help and
+  the erasure policy say the same.
+- **An erasure request filed by e-mail address (D-140, D-148 to D-150) now reaches anonymous prayer requests (#1009,
+  D-176):** every request at that organisation sent through the anonymous form with that address has its name, e-mail
+  address, network address, the sender's own words and any prayer partner's note emptied (the request row is kept).
+  It is described everywhere as a request for an e-mail address, whether or not the address also belongs to an account
+  — never "no account". The erasure page's card, the message after filing and the admin help say exactly what each step
+  does: old activity records have the address replaced with "[erased]" and the network address, browser, request and
+  session details emptied; an approval e-mail still waiting is deleted; in the record of one already sent (including
+  one recorded under no organisation) the address is replaced with "[erased]" and any error message emptied, the record
+  itself kept.
+- A request sent without an e-mail address cannot be found by any erasure, and nothing deletes a prayer request, so its
+  network address is kept with no end date until #1019 sets a keeping period (D-178).
+- New hard gate `tools/audit-checks/check_activity_naming_nobody.py` names every caller of the method and fails both
+  ways. Tests: section N of `tools/erasure-pages-selftest.php` (the member-facing sentences pinned as rendered; the
+  four records a run writes read back whole), `activity-log`, `gdpr-eraser`, `gdpr-coverage`.
+
+### The assets API keeps changes it was not sent (#1001)
+
+- **Fixed (#1001):** the assets API (`POST /api/assets/update`, `PUT`/`PATCH
+  /api/v1/assets/{id}`) no longer puts back a change somebody else made while
+  it was working. It used to fill every field it was not sent from a copy of
+  the asset read before it took the asset's lock, and write those as if they
+  had been sent; it now writes only the fields it was sent, and every other
+  field as the asset holds it at the moment of the write. The asset's history
+  record of each change now compares against that same moment, so it no
+  longer hides such a revert. Tested by `tools/assets-api-update-selftest.php`.
+
+### Five small fixes (#918, #987, #945, #1014, #960)
+
+- **Attendance spreadsheet leaves out deleted sessions (#918).** The download
+  carried every deleted session's headcount and note, so its total could be
+  more than the reports page showed. It now follows the same rule as the page.
+- **Duty Roster "upcoming" follows the organisation's date (#987).** "My
+  upcoming duties", "Full roster" and Manage Rota used the database server's
+  date, so around midnight an organisation far from the server saw yesterday's
+  duties or lost today's. They now use the organisation's own calendar.
+- **A word typed as a map position no longer becomes 0 (#945).**
+  `GeoLocation::validateCoords()` turned any text into a number, so "north" was
+  saved as latitude 0, which is a real place. It now accepts only numbers
+  (plain or exponent form; exactly 0 is still valid). On the organisation
+  page, a position typed but unusable is no longer saved; the rest of the form
+  is, the stored position stays as it was, and the message says why.
+- **"Booking saved." now appears (#1014).** The venues year schedule printed
+  no message, so saves and refusals that return there were silent.
+- **Report filters refuse two date-and-time spellings the databases misread
+  (#960).** A no-break space between date and time (read as midnight by MySQL)
+  and no space at all (no rows on MySQL, every row on MariaDB) are refused.
+
 ### Four admin pages that showed something wrong or broke (#845, #840, #817, #1008; migration 287)
 
 - **Settings page: no Edit or Delete button on a setting it would refuse (#845).** How
@@ -60,8 +264,8 @@
 - It touches no account (not even a member's using the same address) and nothing at another organisation (D-150),
   except a send-log row recorded under no organisation. The visitor is not e-mailed (D-149). Nothing is cleared
   automatically (D-140).
-- Limits, stated on the help page and in the policy: a queued copy later sent through Microsoft 365 or Google is
-  logged under the wrong organisation and is not reached (#1006); an Errors line quoting the address is deleted only
+- Limits, stated on the help page and in the policy: a queued copy later sent through Microsoft 365 or Google was
+  logged under the wrong organisation and not reached — fixed by #1006, except for rows written before it; an Errors line quoting the address is deleted only
   by the retention clear-out; an approval pressed while the request runs can still leave one row, cleared by a
   fresh request. Follow-ups #1006-#1010. Codex has not reviewed this.
 

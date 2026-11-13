@@ -23,6 +23,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Events;
+use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
@@ -100,13 +101,18 @@ if ($isLoggedIn === false && $requireCap === true && $captchaUsable === false) {
     );
 }
 
-$eventName       = trim((string) ($_POST['eventName']      ?? ''));
+// ➖ #972: the event's name and the visitor's own name are ONE line each,
+//    by the rule the approval e-mail uses too (EventSuggestions::oneLine()).
+//    Both boxes are single-line, but a request made by hand could carry line
+//    breaks, which laid out the approval e-mail in a way the administrator
+//    approving it never saw. Stored flattened, every page and the e-mail
+//    show the same words.
+$eventName       = EventSuggestions::oneLine((string) ($_POST['eventName']      ?? ''));
 $startRaw        = trim((string) ($_POST['startDateTime']  ?? ''));
 $endRaw          = trim((string) ($_POST['endDateTime']    ?? ''));
-$categoryId      = (int)         ($_POST['categoryID']     ?? 0);
 $locationName    = trim((string) ($_POST['locationName']   ?? ''));
 $description     = trim((string) ($_POST['description']    ?? ''));
-$submitterName   = trim((string) ($_POST['submitterName']  ?? ''));
+$submitterName   = EventSuggestions::oneLine((string) ($_POST['submitterName']  ?? ''));
 $submitterEmail  = trim((string) ($_POST['submitterEmail'] ?? ''));
 
 if ($eventName === '' || $startRaw === '') {
@@ -221,7 +227,16 @@ if ($submitterEmail !== '' && filter_var($submitterEmail, FILTER_VALIDATE_EMAIL)
 
 $siteId      = Site::id();
 $submitterId = $isLoggedIn === true ? (int) $_SESSION['user_id'] : null;
-$categoryArg = $categoryId > 0 ? $categoryId : null;
+$categoryArg = Events::postedIdOrNone($_POST['categoryID'] ?? null);
+// 🏷️ THE CATEGORY MUST BE THIS ORGANISATION'S (#885). The form offers only its
+//    own, but anything can be posted: another organisation's number used to be
+//    STORED on the suggestion, and a number nobody has made the database refuse
+//    the save. `Events::whyCategoryOrTypeRefused()` decides, with one answer
+//    for both, so a stranger learns nothing about other organisations.
+if ($categoryArg === false || Events::whyCategoryOrTypeRefused($mysqli, $siteId, $categoryArg, null) !== null) {
+    header('Location: ' . Site::url('calendar/submit') . '?err=category', true, 302);
+    exit();
+}
 $locArg      = $locationName !== '' ? $locationName : null;
 $descArg     = $description  !== '' ? $description  : null;
 $nameArg     = $isLoggedIn === true ? null : $submitterName;

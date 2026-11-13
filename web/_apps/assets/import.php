@@ -322,16 +322,44 @@ function assets_import_build_row(array $cells, array $mapping, int $rowNum, arra
         }
     }
 
-    // 💷 purchaseCostPounds → purchaseCostPence — strips currency symbols/
-    // thousands separators, then requires a non-negative number.
+    // 💷 purchaseCostPounds → purchaseCostPence through the ONE converter,
+    //    Currency::parseAmount() (#1004), in its FILE mode (the owner, D-153):
+    //    a spreadsheet saved with currency formatting writes "£1,234.56", so
+    //    commas between groups of three are read, and the organisation's
+    //    three-letter CODE in front, or any sign WITH A SYMBOL IN IT that
+    //    currency is written with ("£" as Gibraltar pounds in a GIP
+    //    organisation; the owner, D-165), either followed by any run of spaces,
+    //    exactly as the bank-statement import reads them. A sign made only of
+    //    letters ("R", "Rs", "kr") is not read (D-177). A refusal names a reason
+    //    only where it is certain (more than one currency marker — one fixed
+    //    sentence, Currency::manyMarkersWords() — decimals, commas,
+    //    points, a minus, too large, nothing entered, a marker while no currency
+    //    is chosen); a cell starting with a currency marker the converter
+    //    RECOGNISES (a sign listed in Currency::SIGNS_OF with a symbol in it,
+    //    capitals joined to one, or a known code followed by an amount or a
+    //    sign — never a letters-only sign such as "R" or "Rs") that is not read
+    //    as the organisation's currency is told it is not read as that currency
+    //    here, and to convert rather than relabel (rounds 10-12), naming no
+    //    other currency; every other start, an unrecognised sign included, is
+    //    "That amount could not be read." with what IS read. An asset cost
+    //    cannot be negative, so every refusal but "No amount was entered."
+    //    and the two that already say so also ends "Amounts here cannot be
+    //    negative.", whatever the cell looks like (round 20). The rows are
+    //    made in the organisation's currency, so that is the one passed. It used to strip
+    //    "£", "$", "€", every comma and every space and go through a float, so
+    //    "$12" was taken as pounds, "12,50" as 1,250.00, and an absurd figure
+    //    wrapped.
     $costRaw           = $get('purchaseCostPounds');
     $purchaseCostPence = null;
     if ($costRaw !== '') {
-        $cleaned = str_replace(['£', '$', '€', ',', ' '], '', $costRaw);
-        if (is_numeric($cleaned) === false || (float) $cleaned < 0) {
-            $errors[] = 'Purchase Cost "' . $costRaw . '" is not a valid non-negative amount.';
+        // The organisation's currency is read once per request, not once per row.
+        static $importCurrency = null;
+        $importCurrency ??= \Portal\Core\Currency::ofSite();
+        $cost = \Portal\Core\Currency::parseAmount($costRaw, $importCurrency, fromFile: true);
+        if (is_string($cost) === true) {
+            $errors[] = 'Purchase Cost "' . $costRaw . '": ' . $cost;
         } else {
-            $purchaseCostPence = (int) round(((float) $cleaned) * 100);
+            $purchaseCostPence = $cost;
         }
     }
 

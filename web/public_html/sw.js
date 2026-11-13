@@ -88,6 +88,29 @@
  *     stops the install storing a signed-in page that answers '/offline/'
  *     (see PRECACHE_ASSETS).
  *
+ * -----------------------------------------------------------------------------
+ * 🔁 WHEN THE OFFLINE PAGE CHANGES, THIS FILE MUST CHANGE TOO (#865)
+ * -----------------------------------------------------------------------------
+ * The offline page is stored once, when the worker INSTALLS, and a browser
+ * installs the worker again only when the bytes of THIS file change (that is
+ * how the Service Workers standard decides there is an update; it was not
+ * measured here). So an edit to web/public_html/offline/index.php alone never
+ * reaches a browser that already has the worker: it goes on showing its old
+ * copy. #865 made the offline page try again by itself once a minute, and
+ * this note, with the version number below, is the change that makes every
+ * installed worker fetch that page again.
+ *
+ * What is guarded by a test: tools/offline-page-selftest.mjs drives this
+ * file and the offline page in a real browser. For mayKeepCopy() it sends
+ * pages and stylesheets whose Cache-Control has "private" FIRST, AFTER
+ * another directive ("no-store, private", as the foyer screen sends), as a
+ * SECOND header line (as Auth.php adds it), and in capitals, and a
+ * stylesheet marked "no-store" — so removing either refusal, matching
+ * "private" only at the start, or dropping the lower-casing each fails it
+ * (each planted and seen red). It cannot judge a refusal rewritten to look
+ * for some OTHER spelling it does not send. It also pins that the offline
+ * page tries again by itself, and no sooner than about a minute.
+ *
  * Also handles Web Push (#322): `push` shows a notification for every
  * message (a push with an unparseable/missing body still shows a generic
  * notification — a `push` event SHOULD always display something when
@@ -100,7 +123,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.9.0
+ * @version   0.10.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/507
  * =============================================================================
  */

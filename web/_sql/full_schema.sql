@@ -1591,7 +1591,7 @@ COMMENT='Centralised error log for all platforms/libraries. See core/Logger.php.
 -- migration's header for the full model-decision rationale.
 CREATE TABLE IF NOT EXISTS `tblEmailLog` (
     `emailLogID`      INT           NOT NULL AUTO_INCREMENT COMMENT 'Unique send-log record identifier',
-    `siteID`          INT           DEFAULT NULL COMMENT 'Site::id() at send time; NULL when sent outside site context (e.g. cron)',
+    `siteID`          INT           DEFAULT NULL COMMENT 'The organisation the message was for. Sent at once: the organisation the sending request is working for (Site::id(), which a scheduled job moves with Site::forceContext() while it works for one). Sent later by the mail job from the queue: the queue row''s own organisation, whichever route writes the line (Mailer::queueRowSite(), #683, #1006). NULL when a queued message was kept for no organisation, or when the organisation has since been deleted (ON DELETE SET NULL)',
     `provider`        VARCHAR(20)   NOT NULL COMMENT 'The route the attempt was made through: ms365, ms365-shared, google or smtp',
     `fromAddress`     VARCHAR(255)  NOT NULL DEFAULT '' COMMENT 'Effective sender address at send time',
     `toRecipients`    TEXT          NOT NULL COMMENT 'Comma-joined recipient address list',
@@ -11805,6 +11805,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('286_erasure_by_visitor_address
 -- the migration's carry-over of an existing unfinished run has nothing to act
 -- on; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('287_scheduled_jobs_count_unfinished_runs.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 288_email_log_site_comment.sql (#1040) ─────────────────────────────
+-- tblEmailLog.siteID's comment is written above, in the table itself; the
+-- migration rewrites only that comment on a database that already exists.
+-- This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('288_email_log_site_comment.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

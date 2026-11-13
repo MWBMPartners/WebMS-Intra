@@ -37,6 +37,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\ByteRange;
 use Portal\Core\Router;
 
 // 🛡️ Strict token format — 32 lowercase hex chars (bin2hex(random_bytes(16)))
@@ -83,10 +84,27 @@ if (is_readable($filePath) === false) {
 
 // 📤 Serve — long-lived public cache is safe: the filename is random and
 //    content-addressed in practice (a new upload always mints a new token).
+//
+//    🎞️ The bytes go out through `ByteRange::send()` (#880), the ONE place a
+//    `Range:` request is answered. A poster can be a VIDEO, and Safari will
+//    not play a video from a server that cannot send it in pieces (206 with
+//    `Content-Range`, and `Accept-Ranges: bytes` on every answer). This
+//    used to send `Content-Length` and the whole file with `readfile()`,
+//    which every other browser accepted and Safari did not. `send()` sets
+//    `Content-Length` itself, because for a piece it is the piece's length.
+//    Every check above — the name's shape, the ledger row, the file being
+//    there — still comes first: nothing is sent until they have all passed.
 $mimeType = (string) ($upload['mimeType'] ?? 'application/octet-stream');
 header('Content-Type: ' . $mimeType);
-header('Content-Length: ' . (string) filesize($filePath));
 header('Cache-Control: public, max-age=31536000, immutable');
 header('X-Content-Type-Options: nosniff');
-readfile($filePath);
+if (ByteRange::send($filePath) === false) {
+    // The file could not be opened after all. `send()` sent nothing, so the
+    // ordinary "not found" page can still be drawn — without the headers
+    // set above for a file that is not coming.
+    header_remove('Content-Type');
+    header_remove('Cache-Control');
+    Router::renderError(404);
+    return;
+}
 exit();

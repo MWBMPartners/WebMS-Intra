@@ -1462,8 +1462,9 @@ check('X3 on an invoice of 20.00: 15.00 is accepted, 6.00 (over by 1.00) is refu
     $paidOn($stepInvoice) === [1500, 500], json_encode($paidOn($stepInvoice)));
 
 // A1/A2: an allocation that fails says WHY truly (round 7): the same booking twice is
-// "already allocated"; any other failure — here an amount too large for the column,
-// which the database refuses — is not.
+// "already allocated"; any other failure is not. Since #1004 an amount too large for
+// the column never reaches the database: Currency::parseAmount() refuses it in the
+// handler, saying what the column can hold, so A1 now reads that sentence.
 run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 2000, 'EUR', 'pending')", 'ii', [$site, $venue]);
 $allocInvoice = (int) $db->insert_id;
 $made['invoices'][] = $allocInvoice;
@@ -1474,8 +1475,8 @@ $tooBig = html_entity_decode($http('GET', '/venues/invoice?id=' . $allocInvoice)
 $allocate('10.00');
 $allocate('10.00');
 $twice = html_entity_decode($http('GET', '/venues/invoice?id=' . $allocInvoice)['body'], ENT_QUOTES, 'UTF-8');
-check('A1 an allocation the database refuses for another reason (an amount too large for the column) says so — not "already allocated", and not "try again", which would fail the same way',
-    str_contains($tooBig, 'The amount is too large to store. Nothing was allocated.') === true && str_contains($tooBig, 'already allocated') === false
+check('A1 an allocation refused for another reason (an amount too large for the column, refused by the converter before the database, #1004) says so — not "already allocated", and not "try again", which would fail the same way',
+    str_contains($tooBig, 'That amount is too large: the most that can be stored here is 21,474,836.47. Nothing was allocated.') === true && str_contains($tooBig, 'already allocated') === false
     && str_contains($tooBig, 'try again') === false);
 check('A2 allocating the same booking twice IS reported as "already allocated", and only one line exists',
     str_contains($twice, 'already allocated to this invoice') === true

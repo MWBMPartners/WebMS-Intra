@@ -165,6 +165,67 @@ class Mailer
     private static ?int $firstTriedAt = null;
 
     /**
+     * 🏷️ The names of real HTML elements, for looksLikeHtml() (#971).
+     *
+     * Every element of the HTML Living Standard (https://html.spec.whatwg.org/
+     * #elements-3), plus the old ones e-mail still uses (`center`, `font`,
+     * `big`, `strike`, `tt`). A tag whose name is not on this list is not HTML
+     * anybody here writes: `<x>`, `<Supper>` and `<you@example.org>` are
+     * ordinary text that happens to hold a "<".
+     */
+    private const HTML_ELEMENTS = [
+        'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'big', 'blockquote',
+        'body', 'br', 'button', 'canvas', 'caption', 'center', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist',
+        'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure',
+        'font', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i',
+        'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu', 'meta',
+        'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'param', 'picture', 'pre',
+        'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'search', 'section', 'select', 'slot', 'small',
+        'source', 'span', 'strike', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template',
+        'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'tt', 'u', 'ul', 'var', 'video', 'wbr',
+    ];
+
+    /**
+     * 🔍 Does a body the caller did NOT describe look like HTML? The ONE place
+     * that guess is made (#971): send() and renderBase() both ask it, and
+     * there is no second copy of the pattern.
+     *
+     * A body that looks like HTML is sent EXACTLY as written: no escaping and
+     * no branded layout, so no footer either. A body that does not is escaped
+     * once and wrapped in the layout, footer and all.
+     *
+     * WHY IT NAMES REAL ELEMENTS. Until #971 the guess was "a `<`, a letter,
+     * then a `>` somewhere later", which ordinary text satisfies. A plain
+     * message whose BODY held such a name - the e-mail page's test message
+     * names the organisation (`site.name`, typed on a settings page), and the
+     * "a password was added" notice names the product (`product.name`, chosen
+     * at install) - was taken for "HTML" when that name was, say,
+     * `St Ann's <x> & Co`: the `&` went out unescaped, the line breaks were
+     * lost and the footer disappeared. (The backup alert names the
+     * organisation in its SUBJECT only, which this guess never sees, so it was
+     * never affected.) Now the tag must be a real element's (`<p`, `</strong`,
+     * `<br/` …) or a doctype, followed by a space, `/` or `>`; `<x>`,
+     * `<Supper>` and `<sup` at the start of `<Supper>` are not.
+     *
+     * WHAT IT STILL CANNOT DO: tell a name that HAPPENS to be an element from
+     * markup. `St <Mark> & Co`, `<Main Hall>` and `<Title>` all name real
+     * elements (`mark`, `main`, `title`), so text holding them is still taken
+     * for HTML. That is why a caller whose body is plain text says so with
+     * `bodyIsText` (#859, #971) rather than relying on this guess - and why
+     * anything typed by somebody outside the organisation must never reach it
+     * at all.
+     */
+    public static function looksLikeHtml(string $body): bool
+    {
+        static $pattern = null;
+        if ($pattern === null) {
+            $pattern = '/<(?:!doctype\b|\/?(?:' . implode('|', self::HTML_ELEMENTS) . ')(?=[\s\/>]))[^>]*>/i';
+        }
+
+        return preg_match($pattern, $body) === 1;
+    }
+
+    /**
      * 🧭 Which route send() will use: ROUTE_GOOGLE, ROUTE_SMTP or ROUTE_MS365.
      *
      * `mail.provider = 'google'` means Google and `'smtp'` means SMTP. Every
@@ -334,7 +395,8 @@ class Mailer
      *
      * @param string|array $to      Recipient (single email or array)
      * @param string       $subj    Email subject line
-     * @param string       $body    Body — auto-detected as HTML if it contains `<` tags
+     * @param string       $body    Body — taken as HTML when looksLikeHtml() says so,
+     *                              unless `bodyIsText` is passed (#971)
      * @param array        $files   File paths to attach
      * @param array        $options What the caller knows about the message
      *                              (every part is optional):
@@ -392,11 +454,14 @@ class Mailer
         //    using send() directly get the auto-wrap behaviour.
         // 🛡️ `bodyIsText` (#859): the caller KNOWS the body is plain text, so
         //    no guess is made. The guess is a pattern, and a pattern is
-        //    satisfied by text a stranger typed ("Fish & Chips <Supper>", or
-        //    a name carrying `<a href=…>`), which would then be sent as
-        //    written. Callers who leave it out keep the guess unchanged.
+        //    satisfied by text a stranger typed (a name carrying `<a href=…>`,
+        //    or one that merely names a real element, such as `St <Mark> & Co`),
+        //    which would then be sent as written. Before #971 even
+        //    "Fish & Chips <Supper>" was. Callers who leave it out keep the
+        //    guess (looksLikeHtml()).
+        //    The guess itself is looksLikeHtml(), the one place it is made (#971).
         $bodyIsText    = ($options['bodyIsText'] ?? false) === true;
-        $looksLikeHtml = $bodyIsText === false && (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
+        $looksLikeHtml = $bodyIsText === false && self::looksLikeHtml($body) === true;
         // 🏷️ Which organisation's footer (#683). A scheduled job that walks
         //    several organisations must say which one each message belongs to,
         //    because the request's merged settings were fixed before the walk
@@ -876,9 +941,20 @@ class Mailer
                 'words' => 'Not sent: ' . self::ROUTES[$route] . ' has no way past a failed certificate check. Nothing was tried.'] + $answer;
         }
         try {
+            // 🏢 THE MESSAGE'S OWN ORGANISATION goes with it (#1006). These
+            //    two routes write their own send-log line (`ownLog` above),
+            //    and without it they wrote it under Site::id(): in the
+            //    scheduled job that is whichever organisation the job's own
+            //    request resolved to, not the one the message was for. An
+            //    erasure that finds send-log rows by organisation (#964's
+            //    visitor request) then missed that row, and the organisation
+            //    the message was for had no record of sending it. SMTP never
+            //    had the fault: logQueueAttempt() writes its line, and has
+            //    always passed the row's organisation.
+            $site = self::queueRowSite($row);
             $sent = $route === self::ROUTE_GOOGLE
-                ? MailerGoogle::send($to, (string) $row['subject'], $html, $files)
-                : self::sendViaGraph($to, (string) $row['subject'], $html, $files);
+                ? MailerGoogle::send($to, (string) $row['subject'], $html, $files, $site)
+                : self::sendViaGraph($to, (string) $row['subject'], $html, $files, $site);
         } catch (\Throwable $e) {
             // These routes throw when a setting is missing. The exception's
             // text names the setting, never the message.
@@ -908,10 +984,10 @@ class Mailer
     public static function logQueueAttempt(array $row, array $answer, string $status): void
     {
         if (($answer['ownLog'] ?? false) === true) {
-            return; // Microsoft 365 and Google wrote their own line
+            return; // Microsoft 365 and Google wrote their own line, under the row's organisation (#1006)
         }
         $to     = array_map('trim', explode(',', (string) $row['toRecipients']));
-        $siteId = $row['siteID'] === null ? null : (int) $row['siteID'];
+        $siteId = self::queueRowSite($row);
         if (self::route() === self::ROUTE_SMTP && isset($answer['from']) === true && $answer['from'] !== '') {
             self::logSmtp($answer, $to, (string) $row['subject'], $status, $status === 'failed' || $status === 'held', $siteId);
 
@@ -935,8 +1011,24 @@ class Mailer
     {
         self::logSend(
             self::route(), '', (string) $row['toRecipients'], (string) $row['subject'], (int) ($row['attachmentCount'] ?? 0), $status, null, $code, $words,
-            $row['siteID'] === null ? null : (int) $row['siteID']
+            self::queueRowSite($row)
         );
+    }
+
+    /**
+     * 🏢 The organisation a waiting message is FOR: its queue row's own
+     * `siteID`, or none. The ONE place the mail job's send-log lines take
+     * their organisation from (#1006), whichever line writes it - the queue's
+     * own (logQueueAttempt(), logQueueEvent()) or a route's (deliverQueued()
+     * hands it to Microsoft 365 and Google, which write their own). Never
+     * Site::id(): the job has no organisation of its own, and the one its
+     * request resolved to is not the message's.
+     *
+     * @param array<string, mixed> $row The queue row.
+     */
+    private static function queueRowSite(array $row): ?int
+    {
+        return ($row['siteID'] ?? null) === null ? null : (int) $row['siteID'];
     }
 
     /**
@@ -961,7 +1053,9 @@ class Mailer
      */
     public static function testSmtp(string $to, string $subject, string $text): array
     {
-        return self::sendViaSmtp([$to], $subject, self::renderBase($text), $text, []);
+        // `true`: the test message is plain text naming the organisation, so it
+        //    is escaped once and never guessed at (#971).
+        return self::sendViaSmtp([$to], $subject, self::renderBase($text, null, true), $text, []);
     }
 
     /**
@@ -1143,9 +1237,9 @@ class Mailer
      * footerFactsFor() (#683).
      *
      * $contentIsText true (#859, send()'s `bodyIsText`): the content is plain
-     * text and is ALWAYS escaped. This method guesses too, with the same
-     * pattern as send(), so skipping send()'s guess alone was not enough:
-     * the text would have reached this one and been taken as HTML here.
+     * text and is ALWAYS escaped. This method guesses too, by asking the same
+     * looksLikeHtml() as send(), so skipping send()'s guess alone was not
+     * enough: the text would have reached this one and been taken as HTML here.
      */
     private static function renderBase(string $content, ?int $siteId = null, bool $contentIsText = false): string
     {
@@ -1158,7 +1252,7 @@ class Mailer
             // 🪞 Base template missing — return the content as-is wrapped in
             //    a minimal HTML shell so the email still renders.
             return '<!doctype html><html><body style="font-family:system-ui">'
-                 . ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+                 . ($contentIsText === false && self::looksLikeHtml($content) === true
                     ? $content
                     : '<pre style="white-space:pre-wrap">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>')
                  . '</body></html>';
@@ -1181,7 +1275,7 @@ class Mailer
         $portalUrl     = PortalAddress::absolute('', $siteId);
         $supportEmail  = $footer['support'];
         // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
-        $contentHtml = ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1)
+        $contentHtml = ($contentIsText === false && self::looksLikeHtml($content) === true)
             ? $content
             : '<p>' . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</p>';
 
@@ -1284,10 +1378,15 @@ class Mailer
      * @param string $subj  Subject
      * @param string $html  HTML body
      * @param array  $files File paths to attach
+     * @param int|false|null $forSiteId The organisation the send-log line is
+     *        recorded under, as logSend()'s last argument: false (the
+     *        default) for this request's, which is right for a page sending
+     *        now; the queue row's for a message the mail job sends later
+     *        (#1006). Handed on to the Google fallback, which writes its own.
      *
      * @return bool True if sent successfully
      */
-    private static function sendViaGraph(array $to, string $subj, string $html, array $files = []): bool
+    private static function sendViaGraph(array $to, string $subj, string $html, array $files = [], int|false|null $forSiteId = false): bool
     {
         global $SETTINGS;
 
@@ -1356,7 +1455,7 @@ class Mailer
         }
 
         if ($result['code'] >= 200 && $result['code'] < 300) {
-            self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'sent', $result['code'], '', '');
+            self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'sent', $result['code'], '', '', $forSiteId);
             return true;
         }
 
@@ -1370,7 +1469,7 @@ class Mailer
         $errMessage = (string) ($errData['error']['message'] ?? (string) $result['body']);
 
         Logger::errorPlatform('Graph', 'Error', (string) $result['code'], 'Mail send fail', $errCode . ': ' . $errMessage);
-        self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'failed', $result['code'] > 0 ? $result['code'] : null, $errCode, $errMessage);
+        self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'failed', $result['code'] > 0 ? $result['code'] : null, $errCode, $errMessage, $forSiteId);
 
         // 🪂 Optional opt-in fallback (default OFF — a silent failover
         //    changes the visible sending identity and can break DMARC
@@ -1379,7 +1478,7 @@ class Mailer
         if ($fallback === 'google') {
             try {
                 if (MailerGoogle::isConfigured() === true) {
-                    return MailerGoogle::send($to, $subj, $html, $files);
+                    return MailerGoogle::send($to, $subj, $html, $files, $forSiteId);
                 }
             } catch (\Throwable $e) {
                 Logger::errorPlatform('Graph', 'Error', 'FALLBACK_FAIL', 'Google fallback failed', $e->getMessage());

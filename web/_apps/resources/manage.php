@@ -58,7 +58,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             $cap = $capacity > 0 ? $capacity : null;
             $loc = $location !== '' ? $location : null;
             $desc = $description !== '' ? $description : null;
-            $ratePence = ($rate !== '' && is_numeric($rate)) ? (int) round(((float) $rate) * 100) : null;
+            // 💷 A blank box means no rate. Any other text is read by the ONE
+            //    converter, Currency::parseAmount() (#1004): a figure that could
+            //    not be read used to clear the rate without a word, and an absurd
+            //    one wrapped through a float. A refusal is thrown to the catch
+            //    below, before anything is written. Figures only (D-152).
+            $ratePence = null;
+            if (trim($rate) !== '') {
+                $ratePence = \Portal\Core\Currency::parseAmount($rate, '');
+                if (is_string($ratePence) === true) {
+                    throw new \RuntimeException('Hourly rate: ' . $ratePence . ' Nothing was saved.');
+                }
+            }
 
             // 📍 #456 Chunk A — validated the same as every other new
             // location field; invalid non-empty W3W throws (caught below,

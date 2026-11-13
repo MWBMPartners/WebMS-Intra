@@ -1458,6 +1458,14 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `ics-reader-selftest.php`, `safefetch-selftest.php` and
     `import-notifier-selftest.php`. The technical record is DEV_NOTES.md,
     "Outside calendars (#514)".
+    `Events::whyCategoryOrTypeRefused()` is the ONE judge of an event's category/type number (#885);
+    `Events::soonestByRealStart()` the ONE order for a "next N events" list (#811); `Events::startAsUtcMoment()` is the ONE place a paged or limited event list gets its real-time order (#1024, #1025); a job over every organisation reads each one's date and hour inside its loop (#1028). a decision on a
+    waiting imported date re-works its calendar first (`inFeedLock($resolveFirst)`, D-180, #855), and
+    which dates "now follow your decision" comes only from `resolveFeed()`'s `followers`, never from note text.
+    `Mailer::looksLikeHtml()` is the ONE place a body is guessed to be HTML (#971): a real element only,
+    which a name can still be, so a caller sending plain text says `bodyIsText`; `EventSuggestions::oneLine()`
+    is the ONE rule for a visitor's one-line values (#972, #1020); the newsletter choice is saved only when
+    `Newsletter::choiceFromPost()` sees its marker for this organisation AND the member changed the box (#875).
 
     **Changing a repeating series' pattern (#669, migration 232).**
     `Portal\Core\SeriesRepattern` is the ONE place that decides what a
@@ -3215,6 +3223,7 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   account without `check()` ask `AccountGuard::checkNotErased()`. Test: section M of `tools/erasure-pages-selftest.php`.
   **A visitor (no account) is erased only by a `visitor_address` request (#964; D-140, D-148 to D-150):** `GdprEraser::fileVisitorAddressRequest()` / `executeVisitorAddress()` — this organisation's suggestions, pre-#963 activity records and approval e-mails only, never an account.
   **A worker's download lists the records carrying their name (#929; D-142, D-151):** `GdprEraser::recordsCarryingYourName()` is the ONE place — kind, day and organisation only; other organisations counted; hard gate `check_worker_records_listed.py`.
+  **The anonymous prayer form names nobody (#988, #1009):** `Logger::activityNamingNobody()` is the ONE way to write a record that names nobody, only where a page promises anonymity (gate `check_activity_naming_nobody.py`); an e-mail-address erasure request also empties anonymous prayer requests (D-176), and is never described as being for an address with "no account". `Geocoder::answer()` is the ONE place an address look-up answer is built (fresh, cached, either provider) and it must be a real position, never 0,0 from nothing; the cache is kept per country (#1034, #1035). A queued message's send-log line is under the queue row's organisation whatever the route (`Mailer::queueRowSite()`, #1006); on the Microsoft 365 and Google routes every `return false` writes its own line and a throw writes none, so the queue writes it (#1043); a refused reCAPTCHA v3 answer on a form in `Captcha::PROMISES_ANONYMITY` names nobody (#1017); `tools/https-standin.php` stands in for Microsoft 365, Google and reCAPTCHA in a test, set up through `tools/https-standin-client.php`.
   **A member's own DBS checks reach their full data copy only through `GdprEraser::dbsChecksAboutYou()`**, which My data's count also asks (#1012, D-154); `inventory()` shows a failed read as "could not be read", never none.
 - **Currency (#966; D-133, D-139).** `Portal\Core\Currency` is the ONE place: the organisation's currency
   (`org.currency`, own row else the installation's, else none = plain numbers, never "£"; changeable), what a
@@ -3222,6 +3231,9 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   every money row keeps its own `currency`, an edit writes it only through `Currency::onEdit()` (hard gate
   `check_currency_writes.py`), totals add up per currency (`addTo()`/`totalsLines()`), and an expense
   line goes through `ExpenseRules::expenseLine()` (quoted and converted). Test: `tools/currency-selftest.php`.
+  `Currency::parseAmount()` is the ONE place typed money becomes hundredths (#1004): figures only (D-152), never a float; `fromFile` is the bank and asset imports' alone (D-153) and reads the organisation's own symbol sign (D-165, `Currency::SIGNS_OF`), never a letters-only one (D-177); a file refusal never guesses another currency, and every one ends with how negatives stand there; prefill a money box with plain figures. Hard gate `check_no_float_money.py`; test `tools/money-amount-selftest.php`. `Portal\Core\ByteRange` is the ONE place a `Range:` request is answered (#880): call `send()` after every access check, never parse `HTTP_RANGE` in a page; `check_no_deprecated_php_functions.py` refuses any call to a function PHP deprecates (#1003).
+  **The general settings editor's row rules (#1021).** `Portal\Core\SettingsRowRule` is the ONE place that decides which ROWS an administrator of one organisation may not change on `/settings` (portal-wide, "public" name, unsafe stored name) and the ONE SQL text for it; the page, the save and the delete all ask it. Test: section R of `tools/settings-locks-selftest.php`. **A deleted asset is never updated (#1031).** `AssetRegister::updateAsset()` re-reads the row under the lock with `isDeleted = 0`; the API answers 404 as for any missing asset. Test: sections D and E of `tools/assets-api-update-selftest.php`.
+  **The discipleship sweep completes steps only for people who still belong (#824):** `Discipleship::peopleWhoStillBelong()` asks `Site::isOwnOrganisation()` (one organisation: the account's own switch); never join `tblUserSites` in the sweep. Test: X18m–X18q of `tools/time-zones-selftest.php`. **The offline page retries by itself; change `sw.js` whenever it changes (#865).** Test: `tools/offline-page-selftest.mjs` (real browser), which also pins `mayKeepCopy()`'s refusal of anything `private`.
 - **No place is built in either (#935, migration 274).** `Sabbath::place()` is the
   ONE answer to where sunset is worked out (typed place, else the organisation's
   map position, else none and the fixed times, said on the page);

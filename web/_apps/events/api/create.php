@@ -18,8 +18,9 @@
  *                                                when left out)
  *     "isAllDay":       false,                   (optional, default false)
  *     "locationName":   "Main Hall",            (optional)
- *     "categoryID":     7,                       (optional)
- *     "typeID":         3,                       (optional)
+ *     "categoryID":     7,                       (optional; this organisation's
+ *                                                own, else 422 — #885)
+ *     "typeID":         3,                       (optional; likewise)
  *     "status":         "published",             (optional, default "draft")
  *     "isPublic":       true,                    (optional, default false — D-079)
  *     "description":    "Order of service…"     (optional)
@@ -194,10 +195,26 @@ if (in_array($status, ['draft', 'published', 'cancelled', 'postponed'], true) ==
     // in so far as nobody has decided to make them agree.
     $status = 'draft';
 }
-$categoryId = isset($body['categoryID']) === true && $body['categoryID'] !== null && $body['categoryID'] !== ''
-    ? (int) $body['categoryID'] : null;
-$typeId     = isset($body['typeID']) === true && $body['typeID'] !== null && $body['typeID'] !== ''
-    ? (int) $body['typeID'] : null;
+// 🏷️ THE CATEGORY AND THE EVENT TYPE MUST BE THIS ORGANISATION'S (#885).
+//    These went into the INSERT as `(int)` of whatever was sent, so a number
+//    no row has made the database refuse its link and this answered a bare
+//    500 — and a number of ANOTHER organisation's category was accepted and
+//    stored. `Events::whyCategoryOrTypeRefused()` is the ONE place that
+//    decides, and it gives "another organisation's" and "nobody's" the same
+//    words. Asked BEFORE anything is written.
+$categoryId = Events::postedIdOrNone($body['categoryID'] ?? null);
+$typeId     = Events::postedIdOrNone($body['typeID'] ?? null);
+if ($categoryId === false || $typeId === false) {
+    ApiResponse::error(
+        ($categoryId === false ? 'categoryID' : 'typeID') . ' must be the number of one of this organisation\'s own '
+        . ($categoryId === false ? 'event categories' : 'event types') . ' (a whole number above 0), or null, 0 or left out for none. Nothing was created.',
+        422
+    );
+}
+$taxonomyRefusal = Events::whyCategoryOrTypeRefused(App::db(), Site::id(), $categoryId, $typeId);
+if ($taxonomyRefusal !== null) {
+    ApiResponse::error($taxonomyRefusal . ' Nothing was created.', 422);
+}
 $description = (string) ($body['description'] ?? '');
 
 // 📍 #456 Chunk A — optional location fields, additive to the create

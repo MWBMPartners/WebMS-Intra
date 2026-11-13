@@ -77,17 +77,10 @@ if ($action === 'cancel') {
 // -----------------------------------------------------------------------------
 // 💾 Save — new pledge, or update of the pledger's own existing row.
 // -----------------------------------------------------------------------------
-$amount   = Giving::parseAmount((string) ($_POST['amount'] ?? ''));
+$amountTyped = is_string($_POST['amount'] ?? null) === true ? (string) $_POST['amount'] : '';
 $schedule = (string) ($_POST['paymentSchedule'] ?? 'monthly');
 if (in_array($schedule, ['one-off', 'weekly', 'monthly'], true) === false) {
     $schedule = 'monthly';
-}
-
-if ($amount <= 0) {
-    $_SESSION['flash_msg']  = 'Enter a pledge amount greater than zero.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
-    exit();
 }
 
 // 🛡️ Validate the campaign accepts new pledges: exists at this site, is
@@ -109,6 +102,24 @@ if ($stmt !== false) {
 }
 if ($campaign === null) {
     $_SESSION['flash_msg']  = 'This campaign is not currently accepting pledges.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
+    exit();
+}
+
+// 💷 The pledge is read by the ONE converter, Currency::parseAmount() (#1004),
+//    in the CAMPAIGN's currency, which the pledge is stored in (D-139) — so it
+//    is read only once the campaign is known. A figure it refuses is said back
+//    with the reason; an empty box or 0 keeps the old sentence.
+$amount = \Portal\Core\Currency::parseAmount($amountTyped, (string) $campaign['currency']);
+if (trim($amountTyped) !== '' && is_string($amount) === true) {
+    $_SESSION['flash_msg']  = 'Pledge amount: ' . $amount . ' Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
+    exit();
+}
+if (is_string($amount) === true || $amount <= 0) {
+    $_SESSION['flash_msg']  = 'Enter a pledge amount greater than zero.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('giving/campaign') . '?id=' . $campaignId);
     exit();

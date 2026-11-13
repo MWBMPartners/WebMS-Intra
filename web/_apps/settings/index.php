@@ -52,6 +52,7 @@ use Portal\Core\Logger;
 use Portal\Core\MailRoutes;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
+use Portal\Core\SettingsRowRule;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
@@ -429,49 +430,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         }
 
         if ($target !== null) {
-            $targetKey = (string) $target['settingKey'];
-
-            if ($target['siteID'] === null) {
-                $_SESSION['flash_msg']  = 'That setting is portal-wide: it is '
-                    . 'the value every organisation on this installation uses '
-                    . 'unless it has set its own. Only a global administrator '
-                    . 'can delete it.';
-                $_SESSION['flash_type'] = 'danger';
-                header('Location: ' . Site::url('settings'));
-                exit();
-            }
-
-            // 🔡 "public" on its own, or a name beginning "public.", in ANY
-            //    letter case. The database compares setting names without
-            //    regard to capital and small letters, so to it
-            //    "PUBLIC.example" is the same name as "public.example". The
-            //    first version of this test was case-sensitive and missed it.
-            //    The second missed the bare name "public", which replaces
-            //    every "public." setting when the portal loads its settings
-            //    (the full note is in web/_apps/settings/save.php).
-            if (strcasecmp($targetKey, 'public') === 0 || strncasecmp($targetKey, 'public.', 7) === 0) {
-                $_SESSION['flash_msg']  = 'The setting called "public", and every '
-                    . 'setting whose name begins "public.", control the public '
-                    . 'website, which anybody on the internet can read without '
-                    . 'signing in. Only a global administrator can delete those.';
-                $_SESSION['flash_type'] = 'danger';
-                header('Location: ' . Site::url('settings'));
-                exit();
-            }
-
-            // 🔤 A stored name using anything other than A to Z, digits, full
-            //    stops, hyphens and underscores is reserved too. The database
-            //    can treat such a name as EQUAL to a protected one: an accent
-            //    typed as a separate mark, full-width letters, or an invisible
-            //    character all compare equal to "public.example" on MySQL
-            //    8.0.36, while failing a character-by-character test. The same
-            //    rule, and the reasons for it, are in web/_apps/settings/save.php.
-            if (preg_match('/^[A-Za-z0-9._-]+\z/', $targetKey) !== 1) {
-                $_SESSION['flash_msg']  = 'This setting\'s name contains characters '
-                    . 'other than the letters A to Z, numbers, full stops (.), '
-                    . 'hyphens (-) and underscores (_). The database can treat a '
-                    . 'name like that as the same name as a protected setting, so '
-                    . 'only a global administrator can delete it.';
+            // 🚧 The row rules, asked of the ONE place that decides them
+            //    (#1021): a portal-wide row, a "public" / "public." name in any
+            //    letter case, and a stored name outside the safe characters.
+            //    The reasons for each, and what was measured, are in
+            //    SettingsRowRule. Asked with the name STORED, never one posted.
+            $rowRefusal = SettingsRowRule::whyNotChangeable(
+                (string) $target['settingKey'],
+                $target['siteID'] === null,
+                $isRoot
+            );
+            if ($rowRefusal !== null) {
+                $_SESSION['flash_msg']  = SettingsRowRule::refusalWords($rowRefusal, 'delete');
                 $_SESSION['flash_type'] = 'danger';
                 header('Location: ' . Site::url('settings'));
                 exit();
@@ -499,10 +469,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             //      - when $globalFlag is 0, the name must be made only of A to
             //        Z, digits, full stops, hyphens and underscores, must not
             //        be empty, and must not be "public" or begin "public.", in
-            //        any letter case. This is the same text as $nameRuleSql in
-            //        web/_apps/settings/save.php, which explains each part and
-            //        what was checked on MySQL 8.0.36; if one changes, change
-            //        both. WHAT WAS WRONG: this used to test only
+            //        any letter case. That text is SettingsRowRule::nameRuleSql(),
+            //        the same text the save handler's UPDATE carries (#1021: it
+            //        used to be typed out here AND in save.php, under "if one
+            //        changes, change both"). WHAT WAS WRONG: this used to test only
             //        LOWER(settingKey) NOT LIKE 'public.%', which misses the
             //        bare name "public" and names the database treats as equal
             //        to a "public." name while LIKE does not (an accent typed as
@@ -518,14 +488,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             $globalFlag  = (int) $isRoot;
             $rowsDeleted = 0;
             $stmt = $mysqli->prepare(
-                'DELETE FROM tblSettings '
-                . 'WHERE settingID = ? '
-                . 'AND (siteID = ? OR (siteID IS NULL AND ? = 1)) '
-                . "AND (? = 1 OR (CHAR_LENGTH(settingKey) = LENGTH(settingKey) "
-                . "AND settingKey COLLATE utf8mb4_bin NOT REGEXP '[^A-Za-z0-9._-]' "
-                . "AND settingKey <> '' "
-                . "AND LOWER(settingKey) <> 'public' "
-                . "AND LOWER(settingKey) NOT LIKE 'public.%'))"
+                'DELETE FROM `tblSettings` '
+                . 'WHERE `settingID` = ? '
+                . 'AND (`siteID` = ? OR (`siteID` IS NULL AND ? = 1)) '
+                . 'AND ' . SettingsRowRule::nameRuleSql()
             );
             if ($stmt !== false) {
                 $stmt->bind_param('iiii', $deleteId, $deleteSiteId, $globalFlag, $globalFlag);
@@ -854,11 +820,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    row here. tools/settings-locks-selftest.php (sections S and
                                     //    D) fails when a lock method in web/_core is not asked here,
                                     //    or when a locked row draws either button.
+                                    // 🚧 #1021: the ROW rules, asked of the ONE place the save
+                                    //    and delete handlers ask (SettingsRowRule): for anybody
+                                    //    but a global administrator, a portal-wide row, a "public"
+                                    //    name and a stored name outside the safe characters are
+                                    //    refused whatever the setting is. This drawing used to ask
+                                    //    none of them, so an organisation's own administrator was
+                                    //    offered Edit on every portal-wide row — hundreds on an
+                                    //    ordinary installation — and pressing it was refused. Its
+                                    //    note comes LAST in the chain below, because the save
+                                    //    handler asks the setting rules first: a row that is both
+                                    //    is explained by the page where it IS changed. Section R
+                                    //    of tools/settings-locks-selftest.php presses Save on every
+                                    //    row drawn and fails where the drawing and the save differ.
+                                    $rowRefusal = SettingsRowRule::whyNotChangeable((string) $row['settingKey'], $row['siteID'] === null, $isRoot);
                                     $editLocked = $givingLocked === true || $organisationsLocked === true || $mailLocked === true
                                         || $versionLocked === true || $capabilityLocksLocked === true || $zoneLocked === true
                                         || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
                                         || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
-                                        || $transcriptLocked === true || $currencyLocked === true;
+                                        || $transcriptLocked === true || $currencyLocked === true || $rowRefusal !== null;
                                     $deleteLocked = $editLocked === true || $isGivingRule === true;
                                     ?>
                                     <?php if ($editLocked === true): ?>
@@ -917,6 +897,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/transcription'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Transcript retention</a>
                                     <?php elseif ($currencyLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Organisation</a>
+                                    <?php elseif ($rowRefusal !== null): ?>
+                                        <?php /* #1021: no link — there is no page where this person could change it either. */ ?>
+                                        <span class="small text-secondary" data-row-refusal="<?php echo htmlspecialchars($rowRefusal, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(SettingsRowRule::noteWords($rowRefusal), ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php endif; ?>
                                     </span>
                                     <?php else: ?>

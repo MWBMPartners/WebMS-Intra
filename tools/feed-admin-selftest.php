@@ -393,7 +393,7 @@ if (($argv[1] ?? '') === '--hold-lock') {
 //    running" in the header). Change them only together with a check.
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
-const EXPECTED_D      = 612;  // part D: (#493 P1 adds 2 to D39: the copy's website half under both copied-in rules; and 1 to D5: the label under the stricter rule) 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
+const EXPECTED_D      = 619;  // part D: (#855 round 4 adds 4 more to D20: the typed note, the two plural wordings, followers of other dates) (#855 round 3 adds 2 more to D20: probe 3 and the in-place refresh) (#855 adds 1 to D20: an item really "changed" stays so beside a decided one) (#493 P1 adds 2 to D39: the copy's website half under both copied-in rules; and 1 to D5: the label under the stricter rule) 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
 const EXPECTED_W      = 315;  // part W: (#493 P1 round 12 adds 1 to W30: a save drawn as new refused under the lock) 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9); #514 part 11 adds 2 to W50 (the guide's "told" section, and the approvals help's two switches)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
@@ -9313,6 +9313,168 @@ pa_ok(
     pa_show([$rResolve20, $rStaleC])
 );
 
+// #855 (D-180), the over-reach direction of step 5's after-resolve read: an
+// item that was really "changed" must STILL be reported so when another item
+// of the same request IS decided. Two one-off dates; the second is sent with
+// a request fingerprint the page never showed. Only the first is decided, and
+// the second's row stays waiting under the one request it really has.
+pa_resetWorld();
+$mixEv1 = pa_event(FA1, 'd20-mix-1@p8', 'D20 mix one');
+$mixEv2 = pa_event(FA1, 'd20-mix-2@p8', 'D20 mix two');
+$rMix   = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 mix', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 mix']]]);
+$pMix1  = pa_pending($mixEv1);
+$pMix2  = pa_pending($mixEv2);
+$dMix   = ($rMix['ok'] !== true || $pMix1 === null || $pMix2 === null) ? ['decided' => -1, 'changed' => -1, 'message' => '']
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pMix1),
+        ['approvalID' => (int) $pMix2['approvalID'], 'requestHash' => str_repeat('a', 64), 'contentHash' => $pMix2['contentHash']]]);
+pa_ok(
+    'D20 one date decided and one sent with a fingerprint the page never showed, in ONE call: decided 1, changed 1, exactly "Approved 1. 1 had changed since you opened the page; please review it again." — the second is not counted because the first was decided (#855, step 5)',
+    $dMix['decided'] === 1 && ($dMix['changed'] ?? -1) === 1
+    && $dMix['message'] === 'Approved 1. 1 had changed since you opened the page; please review it again.'
+    && $pMix2 !== null && pa_status((int) $pMix2['approvalID']) === 'pending',
+    pa_show($dMix)
+);
+
+// #855 rounds 3 and 4: the two wordings of "changed" (step 5). A named date
+// whose claim failed reads "now follows your decision on another date" ONLY
+// when the resolve after the claims reports that it WROTE a row for that date
+// as a follower of a row THIS call claimed (`resolveFeed()`'s `followers` —
+// round 4; round 3 read the note's text, which an administrator can type);
+// the count stays the rows claimed directly (D-180: told it had changed).
+//
+// (a) Probe 3 of round 2's check: the date already follows an EARLIER,
+//     separate decision. Two dates of one repeating event and a one-off; the
+//     first call approves date 2, so date 1 follows it at once. The second
+//     call names the one-off and date 1's old row: date 1's newest row
+//     follows a row the SECOND call never claimed, so it is "review it again"
+//     — round 2 called it decided.
+pa_resetWorld();
+$p3s  = pa_series(FA1, 'd20-p3@p8', 'D20 probe three', ['count' => 2]);
+$p3x  = pa_event(FA1, 'd20-p3-x@p8', 'D20 probe three extra');
+$rP3  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 p3', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 probe three']]]);
+$pP3a = pa_pending($p3s[0]);
+$pP3b = pa_pending($p3s[1]);
+$pP3x = pa_pending($p3x);
+$dP3first = ($rP3['ok'] !== true || $pP3a === null || $pP3b === null || $pP3x === null) ? ['decided' => -1]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pP3b)]);
+$p3note   = (string) (pa_one('SELECT decisionNote FROM tblExternalEventApprovals WHERE eventID = ? ORDER BY approvalID DESC LIMIT 1', 'i', [$p3s[0]])['decisionNote'] ?? '');
+$dP3      = ($dP3first['decided'] ?? -1) !== 1 ? ['decided' => -1, 'changed' => -1, 'message' => '', 'decidedIds' => []]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pP3x), pa_item($pP3a)]);
+pa_ok(
+    'D20 a named date that already follows an EARLIER, separate decision is "please review it again", not "follows your decision" and not counted: decided 1, changed 1, the activity log names only the one-off (#855 round 3, probe 3)',
+    $pP3b !== null && str_ends_with($p3note, '(approval #' . (int) $pP3b['approvalID'] . ')')
+    && $dP3['decided'] === 1 && ($dP3['changed'] ?? -1) === 1
+    && $dP3['message'] === 'Approved 1. 1 had changed since you opened the page; please review it again.'
+    && $dP3['decidedIds'] === [(int) $pP3x['approvalID']],
+    pa_show([$p3note, $dP3])
+);
+// (b) A date refreshed IN PLACE: both dates of a repeating event are renamed
+//     while the page is open, so each keeps its approval number with a new
+//     content fingerprint. Date 2 is sent with its NEW fingerprint (decided),
+//     date 1 with its OLD one (its claim fails); the resolve after carries the
+//     decision onto date 1's SAME row. Round 2 skipped a row with the same
+//     number and said "please review it again" with nothing left to review.
+pa_resetWorld();
+$ipS  = pa_series(FA1, 'd20-ip@p8', 'D20 in place', ['count' => 2]);
+$rIP  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 ip', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 in place']]]);
+$pIPa = pa_pending($ipS[0]);
+pa_q('UPDATE tblEvents SET eventName = ? WHERE eventID IN (?, ?)', 'sii', ['D20 in place, renamed', $ipS[0], $ipS[1]]);
+$rIPr = FeedAdmin::saveCategoryMap($mysqli, FA1, ORG_A, SA, ['map' => [['word' => 'any', 'choice' => 'none']]]); // any real locked write resolves
+$pIPaNow = ($pIPa === null) ? null : pa_one('SELECT status, contentHash FROM tblExternalEventApprovals WHERE approvalID = ?', 'i', [(int) $pIPa['approvalID']]);
+$pIPb    = pa_pending($ipS[1]);
+$dIP     = ($rIP['ok'] !== true || $pIPa === null || $pIPb === null || $pIPaNow === null) ? ['decided' => -1, 'changed' => -1, 'message' => '', 'decidedIds' => []]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pIPb), pa_item($pIPa)]);
+pa_ok(
+    'D20 a named date refreshed IN PLACE (same approval number, new fingerprint) that ends carrying this call\'s decision: decided 1, changed 1, exactly "Approved 1. 1 had changed since you opened the page and now follows your decision on another date." + the series sentence; its SAME row approved and named in the activity log (#855 round 3)',
+    ($rIPr['ok'] ?? false) === true && $pIPaNow !== null && $pIPaNow['status'] === 'pending' && $pIPaNow['contentHash'] !== $pIPa['contentHash']
+    && $dIP['decided'] === 1 && ($dIP['changed'] ?? -1) === 1
+    && $dIP['message'] === 'Approved 1. 1 had changed since you opened the page and now follows your decision on another date.' . MSG_OTHER_ONE
+    && pa_status((int) $pIPa['approvalID']) === 'approved'
+    && $dIP['decidedIds'] === [(int) $pIPb['approvalID'], (int) $pIPa['approvalID']],
+    pa_show([$pIPaNow, $dIP])
+);
+
+// (c) #855 round 4, MEASURED by round 3's check: an administrator's OWN typed
+//     note that happens to end "(approval #N)". GA declines P with the note
+//     "Same reason as (approval #X)"; SA then approves X and P together. P was
+//     declined by somebody else and follows nothing: "please review it again",
+//     and the activity log names X only. Round 3 read the note's TEXT, told SA
+//     that P "now follows your decision", and logged P as approved by SA.
+pa_resetWorld();
+$tnX  = pa_event(FA1, 'd20-tn-x@p8', 'D20 typed note x');
+$tnP  = pa_event(FA1, 'd20-tn-p@p8', 'D20 typed note p');
+$rTN  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 tn', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 typed note']]]);
+$pTNx = pa_pending($tnX);
+$pTNp = pa_pending($tnP);
+$dTNga = ($rTN['ok'] !== true || $pTNx === null || $pTNp === null) ? ['decided' => -1]
+    : FeedAdmin::decide($mysqli, ORG_A, GA, 'declined', 'Same reason as (approval #' . (int) $pTNx['approvalID'] . ')', [pa_item($pTNp)]);
+$dTN = ($dTNga['decided'] ?? -1) !== 1 ? ['decided' => -1, 'changed' => -1, 'message' => '', 'decidedIds' => []]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pTNx), pa_item($pTNp)]);
+pa_ok(
+    'D20 a date DECLINED by another administrator whose own typed note ends "(approval #X)" is "please review it again" when X is approved with it — never "now follows your decision", and the activity log names X only (#855 round 4)',
+    $dTN['decided'] === 1 && ($dTN['changed'] ?? -1) === 1
+    && $dTN['message'] === 'Approved 1. 1 had changed since you opened the page; please review it again.'
+    && $dTN['decidedIds'] === [(int) $pTNx['approvalID']]
+    && pa_status((int) $pTNp['approvalID']) === 'declined',
+    pa_show([$dTNga, $dTN])
+);
+// (d) Two dates that now follow: three dates of one repeating event, the
+//     first two sent with a request fingerprint the page never showed (their
+//     claims fail), the third decided — the resolve after carries the
+//     decision onto both. The plural wording, and both rows in the log.
+pa_resetWorld();
+$plS  = pa_series(FA1, 'd20-pl@p8', 'D20 plural follow', ['count' => 3]);
+$rPL  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 pl', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 plural follow']]]);
+$pPL  = array_map(static fn (int $e): ?array => pa_pending($e), $plS);
+$stalePL = static fn (array $row): array => ['approvalID' => (int) $row['approvalID'], 'requestHash' => str_repeat('e', 64), 'contentHash' => (string) $row['contentHash']];
+$dPL  = ($rPL['ok'] !== true || in_array(null, $pPL, true) === true) ? ['decided' => -1, 'changed' => -1, 'message' => '', 'decidedIds' => []]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [$stalePL($pPL[0]), $stalePL($pPL[1]), pa_item($pPL[2])]);
+pa_ok(
+    'D20 two named dates that now follow this call\'s decision: decided 1, changed 2, exactly "Approved 1. 2 had changed since you opened the page and now follow your decision on another date." + the series sentence, all three in the activity log (#855 round 4)',
+    $dPL['decided'] === 1 && ($dPL['changed'] ?? -1) === 2
+    && $dPL['message'] === 'Approved 1. 2 had changed since you opened the page and now follow your decision on another date.' . MSG_OTHER_ONE
+    && in_array(null, $pPL, true) === false
+    && $dPL['decidedIds'] === [(int) $pPL[2]['approvalID'], (int) $pPL[0]['approvalID'], (int) $pPL[1]['approvalID']],
+    pa_show($dPL)
+);
+// (e) Two dates left to review: three one-off dates, two sent with a request
+//     fingerprint the page never showed. The plural "review them".
+pa_resetWorld();
+$rvE  = [pa_event(FA1, 'd20-rv-1@p8', 'D20 review one'), pa_event(FA1, 'd20-rv-2@p8', 'D20 review two'), pa_event(FA1, 'd20-rv-3@p8', 'D20 review three')];
+$rRV  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 rv', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 review']]]);
+$pRV  = array_map(static fn (int $e): ?array => pa_pending($e), $rvE);
+$dRV  = ($rRV['ok'] !== true || in_array(null, $pRV, true) === true) ? ['decided' => -1, 'changed' => -1, 'message' => '']
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [$stalePL($pRV[0]), $stalePL($pRV[1]), pa_item($pRV[2])]);
+pa_ok(
+    'D20 two named one-off dates sent with a fingerprint the page never showed: decided 1, changed 2, exactly "Approved 1. 2 had changed since you opened the page; please review them again." (#855 round 4)',
+    $dRV['decided'] === 1 && ($dRV['changed'] ?? -1) === 2
+    && $dRV['message'] === 'Approved 1. 2 had changed since you opened the page; please review them again.',
+    pa_show($dRV)
+);
+
+// (f) Followers of OTHER dates do not speak for a named date: a repeating
+//     event of three dates and a one-off on the same calendar. The third date
+//     is decided (the first two, not named, follow it); the one-off is named
+//     with a fingerprint the page never showed. The one-off is "please review
+//     it again" although the same resolve wrote followers — of other dates.
+pa_resetWorld();
+$ofS  = pa_series(FA1, 'd20-of@p8', 'D20 other followers', ['count' => 3]);
+$ofY  = pa_event(FA1, 'd20-of-y@p8', 'D20 other followers one-off');
+$rOF  = FeedAdmin::saveRule($mysqli, FA1, 0, ORG_A, SA, ['name' => 'D20 of', 'audienceLevel' => 'public', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'D20 other followers']]]);
+$pOF2 = pa_pending($ofS[2]);
+$pOFy = pa_pending($ofY);
+$dOF  = ($rOF['ok'] !== true || $pOF2 === null || $pOFy === null) ? ['decided' => -1, 'changed' => -1, 'message' => '', 'decidedIds' => []]
+    : FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', [pa_item($pOF2),
+        ['approvalID' => (int) $pOFy['approvalID'], 'requestHash' => str_repeat('d', 64), 'contentHash' => (string) $pOFy['contentHash']]]);
+pa_ok(
+    'D20 a named one-off whose claim failed is "please review it again" although the same resolve wrote followers for OTHER dates; only the decided date is logged (#855 round 4)',
+    $dOF['decided'] === 1 && ($dOF['changed'] ?? -1) === 1
+    && $dOF['message'] === 'Approved 1. 1 had changed since you opened the page; please review it again.' . MSG_OTHER_ONE
+    && $dOF['decidedIds'] === [(int) $pOF2['approvalID']]
+    && pa_status((int) $pOFy['approvalID']) === 'pending',
+    pa_show($dOF)
+);
+
 // B's waiting row, made through B's own real write path, decided AS A.
 pa_resetWorld();
 pa_q("UPDATE tblExternalFeeds SET audienceLevel = 'members' WHERE feedID = ?", 'i', [FB1]);
@@ -9459,17 +9621,29 @@ foreach ($cases20 as $what20 => [$decision20, $series20, $dates20, $clockMoved20
     $verb20    = ($decision20 === 'approved') ? 'Approved' : 'Declined';
     $want20    = $verb20 . ' ' . $series20 . '.' . ($series20 === 1 ? MSG_OTHER_ONE : MSG_OTHER_MANY);
     if ($clockMoved20 === true) {
-        // One rule: the other dates' rows are withdrawn and nothing waits.
+        // ⚖️ #855 CHANGED WHAT THESE EXPECT, ON PURPOSE. A decision now
+        //    re-works the calendar under the rules in force FIRST (inFeedLock's
+        //    `$resolveFirst`), so a request whose rule has run out is replaced
+        //    BEFORE the decision is made: nothing is decided, every item is
+        //    reported "had changed since you opened the page", and the page
+        //    then shows the dates as they stand now. Until #855 the decision
+        //    went through on the old request, and the re-work AFTER it
+        //    withdrew the other dates. The same rule now covers a request
+        //    made under the other copied-in rule (#855's own case), which is
+        //    why it is not special-cased for an ended rule.
+        // One rule: every date's row is withdrawn and nothing waits.
         // Two rules, one ended: the request changed, so every date of the
         // series waits again under the new request — 3 in the inbox.
+        $want20        = $verb20 . ' 0. ' . $series20 . ' had changed since you opened the page; please review '
+            . ($series20 === 1 ? 'it' : 'them') . ' again.';
         $wantWaiting20 = ($secondRule20 === true) ? $dates20 : 0;
         $wantSt20      = ($secondRule20 === true)
             ? array_fill(0, $series20, array_fill(0, $dates20, 'pending'))
-            : array_fill(0, $series20, array_merge([$decision20], array_fill(0, $dates20 - 1, 'withdrawn')));
+            : array_fill(0, $series20, array_fill(0, $dates20, 'withdrawn'));
         pa_ok(
-            'D20 ' . $what20 . ' — the rule\'s last day has passed since the last refresh: decided ' . $series20 . ', ' . $wantWaiting20
+            'D20 ' . $what20 . ' — the rule\'s last day has passed since the last refresh: decided 0 (#855: re-worked first, so the old request is gone), ' . $wantWaiting20
             . ' date(s) waiting afterwards, every date where it should be, and exactly "' . $want20 . '"',
-            ($rr20['ok'] ?? false) === true && $d20['decided'] === $series20
+            ($rr20['ok'] ?? false) === true && $d20['decided'] === 0
             && $waiting20 === $wantWaiting20 && $st20 === $wantSt20 && $d20['message'] === $want20,
             pa_show([$d20['message'] ?? null, 'waiting' => $waiting20, $st20])
         );
@@ -9529,17 +9703,28 @@ foreach (['approved', 'declined'] as $decision20q) {
     $newest20q  = array_map(static fn (int $e): array => pa_one('SELECT approvalID, status, reason FROM tblExternalEventApprovals WHERE eventID = ? ORDER BY approvalID DESC LIMIT 1', 'i', [$e]) ?? [], $w20q);
     $waiting20q = (int) pa_one("SELECT COUNT(*) AS n FROM tblExternalEventApprovals WHERE feedID = ? AND status = 'pending'", 'i', [FA1])['n'];
     $verb20q    = ($decision20q === 'approved') ? 'Approved' : 'Declined';
-    $want20q    = $verb20q . ' 2.' . MSG_OTHER_ONE;
+    // ⚖️ #855 (D-180): the calendar is re-worked BEFORE the decision, so
+    //    W0's and W1's old request (both rules) is replaced by the request W2
+    //    already has (the second rule alone) — new rows for W0 and W1 waiting
+    //    under it. W0's OLD row cannot be claimed; W2's is, and the re-work
+    //    after it carries the decision onto the new rows of W0 and W1. W0 is
+    //    "changed" (D-180) — but worded as now following this decision, not
+    //    "please review it again", which round 1 said of a date with nothing
+    //    left to review; it is NOT counted (round 2 counted it, against
+    //    D-180). The activity log names W0's NEW row.
+    $want20q    = $verb20q . ' 1. 1 had changed since you opened the page and now follows your decision on another date.' . MSG_OTHER_ONE;
     pa_ok(
-        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together — set-up: the hall dates wait under one request and the chapel date under another, and afterwards W1\'s old row is withdrawn and a NEW row for W1 carries the decision, as following another date (series_match)',
-        $set20q === true && pa_status((int) $old20q[1]['approvalID']) === 'withdrawn'
+        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together — set-up: the hall dates wait under one request and the chapel date under another, and afterwards W0\'s and W1\'s old rows are withdrawn and NEW rows for both carry the decision (#855: re-worked before the decision)',
+        $set20q === true && pa_status((int) $old20q[0]['approvalID']) === 'withdrawn' && pa_status((int) $old20q[1]['approvalID']) === 'withdrawn'
+        && (int) ($newest20q[0]['approvalID'] ?? 0) > (int) $old20q[0]['approvalID']
         && (int) ($newest20q[1]['approvalID'] ?? 0) > (int) $old20q[1]['approvalID']
-        && ($newest20q[1]['status'] ?? '') === $decision20q && ($newest20q[1]['reason'] ?? '') === 'series_match',
+        && ($newest20q[0]['status'] ?? '') === $decision20q && ($newest20q[1]['status'] ?? '') === $decision20q,
         pa_show([$set20q, $newest20q])
     );
     pa_ok(
-        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 2, changed 0, nothing waiting, every date\'s newest row "' . $decision20q . '", exactly "' . $want20q . '" (one repeating event, singular)',
-        $d20q['decided'] === 2 && ($d20q['changed'] ?? -1) === 0 && $waiting20q === 0
+        'D20 ' . $decision20q . ', two rules, one ended, W0 and W2 decided together: decided 1 (W2), changed 1 (W0, worded as following), nothing waiting, every date\'s newest row "' . $decision20q . '", the activity log naming W2 and W0\'s NEW row, exactly "' . $want20q . '" (one repeating event, singular)',
+        $d20q['decided'] === 1 && ($d20q['changed'] ?? -1) === 1 && $waiting20q === 0
+        && ($d20q['decidedIds'] ?? null) === [(int) $old20q[2]['approvalID'], (int) ($newest20q[0]['approvalID'] ?? 0)]
         && array_column($newest20q, 'status') === [$decision20q, $decision20q, $decision20q]
         && $d20q['message'] === $want20q,
         pa_show([$d20q['message'] ?? null, 'waiting' => $waiting20q, $newest20q])
@@ -9682,13 +9867,19 @@ $src21 = (string) file_get_contents(dirname(__DIR__) . '/web/_core/FeedAdmin.php
 $from21 = strpos($src21, 'private static function inFeedLock(');
 $body21 = ($from21 === false) ? '' : substr($src21, $from21, (int) strpos($src21, "\n    }\n", $from21) - $from21);
 $at21 = static fn (string $needle): int => ($body21 !== '' && substr_count($body21, $needle) === 1) ? (int) strpos($body21, $needle) : -1;
-$posResolve = $at21('FeedResolver::resolveFeed(');
-$posHook    = $at21('$afterResolve($result)');
-$posCommit  = $at21('$db->commit();');
+// #855: the resolver is called through ONE local closure (`$resolve`), so the
+// optional re-work BEFORE the work and the re-work after it are the same call.
+// So the text `FeedResolver::resolveFeed(` (still exactly once) is the
+// closure, and the ORDER pinned is that of the after-work call, `$result['resolved'] = $resolve(`.
+$posResolveDef = $at21('FeedResolver::resolveFeed(');
+$posResolve    = $at21('$result[\'resolved\'] = $resolve(');
+$posWork       = $at21('$result = $work();');
+$posHook       = $at21('$afterResolve($result)');
+$posCommit     = $at21('$db->commit();');
 pa_ok(
-    'D21 in inFeedLock()\'s own source: the resolve, then the after-resolve step, then the commit — each exactly once',
-    $posResolve > 0 && $posHook > $posResolve && $posCommit > $posHook,
-    pa_show([$posResolve, $posHook, $posCommit])
+    'D21 in inFeedLock()\'s own source: the work, then the resolve, then the after-resolve step, then the commit — each exactly once',
+    $posResolveDef > 0 && $posWork > $posResolveDef && $posResolve > $posWork && $posHook > $posResolve && $posCommit > $posHook,
+    pa_show([$posResolveDef, $posWork, $posResolve, $posHook, $posCommit])
 );
 // …and it may only ADD result keys. A step that tries to replace one (here
 // `resolved`) is refused with a LogicException, and the whole write — the
@@ -9941,7 +10132,7 @@ $before = (int) (pa_one("SHOW SESSION STATUS LIKE 'Com_commit'")['Value'] ?? 0);
 $rBulk  = $w25['ok'] ? FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', array_map('pa_item', $w25['rows'])) : ['decided' => -1];
 $after  = (int) (pa_one("SHOW SESSION STATUS LIKE 'Com_commit'")['Value'] ?? 0);
 pa_ok(
-    'D25 four items across two calendars (three dates of one series, one one-off date): decided 4, changed 0, exactly "Approved 4." + the singular sentence, exactly two commits (one lock and one resolve per calendar)',
+    'D25 four items across two calendars (three dates of one series, one one-off date): decided 4, changed 0, exactly "Approved 4." + the singular sentence, exactly two commits (one lock and one commit per calendar; since #855 two resolves inside each lock)',
     $w25['ok'] === true && $rBulk['decided'] === 4 && $rBulk['changed'] === 0 && $rBulk['notDone'] === 0
     && $rBulk['message'] === 'Approved 4.' . MSG_OTHER_ONE && ($after - $before) === 2,
     pa_show($rBulk) . ' commits=' . ($after - $before)
@@ -9970,9 +10161,13 @@ if ($items4 !== []) {
 }
 $rStale4 = $w25d['ok'] ? FeedAdmin::decide($mysqli, ORG_A, SA, 'approved', '', $items4) : ['decided' => -1];
 pa_ok(
-    'D25 one stale item among four: changed 1, the other three decided, the sentence LAST (after "1 had changed …")',
+    // #855 round 3: the stale item is a date of the same repeating event, so
+    // the resolve after the decision carries this call's decision onto it —
+    // "please review it again" was untrue of a date with nothing left to
+    // review. It is still "changed" and still not counted (D-180).
+    'D25 one stale item among four: changed 1 (worded as now following this decision, since the resolve carried it), the other three decided, the sentence LAST',
     $w25d['ok'] === true && $rStale4['changed'] === 1 && $rStale4['decided'] === 3
-    && $rStale4['message'] === 'Approved 3. 1 had changed since you opened the page; please review it again.' . MSG_OTHER_ONE,
+    && $rStale4['message'] === 'Approved 3. 1 had changed since you opened the page and now follows your decision on another date.' . MSG_OTHER_ONE,
     pa_show($rStale4)
 );
 // Checker LOW 4 (a): the same date listed twice is decided ONCE, never

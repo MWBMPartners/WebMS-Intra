@@ -98,12 +98,27 @@ if (function_exists('render_day_columns') === false) {
                 : $start->modify('+1 hour');
             $isAllDay = (int) ($ev['isAllDay'] ?? 0) === 1;
 
+            // 📆 WHICH DAYS IT IS ON: `I18n::wallClockDaySpan()`, the ONE place a
+            //    page asks it (#806, #811). This was an overlap test of the
+            //    event against each column's 00:00:00-23:59:59, and an END OF
+            //    EXACTLY 00:00:00 touches the next column's first second — so an
+            //    evening event ending at midnight was ALSO drawn in the next
+            //    day's column, as a 15-minute sliver at the top (the drawing
+            //    never shows less than 15 minutes), while the month grid and
+            //    the attendance register, which ask the span, left that day
+            //    out. Same rule everywhere now: an end at 00:00:00 does not
+            //    occupy its own day. The end passed is the one this grid draws
+            //    (the stored end, or an hour after the start when there is
+            //    none), so an event with no end that runs past midnight on the
+            //    grid still shows its part of the next day, as before.
+            $span = \Portal\Core\I18n::wallClockDaySpan($start->format('Y-m-d H:i:s'), $end->format('Y-m-d H:i:s'));
+            if ($span === null) {
+                continue;
+            }
+
             foreach ($days as $d) {
-                $dStart = \Portal\Core\I18n::wallClockReading($d->format('Y-m-d') . ' 00:00:00');
-                $dEnd   = \Portal\Core\I18n::wallClockReading($d->format('Y-m-d') . ' 23:59:59');
-                // overlap test
-                if ($start <= $dEnd && $end >= $dStart) {
-                    $k = $d->format('Y-m-d');
+                $k = $d->format('Y-m-d');
+                if (strcmp($k, $span['first']) >= 0 && strcmp($k, $span['last']) <= 0) {
                     if ($isAllDay === true) {
                         $allDayByDay[$k][] = $ev;
                     } else {

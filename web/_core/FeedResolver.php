@@ -199,7 +199,7 @@ final class FeedResolver
      *                                       calendar's events, so a tampered
      *                                       entry can do nothing.
      *
-     * @return array{changed:int, newPending:int, pendingTotal:int, approvedBySave:int}
+     * @return array{changed:int, newPending:int, pendingTotal:int, approvedBySave:int, followers:array<int,array{follows:int, eventID:int}>}
      *         `changed` = events whose stored answer was rewritten.
      *         `newPending` = approval rows waiting at the end that were not
      *         waiting before (what a notification says is new).
@@ -208,7 +208,11 @@ final class FeedResolver
      *         declined to approved because the administrator saw them on the
      *         choice page and saved (0 whenever `$savedChoice` is null); the
      *         choice page reports it, so a colleague's decline is never
-     *         overturned without anybody being told.
+     *         overturned without anybody being told. `followers` (#855) =
+     *         every approval row this resolve WROTE as following another
+     *         date's decision (part 7's sibling rule), new or updated in
+     *         place: row number => `follows` (the row it follows) and
+     *         `eventID` (its date). `FeedAdmin::decide()` reads it.
      */
     public static function resolveFeed(
         \mysqli $db,
@@ -221,19 +225,28 @@ final class FeedResolver
             // The calendar is gone. Nothing of it should be visible, and the
             // visibility rule already answers "no" for an event whose
             // calendar row does not exist, so there is nothing to write.
-            return ['changed' => 0, 'newPending' => 0, 'pendingTotal' => 0, 'approvedBySave' => 0];
+            return ['changed' => 0, 'newPending' => 0, 'pendingTotal' => 0, 'approvedBySave' => 0, 'followers' => []];
         }
 
         $zone = self::organisationZone((int) $state['feed']['siteID']);
         $plan = self::plan($state, $nowUtc, $zone, $savedChoice);
 
-        $changed = self::writePlan($db, $state, $plan, $nowUtc);
+        $followers = [];
+        $changed   = self::writePlan($db, $state, $plan, $nowUtc, $followers);
 
+        // `followers` (#855 round 4): every approval row THIS resolve wrote as
+        // following another date's decision (part 7's sibling rule), as
+        // follower row number => ['follows' => the row it follows, 'eventID'
+        // => its date]. It is the structural record of "this row follows that
+        // one" — `FeedAdmin::decide()` reads it instead of the row's
+        // `decisionNote`, which also holds an administrator's own typed note
+        // and so cannot tell the two apart.
         return [
             'changed'        => $changed,
             'newPending'     => $plan['counts']['newPending'],
             'pendingTotal'   => $plan['counts']['pendingTotal'],
             'approvedBySave' => $plan['counts']['approvedBySave'],
+            'followers'      => $followers,
         ];
     }
 
@@ -2450,9 +2463,12 @@ final class FeedResolver
      * @param array<string,mixed> $state
      * @param array<string,mixed> $plan
      *
+     * @param array<int,array{follows:int, eventID:int}> $followers Filled in: each follower row written
+     *        here (pass 2), by its approval number (#855 round 4; see `resolveFeed()`).
+     *
      * @return int How many events were rewritten.
      */
-    private static function writePlan(\mysqli $db, array $state, array $plan, DateTimeImmutable $nowUtc): int
+    private static function writePlan(\mysqli $db, array $state, array $plan, DateTimeImmutable $nowUtc, array &$followers = []): int
     {
         $nowText = self::utcText($nowUtc);
         $rows    = $plan['rows'];
@@ -2469,7 +2485,8 @@ final class FeedResolver
         $insert = null;
         $update = null;
         foreach ($ordered as $key) {
-            $row = $rows[$key];
+            $row      = $rows[$key];
+            $followed = null;
             if ($row['followsKey'] !== null) {
                 $followed = $rows[$row['followsKey']]['approvalID'];
                 $row['decisionNote'] = 'Follows the decision on another date of this repeating event (approval #'
@@ -2558,6 +2575,9 @@ final class FeedResolver
                 );
                 $insert->execute();
                 $rows[$key]['approvalID'] = (int) $db->insert_id;
+                if ($followed !== null) {
+                    $followers[(int) $db->insert_id] = ['follows' => (int) $followed, 'eventID' => (int) $row['eventID']];
+                }
                 continue;
             }
 
@@ -2603,6 +2623,9 @@ final class FeedResolver
                 $bId
             );
             $update->execute();
+            if ($followed !== null) {
+                $followers[$bId] = ['follows' => (int) $followed, 'eventID' => (int) $row['eventID']];
+            }
         }
         if ($insert !== null) {
             $insert->close();

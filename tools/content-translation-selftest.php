@@ -2249,6 +2249,28 @@ ok('J12 every refusal is recorded in the activity log',
     'recorded ' . ($refusalsAfter - $refusalsBefore) . ' refusal(s); ' . $shouldRefuse
     . ' figure(s) were refused. A refusal nobody can see is not a refusal that helps anybody');
 
+// J13 (#1004): a figure the page's own nine-digit pattern admits but which is
+// above the hard maximum must reach the HARD-MAXIMUM refusal, which says what
+// the limit is — not "could not be read as a figure", which is untrue. Round 1
+// of #1004 put the converter in front with the INT column's default maximum
+// (21,474,836.47), so 21,474,837 to 999,999,999.99 got the wrong sentence.
+// Both ends of that band are posted; each must leave the stored figure alone.
+foreach (['J13' => '21474837', 'J13b' => '999999999.99'] as $label => $typed) {
+    $before = $capNow();
+    $saveCap($typed);
+    $page   = html_entity_decode(req($jarAdmin, 'GET', '/admin/translation')['body'], ENT_QUOTES, 'UTF-8');
+    $logged = one('SELECT `activityDescription` AS d FROM `tblActivityLogs` WHERE `activityType` = ? ORDER BY `logID` DESC LIMIT 1',
+        's', ['TranslationCapRefused']);
+    ok(
+        $label . ' typed "' . $typed . '": above the hard maximum, the page says the limit ("cannot be more than … 1,000.00 …") and the log says "above the most", never "could not be read as a figure"',
+        str_contains($page, 'Nothing was saved. The monthly translation limit cannot be more than ') === true
+        && str_contains($page, '1,000.00. Enter 0 for no limit, or a smaller figure.') === true
+        && str_contains((string) ($logged['d'] ?? ''), 'above the most this portal allows') === true
+        && $capNow() === $before,
+        'log: ' . (string) ($logged['d'] ?? '(none)') . '; stored ' . $before . ' → ' . $capNow()
+    );
+}
+
 setSetting('translation.monthCapPence', '5000');
 
 // =============================================================================

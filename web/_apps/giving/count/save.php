@@ -91,6 +91,31 @@ function backToCountSession(int $id, string $msg, string $type): void
     exit();
 }
 
+/**
+ * 💷 One typed count figure, read by the ONE converter, Currency::parseAmount()
+ * (#1004), in the count's own currency, figures only (D-152), written back as
+ * the text its DECIMAL(10,2) column takes ("1234.50"). Its maximum is the INT
+ * maximum (21,474,836.47), NOT the DECIMAL column's 99,999,999.99: closing a
+ * count writes each bucket and each envelope WHOLE into
+ * tblGivingEntry.amountPence, a signed INT, so a larger figure would save here
+ * and then make the count impossible to close, with "please try again" a
+ * sentence that can never come true. A
+ * refusal goes back to the count page with the box's name and the reason, and
+ * nothing is saved. This replaces Giving::parseDecimal(), which stripped every
+ * character that was not a figure, a point or a minus and went through a
+ * float, so "12,50" was saved as 1,250.00 and "1e30" reached the database.
+ */
+function countFigureOrBack(string $field, string $label, string $currency, int $countSessionId): string
+{
+    $typed  = is_string($_POST[$field] ?? null) === true ? (string) $_POST[$field] : '';
+    $answer = \Portal\Core\Currency::parseAmount($typed, $currency, \Portal\Core\Currency::INT_COLUMN_MAX);
+    if (is_string($answer) === true) {
+        backToCountSession($countSessionId, $label . ': ' . $answer . ' Nothing was saved.', 'danger');
+    }
+
+    return \Portal\Core\Currency::hundredthsToDecimal($answer);
+}
+
 // -----------------------------------------------------------------------------
 // ➕ action=create — start a new count session
 // -----------------------------------------------------------------------------
@@ -172,13 +197,9 @@ if ($action === 'count') {
         backToCountSession($countSessionId, 'This session is already closed.', 'warning');
     }
 
-    $cash     = Giving::parseDecimal((string) ($_POST['cashAmount'] ?? ''));
-    $cheque   = Giving::parseDecimal((string) ($_POST['chequeAmount'] ?? ''));
-    $envelope = Giving::parseDecimal((string) ($_POST['envelopeAmount'] ?? ''));
-
-    if ($cash === null || $cheque === null || $envelope === null) {
-        backToCountSession($countSessionId, 'Cash, cheque, and envelope totals must all be valid non-negative amounts.', 'danger');
-    }
+    $cash     = countFigureOrBack('cashAmount', 'Cash total', (string) $session['currency'], $countSessionId);
+    $cheque   = countFigureOrBack('chequeAmount', 'Cheque total', (string) $session['currency'], $countSessionId);
+    $envelope = countFigureOrBack('envelopeAmount', 'Envelope total', (string) $session['currency'], $countSessionId);
 
     // 🛡️ Static SQL per slot (no dynamic column-name interpolation) — keeps
     // this readable by the column-name-existence audit
@@ -224,7 +245,8 @@ if ($action === 'count') {
         $agreedEnvelope = $session['envelopeTotal' . $source];
         $flashMsg       = 'Counter ' . $slot . ' totals saved and agreed (single-counter mode).';
     } elseif ($slot1Complete === true && $slot2Complete === true) {
-        $toPence = static fn (string $v): int => (int) round(((float) $v) * 100);
+        // 💷 Stored DECIMAL text compared as hundredths, never as floats (#1004).
+        $toPence = static fn (string $v): int => \Portal\Core\Currency::storedDecimalToHundredths($v);
         $matches = $toPence($session['cashTotal1']) === $toPence($session['cashTotal2'])
             && $toPence($session['chequeTotal1']) === $toPence($session['chequeTotal2'])
             && $toPence($session['envelopeTotal1']) === $toPence($session['envelopeTotal2']);
@@ -277,14 +299,10 @@ if ($action === 'resolve') {
         backToCountSession($countSessionId, 'This session is already closed.', 'warning');
     }
 
-    $cash     = Giving::parseDecimal((string) ($_POST['cashAmount'] ?? ''));
-    $cheque   = Giving::parseDecimal((string) ($_POST['chequeAmount'] ?? ''));
-    $envelope = Giving::parseDecimal((string) ($_POST['envelopeAmount'] ?? ''));
+    $cash     = countFigureOrBack('cashAmount', 'Agreed cash total', (string) $session['currency'], $countSessionId);
+    $cheque   = countFigureOrBack('chequeAmount', 'Agreed cheque total', (string) $session['currency'], $countSessionId);
+    $envelope = countFigureOrBack('envelopeAmount', 'Agreed envelope total', (string) $session['currency'], $countSessionId);
     $notes    = trim((string) ($_POST['notes'] ?? ''));
-
-    if ($cash === null || $cheque === null || $envelope === null) {
-        backToCountSession($countSessionId, 'Agreed cash, cheque, and envelope totals must all be valid non-negative amounts.', 'danger');
-    }
 
     $stmt = $db->prepare(
         'UPDATE tblCountSessions SET status = \'counting\', cashTotal = ?, chequeTotal = ?, envelopeTotal = ?, notes = ? '
@@ -320,13 +338,13 @@ if ($action === 'envelope-add') {
 
     $giverId   = (int) ($_POST['giverID'] ?? 0);
     $giverName = trim((string) ($_POST['giverName'] ?? ''));
-    $amount    = Giving::parseDecimal((string) ($_POST['amount'] ?? ''));
+    $amount    = countFigureOrBack('amount', 'Envelope amount', (string) $session['currency'], $countSessionId);
     $method    = (string) ($_POST['method'] ?? 'cash');
     if (in_array($method, ['cash', 'cheque'], true) === false) {
         $method = 'cash';
     }
 
-    if ($amount === null || (float) $amount <= 0) {
+    if (\Portal\Core\Currency::storedDecimalToHundredths($amount) <= 0) {
         backToCountSession($countSessionId, 'A valid positive amount is required for a named envelope.', 'danger');
     }
 
@@ -371,7 +389,7 @@ if ($action === 'envelope-add') {
     Logger::activity(
         'CountEnvelopeAdded',
         // 💷 In the count's own currency, as the envelope row is (#966, D-139).
-        'Logged a named envelope (' . Giving::formatAmount((int) round(((float) $amount) * 100), (string) ($session['currency'] ?? '')) . ') for session #' . $countSessionId,
+        'Logged a named envelope (' . Giving::formatAmount(\Portal\Core\Currency::storedDecimalToHundredths($amount), (string) ($session['currency'] ?? '')) . ') for session #' . $countSessionId,
         $userId
     );
     backToCountSession($countSessionId, 'Named envelope logged.', 'success');

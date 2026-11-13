@@ -259,6 +259,10 @@ public-door|tools/public-door-selftest.php|selftest_pubdoor|SELFTEST_WEB_PORT=94
 htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
 currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
+assets-api-update|tools/assets-api-update-selftest.php|selftest_assetsapi|SELFTEST_WEB_PORT=9101
+money-amount|tools/money-amount-selftest.php|selftest_money|SELFTEST_WEB_PORT=9533
+uploads-and-media|tools/uploads-and-media-selftest.php|selftest_upmedia|
+geocoder|tools/geocoder-selftest.php|selftest_geocoder|SELFTEST_WEB_PORT=9871
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 activity-description|tools/activity-description-selftest.php|selftest_actdesc|web:activity-description SELFTEST_WEB_PORT=9933
@@ -304,6 +308,7 @@ installer-country-script|node tools/installer-country-script-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
+offline-page-browser|node tools/offline-page-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 # 🔎 Every audit check's own self-test (#919), FOUND rather than listed: the

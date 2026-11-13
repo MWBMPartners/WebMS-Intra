@@ -215,8 +215,10 @@
  *         SELFTEST_DB_HOST (default 127.0.0.1), SELFTEST_DB_USER (default
  *         root), SELFTEST_WEB_PORT (default 9071), SELFTEST_SNAPSHOT_FILE
  *         (see above; optional). The database must already
- *         hold `web/_sql/full_schema.sql`. Needs PHP's curl extension and
- *         `proc_open()`.
+ *         hold `web/_sql/full_schema.sql`. Needs PHP's curl and openssl
+ *         extensions and `proc_open()`. Since #1017 the server's HTTPS calls
+ *         go to `tools/https-standin.php`, which answers for reCAPTCHA itself
+ *         and refuses every other name, so none leaves the machine.
  * Exit:   0 only when every check ran and passed; 1 otherwise, including
  *         every refusal to run.
  *
@@ -231,7 +233,10 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 241; // #982 round 12 added M13q (the Offboard page's
+const EXPECTED_CHECKS = 247; // MERGED (p982-land): both sides grew from 223,
+                            // #982/#926 by 18 (to 241, the lines below) and
+                            // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
+                            // #982 round 12 added M13q (the Offboard page's
                             // note and confirmation) and M13r (no Rehire
                             // button for an account erased inside the undo
                             // window). 241.
@@ -260,6 +265,13 @@ const EXPECTED_CHECKS = 241; // #982 round 12 added M13q (the Offboard page's
                             // (Request erasure shows a member no developer
                             // note, pinned as rendered). M12 and M13 now also
                             // read the offboarding page's message. 223 + 2 = 225.
+                            // #1017 added six: a signed-in member's
+                            // refused reCAPTCHA v3 answer on the anonymous form,
+                            // on the score and on the action, recorded naming
+                            // nobody, while the same refusal on another form
+                            // still names her (N50); three plants (N51-N53);
+                            // the clean run after them (N54); and the captcha
+                            // settings put back before later sections (N55). 229.
                             // #988/#1009 check round 4 added seven: the
                             // GdprErasureExecuted record of N5's run read back
                             // whole (N5b); the four records of a run - executed,
@@ -395,7 +407,10 @@ $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
     refuse("set SELFTEST_DB_NAME to a database whose name starts with selftest_ (got '{$dbName}'). This test writes and erases rows");
 }
-foreach (['curl_init', 'proc_open'] as $needed) {
+// 🎭 How the HTTPS stand-in is started and steered (#1017): one copy, shared with
+//    mail-queue-selftest.php.
+require __DIR__ . DIRECTORY_SEPARATOR . 'https-standin-client.php';
+foreach (['curl_init', 'proc_open', 'openssl_pkey_new'] as $needed) {
     if (function_exists($needed) === false) {
         refuse("this PHP has no {$needed}()");
     }
@@ -709,7 +724,7 @@ function siteSetting(int $site, string $key, string $value): void
 // =============================================================================
 // 🧰 The server, and one request
 // =============================================================================
-$state = ['proc' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'settings' => [], 'started' => false, 'cleaned' => false];
+$state = ['proc' => null, 'child' => '', 'token' => bin2hex(random_bytes(16)), 'settings' => [], 'started' => false, 'cleaned' => false, 'https' => []];
 
 function portAnswers(int $port): bool
 {
@@ -811,6 +826,10 @@ function cleanup(): void
         }
         proc_close($state['proc']);
         $state['proc'] = null;
+    }
+    // The HTTPS stand-in (#1017), by its own handle.
+    if ($state['https'] !== []) {
+        httpsStandinStop($state['https']);
     }
     try {
         putClaimColumnBack();
@@ -1247,18 +1266,25 @@ file_put_contents($child . $sep . 'router.php', str_replace('__TOKEN__', $state[
 $env = getenv();
 unset($env['PHP_CLI_SERVER_WORKERS']);
 $env['PORTAL_ENV'] = 'prod';
+// 🎭 The HTTPS stand-in (#1017): reCAPTCHA's name answered by this run itself,
+//    every other name refused, and the server told to trust it and use it as
+//    its HTTPS proxy (httpsStandinServerArgs() / httpsStandinServerEnv()).
+$state['https'] = httpsStandinStart($child . $sep . 'https', ['www.google.com'], [], 'refuse');
 $state['proc']     = proc_open(
-    [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
-        // No opcache (#964): section N plants faults in the scratch copy of two
-        // classes between requests, and a cached copy would be checked for a
-        // newer file only every couple of seconds - the plant could miss, or
-        // worse, the putting-back could. access-pages-selftest.php does the same.
-        '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
-        '-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+    array_merge(
+        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
+            // No opcache (#964): section N plants faults in the scratch copy of two
+            // classes between requests, and a cached copy would be checked for a
+            // newer file only every couple of seconds - the plant could miss, or
+            // worse, the putting-back could. access-pages-selftest.php does the same.
+            '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0'],
+        httpsStandinServerArgs($state['https']),
+        ['-S', '127.0.0.1:' . $port, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php']
+    ),
     [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server-output.log', 'a'], 2 => ['file', $child . $sep . 'server-output.log', 'a']],
     $pipes,
     $child,
-    $env
+    httpsStandinServerEnv($state['https'], $env)
 );
 if (is_resource($state['proc']) === false) {
     refuse('the web server could not be started');
@@ -5264,6 +5290,162 @@ foreach ($n1009Plants as $label => [$rel, $swaps, $expect]) {
 $n1009Clean = $n1009Records();
 ok('N49 with every round-4 plant taken out again, the same four runs are green (#1009 round 4)', $n1009Clean === [], implode('; ', $n1009Clean));
 $n964Clear();
+
+// ── N50-N54. #1017: the bot check's OWN record on the anonymous form ─────────
+// When reCAPTCHA v3 says a request looks like a robot (its score is below the
+// threshold, or it was made for another page), Captcha::verify() records that
+// itself, before the form writes its own "captcha failed" record. That record
+// was written by Logger::activity(), which since #626 fills in the signed-in
+// member's account, session fingerprint, network address and browser - so a
+// member who used the ANONYMOUS form and was refused had her name put to it,
+// in the same second as the form's own record, which names nobody (#988).
+// Now a form on Captcha::PROMISES_ANONYMITY gets a record naming nobody, and
+// every other form keeps the ordinary record (N50's third half proves that
+// against the visitor form, which promises nothing).
+//
+// reCAPTCHA itself is the HTTPS stand-in: www.google.com is answered by this
+// run, with the score or action each case needs. The captcha settings are the
+// installation's for these checks only, and are put back straight after them.
+$n1017Settings = [
+    'auth.captcha.priority' => 'recaptcha', 'auth.recaptcha.siteKey' => 'p1017-made-up-site-key', 'auth.recaptcha.secretKey' => 'p1017-made-up-secret-key',
+    'auth.recaptcha.version' => 'v3', 'auth.recaptcha.v3.action' => 'submit', 'auth.recaptcha.v3.threshold' => '0.5',
+];
+$n1017Before = [];
+foreach ($n1017Settings as $key => $value) {
+    $row                = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
+    $n1017Before[$key]  = $row;
+    if (array_key_exists($key, $state['settings']) === false) {
+        $state['settings'][$key] = $row; // put back by the clean-up too, should this run die part way
+    }
+    if ($row === null) {
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+    } else {
+        // Only the value: the secret key's row stays marked as a secret, and
+        // readable text in a marked row is used as it is (SecretSettings).
+        q('UPDATE tblSettings SET settingValue = ? WHERE settingID = ?', 'si', [$value, (int) $row['settingID']]);
+    }
+}
+siteSetting(ORG_A, 'visitors.public_capture_enabled', '1');
+/**
+ * Three refused answers as May, signed in: the anonymous form refused on the
+ * SCORE, the anonymous form refused on the ACTION, and the visitor form (which
+ * promises nothing) refused on the score. Everything that is WRONG, as a list.
+ */
+$n1017Observe = static function () use (&$jar, $state): array {
+    $wrong  = [];
+    $verify = [['path' => '/recaptcha/api/siteverify', 'status' => 200, 'json' => ['success' => true, 'action' => 'submit', 'score' => 0.1]]];
+    $cases  = [
+        'the score'  => [$verify, 'reCAPTCHA v3 score below threshold (score=0.1, threshold=0.5)'],
+        'the action' => [[['path' => '/recaptcha/api/siteverify', 'status' => 200, 'json' => ['success' => true, 'action' => 'login', 'score' => 0.9]]],
+            'reCAPTCHA v3 action mismatch (expected=submit, got=login)'],
+    ];
+    foreach ($cases as $what => [$answer, $words]) {
+        httpsStandinAnswers($state['https'], ['www.google.com' => $answer]);
+        httpsStandinRequests($state['https']);
+        $before  = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+        $subject = 'P1017 refused ' . bin2hex(random_bytes(4));
+        $sent    = sendAnonymousPrayer($jar['may'], ['subject' => $subject, 'body' => 'P1017 words', 'g-recaptcha-response' => 'p1017-made-up-token']);
+        $asked   = httpsStandinRequests($state['https']);
+        if (count($asked) !== 1 || ($asked[0]['path'] ?? '') !== '/recaptcha/api/siteverify') {
+            // Without this, a captcha that never reached reCAPTCHA (switched
+            // off, keys unreadable) would pass every check below vacuously.
+            $wrong[] = 'refused on ' . $what . ': reCAPTCHA was not asked once (asked ' . count($asked) . ')';
+        }
+        if (one('SELECT `requestID` FROM `tblPrayerRequests` WHERE `subject` = ?', 's', [$subject]) !== null
+            || str_contains($sent['sent']['location'], 'err=') === false) {
+            $wrong[] = 'refused on ' . $what . ': the request was saved, or the visitor was not told';
+        }
+        $records = q('SELECT * FROM `tblActivityLogs` WHERE `logID` > ? ORDER BY `logID`', 'i', [$before]);
+        $byType  = [];
+        foreach ($records as $r) {
+            $byType[(string) $r['activityType']][] = $r;
+            if ((int) ($r['userID'] ?? 0) === MAY) {
+                $wrong[] = 'refused on ' . $what . ': a record names the member (' . $r['activityType'] . ')';
+            }
+        }
+        foreach (['CaptchaRejected' => $words, 'PrayerRequestAnonRejected' => 'Captcha failed on anonymous prayer-request save'] as $type => $text) {
+            $found = $byType[$type] ?? [];
+            if (count($found) !== 1 || (string) $found[0]['activityDescription'] !== $text) {
+                $wrong[] = 'refused on ' . $what . ': the ' . $type . ' record is missing or worded otherwise';
+                continue;
+            }
+            foreach (NOBODY_COLS as $col) {
+                if ($found[0][$col] !== null) {
+                    $wrong[] = 'refused on ' . $what . ': the ' . $type . ' record holds ' . $col;
+                }
+            }
+        }
+    }
+    // The other half: the same refusal on a form that promises NOTHING keeps
+    // the ordinary record, which names the signed-in member (#626). Without
+    // this a fix that made EVERY bot-check refusal anonymous would pass.
+    httpsStandinAnswers($state['https'], ['www.google.com' => $verify]);
+    httpsStandinRequests($state['https']);
+    $before = (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+    $page   = req($jar['may'], 'GET', '/visit');
+    $posted = req($jar['may'], 'POST', '/visit', ['csrf_token' => token($page['body']), 'fullName' => 'P1017 Contrast', 'email' => 'p1017@contrast.invalid',
+        'g-recaptcha-response' => 'p1017-made-up-token']);
+    $asked  = httpsStandinRequests($state['https']);
+    $mine   = one("SELECT * FROM `tblActivityLogs` WHERE `logID` > ? AND `activityType` = 'CaptchaRejected'", 'i', [$before]);
+    if ($posted['status'] !== 200 || count($asked) !== 1 || $mine === null) {
+        $wrong[] = 'the visitor form: the refusal was not reached (HTTP ' . $posted['status'] . ', reCAPTCHA asked ' . count($asked) . ' time(s))';
+    } elseif ((int) ($mine['userID'] ?? 0) !== MAY || $mine['sessionID'] === null) {
+        $wrong[] = 'the visitor form: its refusal record does not name the signed-in member';
+    }
+    httpsStandinAnswers($state['https'], []);
+
+    return $wrong;
+};
+$n1017First = $n1017Observe();
+ok('N50 A SIGNED-IN MEMBER on the anonymous form is refused by reCAPTCHA v3 - once on the score, once on the action: reCAPTCHA (the stand-in) is really asked, nothing is saved, and BOTH the bot check\'s own record and the form\'s record name nobody - no account, network address, browser, headers or session details - while the same refusal on the visitor form, which promises nothing, still names her (#1017)',
+    $n1017First === [], implode('; ', $n1017First));
+$n1017Plants = [
+    'N51 the bot check\'s refusal written with Logger::activity() again: on the anonymous form it names the signed-in member' => [
+        '_core/Captcha.php', ["Logger::activityNamingNobody('CaptchaRejected', 'reCAPTCHA v3 ' . \$why);" => "Logger::activity('CaptchaRejected', 'reCAPTCHA v3 ' . \$why);"],
+        'refused on the score: the CaptchaRejected record holds userID'],
+    'N52 the anonymous form no longer names itself to the bot check by the constant on the list' => [
+        '_apps/prayer-requests/anonymous-save.php', ['Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)' => "Captcha::verify(\$_POST, 'prayer-request-plant')"],
+        'refused on the action: the CaptchaRejected record holds userID'],
+    'N53 every form\'s refusal made anonymous, the visitor form\'s included' => [
+        '_core/Captcha.php', ['if (in_array($form, self::PROMISES_ANONYMITY, true) === true) {' => 'if (true) {'],
+        'the visitor form: its refusal record does not name the signed-in member'],
+];
+foreach ($n1017Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $n1017Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1017)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$n1017Clean = $n1017Observe();
+ok('N54 with every #1017 plant taken out again, the same run is green (#1017)', $n1017Clean === [], implode('; ', $n1017Clean));
+// The captcha settings back as they were, now: later sections sign in again.
+foreach ($n1017Before as $key => $row) {
+    if ($row === null) {
+        q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
+    } else {
+        q('UPDATE tblSettings SET settingValue = ? WHERE settingID = ?', 'si', [$row['settingValue'], (int) $row['settingID']]);
+    }
+}
+q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'visitors.public_capture_enabled'", 'i', [ORG_A]);
+$n1017Back = true;
+foreach ($n1017Before as $key => $row) {
+    $n1017Back = $n1017Back && one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]) === $row;
+}
+ok('N55 the captcha settings these checks changed are as they were, before any later section signs in again (#1017)', $n1017Back === true);
 
 // =============================================================================
 head('O. A worker\'s own data download lists the records carrying their name, and nothing else from them (#929; D-142, D-151)');

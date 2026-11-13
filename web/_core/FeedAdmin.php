@@ -473,6 +473,17 @@ final class FeedAdmin
      * default is wrong for a diary — this is by START time, earliest
      * first, the order the calendar page reads like a diary.
      *
+     * 🌐 `onWebsite` (#853) is 1 when the public website shows the event NOW,
+     *    asked of `EventVisibility::where()` in "website" mode — the ONE rule
+     *    the public door, the sitemap and an event page's search-engine markup
+     *    use (D-089) — with this organisation's copied-in rule
+     *    (`PublicWebsite::copiedRuleFor()`, D-080, D-081) and its own "today".
+     *    The page's "On the public website" badge used to ask only the website
+     *    box and which tick counts, so an event of a SWITCHED-OFF calendar, or
+     *    one whose stored answer had run out, carried the badge while the
+     *    website left it out. Nothing about the badge is worked out here any
+     *    more: the rule is asked, not copied.
+     *
      * @return array{rows: list<array<string,mixed>>, total: int}
      */
     public static function events(\mysqli $db, int $feedId, int $siteId, int $page): array
@@ -489,16 +500,24 @@ final class FeedAdmin
         );
         $total = (int) ($totalRow['n'] ?? 0);
 
+        // The organisation's "today", as the public door reads it (the
+        // website's dates follow the organisation's calendar).
+        $websiteToday = (new \DateTimeImmutable('now', new \DateTimeZone(Site::timezone($siteId))))->format('Y-m-d');
+        $onWebsite    = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $websiteToday, PublicWebsite::copiedRuleFor($db, $siteId));
+
         $stmt = $db->prepare(
             'SELECT eventID, eventName, startDateTime, endDateTime, timezone, isAllDay, categoryID, importLevel, '
             . 'importDetail, importWebsite, importApiOptOut, importAudienceType, importAudienceID, importSource, '
             . 'importSourceID, importRecheckAt, (externalUidHash IS NOT NULL) AS hasIdentity, '
             . "(externalRecurrenceKey <> '') AS inSeries, "
-            . '(importRecheckAt IS NOT NULL AND importRecheckAt <= UTC_TIMESTAMP()) AS stale '
-            . 'FROM tblEvents WHERE externalFeedID = ? AND siteID = ? AND isDeleted = 0 '
+            . '(importRecheckAt IS NOT NULL AND importRecheckAt <= UTC_TIMESTAMP()) AS stale, '
+            // COALESCE: a column the rule compares may be empty (an answer not
+            // worked out yet), and "unknown" must read as "not on it".
+            . 'COALESCE((1 = 1' . $onWebsite['sql'] . '), 0) AS onWebsite '
+            . 'FROM tblEvents e WHERE externalFeedID = ? AND siteID = ? AND isDeleted = 0 '
             . 'ORDER BY startDateTime, eventID LIMIT ? OFFSET ?'
         );
-        $stmt->bind_param('iiii', $feedId, $siteId, $perPage, $offset);
+        $stmt->bind_param($onWebsite['types'] . 'iiii', ...array_merge($onWebsite['params'], [$feedId, $siteId, $perPage, $offset]));
         $stmt->execute();
         $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $stmt->close();
@@ -2314,13 +2333,20 @@ final class FeedAdmin
     /**
      * Approve or decline one or many waiting dates. `$items` is a list of
      * `['approvalID' => int, 'requestHash' => string, 'contentHash' => string]`.
-     * Grouped by calendar; each calendar's lock is taken exactly once,
-     * every item of that calendar decided, then ONE resolve and ONE commit
-     * (challenge M2).
+     * Grouped by calendar; each calendar's lock is taken exactly once and
+     * ONE commit is made for it (challenge M2). Inside that lock there are
+     * TWO resolves since #855 (D-180): one BEFORE any item is decided, so a
+     * date is decided as it stands now, and one after, which carries the
+     * decisions to other dates (part 7's sibling rule). See step 5 for what
+     * that second resolve means for the message (never for the count).
      *
-     * The message: "Approved N." (or "Declined N."), then any that had
-     * changed ("N had changed since you opened the page; please review
-     * it/them again."), then any not done ("N could not be decided this
+     * The message: "Approved N." (or "Declined N.") — N counts ONLY rows
+     * this call claimed directly — then any that had changed and are left
+     * to review ("N had changed since you opened the page; please review
+     * it/them again."), then any that had changed and now carry this very
+     * call's decision ("N had changed since you opened the page and
+     * now follow(s) your decision on another date." — #855, step 5), then
+     * any not done ("N could not be decided this
      * time; please try again."), then — ONLY when at least one date really
      * DECIDED here is a date of a repeating event (its recurrence key is
      * not empty) — "Other dates of the same repeating event may follow
@@ -2351,6 +2377,23 @@ final class FeedAdmin
      * rule), and the list of waiting dates shows each one's state.
      * `decided`, `changed` and `notDone` are unchanged.
      *
+     * HOW STEP 5 (#855) DIFFERS FROM METHOD 3, which it can look like. It
+     * concerns ONLY a date the administrator NAMED whose claim failed — never
+     * an "other date" — and it adds nothing to the decided count: it only
+     * CHOOSES BETWEEN TWO WORDINGS OF "changed". It does not judge where the
+     * date stands from any row at all (method 3's flaw). It asks one
+     * structural question: did the resolve run after the claims WRITE a row
+     * for that date as a follower of a row this call claimed? The resolver
+     * reports exactly that (`resolveFeed()`'s `followers`). Yes: the date now
+     * carries this decision and there is nothing left to review. Anything
+     * else — waiting again, decided by somebody else, or following an
+     * EARLIER, separate decision — keeps "please review it again". Rounds 2
+     * and 3 of #855's check found two earlier versions wrong: round 2
+     * COUNTED such dates as decided (contradicting D-180), and the next
+     * version read the row's `decisionNote` text, which also holds an
+     * administrator's own typed note, so "Same reason as (approval #51)" on a
+     * row somebody else had DECLINED read as following this call.
+     *
      * IN THIS ORDER, and why:
      *   1. Checks of the request's own shape that need NO database at all —
      *      the decision word (a wrong one throws, as part 7's
@@ -2373,7 +2416,16 @@ final class FeedAdmin
      *      for the "other dates" sentence (fix round 12). Reading them
      *      before the lock is safe: they are what the date IS — the
      *      importer finds an event by them and never rewrites either.
-     *   5. Per calendar, `inFeedLock()`.
+     *   5. Per calendar, `inFeedLock()` — which since #855 (D-180) RE-WORKS
+     *      the calendar under the rules in force BEFORE any item is decided,
+     *      so an item whose request those rules would no longer make (made
+     *      under the other copied-in rule, or under a rule that has since
+     *      run out) is "changed", never decided on its old request. There is
+     *      NO after-resolve step: once `inFeedLock()` has returned (after its
+     *      commit), this method reads the second resolve's own report of the
+     *      follower rows it wrote (`resolved.followers`, held in memory — no
+     *      database read) to choose each failed item's "changed" wording (see
+     *      "HOW STEP 5 DIFFERS" above).
      *
      * ONE LOCK PER CALENDAR, SO NOT ALL-OR-NOTHING ACROSS CALENDARS (plan
      * section 4.1). If a later calendar fails — its lock times out, or the
@@ -2392,11 +2444,11 @@ final class FeedAdmin
      * followed" after all the commits, so a connection lost at exactly
      * that moment would have thrown although decisions were already
      * committed. That read later moved inside the calendar's transaction
-     * (`inFeedLock()`'s `$afterResolve`), and since fix round 12 there is
-     * no such read at all: the "other dates" sentence needs only step 4's
-     * look-up and which items this call decided. So the promise stays
-     * simple and true: this method throws only when nothing at all was
-     * committed — as far as the connection can tell.
+     * (`inFeedLock()`'s `$afterResolve`); fix round 12 removed it, and step
+     * 5 (#855) needs none: it uses the second resolve's own report, which
+     * comes back with the result. So the promise stays true: this method
+     * throws only when nothing at all was committed — as far as the
+     * connection can tell.
      * One case no client can tell apart (checker round 3): the server
      * commits the FIRST calendar but its reply is lost on the way back;
      * that looks exactly like a failed commit, so it is thrown.
@@ -2408,7 +2460,12 @@ final class FeedAdmin
      *
      * `decidedIds` (chunk P8-4) lists the approval numbers really decided,
      * so the decision handler can write one activity line per decided date
-     * (plan section 3.3) — numbers only, never a title.
+     * (plan section 3.3) — numbers only, never a title. It also lists, for a
+     * date step 5 found now carrying this call's decision, the follower row
+     * the resolver wrote for it (the NEW row when the first resolve replaced the date's
+     * row; the same row when it was refreshed in place) — the decision this
+     * person made is recorded against the row that holds it, though the
+     * date is reported "changed" and is not in the count.
      *
      * @return array{ok:bool, status:string, message:string, decided:int, changed:int, notDone:int, failure:?\Throwable, decidedIds:list<int>}
      *
@@ -2472,6 +2529,7 @@ final class FeedAdmin
         //    as before the join was added.
         $feedByApproval   = [];
         $seriesByApproval = []; // approvalID => the repeating event it belongs to, for series dates only
+        $eventByApproval  = []; // approvalID => its date (step 5 matches it against `resolved.followers`, #855)
         if ($unique !== []) {
             $approvalIds  = array_keys($unique);
             $placeholders = implode(',', array_fill(0, count($approvalIds), '?'));
@@ -2487,6 +2545,7 @@ final class FeedAdmin
             $result = $stmt->get_result();
             while (($row = $result->fetch_assoc()) !== null) {
                 $feedByApproval[(int) $row['approvalID']] = (int) $row['feedID'];
+                $eventByApproval[(int) $row['approvalID']] = (int) $row['eventID'];
                 if ((string) ($row['externalRecurrenceKey'] ?? '') !== '') {
                     // A repeating event is its identity WITHIN its calendar
                     // (two calendars are two events, even with the same
@@ -2511,12 +2570,37 @@ final class FeedAdmin
             $byFeed[$feedByApproval[$aid]][] = $item;
         }
 
-        // 5️⃣ Per calendar: one lock, every item, one resolve, one commit.
-        //    Every item of a calendar is decided BEFORE its one resolve, so
-        //    no item can be settled by another item of this same request
-        //    (part 7's sibling rule runs only in the resolve) and then be
-        //    reported as "changed" — the guarantee of challenge M2 that
-        //    matters, kept by fix round 12.
+        // 5️⃣ Per calendar: one lock, a resolve, every item, a resolve, one
+        //    commit (#855, D-180 — the FIRST resolve is new). Every item is
+        //    decided BEFORE the second resolve, so no item is settled by
+        //    another item's decision and then decided again.
+        //
+        //    ⚠️ THE FIRST RESOLVE CAN REPLACE OR REFRESH AN ITEM'S ROW, so its
+        //    claim fails and it is "changed" (D-180). If another item of this
+        //    same request is a sibling date under the request it now has, the
+        //    second resolve carries THIS decision onto it (part 7's sibling
+        //    rule) — and "please review it again" would then be untrue, with
+        //    nothing left to review. So each such date is worded "now follows
+        //    your decision on another date" when, and only when, the SECOND
+        //    resolve itself reports that it wrote a row for that date as a
+        //    follower of a row THIS call claimed (`resolveFeed()`'s
+        //    `followers`, #855 round 4); otherwise "please review it again".
+        //    The count ("Approved N") stays the rows claimed directly.
+        //
+        //    WHY NOT THE ROW'S NOTE, which rounds 2 and 3 read: the note
+        //    column `decisionNote` also holds an administrator's OWN typed
+        //    note (`FeedResolver::decideApproval()` stores it), so a date
+        //    DECLINED by somebody else with the typed note "Same reason as
+        //    (approval #51)" read as following #51 — the message said it now
+        //    followed this decision and the activity log recorded "approved"
+        //    against this person for a row somebody else had declined
+        //    (measured by round 3's check). A text test cannot tell a typed
+        //    note from the resolver's; the resolver's own report of what it
+        //    WROTE can, and it is read without touching the database again.
+        //    Round 2 counted such dates as decided (contradicting D-180).
+        //    (Fix round 12's owner decision not to count OTHER dates that
+        //    followed is untouched: only dates the administrator named.)
+        $followedTotal = 0; // "changed", and now carrying this call's decision
         $decidedTotal  = 0;
         $notDone       = 0;
         $failure       = null;
@@ -2550,10 +2634,18 @@ final class FeedAdmin
                     }
 
                     return ['ok' => true, 'status' => 'saved', 'decidedIds' => $decidedIds, 'changedHere' => $changedHere];
-                });
-                // No after-resolve step any more (fix round 12): decide()
-                // no longer reads what became of other dates. The hook
-                // stays in inFeedLock() for saveChoice() and saveRule().
+                }, null, true);
+                // ⚖️ `true`: re-work the calendar under the copied-in rule in
+                //    force NOW, under the same lock, BEFORE deciding (#855).
+                //    A request made under the other rule, left waiting because
+                //    the re-work after the rule changed failed for this
+                //    calendar, is replaced by it, so approving the old one
+                //    claims nothing ("had changed since you opened the page")
+                //    and can never be reused later to publish the dates under
+                //    words that said the website box did nothing. See
+                //    inFeedLock()'s `$resolveFirst`.
+                // No after-resolve step: step 5's question is answered from
+                // the second resolve's own report (`resolved.followers`).
             } catch (\Throwable $e) {
                 if ($committedAny === false) {
                     throw $e; // nothing committed yet — "nothing was changed" is true
@@ -2569,10 +2661,45 @@ final class FeedAdmin
                 $changed += count($feedItems);
                 continue;
             }
-            $committedAny  = true;
-            $decidedTotal += count($result['decidedIds']);
-            array_push($decidedIds, ...$result['decidedIds']);
-            $changed      += (int) $result['changedHere'];
+            $committedAny   = true;
+            // Step 5: for each named item whose claim failed, the row the
+            // second resolve wrote for its date AS A FOLLOWER of a row this
+            // call claimed — original approval number => that row. The date
+            // test is pinned (D20 case f: followers of OTHER dates). The
+            // "follows a row this call claimed" test cannot be triggered in an
+            // ordinary run, and no test here triggers it: the first resolve,
+            // under the same lock, has already applied every earlier decision,
+            // so a follower the second resolve writes normally follows a row
+            // claimed in between — this call's. It CAN matter: each resolve
+            // reads the database's clock (`databaseNowUtc()`), so at a
+            // one-second boundary a rule's window can open or close between
+            // the two, and the second resolve can then write a follower of an
+            // OLDER decision. This test keeps such a date out of "follows your
+            // decision" (it reads "please review it again"), and stops a later
+            // change to the resolver widening the wording to any decision.
+            $claimedHere  = array_map('intval', $result['decidedIds']);
+            $followedHere = [];
+            foreach ($feedItems as $item) {
+                $aid = (int) $item['approvalID'];
+                if (in_array($aid, $claimedHere, true) === true || isset($eventByApproval[$aid]) === false) {
+                    continue;
+                }
+                foreach ((array) ($result['resolved']['followers'] ?? []) as $rowId => $follower) {
+                    if ((int) $follower['eventID'] === $eventByApproval[$aid]
+                        && in_array((int) $follower['follows'], $claimedHere, true) === true) {
+                        $followedHere[$aid] = (int) $rowId;
+                        break;
+                    }
+                }
+            }
+            $decidedTotal  += count($result['decidedIds']);
+            // The activity log ALSO names each row now carrying this decision
+            // through step 5 (the docblock's `decidedIds` note).
+            array_push($decidedIds, ...$result['decidedIds'], ...array_values($followedHere));
+            // `changed` still counts every named date whose claim failed;
+            // the message only words the step-5 ones differently.
+            $changed       += (int) $result['changedHere'];
+            $followedTotal += count($followedHere);
             foreach ($result['decidedIds'] as $aid) {
                 if (isset($seriesByApproval[$aid]) === true) {
                     $seriesDecided[$seriesByApproval[$aid]] = true;
@@ -2582,9 +2709,16 @@ final class FeedAdmin
 
         $verb    = ($decision === 'approved') ? 'Approved' : 'Declined';
         $message = $verb . ' ' . $decidedTotal . '.';
-        if ($changed > 0) {
-            $message .= ' ' . $changed . ' had changed since you opened the page; please review '
-                . ($changed === 1 ? 'it' : 'them') . ' again.';
+        // Two wordings of "changed" (step 5): the ones left to review, and
+        // the ones that now carry this call's decision. `changed` counts both.
+        $toReview = $changed - $followedTotal;
+        if ($toReview > 0) {
+            $message .= ' ' . $toReview . ' had changed since you opened the page; please review '
+                . ($toReview === 1 ? 'it' : 'them') . ' again.';
+        }
+        if ($followedTotal > 0) {
+            $message .= ' ' . $followedTotal . ' had changed since you opened the page and now '
+                . ($followedTotal === 1 ? 'follows' : 'follow') . ' your decision on another date.';
         }
         if ($notDone > 0) {
             $message .= ' ' . $notDone . ' could not be decided this time; please try again.';
@@ -2836,7 +2970,8 @@ final class FeedAdmin
      * rolled back and returned exactly as given (nothing written, no
      * resolve). A result with `ok === true` is resolved and committed, and
      * gains a `resolved` key: `FeedResolver::resolveFeed()`'s own return
-     * array (`changed`, `newPending`, `pendingTotal`, `approvedBySave`).
+     * array (`changed`, `newPending`, `pendingTotal`, `approvedBySave`,
+     * `followers` — the follower rows it wrote; #855, read by `decide()`).
      *
      * This is the ONLY place in `FeedAdmin` that calls `resolveFeed()`
      * (C10 item 2) — every write above reaches the resolver through here,
@@ -2851,7 +2986,9 @@ final class FeedAdmin
      * and the "who can see it" answer after the save (`whoCanSee()`) in
      * `saveChoice()` and `saveRule()`. (`decide()` used it for "how many
      * other dates followed" until fix round 12, when the owner replaced
-     * that count with one always-true sentence; see `decide()`.)
+     * that count with one always-true sentence. It does not use it now:
+     * #855's step 5 answers its question from the resolve's own report of
+     * the follower rows it wrote — see `decide()`, step 5.)
      *
      * ITS RULES (checker round 3, LOW 3):
      * - It must only READ. Anything it wrote would be committed WITHOUT
@@ -2866,14 +3003,42 @@ final class FeedAdmin
      * Whatever it throws rolls the whole write back, like anything else
      * inside.
      *
+     * `$resolveFirst` (#855) ALSO re-works the calendar under the lock BEFORE
+     * `$work` runs, inside the same transaction. `decide()` asks for it: a
+     * waiting request was fingerprinted under the copied-in rule in force when
+     * it was made (`FeedResolver::requestHash()` records the website box AS IT
+     * COUNTS under that rule), and when a later re-work under a changed rule
+     * FAILED for this calendar the request was left waiting with the old
+     * fingerprint. Approving it then stored an approval whose request counts
+     * the website — given under words, on the approvals page, saying the box
+     * did nothing — and it was reused to publish the dates if the rule was
+     * later loosened again. Re-working first under the rule in force NOW
+     * replaces such a request (its fingerprint no longer matches), so the
+     * decision on it claims nothing and is reported "changed since you opened
+     * the page", and the administrator sees the request as it stands today.
+     * A request still matching the rules in force is left exactly as it was,
+     * so the ordinary decision is unaffected. ⚠️ THE SAME HAPPENS to any
+     * request the rules in force would no longer make — above all one whose
+     * rule's last day has passed since the last refresh: until #855 such a
+     * request could still be decided (and the re-work after it withdrew its
+     * other dates); now it is replaced first and the decision reports it
+     * "changed". That is deliberate — one rule, "a decision is made on the
+     * request as it stands now" — and D20 of feed-admin-selftest pins it.
+     *
      * @param callable(): array<string,mixed>                          $work
      * @param (callable(array<string,mixed>): array<string,mixed>)|null $afterResolve
      *
      * @return array<string,mixed>
      */
-    private static function inFeedLock(\mysqli $db, int $feedId, int $siteId, callable $work, ?callable $afterResolve = null): array
+    private static function inFeedLock(\mysqli $db, int $feedId, int $siteId, callable $work, ?callable $afterResolve = null, bool $resolveFirst = false): array
     {
         self::allowTimeForLockedWork();
+
+        // The ONE call of the resolver in this class, wrapped so the optional
+        // re-work before `$work` (#855) and the re-work after it are the same.
+        $resolve = static fn (?array $savedChoice): array => FeedResolver::resolveFeed(
+            $db, $feedId, FeedResolver::databaseNowUtc($db), $savedChoice
+        );
 
         $db->begin_transaction();
         try {
@@ -2888,6 +3053,10 @@ final class FeedAdmin
                 return ['ok' => false, 'status' => 'not_found', 'message' => self::NOT_FOUND_CALENDAR];
             }
 
+            if ($resolveFirst === true) {
+                $resolve(null);
+            }
+
             $result = $work();
             if (($result['ok'] ?? false) === false) {
                 $db->rollback();
@@ -2895,9 +3064,7 @@ final class FeedAdmin
                 return $result;
             }
 
-            $result['resolved'] = FeedResolver::resolveFeed(
-                $db, $feedId, FeedResolver::databaseNowUtc($db), $result['savedChoice'] ?? null
-            );
+            $result['resolved'] = $resolve($result['savedChoice'] ?? null);
             if ($afterResolve !== null) {
                 $extra = $afterResolve($result);
                 foreach ($extra as $name => $unused) {

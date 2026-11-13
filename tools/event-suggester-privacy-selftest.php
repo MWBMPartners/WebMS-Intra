@@ -1489,9 +1489,11 @@ const P968_EXPORT_BARE = [
     'if ( <$row> === null )'                  => 1, // nothing for this viewer
     '; } <$events> [ ] ='                     => 1, // collected
     '] = <$row> ; } elseif'                   => 1, // collected
-    'while ( <$r> = $result ->'               => 2, // series and whole-calendar rows
+    'while ( <$r> = $result ->'               => 1, // series rows
+    ') as <$r> ) { $events'                   => 1, // whole-calendar rows, soonest real moment first (#811)
     ') { <$events> [ ] ='                     => 2, // collected, both loops
-    '] = <$r> ; } $stmt'                      => 2, // collected, both loops
+    '] = <$r> ; } $stmt'                      => 1, // collected, series loop
+    '] = <$r> ; } }'                          => 1, // collected, whole-calendar loop (#811: the same SELECT, now through Events::soonestByRealStart())
     'count ( <$events> ) === 0'               => 2, // nothing for this viewer, both branches
     '$rows as <$row> ) { if'                  => 1, // SERIES-RUN rows (another query)
     '( array <$r> ) : string'                 => 1, // SERIES-RUN rows (another query)

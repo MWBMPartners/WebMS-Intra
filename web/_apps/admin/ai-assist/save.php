@@ -109,11 +109,24 @@ if (in_array($provider, ['anthropic','openai','local'], true) === false) {
     $provider = 'anthropic';
 }
 
-$capPence = (int) round(((float) (string) ($_POST['monthCap'] ?? 0)) * 100);
+// 💷 The monthly cap is read by the ONE converter, Currency::parseAmount()
+//    (#1004), BEFORE anything is written. It used to go through a float with
+//    any text accepted: an absurd figure wrapped, "abc" or an empty box became
+//    a cap of 0 (which stops every request), and a negative was clamped to 0
+//    without a word. Each of those is refused now, with the reason. Figures
+//    only (D-152); no currency is passed.
+$capPosted = $_POST['monthCap'] ?? '';
+$capPence  = \Portal\Core\Currency::parseAmount(is_string($capPosted) === true ? $capPosted : '', '');
+if (is_string($capPence) === true) {
+    $_SESSION['flash_msg']  = 'Nothing was saved. Monthly cap: ' . $capPence;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/ai-assist'));
+    exit();
+}
 
 $upsert($db, 'ai_assist.enabled',        isset($_POST['enabled']) === true ? '1' : '0', false);
 $upsert($db, 'ai_assist.provider',       $provider, false);
-$upsert($db, 'ai_assist.monthCapPence',  (string) max(0, $capPence), false);
+$upsert($db, 'ai_assist.monthCapPence',  (string) $capPence, false);
 $upsert($db, 'ai_assist.userDailyCap',   (string) max(1, min(200, (int) ($_POST['userDailyCap'] ?? 20))), false);
 $upsert($db, 'ai_assist.audience',       substr(trim((string) ($_POST['audience'] ?? 'congregation')), 0, 60), false);
 $upsert($db, 'ai_assist.anthropic.model', trim((string) ($_POST['anth_model']  ?? 'claude-haiku-4-5-20251001')), false);

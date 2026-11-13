@@ -78,7 +78,7 @@ $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 $success     = isset($_GET['submitted']) === true;
 
 // 💬 WHY THE REFUSAL IS SHOWN AT ALL (#777 round 6).
-//    `submit-save.php` redirects back here with `?err=<code>` for EIGHT
+//    `submit-save.php` redirects back here with `?err=<code>` for EIGHT (nine since #885 added `category`)
 //    different refusals, and this page read only `?submitted` -- so every one
 //    of them was a bounce to a blank form with no message and everything the
 //    visitor had typed gone. On a form reachable without signing in, that is
@@ -100,6 +100,9 @@ $errorCodes = [
     //    only an approval is e-mailed (D-134).
     'contact'  => 'Please give your name and email address so we can e-mail you if your event is approved.',
     'email'    => 'That email address does not look right. Please check it.',
+    // #885: a category that is not one of this calendar's (the form offers
+    //    only its own, so this is reached by an edited post or a stale page).
+    'category' => 'Please choose one of the categories offered, or leave the category empty.',
     'captcha'  => 'The anti-robot check did not pass. Please try again.',
     'csrf'     => 'The form expired while you were filling it in. Please try again.',
     'db'       => 'Something went wrong at our end and the event was not saved. Please try again.',

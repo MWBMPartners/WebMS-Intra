@@ -613,7 +613,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps selftest_geocoder; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1334,6 +1334,20 @@ jobs:
           SELFTEST_WEB_PORT: '9778'
         run: php tools/outside-services-selftest.php
 
+      # 📍 #1034, #1035. The geocoder's answers, fresh and cached, through the
+      #    real /geo/lookup page and a real venue save. A stand-in provider on
+      #    this machine answers in Google's and Nominatim's shapes (the COPY of
+      #    the class is pointed at it; nothing reaches the internet). Bad
+      #    coordinates must give "no answer" rather than 0,0, and the country a
+      #    look-up is limited to must be part of the cache key. REFUSES rather
+      #    than skipping.
+      - name: "Geocoder answers are real positions, cached per country (#1034, #1035)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_geocoder
+          SELFTEST_WEB_PORT: '9871'
+        run: php tools/geocoder-selftest.php
+
       # 🧒 #816 (D-074): the OPTIONAL installation ceiling on how long event
       #    registrations are kept. Drives /admin/settings/registrations, its
       #    handler, the general settings editor, the events API and the real
@@ -1405,6 +1419,20 @@ jobs:
           docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_pubdoor < web/_sql/full_schema.sql > /dev/null
           php tools/public-door-selftest.php
 
+      # 🧹 #1003, #880: uploads write no deprecation (each handler driven with a
+      #    real upload, and the deprecated call planted back to prove the check
+      #    can fail), and media routes answer byte ranges exactly. Makes its own
+      #    database; picks its own web port.
+      - name: "Uploads write no deprecation; media answer byte ranges (#1003, #880)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_upmedia
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_upmedia"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_upmedia < web/_sql/full_schema.sql > /dev/null
+          php tools/uploads-and-media-selftest.php
+
       # 🔒 #836: the general settings editor refuses to change, add or delete
       #    every setting a lock method locks — on all three paths, for every
       #    lock method it finds by name (so #493's lock on the copied-in events
@@ -1433,6 +1461,37 @@ jobs:
           docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_currency"
           docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_currency < web/_sql/full_schema.sql > /dev/null
           php tools/currency-selftest.php
+
+      # 💷 #1004: one strict converter for typed money — a table of
+      #    dimensions with no database, then the venue handlers, giving,
+      #    projects, the AI cap, offering counts, every edit form's round trip,
+      #    and both imports over real HTTP. Makes its own database.
+      - name: "Typed money is read strictly, never wrapped (#1004)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_money
+          SELFTEST_WEB_PORT: '9533'
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_money"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_money < web/_sql/full_schema.sql > /dev/null
+          php tools/money-amount-selftest.php
+
+      # 📦 #1001: the assets API updates only the fields it was sent. A change
+      #    made by somebody else while an API request waits on the asset's lock
+      #    survives it, in both directions (set and cleared); currency keeps its
+      #    own refusals. Needs performance_schema, as the currency test does.
+      #    Makes its own database.
+      - name: "Assets API: a partial update keeps other changes (#1001)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_assetsapi
+          SELFTEST_WEB_PORT: '9101'
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_assetsapi"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_assetsapi < web/_sql/full_schema.sql > /dev/null
+          php tools/assets-api-update-selftest.php
 
       # 🧹 The other half of #668, which the test above cannot reach: that the
       #    readers the nightly clear-out ACTUALLY USES apply the rule, against

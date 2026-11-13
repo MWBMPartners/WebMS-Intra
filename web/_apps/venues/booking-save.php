@@ -65,10 +65,27 @@ switch ($action) {
     case 'save':
         $bookingId = (int) ($_POST['bookingID'] ?? 0);
 
-        // 💷 Pounds → pence, ONLY at this boundary. Blank field = no cost set.
+        // 💷 Whole units → hundredths, ONLY at this boundary. A blank box means
+        //    no cost set. Read by the ONE converter, Currency::parseAmount()
+        //    (#1004): `(int) round((float) $v * 100)` wrapped an absurd figure
+        //    into a small or negative one, and stored "abc" as a cost of 0.00.
+        //    A refused figure goes back to the form with nothing written. The
+        //    box takes figures only (D-152); no currency is passed.
         $costPounds = trim((string) ($_POST['costPence'] ?? ''));
         $data = $_POST;
-        $data['costPence'] = $costPounds !== '' ? (string) (int) round(((float) $costPounds) * 100) : null;
+        $data['costPence'] = null;
+        if ($costPounds !== '') {
+            $cost = \Portal\Core\Currency::parseAmount($costPounds, '');
+            if (is_string($cost) === true) {
+                $_SESSION['flash_msg']  = 'Cost: ' . $cost . ' Nothing was saved.';
+                $_SESSION['flash_type'] = 'danger';
+                header('Location: ' . ($bookingId > 0
+                    ? Site::url('venues/booking') . '?id=' . $bookingId
+                    : Site::url('venues/booking') . '?venue=' . $venueId . '&date=' . rawurlencode((string) ($_POST['bookingDate'] ?? ''))));
+                exit();
+            }
+            $data['costPence'] = (string) $cost;
+        }
 
         $result = Venues::saveBooking($siteId, $bookingId, $data, $userId);
         if (count($result['errors']) > 0) {

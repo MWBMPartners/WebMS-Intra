@@ -145,7 +145,20 @@ if (in_array($provider, ['anthropic','openai','google','deepl','libre'], true) =
 //    array and something threw before the gate.
 $capPosted = $_POST['monthCap'] ?? '';
 $capRaw    = is_string($capPosted) === true ? trim($capPosted) : '';
-if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $capRaw) !== 1) {
+// 💷 The figure becomes hundredths through the ONE converter,
+//    Currency::parseAmount() (#1004), never a float. This page keeps its own
+//    narrower pattern in front (up to nine figures and two decimals, no comma,
+//    no sign), which section J of tools/content-translation-selftest.php pins;
+//    whatever the pattern lets through, the converter's answer is what decides,
+//    and a refusal from either goes to the same refusal below. Its maximum is
+//    the largest figure the PATTERN admits (999,999,999.99), never the INT
+//    column default: with that default, 21,474,837 to 999,999,999.99 were told
+//    "could not be read as a figure", which is untrue, and never reached the
+//    hard-maximum refusal below, which is the one that says what the limit is.
+$capPence = preg_match('/^\d{1,9}(\.\d{1,2})?$/', $capRaw) === 1
+    ? \Portal\Core\Currency::parseAmount($capRaw, '', 99999999999)
+    : 'not a figure';
+if (is_string($capPence) === true) {
     Logger::activity(
         'TranslationCapRefused',
         'A monthly translation limit that could not be read as a figure was refused.'
@@ -160,7 +173,6 @@ if (preg_match('/^\d{1,9}(\.\d{1,2})?$/', $capRaw) !== 1) {
     header('Location: ' . Site::url('admin/translation'));
     exit();
 }
-$capPence = (int) round(((float) $capRaw) * 100);
 
 // 💰 THE MONTHLY LIMIT IS REFUSED ABOVE THE HARD MAXIMUM, NEVER REDUCED.
 //    #668's rule, and the reason is that quietly reducing a number somebody

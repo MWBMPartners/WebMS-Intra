@@ -84,6 +84,83 @@ final class EventSuggestions
     public const APPROVAL_SUBJECT = 'Your event suggestion has been approved';
 
     /**
+     * ➖ A stranger's one-line value, made one line (#972, #1020). The ONE
+     * rule for the two things a visitor types that the approval e-mail
+     * repeats: the event's name and their own name. `calendar/submit-save.php`
+     * applies it before storing, and approvalMessage() applies it again to
+     * whatever the row holds.
+     *
+     * WHY. Both boxes are single-line on the form, but a request made by hand
+     * can carry line breaks, and the form only trimmed the ends. The e-mail is
+     * plain text, so a stranger could lay it out: a name such as
+     * "Pat\n\nClick https://… to confirm" became its own paragraph holding a
+     * link, in a message from the organisation's own mailbox. The approving
+     * administrator never saw that layout, because the moderation page shows
+     * the same text inside one heading, where a browser folds every line break
+     * and run of spaces into a single space.
+     *
+     * SO IT DOES WHAT THE ADMINISTRATOR'S BROWSER DID, in three steps:
+     *   1. Text that is not valid UTF-8 has each broken byte sequence replaced
+     *      by "?" (mb_scrub(), with the replacement character set to "?" HERE
+     *      rather than left to the `mbstring.substitute_character` setting,
+     *      which an installation can change). A browser never sends such text
+     *      from this form; a request made by hand can. Without this step the Unicode patterns
+     *      below refuse the whole string, and the first version then fell back
+     *      to a byte pattern that KEPT U+2028 and every multi-byte control - so
+     *      the rule was different for exactly the text built by hand to get
+     *      round it. One rule now, for every input.
+     *   2. The characters that change the ORDER a line reads in are removed
+     *      (#1020): the embeddings and overrides U+202A-U+202E and the isolates
+     *      U+2066-U+2069. An override (U+202E) makes "Pat" display as "taP".
+     *      A name in Arabic or Hebrew normally reads correctly without any of
+     *      them: the order of letters comes from the letters themselves.
+     *      KEPT, deliberately: the zero-width joiner and non-joiner (U+200D,
+     *      U+200C), which emoji sequences and several scripts (Persian, the
+     *      Indian scripts) need to be spelled right; and the left-to-right and
+     *      right-to-left MARKS (U+200E, U+200F) and the Arabic letter mark
+     *      (U+061C). A mark acts like an invisible letter with a direction. It
+     *      CAN reorder things inside the visitor's own text - groups of digits
+     *      and right-to-left words (round 2 of the check measured
+     *      "Meeting<U+200F> 12 34 end" shown as "Meeting34 12  end" in Edge) -
+     *      but it never reverses the letters of a word. In this e-mail what
+     *      comes after each value is punctuation (`,` after the name, `", on `
+     *      after the event's name) and then either a left-to-right letter or the
+     *      end of the paragraph, which takes the paragraph's left-to-right
+     *      direction; so a mark inside the value did not reach the fixed words
+     *      around it. That was measured for the example in round 2 of the
+     *      check, not proven for every possible value.
+     *      People writing in right-to-left scripts type marks on purpose, so
+     *      they stay, and this does NOT remove every "format" character
+     *      (\p{Cf}).
+     *   3. Every run of control characters (line breaks, tabs, every C0/C1
+     *      control: \p{Cc}) and of Unicode spaces and line or paragraph
+     *      separators (\p{Z}: the no-break space, the en and em spaces, U+2028,
+     *      U+2029 and the rest) becomes ONE ordinary space, and the ends are
+     *      trimmed.
+     * The stored value, the moderation page and the e-mail then read the same,
+     * word for word. A link stays as text: the administrator sees it, on one
+     * line, before approving, which is the point.
+     */
+    public static function oneLine(string $text): string
+    {
+        // "?" for a broken byte sequence, said here: mb_scrub() otherwise uses
+        // whatever `mbstring.substitute_character` is set to. Put back after.
+        $was = mb_substitute_character();
+        mb_substitute_character(0x3F);
+        try {
+            $valid = mb_scrub($text, 'UTF-8');
+        } finally {
+            mb_substitute_character($was);
+        }
+        $flat  = preg_replace('/[\x{202A}-\x{202E}\x{2066}-\x{2069}]+/u', '', $valid);
+        $flat  = preg_replace('/[\p{Cc}\p{Z}]+/u', ' ', (string) $flat);
+
+        // Neither pattern can refuse text mb_scrub() has made valid; `(string)`
+        // is only there so a null could never reach trim().
+        return trim((string) $flat);
+    }
+
+    /**
      * ✉️ The subject and the plain-text body of the e-mail.
      *
      * THE SUBJECT NAMES NOTHING, deliberately. The send log keeps a message's
@@ -103,14 +180,15 @@ final class EventSuggestions
      * `Mailer::send()`'s `bodyIsText` option, which makes Mailer escape it and
      * wrap it in the organisation's branded layout WHATEVER it contains.
      *
-     * ⚠️ ROUND 1 OF THE CHECK FOUND THIS SENTENCE UNTRUE. It said "Mailer
-     *    escapes it", and without the option Mailer GUESSES: a body matching
-     *    `<[a-zA-Z][^>]*>` anywhere is taken as HTML and sent exactly as
-     *    written, with no escaping and no footer. So `Fish & Chips <Supper>`,
-     *    a name carrying `<a href="https://evil.example/…">`, or an
-     *    `<img src="https://tracker.example/…">` would have gone out from the
-     *    organisation's own mailbox as a working link or a tracking image.
-     *    Never drop the option from this send.
+     * ⚠️ ROUND 1 OF #859's CHECK FOUND THIS SENTENCE UNTRUE. It said "Mailer
+     *    escapes it", and without the option Mailer GUESSES whether a body is
+     *    HTML (Mailer::looksLikeHtml()) and sends one it takes for HTML
+     *    exactly as written, with no escaping and no footer. Since #971 the
+     *    guess needs a real HTML element, so `Fish & Chips <Supper>` no longer
+     *    trips it - but a name carrying `<a href="https://evil.example/…">` or
+     *    an `<img src="https://tracker.example/…">` still would, and would go
+     *    out from the organisation's own mailbox as a working link or a
+     *    tracking image. Never drop the option from this send.
      *
      * @param string $eventName    The suggestion's title, as stored.
      * @param string $startReading `tblEvents.startDateTime`: a reading of the
@@ -132,7 +210,13 @@ final class EventSuggestions
         string $name
     ): array {
         $when = I18n::formatClockDateTime($startReading, $isAllDay === true ? 'l j F Y' : 'l j F Y \a\t H:i');
-        $hello = trim($name) === '' ? 'Hello,' : 'Hello ' . trim($name) . ',';
+        // ➖ #972: the two things a stranger typed, one line each, exactly as
+        //    the moderation page showed them (see oneLine()). Asked here too,
+        //    not only at the form, because a row can reach approval having been
+        //    written some other way.
+        $eventName = self::oneLine($eventName);
+        $name      = self::oneLine($name);
+        $hello = $name === '' ? 'Hello,' : 'Hello ' . $name . ',';
 
         if ($isPublic === true) {
             $body = $hello . "\n\n"

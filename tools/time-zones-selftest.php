@@ -67,6 +67,10 @@
  *      a call that lands just after midnight on the event's own day still
  *      sends, and only the day the clocks go back holds one back. (That is
  *      about 550 runs of the job, and most of the minute this file takes.)
+ *   L  The calendar's list view pages in REAL order across clocks (#1024),
+ *      and the user reminders job picks rota duties and birthdays by each
+ *      organisation's OWN date, with the database's clock chosen to be on a
+ *      different date (#1028).
  *   P  No PLACE is built in either (#935): the Sabbath place ships empty and
  *      sunset follows the organisation's map position, or the fixed times
  *      when there is none, and a venue's country follows the organisation's
@@ -121,7 +125,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 289;  // + thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 315;  // + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -184,6 +188,17 @@ if (($argv[1] ?? '') === '--child') {
                 ob_start();
                 require $childWeb . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . 'event-reminders.php';
                 $out['said'] = (string) ob_get_clean();
+                break;
+            case 'userReminders': // #1028: ONE run of the real user reminders job, as its page makes it
+                $_GET['key'] = (string) $job['key'];
+                ob_start();
+                require $childWeb . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR . 'user-reminders.php';
+                $out['said'] = (string) ob_get_clean();
+                break;
+            case 'momentSize': // #1024 round 2: how big the real-order expression is for one organisation
+                $moment         = \Portal\Core\Events::startAsUtcMoment($mysqli, 'e', (int) $job['site']);
+                $out['values']  = count($moment['params']);
+                $out['length']  = strlen($moment['sql']);
                 break;
             case 'import': // one refresh of an outside calendar, from this run's stand-in server
                 \Portal\Core\SafeFetch::$testResolverOverride = ['calendar.test' => ['ips' => ['127.0.0.1'], 'port' => (int) $job['port']]];
@@ -3293,6 +3308,112 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         $activeElsewhere === 0 && $okRun($runI) === true && is_array($sweptI) === true && ($sweptI['sitesSwept'] ?? null) === 0,
         'other active pathways: ' . $activeElsewhere . '; ' . $tell($runI)
     );
+
+    // ---- #824: a step is completed only for somebody who still BELONGS -----
+    // None of the sweep's three rules asked whether the person was still one
+    // of the organisation's own, so somebody who had LEFT (their membership
+    // switched off) went on having steps completed from their attendance and
+    // RSVPs: permanent rows their former organisation's leaders read. The
+    // sweep now asks the ONE rule (`Site::isOwnOrganisation()` with several
+    // organisations; the account's own switch with one) before any rule runs.
+    //
+    // A second person is enrolled in organisation 1's pathway with a going
+    // RSVP to organisation 1's own event: OTHER, who is a member of
+    // organisation two ONLY. With several organisations OTHER is not one of
+    // organisation 1's, so the step is not completed; with ONE organisation
+    // nobody needs a membership row, so it is -- which is what makes OTHER
+    // the control for the single-organisation checks below.
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) VALUES (1, ?, ?, 'active')", 'ii', [$path812One, OTHER]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (960907, ?, 1, 'going', 'confirmed')", 'i', [OTHER]);
+    $xMultisiteWas = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL")['settingValue'] ?? null;
+    $memberOneRow  = static fn (): ?array => one('SELECT isActive FROM tblUserSites WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    $enrolment824  = static fn (int $userId): ?string => one('SELECT status FROM tblPathwayEnrolments WHERE pathwayID = ? AND userID = ?', 'ii', [$path812One, $userId])['status'] ?? null;
+
+    // With SEVERAL organisations, through the scheduled job.
+    setting('multisite.enabled', 'true');
+    $run824a   = $sweepOnce();
+    $otherOneA = $doneIn($path812One, OTHER);
+    ok(
+        'X18m premise (#824): with several organisations and everybody where they belong, the scheduled sweep completes the member\'s step in organisation 1 and OTHER\'s in organisation two -- so the empty answers below are not the sweep failing to run',
+        (int) ($memberOneRow()['isActive'] ?? 0) === 1 && $okRun($run824a) === true && $bothSwept($run824a) === true,
+        'member\'s organisation 1 row ' . json_encode($memberOneRow()) . '; ' . $tell($run824a)
+    );
+    ok(
+        'X18n (#824) OTHER -- enrolled in organisation 1\'s pathway with a going RSVP to its event, but a member of organisation two only -- has NO step completed there (the old sweep never asked, and completed it)',
+        $otherOneA === [] && one('SELECT userID FROM tblUserSites WHERE userID = ? AND siteID = 1', 'i', [OTHER]) === null,
+        'OTHER completed in organisation 1: ' . json_encode($otherOneA)
+    );
+    q('UPDATE tblUserSites SET isActive = 0 WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    $run824b = $sweepOnce();
+    ok(
+        'X18o (#824) once the member has LEFT organisation 1 (membership switched off, isActive 0), the scheduled sweep completes NOTHING for them there, still completes OTHER\'s step in organisation two, records ok -- and leaves the member\'s enrolment exactly as it was',
+        (int) ($memberOneRow()['isActive'] ?? -1) === 0 && $okRun($run824b) === true
+            && $run824b['one'] === [] && $run824b['two'] === ['Selftest 819 organisation two'] && $enrolment824(MEMBER) === 'active',
+        'enrolment ' . json_encode($enrolment824(MEMBER)) . '; ' . $tell($run824b) . ' (the old sweep completed ["Selftest 812 own organisation"] for the member who had left)'
+    );
+    q('UPDATE tblUserSites SET isActive = 1 WHERE userID = ? AND siteID = 1', 'i', [MEMBER]);
+    if ($xMultisiteWas === null) {
+        q("DELETE FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL");
+    } else {
+        setting('multisite.enabled', (string) $xMultisiteWas);
+    }
+
+    // With ONE organisation, through the administrator's roster page, which
+    // sweeps ONE pathway (the other way the sweep is reached). Here the
+    // account's own switch is the whole question.
+    $clearProgress();
+    q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [MEMBER]);
+    $roster824a = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $memberOneC = $doneIn($path812One, MEMBER);
+    $otherOneC  = $doneIn($path812One, OTHER);
+    q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [MEMBER]);
+    ok(
+        'X18p (#824) with ONE organisation, the roster page\'s sweep completes NOTHING for a member whose account is switched off, and DOES complete OTHER\'s step although OTHER has no organisation 1 membership row (with one organisation nobody needs one)',
+        $xMultisiteWas !== 'true' && $roster824a['status'] === 200 && $memberOneC === [] && $otherOneC === ['Selftest 812 own organisation'],
+        'multisite was ' . json_encode($xMultisiteWas) . '; ' . said($roster824a) . '; member completed ' . json_encode($memberOneC) . ', OTHER completed ' . json_encode($otherOneC)
+            . ' (the old sweep completed the switched-off member\'s step too)'
+    );
+    // Cleared first, so OTHER's step from X18p cannot answer for this run:
+    // here BOTH people are in the one list the sweep binds (round 2 of #824's
+    // check -- a sweep that bound only the FIRST person of its list passed
+    // every check, because no run had two people who both belonged).
+    $clearProgress();
+    $roster824b = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $memberOneD = $doneIn($path812One, MEMBER);
+    $otherOneD  = $doneIn($path812One, OTHER);
+    ok(
+        'X18q (#824) once the account is switched back on, the next sweep completes the step its evidence earns -- leaving was not recorded as anything -- and it completes it for BOTH people in the one list it binds, not only the first',
+        $roster824b['status'] === 200 && $memberOneD === ['Selftest 812 own organisation'] && $otherOneD === ['Selftest 812 own organisation'],
+        said($roster824b) . '; member completed ' . json_encode($memberOneD) . ', OTHER completed ' . json_encode($otherOneD)
+    );
+
+    // More people than one slice holds. The sweep binds its list 500 at a
+    // time (`Discipleship::SWEEP_SLICE`); with two people there is only ever
+    // ONE slice, so a loop that ran only the first slice passed everything.
+    // 520 more accounts, switched on, enrolled, each with a going RSVP to
+    // organisation 1's own event, take the list to 522: a second slice of 22.
+    // One organisation, so nobody needs a membership row (X18p).
+    q("INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) "
+        . "WITH RECURSIVE `n` (`i`) AS (SELECT 0 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 519) "
+        . "SELECT 970000 + `i`, CONCAT('Selftest 824 bulk ', `i`), CONCAT('bulk', `i`, '.824.zones@selftest.invalid'), 1, 0, 0 FROM `n`");
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) SELECT 1, ?, `userID`, 'active' FROM `tblUsers` WHERE `userID` BETWEEN 970000 AND 970519", 'i', [$path812One]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) SELECT 960907, `userID`, 1, 'going', 'confirmed' FROM `tblUsers` WHERE `userID` BETWEEN 970000 AND 970519");
+    $clearProgress();
+    $roster824c = req($adminJar, 'GET', '/admin/discipleship/progress/pathway?id=' . $path812One);
+    $bulkDone   = (int) (one(
+        "SELECT COUNT(*) AS n FROM tblPathwayProgress pr JOIN tblPathwaySteps s ON s.stepID = pr.stepID WHERE s.pathwayID = ? AND s.name = 'Selftest 812 own organisation' AND pr.userID BETWEEN 970000 AND 970519",
+        'i', [$path812One]
+    )['n'] ?? -1);
+    $lastBulk   = $doneIn($path812One, 970519);
+    ok(
+        'X18r (#824) with 522 people enrolled -- more than one slice of 500 -- the sweep completes the step for all of them, the last one included (a loop that ran only the first slice left the last 22 out)',
+        $roster824c['status'] === 200 && $bulkDone === 520 && $lastBulk === ['Selftest 812 own organisation'],
+        said($roster824c) . '; of the 520 extra people, ' . $bulkDone . ' completed; the last one: ' . json_encode($lastBulk)
+    );
+    q('DELETE FROM tblPathwayProgress WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblPathwayEnrolments WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblEventRSVPs WHERE userID BETWEEN 970000 AND 970519');
+    q('DELETE FROM tblUsers WHERE userID BETWEEN 970000 AND 970519');
     q("DELETE FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
 
     // Put everything back. Nothing below reads these rows; event 960908 goes
@@ -3334,6 +3455,99 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'count with both ' . json_encode($withBoth) . ', without Auckland ' . json_encode($withNy) . ', without either ' . json_encode($withNone)
     );
     q('DELETE FROM tblEvents WHERE eventID IN (960906, 960907)');
+
+    // ---- #811 item 1: "next" by the REAL moment, not by the readings --------
+    // Two events whose READINGS sort the opposite way to their real moments:
+    // an Auckland event at a UTC moment about thirty hours ahead, and a New
+    // York event four real hours LATER. Auckland's reading is many hours
+    // later on the page than New York's, so `ORDER BY startDateTime` listed
+    // New York first although Auckland's happens first.
+    $realFirst = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('+30 hours');
+    $aklNext   = $realFirst->setTimezone($aklZone)->format('Y-m-d H:i:00');
+    $nyNext    = $realFirst->modify('+4 hours')->setTimezone($nyZone)->format('Y-m-d H:i:00');
+    $aklNextName = 'Selftest zones next 960950 Auckland first';
+    $nyNextName  = 'Selftest zones next 960951 New York second';
+    q('DELETE FROM tblEvents WHERE eventID IN (960950, 960951, 960952, 960953)');
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES "
+        . "(960950, 1, 'selftest-zones-next-960950', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'Pacific/Auckland', 'published', 1, 0), "
+        . "(960951, 1, 'selftest-zones-next-960951', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'America/New_York', 'published', 1, 0)",
+        'ssssss', [$aklNextName, $aklNext, $aklNext, $nyNextName, $nyNext, $nyNext]
+    );
+    ok(
+        'X20 premise (#811): New York\'s READING sorts BEFORE Auckland\'s, while Auckland\'s real moment comes FIRST -- so reading order and real order disagree, and nothing below is vacuous',
+        strcmp($nyNext, $aklNext) < 0
+            && (new DateTimeImmutable($aklNext, $aklZone))->getTimestamp() < (new DateTimeImmutable($nyNext, $nyZone))->getTimestamp(),
+        'Auckland reading ' . $aklNext . ', New York reading ' . $nyNext
+    );
+    $firstOf = static function (string $text) use ($aklNextName, $nyNextName): string {
+        $a = strpos($text, $aklNextName);
+        $n = strpos($text, $nyNextName);
+        if ($a === false || $n === false) {
+            return 'not both listed';
+        }
+
+        return $a < $n ? 'Auckland first' : 'New York first';
+    };
+    $remindNext = req($adminJar, 'GET', '/admin/calendar/reminders');
+    ok(
+        'X21 the reminder preview lists the two in their REAL order, Auckland first (#811: by reading it put New York first)',
+        $remindNext['status'] === 200 && $firstOf(words($remindNext['body'])) === 'Auckland first',
+        said($remindNext) . '; ' . $firstOf(words($remindNext['body']))
+    );
+    setting('newsletter.enabled', '1');
+    q("INSERT INTO tblNewsletter (siteID, title, subject, status) VALUES (1, 'Selftest zones newsletter 811', 'Selftest zones newsletter 811', 'draft')");
+    $news811 = (int) one("SELECT newsletterID FROM tblNewsletter WHERE title = 'Selftest zones newsletter 811'")['newsletterID'];
+    q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'events', 0, '{\"days\":7}')", 'i', [$news811]);
+    $letterNext = req($adminJar, 'GET', '/newsletter/preview?id=' . $news811);
+    q('DELETE FROM tblNewsletter WHERE newsletterID = ?', 'i', [$news811]);
+    setting('newsletter.enabled', (string) $newsletterWas);
+    ok(
+        'X22 the newsletter\'s "Upcoming events" lists the two in their REAL order, Auckland first (#811)',
+        $letterNext['status'] === 200 && $firstOf(words($letterNext['body'])) === 'Auckland first',
+        said($letterNext) . '; ' . $firstOf(words($letterNext['body']))
+    );
+    $icsNext = req($adminJar, 'GET', '/calendar/export?all=1');
+    ok(
+        'X23 the "all upcoming" calendar download lists the two in their REAL order, Auckland first -- the order its 200-event cut is taken in (#811; the cut itself, which needs over 200 events, is not exercised here)',
+        $icsNext['status'] === 200 && $firstOf((string) str_replace("\r\n ", '', $icsNext['body'])) === 'Auckland first',
+        said($icsNext) . '; ' . $firstOf((string) str_replace("\r\n ", '', $icsNext['body']))
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960950, 960951)');
+
+    // ---- #811 item 2: an end at exactly midnight is not on the next day -----
+    // The week view's day columns drew an evening event ending at 00:00:00 as
+    // a 15-minute sliver at the top of the NEXT day's column, while the month
+    // grid and the register (I18n::wallClockDaySpan(), #806) leave that day
+    // out. 960953 ends at 00:30 and MUST still reach the next day: it holds
+    // the rule down from over-reaching.
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES "
+        . "(960952, 1, 'selftest-zones-midnight-960952', 'Selftest zones midnight 960952', '2030-06-04 19:00:00', '2030-06-05 00:00:00', 'Pacific/Auckland', 'published', 1, 0), "
+        . "(960953, 1, 'selftest-zones-midnight-960953', 'Selftest zones half past 960953', '2030-06-04 22:00:00', '2030-06-05 00:30:00', 'Pacific/Auckland', 'published', 1, 0)"
+    );
+    $weekGrid = req($adminJar, 'GET', '/calendar?view=week&date=2030-06-04');
+    $colOf = static function (string $html, string $day): ?string {
+        $at = strpos($html, '<div class="portal-cal-col" data-date="' . $day . '">');
+        if ($at === false) {
+            return null;
+        }
+        $next = strpos($html, '<div class="portal-cal-col" data-date="', $at + 10);
+
+        return substr($html, $at, $next === false ? 20000 : $next - $at);
+    };
+    $col4 = $colOf($weekGrid['body'], '2030-06-04');
+    $col5 = $colOf($weekGrid['body'], '2030-06-05');
+    $inCol = static fn (?string $col, string $slug): ?bool => $col === null ? null : str_contains($col, 'slug=' . $slug . '"');
+    ok(
+        'X24 the week view draws the 19:00-to-midnight event on its own day and NOT as a sliver on the next; the one ending at 00:30 still reaches the next day (#811)',
+        $weekGrid['status'] === 200
+            && $inCol($col4, 'selftest-zones-midnight-960952') === true && $inCol($col5, 'selftest-zones-midnight-960952') === false
+            && $inCol($col4, 'selftest-zones-midnight-960953') === true && $inCol($col5, 'selftest-zones-midnight-960953') === true,
+        said($weekGrid) . '; midnight on the 4th/5th: ' . json_encode([$inCol($col4, 'selftest-zones-midnight-960952'), $inCol($col5, 'selftest-zones-midnight-960952')])
+            . ', 00:30 on the 4th/5th: ' . json_encode([$inCol($col4, 'selftest-zones-midnight-960953'), $inCol($col5, 'selftest-zones-midnight-960953')])
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960952, 960953)');
 
     // ---- #783: "still to come" on the organisation's clock ------------------
     $fresh = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
@@ -4006,10 +4220,19 @@ ok(
 );
 // P17i/P17j: the automatic address look-up switched ON. No request leaves this
 // machine: Geocoder::forward() answers from tblGeocodeCache first, so the
-// answer for this address is put there by hand (the key is the same hash the
-// class makes: sha256 of "forward|" and the address in lower case).
+// answer for this address is put there by hand. The key is ASKED of the class
+// itself (its private forwardKeyText() and cacheKey(), through reflection),
+// never rebuilt here: #1035 made the forward key the country AND the address,
+// and a copy of the old formula in this file silently stopped matching, so the
+// look-up missed the cache and P17j failed for a reason that had nothing to do
+// with #945. The page passes the posted country, "GB".
 $geoAddress = 'Selftest 945 lookup';
-$geoHash    = hash('sha256', 'forward|' . mb_strtolower($geoAddress));
+require_once __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Geocoder.php';
+$geoHash    = (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'cacheKey'))->invoke(
+    null,
+    'forward',
+    (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $geoAddress, 'GB')
+);
 q('DELETE FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash]);
 q("INSERT INTO tblGeocodeCache (queryHash, direction, queryText, latitude, longitude, formatted, provider) VALUES (?, 'forward', ?, 12.3456789, 45.6, NULL, 'selftest')", 'ss', [$geoHash, $geoAddress]);
 setting('geo.autoGeocode', 'true');
@@ -4463,6 +4686,360 @@ if ($qGroupsWas === null) {
     setting('small-groups.enabled', (string) $qGroupsWas['settingValue']);
 }
 orgZone(1, $qZoneWas === null ? null : (string) $qZoneWas);
+
+// =============================================================================
+// L. #1024 and #1028: the calendar list pages in REAL order, and the user
+//    reminders job picks each organisation's OWN "today"
+// =============================================================================
+head('L. #1024, #1028: the calendar list in real order across a page boundary, and rota reminders and birthdays on the organisation\'s own date');
+
+// ---- #1024: the list view, ordered by the real moment, across a page boundary ----
+// The list shows twenty a page. Twenty-one events, one search away from
+// everything else in this world:
+//   * one in AUCKLAND at 20:00 on a date forty days on -- the SOONEST in real
+//     time (Auckland is twelve or thirteen hours ahead of UTC), but the
+//     LATEST by reading;
+//   * nineteen on UTC, 08:30 to 13:00 that day;
+//   * one in NEW YORK at 10:00 that day -- the LATEST in real time (14:00 or
+//     15:00 UTC), but seventh by reading.
+// In real order Auckland is first on page 1 and New York 21st, alone on
+// page 2. The old `ORDER BY startDateTime` put New York on page 1 and
+// Auckland on page 2 -- and the reverse for the "include past" view, which
+// lists newest first.
+const L_AKL    = 961001;
+const L_NY     = 961002;
+const L_FILLER = 961003; // 961003 .. 961021
+$lDay     = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->modify('+40 days')->format('Y-m-d');
+$lAklName = 'Selftest 1024 list Auckland evening';
+$lNyName  = 'Selftest 1024 list New York morning';
+$lEvent   = static function (int $id, string $name, string $reading, string $zone): void {
+    q(
+        "INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventSlug`, `eventName`, `startDateTime`, `endDateTime`, `timezone`, `status`, `isPublic`, `isDeleted`) VALUES (?, 1, ?, ?, ?, NULL, ?, 'published', 1, 0)",
+        'issss', [$id, 'selftest-1024-list-' . $id, $name, $reading, $zone]
+    );
+};
+$lEvent(L_AKL, $lAklName, $lDay . ' 20:00:00', 'Pacific/Auckland');
+$lEvent(L_NY, $lNyName, $lDay . ' 10:00:00', 'America/New_York');
+$lFillerMoments = [];
+for ($i = 0; $i < 19; $i++) {
+    $reading = (new DateTimeImmutable($lDay . ' 08:30:00', new DateTimeZone('UTC')))->modify('+' . (15 * $i) . ' minutes')->format('Y-m-d H:i:s');
+    $lEvent(L_FILLER + $i, sprintf('Selftest 1024 list filler %02d', $i), $reading, 'UTC');
+    $lFillerMoments[] = (new DateTimeImmutable($reading, new DateTimeZone('UTC')))->getTimestamp();
+}
+$lAklAt = (new DateTimeImmutable($lDay . ' 20:00:00', new DateTimeZone('Pacific/Auckland')))->getTimestamp();
+$lNyAt  = (new DateTimeImmutable($lDay . ' 10:00:00', new DateTimeZone('America/New_York')))->getTimestamp();
+ok(
+    'L00 premise: Auckland\'s 20:00 is before every UTC filler and New York\'s 10:00 after every one, in REAL time -- while by reading New York sorts before Auckland, so the old order differs on every page',
+    $lAklAt < min($lFillerMoments) && $lNyAt > max($lFillerMoments) && strcmp($lDay . ' 10:00:00', $lDay . ' 20:00:00') < 0,
+    'Auckland ' . gmdate('H:i', $lAklAt) . ' UTC, New York ' . gmdate('H:i', $lNyAt) . ' UTC, fillers ' . gmdate('H:i', min($lFillerMoments)) . '-' . gmdate('H:i', max($lFillerMoments)) . ' UTC'
+);
+// 🗓️ Round 2 of #1024's check: one event dated 9999-12-31 or 0001-01-01 --
+//    a DELETED one included -- made the list view answer 500 for the whole
+//    organisation, and one in 9990 built a statement MySQL refused. They are
+//    in place for every list request below, and none matches a search here.
+const L_FAR = 961090; // 961090 deleted 9999-12-31, 961091 deleted 0001-01-01, 961092 live 9990, 961093 live year 0
+$lEvent(L_FAR, 'Selftest 1024 far end', '9999-12-31 23:30:00', 'Europe/London');
+$lEvent(L_FAR + 1, 'Selftest 1024 far start', '0001-01-01 00:30:00', 'Pacific/Auckland');
+q('UPDATE `tblEvents` SET `isDeleted` = 1 WHERE `eventID` IN (?, ?)', 'ii', [L_FAR, L_FAR + 1]);
+$lEvent(L_FAR + 2, 'Selftest 1024 far 9990', '9990-06-15 12:00:00', 'America/New_York');
+// Round 3: a live event in year 0 (MySQL stores it, PHP's reader refuses
+// it; it used to collapse the window to "now"), and 33,000 DELETED events
+// each with a made-up zone text (both pages used to answer 500: too many
+// placeholders).
+$lEvent(L_FAR + 3, 'Selftest 1024 far year 0', '0000-06-15 12:00:00', 'Europe/London');
+q('SET SESSION `cte_max_recursion_depth` = 40000');
+q(
+    'INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventSlug`, `eventName`, `startDateTime`, `timezone`, `status`, `isPublic`, `isDeleted`) '
+    . 'WITH RECURSIVE `n` (`i`) AS (SELECT 0 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 32999) '
+    . "SELECT 962000 + `i`, 1, CONCAT('selftest-1024-junk-', `i`), CONCAT('Selftest 1024 junk ', `i`), '2027-01-01 10:00:00', CONCAT('Junk/Zone', `i`), 'draft', 1, 1 FROM `n`"
+);
+
+$lSearch = rawurlencode('Selftest 1024 list');
+$lPage1  = req($adminJar, 'GET', '/calendar?view=list&q=' . $lSearch);
+$lPage2  = req($adminJar, 'GET', '/calendar?view=list&page=2&q=' . $lSearch);
+$lP1     = words($lPage1['body']);
+$lP2     = words($lPage2['body']);
+ok(
+    'L01 upcoming, page 1: the Auckland event (soonest in real time) is listed FIRST and the New York one (latest) is not on it (#1024)',
+    $lPage1['status'] === 200 && str_contains($lP1, $lAklName) === true && str_contains($lP1, $lNyName) === false
+        && strpos($lP1, $lAklName) < (int) strpos($lP1, 'Selftest 1024 list filler 00'),
+    said($lPage1) . '; Auckland on page 1: ' . json_encode(str_contains($lP1, $lAklName)) . ', New York on page 1: ' . json_encode(str_contains($lP1, $lNyName))
+);
+ok(
+    'L02 upcoming, page 2: the New York event is there, alone with no filler, and the Auckland one is not (#1024)',
+    $lPage2['status'] === 200 && str_contains($lP2, $lNyName) === true && str_contains($lP2, $lAklName) === false
+        && str_contains($lP2, 'Selftest 1024 list filler') === false,
+    said($lPage2) . '; New York on page 2: ' . json_encode(str_contains($lP2, $lNyName)) . ', Auckland on page 2: ' . json_encode(str_contains($lP2, $lAklName))
+);
+$lPast1 = words(req($adminJar, 'GET', '/calendar?view=list&past=1&q=' . $lSearch)['body']);
+$lPast2 = words(req($adminJar, 'GET', '/calendar?view=list&past=1&page=2&q=' . $lSearch)['body']);
+ok(
+    'L03 "include past" lists newest first by REAL time: New York on page 1 and Auckland alone on page 2 (#1024)',
+    str_contains($lPast1, $lNyName) === true && str_contains($lPast1, $lAklName) === false
+        && str_contains($lPast2, $lAklName) === true && str_contains($lPast2, $lNyName) === false && str_contains($lPast2, 'Selftest 1024 list filler') === false,
+    'page 1 New York ' . json_encode(str_contains($lPast1, $lNyName)) . ' Auckland ' . json_encode(str_contains($lPast1, $lAklName))
+        . '; page 2 Auckland ' . json_encode(str_contains($lPast2, $lAklName)) . ' New York ' . json_encode(str_contains($lPast2, $lNyName))
+);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_AKL, L_FILLER + 18]);
+
+// ---- #1024/#1025 round 2: the order ACROSS CLOCK CHANGES ----
+// Nothing above crosses a clock change, so switching off the clock-change
+// half of Events::startAsUtcMoment() left every check green. London and
+// Auckland (opposite hemispheres), the next four changes of each at least
+// five days on: for each change an event at 12:00 two days BEFORE it and one
+// two days AFTER it, and beside each a UTC event at the moment half way
+// between its real instant and the instant it would have on the OTHER side's
+// offset -- so an event given the wrong offset swaps places with its partner.
+// 32 events: two pages of the list.
+const L_CLOCK = 961200; // 961200 .. 961231, and 961299 the 9999 Los Angeles event
+$lClockRows = [];
+foreach (['Europe/London', 'Pacific/Auckland'] as $zoneName) {
+    $zone   = new DateTimeZone($zoneName);
+    $states = $zone->getTransitions(time() + 5 * 86400, time() + 900 * 86400);
+    for ($i = 1; $i < count($states) && $i <= 4; $i++) {
+        $old = (int) $states[$i - 1]['offset'];
+        $new = (int) $states[$i]['offset'];
+        $day = gmdate('Y-m-d', (int) $states[$i]['ts'] + $new);
+        foreach ([['-2 days', $new], ['+2 days', $old]] as [$shift, $wrongOffset]) {
+            $reading      = (new DateTimeImmutable($day . ' 12:00:00', new DateTimeZone('UTC')))->modify($shift)->format('Y-m-d H:i:s');
+            $real         = (new DateTimeImmutable($reading, $zone))->getTimestamp();
+            $asIf         = (new DateTimeImmutable($reading, new DateTimeZone('UTC')))->getTimestamp() - $wrongOffset;
+            $lClockRows[] = [$reading, $zoneName];
+            $lClockRows[] = [gmdate('Y-m-d H:i:s', intdiv($real + $asIf, 2)), 'UTC'];
+        }
+    }
+}
+$lClockName = static fn (int $n): string => sprintf('Selftest 1024 clock %02d', $n);
+$lKeyed     = [];
+foreach ($lClockRows as $n => [$reading, $zoneName]) {
+    $lEvent(L_CLOCK + $n, $lClockName($n), $reading, $zoneName);
+    $lKeyed[] = [(new DateTimeImmutable($reading, new DateTimeZone($zoneName)))->getTimestamp(), $reading, $n];
+}
+// Round 3: a PUBLISHED event at the last second of 9999 in Los Angeles. Its
+// moment used to overflow to NULL, and NULL sorts FIRST: the list showed it
+// first and My volunteering gave it one of its thirty places. It must come
+// LAST, and take no place among the thirty.
+$lEvent(L_CLOCK + 99, $lClockName(99), '9999-12-31 23:59:59', 'America/Los_Angeles');
+$lRealOrder = $lKeyed;
+usort($lRealOrder, static fn (array $a, array $b): int => [$a[0], $a[1], $a[2]] <=> [$b[0], $b[1], $b[2]]);
+$lRealOrder = array_map($lClockName, array_column($lRealOrder, 2));
+$lReadOrder = $lKeyed;
+usort($lReadOrder, static fn (array $a, array $b): int => [$a[1], $a[2]] <=> [$b[1], $b[2]]);
+$lReadOrder = array_map($lClockName, array_column($lReadOrder, 2));
+ok(
+    'L04a premise: ' . count($lClockRows) . ' events straddle four clock changes in London and four in Auckland, and their real order is NOT their reading order',
+    count($lClockRows) === 32 && $lRealOrder !== $lReadOrder,
+    count($lClockRows) . ' events'
+);
+/** The clock-change events' names on a page, in the order the page shows them. */
+$lNamesOn = static function (string $html): array {
+    tz_findAll('/Selftest 1024 clock \d{2}/', words($html), $m);
+
+    return array_values(array_unique($m[0]));
+};
+$lClockPage1 = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode('Selftest 1024 clock'));
+$lClockPage2 = req($adminJar, 'GET', '/calendar?view=list&page=2&q=' . rawurlencode('Selftest 1024 clock'));
+$lClockSeen  = array_merge($lNamesOn($lClockPage1['body']), $lNamesOn($lClockPage2['body']));
+ok(
+    'L04 the list view, across two pages and eight clock changes (with far-off, deleted and 33,000 made-up-zone dates in the calendar), shows the events in REAL order, and the 9999-12-31 23:59:59 Los Angeles one LAST (#1024; round 3: it came first)',
+    $lClockPage1['status'] === 200 && $lClockPage2['status'] === 200 && $lClockSeen === array_merge($lRealOrder, [$lClockName(99)]),
+    said($lClockPage1) . ' / ' . said($lClockPage2) . '; first difference at position '
+        . json_encode(array_key_first(array_diff_assoc($lClockSeen, array_merge($lRealOrder, [$lClockName(99)])))) . ' of ' . count($lClockSeen)
+);
+
+// My volunteering, over HTTP: the administrator is on the team of every one
+// of the 32. The page shows thirty, soonest first in real time.
+foreach (array_merge(array_keys($lClockRows), [99]) as $n) {
+    q("INSERT INTO `tblEventPeople` (`eventID`, `userID`, `role`) VALUES (?, ?, 'helper')", 'ii', [L_CLOCK + $n, ADMIN]);
+}
+$lMine     = req($adminJar, 'GET', '/account/my-volunteering');
+$lMineSeen = $lNamesOn($lMine['body']);
+ok(
+    'L05 My volunteering shows the thirty soonest of them in REAL order across the clock changes, with the same far-off dates in place -- and the 9999 Los Angeles duty takes none of the thirty places (#1025; round 3: it took the first)',
+    $lMine['status'] === 200 && $lMineSeen === array_slice($lRealOrder, 0, 30),
+    said($lMine) . '; ' . count($lMineSeen) . ' shown, first difference at '
+        . json_encode(array_key_first(array_diff_assoc($lMineSeen, array_slice($lRealOrder, 0, 30))))
+);
+$lSize = child(['task' => 'momentSize', 'site' => 1]);
+ok(
+    'L06 with an event in 9990 and every zone this world uses, the ordering expression stays bounded (' . (int) ($lSize['values'] ?? -1) . ' values, ' . (int) ($lSize['length'] ?? -1) . ' characters)',
+    $lSize['threw'] === '' && (int) ($lSize['values'] ?? 0) > 0 && (int) $lSize['values'] <= 2200 && (int) $lSize['length'] <= 250000,
+    $lSize['threw'] !== '' ? 'THREW ' . $lSize['threw'] : json_encode($lSize)
+);
+q('DELETE FROM `tblEventPeople` WHERE `userID` = ? AND `eventID` BETWEEN ? AND ?', 'iii', [ADMIN, L_CLOCK, L_CLOCK + 99]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_CLOCK, L_CLOCK + 99]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN ? AND ?', 'ii', [L_FAR, L_FAR + 3]);
+q('DELETE FROM `tblEvents` WHERE `eventID` BETWEEN 962000 AND 994999');
+
+// ---- #1028: the user reminders job, on each organisation's own date ----
+// The job runs over EVERY organisation. Its rota reminders and its morning
+// birthday digest used the DATABASE's CURDATE() (and PHP's default zone for
+// the digest's hour), so an organisation far from the database's clock was
+// reminded a day early or late. To make the two dates differ whatever time
+// this runs, the test CHOOSES the organisation's clock and the database's:
+//   * the organisation: a real zone where it is 06:00-06:59 now, with no
+//     clock change in the next four hours -- inside the digest's
+//     06:00-08:59 window on its own clock;
+//   * the database connection: an offset eight hours behind it (22:00 the
+//     day before), or eighteen ahead (00:00 the day after) when eight behind
+//     is past the -13:59 the database accepts.
+// Two organisations on that clock. A: a duty on its date, a duty on the
+// database's date, and a member whose birthday is its date. B: a member whose
+// birthday is the database's date only.
+const L_ORG_A    = 961101;
+const L_ORG_B    = 961102;
+const L_MEMBER   = 961111; // has both duties in A; birthday on A's date
+const L_BIRTH_B  = 961112; // a member of B; birthday on the database's date
+const L_READER   = 961113; // holds the digest role in both
+const L_ROLETYPE = 961121;
+const L_SLOT_ORG = 961122; // on the organisation's date
+const L_SLOT_DB  = 961123; // on the database's date
+const L_ORG_C    = 961103; // three days' warning (rota.reminder_days_before = 3)
+const L_ROLETYPE_C = 961124;
+const L_SLOT_C3  = 961125; // the organisation's date + 3: inside the warning
+const L_SLOT_C4  = 961126; // the organisation's date + 4: outside it
+$lNowUtc = time();
+$lZone   = null;
+foreach (DateTimeZone::listIdentifiers() as $name) {
+    $tz = new DateTimeZone($name);
+    if ((int) (new DateTimeImmutable('@' . $lNowUtc))->setTimezone($tz)->format('G') === 6
+        && count((array) $tz->getTransitions($lNowUtc, $lNowUtc + 4 * 3600)) === 1) {
+        $lZone = $name;
+        break;
+    }
+}
+if ($lZone === null) {
+    refuse('no zone PHP knows reads 06:00-06:59 now with no clock change in the next four hours (#1028\'s part of L)');
+}
+$lOffset   = (new DateTimeImmutable('@' . $lNowUtc))->setTimezone(new DateTimeZone($lZone))->getOffset();
+$lDbOffset = $lOffset - 8 * 3600 >= -(13 * 3600 + 59 * 60) ? $lOffset - 8 * 3600 : $lOffset + 18 * 3600;
+$lDbZone   = sprintf('%s%02d:%02d', $lDbOffset < 0 ? '-' : '+', intdiv(abs($lDbOffset), 3600), intdiv(abs($lDbOffset) % 3600, 60));
+$lOrgDate  = (new DateTimeImmutable('@' . $lNowUtc))->setTimezone(new DateTimeZone($lZone))->format('Y-m-d');
+$lAsk      = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
+$lAsk->query("SET time_zone = '" . $lAsk->real_escape_string($lDbZone) . "'");
+$lDbDate   = (string) $lAsk->query('SELECT CURDATE() AS `d`')->fetch_assoc()['d'];
+$lAsk->close();
+ok(
+    'L10 premise: the organisation\'s date (' . $lOrgDate . ' in ' . $lZone . ') is NOT the database\'s CURDATE() (' . $lDbDate . ' at ' . $lDbZone . '), and the organisation\'s clock is in the digest\'s 06:00-08:59 window -- so nothing below can pass on the old code by accident',
+    $lOrgDate !== $lDbDate && (int) (new DateTimeImmutable('now', new DateTimeZone($lZone)))->format('G') === 6,
+    'organisation ' . $lOrgDate . ', database ' . $lDbDate
+);
+
+foreach ([L_ORG_A => 'a', L_ORG_B => 'b', L_ORG_C => 'c'] as $org => $letter) {
+    q('INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `timezone`, `isActive`) VALUES (?, ?, ?, ?, 1)', 'isss', [$org, 'selftest-1028-' . $letter, 'Selftest 1028 ' . $letter, $lZone]);
+    foreach (['rota.enabled' => '1', 'rota.reminders_enabled' => '1', 'rota.reminder_days_before' => ($org === L_ORG_C ? '3' : '0'), 'milestones.enabled' => '1',
+        'milestones.digest_enabled' => '1', 'milestones.digest_recipients' => 'selftest_1028_digest'] as $key => $value) {
+        q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)', 'isss', [$org, $key, $value, $value]);
+    }
+    q("INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`) VALUES (?, 'selftest_1028_digest', 'Selftest 1028 digest')", 'i', [$org]);
+}
+foreach ([[L_MEMBER, 'member', [L_ORG_A]], [L_BIRTH_B, 'birthb', [L_ORG_B]], [L_READER, 'reader', [L_ORG_A, L_ORG_B]]] as [$id, $who, $orgs]) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, 'Selftest 1028 ' . $who, $who . '.1028@selftest.invalid']);
+    foreach ($orgs as $org) {
+        q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, $org]);
+    }
+}
+foreach ([L_ORG_A, L_ORG_B] as $org) {
+    q("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) SELECT ?, `roleID`, `siteID` FROM `tblRoles` WHERE `siteID` = ? AND `roleKey` = 'selftest_1028_digest'", 'ii', [L_READER, $org]);
+}
+q("INSERT INTO `tblUserMilestone` (`userID`, `kind`, `monthDay`, `privacy`) VALUES (?, 'birthday', ?, 'members'), (?, 'birthday', ?, 'members')",
+    'isis', [L_MEMBER, substr($lOrgDate, 5), L_BIRTH_B, substr($lDbDate, 5)]);
+q("INSERT INTO `tblRotaRoleType` (`roleTypeID`, `siteID`, `name`) VALUES (?, ?, 'Selftest 1028 door team')", 'ii', [L_ROLETYPE, L_ORG_A]);
+q('INSERT INTO `tblRotaSlot` (`slotID`, `siteID`, `roleTypeID`, `slotDate`, `assignedToID`) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
+    'iiisiiiisi', [L_SLOT_ORG, L_ORG_A, L_ROLETYPE, $lOrgDate, L_MEMBER, L_SLOT_DB, L_ORG_A, L_ROLETYPE, $lDbDate, L_MEMBER]);
+// Round 2 of #1028's check: with "today" only, a fix that lost the lead
+// days ('+0 days') stayed green. Organisation C warns three days ahead.
+q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [L_MEMBER, L_ORG_C]);
+q("INSERT INTO `tblRotaRoleType` (`roleTypeID`, `siteID`, `name`) VALUES (?, ?, 'Selftest 1028 welcome team')", 'ii', [L_ROLETYPE_C, L_ORG_C]);
+$lPlusDays = static fn (int $days): string => (new DateTimeImmutable($lOrgDate . ' 00:00:00', new DateTimeZone('UTC')))->modify('+' . $days . ' days')->format('Y-m-d');
+q('INSERT INTO `tblRotaSlot` (`slotID`, `siteID`, `roleTypeID`, `slotDate`, `assignedToID`) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)',
+    'iiisiiiisi', [L_SLOT_C3, L_ORG_C, L_ROLETYPE_C, $lPlusDays(3), L_MEMBER, L_SLOT_C4, L_ORG_C, L_ROLETYPE_C, $lPlusDays(4), L_MEMBER]);
+
+// The job's own switches and token, and a mail route that is not set up: an
+// attempt is then written to the e-mail log with its subject and nothing
+// leaves (see part T). Each is put back afterwards.
+$lKept = [];
+foreach (['user_reminders.cron_token', 'user_reminders.enabled', 'mail.provider', 'mail.smtp.host', 'multisite.enabled'] as $key) {
+    $lKept[$key] = one('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
+}
+$lToken = bin2hex(random_bytes(16));
+setting('user_reminders.cron_token', $lToken);
+setting('user_reminders.enabled', '1');
+setting('mail.provider', 'smtp');
+setting('mail.smtp.host', '');
+setting('multisite.enabled', 'true'); // the job's Site::forceContext() refuses every other organisation otherwise
+
+// 🕰️ PHP's default zone in the job is the DEFAULT organisation's (start-up
+//    sets it), and the old digest read its hour and date from there. For
+//    the job's run, organisation 1 is put on a clock whose DATE differs from
+//    the chosen organisation's and whose HOUR is outside 06:00-08:59, so a
+//    revert to `date('G')` or `date('j M')` cannot pass by coincidence. Put
+//    back straight after the run.
+$lPhpZone = null;
+foreach (DateTimeZone::listIdentifiers() as $name) {
+    $at = (new DateTimeImmutable('@' . time()))->setTimezone(new DateTimeZone($name));
+    if ($at->format('Y-m-d') !== $lOrgDate && ((int) $at->format('G') < 5 || (int) $at->format('G') > 9)
+        && count((array) (new DateTimeZone($name))->getTransitions(time(), time() + 4 * 3600)) === 1) {
+        $lPhpZone = $name;
+        break;
+    }
+}
+$lOrgOneWas = (string) one('SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')['timezone'];
+ok(
+    'L10b premise: for the job\'s run, PHP\'s default zone (organisation 1\'s, ' . (string) $lPhpZone . ') is on a different DATE from the organisation\'s and outside the 06:00-08:59 window',
+    $lPhpZone !== null,
+    'no such zone found'
+);
+orgZone(1, (string) $lPhpZone);
+try {
+    $lRan = child(['task' => 'userReminders', 'key' => $lToken, 'sessionZone' => $lDbZone]);
+} finally {
+    orgZone(1, $lOrgOneWas);
+}
+ok(
+    'L11 the real user reminders job ran to its end with the database\'s clock at ' . $lDbZone,
+    $lRan['threw'] === '' && str_contains((string) ($lRan['said'] ?? ''), 'User reminders sweep') === true,
+    $lRan['threw'] !== '' ? 'THREW ' . $lRan['threw'] : substr((string) ($lRan['said'] ?? ''), 0, 300)
+);
+$lClaimed = static fn (int $slot): bool => one('SELECT `reminderSentAt` FROM `tblRotaSlot` WHERE `slotID` = ? AND `reminderSentAt` IS NOT NULL', 'i', [$slot]) !== null;
+ok(
+    'L12 with reminders set for "today" only, the duty on the ORGANISATION\'s date was reminded and the one on the database\'s date was not (#1028: it was the database\'s CURDATE())',
+    $lClaimed(L_SLOT_ORG) === true && $lClaimed(L_SLOT_DB) === false,
+    'organisation-date duty reminded: ' . json_encode($lClaimed(L_SLOT_ORG)) . ', database-date duty reminded: ' . json_encode($lClaimed(L_SLOT_DB))
+);
+ok(
+    'L12b with three days\' warning, the duty three days on (by the ORGANISATION\'s date) was reminded and the one four days on was not (round 2: the lead days were pinned by nothing)',
+    $lClaimed(L_SLOT_C3) === true && $lClaimed(L_SLOT_C4) === false,
+    'day+3 reminded: ' . json_encode($lClaimed(L_SLOT_C3)) . ', day+4 reminded: ' . json_encode($lClaimed(L_SLOT_C4))
+);
+$lDigestDays = static fn (int $org): array => array_column(q("SELECT `dueDate` FROM `tblUserReminderLog` WHERE `refType` = 'milestone-digest' AND `refID` = ?", 'i', [$org]), 'dueDate');
+ok(
+    'L13 the morning birthday digest went out for the organisation whose member\'s birthday is the ORGANISATION\'s date, recorded under that date -- and not for the one whose member\'s birthday is only the database\'s date (#1028)',
+    $lDigestDays(L_ORG_A) === [$lOrgDate] && $lDigestDays(L_ORG_B) === [],
+    'A recorded ' . json_encode($lDigestDays(L_ORG_A)) . ', B recorded ' . json_encode($lDigestDays(L_ORG_B))
+);
+$lSubject = "🎂 Today's milestones — " . (new DateTimeImmutable($lOrgDate . ' 00:00:00', new DateTimeZone('UTC')))->format('j M');
+ok(
+    'L14 the digest\'s subject names the organisation\'s date ("' . $lSubject . '") and was addressed to the reader holding the digest role',
+    in_array('reader.1028@selftest.invalid', mailTo($lSubject), true) === true,
+    'addressed: ' . json_encode(mailTo("🎂 Today's milestones"))
+);
+
+// ---- put everything back as part L found it ----------------------------------------
+foreach ($lKept as $key => $row) {
+    if ($row === null) {
+        q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
+    } else {
+        setting($key, (string) $row['settingValue']);
+    }
+}
+q('DELETE FROM `tblRotaSlot` WHERE `slotID` IN (?, ?, ?, ?)', 'iiii', [L_SLOT_ORG, L_SLOT_DB, L_SLOT_C3, L_SLOT_C4]);
+q('DELETE FROM `tblRotaRoleType` WHERE `roleTypeID` IN (?, ?)', 'ii', [L_ROLETYPE, L_ROLETYPE_C]);
+q("DELETE FROM `tblUserReminderLog` WHERE `refID` IN (?, ?, ?)", 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
+q('DELETE FROM `tblUserRoles` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
+q('DELETE FROM `tblRoles` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
+q('DELETE FROM `tblSettings` WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
+q('UPDATE `tblSites` SET `isActive` = 0 WHERE `siteID` IN (?, ?, ?)', 'iii', [L_ORG_A, L_ORG_B, L_ORG_C]);
 
 // =============================================================================
 // 🏁 The end

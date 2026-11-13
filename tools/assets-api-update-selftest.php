@@ -44,13 +44,22 @@
  *      the asset untouched, a permitted change is written, and a currency
  *      changed by somebody else while the request waited survives a request
  *      that did not send one;
+ *   D  (#1031) an asset SOFT-DELETED by somebody else while the API request
+ *      waits for its lock is not written: the request answers the same 404
+ *      and words as for an asset that never existed, the row is exactly as
+ *      the deletion left it, and no update is in its audit trail;
+ *   E  (#1031) the same race through the edit page (`/assets/save`): nothing
+ *      written, and the asset list the person lands on SAYS the asset could
+ *      not be found and nothing changed (the list printed no message at all
+ *      until #1031, so that sentence used to be lost);
  *   Z  no PHP error in the server's log, and (Z2) after the tidy-up every
  *      table holds exactly as many rows as before the run.
  *
  * WHAT IT CANNOT SHOW, said plainly:
- *   - the edit page (`/assets/save`, a FULL write) is not raced here: it posts
- *     every field by design, so the last person to press Save wins, as it
- *     always has. tools/currency-selftest.php drives that page;
+ *   - the edit page (`/assets/save`, a FULL write) is raced only against a
+ *     DELETION (section E): it posts every field by design, so against an
+ *     ordinary change the last person to press Save wins, as it always has.
+ *     tools/currency-selftest.php drives that page;
  *   - two API requests at once: the harness's web server runs one worker
  *     (`PHP_CLI_SERVER_WORKERS` is unset), so the "other writer" is this
  *     test's own connection, which is the same thing to the database;
@@ -827,6 +836,121 @@ $c4Row = $assetRow($torch);
 check('C4 a request that did NOT send a currency, made while somebody changed it EUR -> USD, writes its status and keeps USD',
     $c4['seen'] === true && $c4['status'] === 200 && ($c4Row['status'] ?? '') === 'in-repair' && ($c4Row['currency'] ?? '') === 'USD',
     'seen ' . var_export($c4['seen'], true) . '; HTTP ' . $c4['status'] . ' ' . json_encode($c4Row));
+
+// =============================================================================
+// D. An asset DELETED while the update waits is not updated (#1031)
+// =============================================================================
+// updateAsset() used to re-read the row under the lock by its number and
+// organisation only, so an asset soft-deleted by somebody else while an update
+// waited for its lock was written anyway, and the API answered 200. Here the
+// other writer DELETES the asset while the API request waits; the request must
+// answer exactly what it answers for an asset that does not exist (404, the
+// same words — so the race tells a caller nothing it could not learn a moment
+// later), and the row must be exactly as the deletion left it, with no update
+// recorded in its audit trail.
+echo "\nSection D — an asset deleted while the API update waits is NOT updated (#1031)\n";
+$stool       = $makeRaceAsset(AU_PREFIX . ' stool');
+$stoolToken  = $freshToken('/assets/edit?id=' . $stool);
+$stoolAudit0 = (int) (rows($db, 'SELECT COALESCE(MAX(`auditID`), 0) AS `m` FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$stool])[0]['m'] ?? 0);
+$stoolHolder = $holdAsset($stool);
+$stoolDeleted = [];
+/** Inside $holder's open transaction, soft-delete the asset as the delete pages do, and answer the row as left. */
+$deleteMeanwhile = static function (mysqli $holder, int $id, array &$leftAs): void {
+    $u = $holder->prepare('UPDATE `tblAssets` SET `isDeleted` = 1 WHERE `assetID` = ? AND `isDeleted` = 0');
+    $u->bind_param('i', $id);
+    $u->execute();
+    $u->close();
+    $r = $holder->prepare('SELECT * FROM `tblAssets` WHERE `assetID` = ?');
+    $r->bind_param('i', $id);
+    $r->execute();
+    $leftAs = $r->get_result()->fetch_assoc() ?? [];
+    $r->close();
+    $holder->commit();
+    $holder->close();
+};
+$d = $raceApi(['assetID' => $stool, 'name' => AU_PREFIX . ' stool renamed', 'status' => 'retired', 'csrf_token' => $stoolToken], $stoolHolder, $stool,
+    static function () use ($stoolHolder, $stool, $deleteMeanwhile, &$stoolDeleted): void {
+        $deleteMeanwhile($stoolHolder, $stool, $stoolDeleted);
+    });
+$stoolRow = $fullRow($stool);
+// What the API says about an asset that has never existed (a number far past
+// any this run made), for the words to compare with.
+$never     = (int) (rows($db, 'SELECT COALESCE(MAX(`assetID`), 0) + 100000 AS `n` FROM `tblAssets`')[0]['n'] ?? 0);
+$missing   = $apiPost(['assetID' => $never, 'name' => 'x', 'csrf_token' => $freshToken('/assets')]);
+$saidRace  = json_decode($d['body'], true);
+$saidNever = json_decode($missing['body'], true);
+check('D1 the premise: the API request was seen WAITING on this asset\'s lock, and the other writer really deleted the asset meanwhile',
+    $d['seen'] === true && (int) ($stoolDeleted['isDeleted'] ?? 0) === 1, 'seen ' . var_export($d['seen'], true) . '; isDeleted ' . var_export($stoolDeleted['isDeleted'] ?? null, true));
+check('D2 the API answers 404 with EXACTLY the words it gives an asset that never existed (never 200, never the tag-code 409)',
+    $d['status'] === 404 && $missing['status'] === 404 && is_array($saidRace) === true && is_array($saidNever) === true
+    && ($saidRace['status'] ?? null) === ($saidNever['status'] ?? '') && ($saidRace['message'] ?? null) === ($saidNever['message'] ?? ''),
+    'race: HTTP ' . $d['status'] . ' ' . mb_substr($d['body'], 0, 200) . ' | never existed: HTTP ' . $missing['status'] . ' ' . mb_substr($missing['body'], 0, 200));
+$stoolChanged = $differences($stoolDeleted, $stoolRow);
+check('D3 NOTHING was written: the row is exactly as the deletion left it — still named as before, still in service — compared whole',
+    $stoolDeleted !== [] && $stoolChanged === [] && ($stoolRow['name'] ?? '') === AU_PREFIX . ' stool',
+    'changed: ' . json_encode($stoolChanged) . '; name ' . var_export($stoolRow['name'] ?? null, true));
+$stoolUpdates = rows($db, "SELECT `auditID` FROM `tblAssetAudit` WHERE `assetID` = ? AND `action` = 'update' AND `auditID` > ?", 'ii', [$stool, $stoolAudit0]);
+check('D4 and no update is recorded in the asset\'s audit trail', $stoolUpdates === [], json_encode($stoolUpdates));
+
+// The edit page (`/assets/save`, a FULL write through the same updateAsset())
+// raced the same way. It must write nothing, and the person must be told
+// plainly, on the page they land on, that the asset could not be found and
+// nothing changed. (They are sent to the edit page, which finds the asset gone
+// and sends them to the asset list — which, until #1031, printed no message at
+// all, so the words were lost.)
+echo "\nSection E — the edit page, raced the same way (#1031)\n";
+$shelf       = $makeRaceAsset(AU_PREFIX . ' shelf');
+$shelfToken  = $freshToken('/assets/edit?id=' . $shelf);
+$shelfAudit0 = (int) (rows($db, 'SELECT COALESCE(MAX(`auditID`), 0) AS `m` FROM `tblAssetAudit` WHERE `assetID` = ?', 'i', [$shelf])[0]['m'] ?? 0);
+$shelfHolder = $holdAsset($shelf);
+$shelfDeleted = [];
+$multi = curl_multi_init();
+$edit  = curl_init('http://127.0.0.1:' . $port . '/assets/save');
+curl_setopt_array($edit, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_HEADER => true,
+    CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $shelfToken, 'assetID' => (string) $shelf, 'name' => AU_PREFIX . ' shelf renamed', 'currency' => 'EUR']),
+    CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+curl_multi_add_handle($multi, $edit);
+$shelfSeen = false;
+$running   = 0;
+for ($i = 0; $i < 100 && $shelfSeen === false; $i++) {
+    curl_multi_exec($multi, $running);
+    $shelfSeen = $waitingOnRow('tblAssets', $shelf, $shelfHolder);
+    if ($shelfSeen === false) {
+        usleep(100000);
+    }
+}
+$deleteMeanwhile($shelfHolder, $shelf, $shelfDeleted);
+do {
+    curl_multi_exec($multi, $running);
+    if ($running > 0) {
+        curl_multi_select($multi, 1.0);
+    }
+} while ($running > 0);
+$editStatus = (int) curl_getinfo($edit, CURLINFO_HTTP_CODE);
+$editRaw    = (string) curl_multi_getcontent($edit);
+curl_multi_remove_handle($multi, $edit);
+curl_multi_close($multi);
+$editTo = preg_match('/^Location:\s*(\S+)\s*$/mi', $editRaw, $loc) === 1 ? $loc[1] : '';
+$shelfRow = $fullRow($shelf);
+check('E1 the premise: the edit page\'s Save was seen WAITING on this asset\'s lock, and the other writer really deleted it meanwhile',
+    $shelfSeen === true && (int) ($shelfDeleted['isDeleted'] ?? 0) === 1, 'seen ' . var_export($shelfSeen, true));
+$shelfChanged = $differences($shelfDeleted, $shelfRow);
+$shelfUpdates = rows($db, "SELECT `auditID` FROM `tblAssetAudit` WHERE `assetID` = ? AND `action` = 'update' AND `auditID` > ?", 'ii', [$shelf, $shelfAudit0]);
+check('E2 NOTHING was written by the edit page: the row is exactly as the deletion left it (name unchanged), and no update is recorded',
+    $shelfDeleted !== [] && $shelfChanged === [] && ($shelfRow['name'] ?? '') === AU_PREFIX . ' shelf' && $shelfUpdates === [],
+    'changed: ' . json_encode($shelfChanged) . '; updates recorded: ' . json_encode($shelfUpdates));
+// Follow where the person is sent, as a browser would, and read the page they land on.
+$editPage = $http('GET', '/assets/edit?id=' . $shelf);
+$landed   = $http('GET', '/assets');
+$plain    = 'That asset could not be found — it may have been deleted. Nothing was changed.';
+check('E3 the Save is sent back to the edit page, which sends the person to the asset list, and that page SAYS plainly the asset could not be found and nothing changed',
+    $editStatus === 302 && str_contains($editTo, '/assets/edit?id=' . $shelf) === true && $editPage['status'] === 302
+    && $landed['status'] === 200 && str_contains(html_entity_decode($landed['body'], ENT_QUOTES, 'UTF-8'), $plain) === true,
+    'save: HTTP ' . $editStatus . ' to ' . $editTo . '; edit page HTTP ' . $editPage['status'] . '; list HTTP ' . $landed['status']
+    . ', message shown: ' . var_export(str_contains(html_entity_decode($landed['body'], ENT_QUOTES, 'UTF-8'), $plain), true));
+$landedAgain = $http('GET', '/assets');
+check('E4 and the message is shown ONCE: the next visit to the list no longer carries it (it is cleared, not left in the session)',
+    str_contains(html_entity_decode($landedAgain['body'], ENT_QUOTES, 'UTF-8'), $plain) === false);
 
 // ── The server's own log: a PHP fault on any request above would be here ────
 $serverErrors = is_file($child . $sep . 'php-errors.log') === true ? trim((string) file_get_contents($child . $sep . 'php-errors.log')) : '';
