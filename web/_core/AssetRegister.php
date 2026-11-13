@@ -4976,9 +4976,12 @@ class AssetRegister
         $msg = 'Loan checked out — condition and dates recorded.';
         if (count($kitSummary['swept']) > 0) {
             $msg .= ' ' . count($kitSummary['swept']) . ' kit component(s) checked out too.';
-            if (count($kitSummary['skipped']) > 0) {
-                $msg .= ' (skipped: ' . implode(', ', $kitSummary['skipped']) . ')';
-            }
+        }
+        // ⏭️ Said even when NO component went out (#1047 round 3): a kit whose
+        //    only component was deleted, moved out or added a moment ago must
+        //    not read as if it had none.
+        if (count($kitSummary['skipped']) > 0) {
+            $msg .= ' Kit component(s) not checked out: ' . implode(', ', $kitSummary['skipped']) . '.';
         }
 
         return ['ok' => true, 'msg' => $msg];
@@ -5045,7 +5048,7 @@ class AssetRegister
             }
         }
         try {
-            self::withLiveAssetsLocked($db, [], $siteId,
+            $done = self::withLiveAssetsLocked($db, [], $siteId,
                 static function (array $lockedRows) use ($db, $loan, $data, $conditionIn, $conditionInNotes, $loanId, $assetId, $siteId, &$kitReturned): bool {
                     $stmt = $db->prepare(
                         "UPDATE tblAssetLoans SET status = 'returned', dateIn = NOW(), conditionIn = ?, conditionInNotes = ? "
@@ -5090,6 +5093,13 @@ class AssetRegister
                 }, $lockAlso);
         } catch (\Throwable $e) {
             error_log('AssetRegister::loanCheckin() failed: ' . $e->getMessage());
+            return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
+        }
+        // Nothing here is REQUIRED, so today the helper never answers null. Its
+        // answer is still asked (#1047 round 3): with the helper changed to
+        // refuse a gone asset, ignoring it reported "Loan checked in" while
+        // nothing had been written (measured). Null means nothing was written.
+        if ($done !== true) {
             return ['ok' => false, 'msg' => 'Could not check in this loan — it may have already changed state.'];
         }
 
@@ -5387,10 +5397,16 @@ class AssetRegister
                     //    each passed them and made a loop (measured). Under the
                     //    locks the second sees the first: its kit is now itself
                     //    a component, or its component now has components.
-                    //    Every attach locks both rows, so a component can only
-                    //    be added to $childAssetId by a write that waits for us;
-                    //    the count below is the transaction's first plain read,
-                    //    taken after the locks, so it sees what they committed.
+                    //    Another ATTACH that adds a component to $childAssetId
+                    //    locks $childAssetId too, so it waits for us (or we for
+                    //    it); the count below is the transaction's first plain
+                    //    read, taken after the locks, so it sees what such a
+                    //    write committed. ⚠️ NOT every writer of parentAssetID
+                    //    is an attach: updateAsset() and createAsset() write it
+                    //    too (the edit page's "Parent asset (bundle/kit)" box,
+                    //    the API's _coerce.php) without this kit's lock and
+                    //    without these checks, so a loop through the edit page
+                    //    is NOT closed here — raised as its own issue.
                     if ($locked[$parentAssetId]['parentAssetID'] !== null) {
                         return 'The chosen parent is itself a component of another kit — kits are only one level deep.';
                     }
@@ -5454,9 +5470,13 @@ class AssetRegister
      */
     public static function detachFromKit(int $childAssetId, int $actorUserId): array
     {
-        // 🗑️ NOT refused for a DELETED asset, on purpose (#1047): it REMOVES a link. kitChildren()
-        //    already leaves a deleted component out of its kit, so detaching one changes nothing
-        //    any page shows; refusing would only stop a manager tidying the kit.
+        // 🗑️ Not given the locked refusal (#1047), on purpose — but be exact about what happens:
+        //    self::get() just below ALREADY refuses a component deleted before this call
+        //    ("Component asset not found.", measured in round 3). Only one deleted in the
+        //    instant between that read and the UPDATE is detached anyway: its link is removed
+        //    on a row no page shows (kitChildren() leaves deleted components out), and nothing
+        //    is created on it. Detaching an already-deleted component is not offered, because
+        //    no page lists one to detach.
         $child = self::get($childAssetId);
         if ($child === null) {
             return ['ok' => false, 'msg' => 'Component asset not found.'];

@@ -31,7 +31,9 @@
  *      fail: a W that passed on the planted copy would be guarding nothing.
  *
  * Plus: K a kit's component deleted while the kit is being checked out (the
- * component is skipped and gets no loan); S the transaction-first rule, read
+ * component is skipped and gets no loan); C a deleted asset's loan and a
+ * deleted kit's loan can still be checked in (ending a loan is never refused),
+ * and a skipped component is named even when none went out; S the transaction-first rule, read
  * from the source; O the ONE lock order — two writes on the same two assets,
  * made to overlap the way that deadlocks if either takes them in its own
  * order (round 2 measured a kit's checkout deadlocking against a seat), each
@@ -868,6 +870,59 @@ $r       = $runJob($kit, $plantDir, $holder, $kit['c']);
 check('K4 with the deletion question planted out of loanCheckout()\'s one lock call (which locks the kit AND its components), the same race hands the deleted component over — so K3 can fail',
     $swapped > 0 && $r['seen'] === true && $count('tblAssetLoans', 'assetID', $kit['c']) === 1,
     'plant swapped ' . $swapped . '; ' . $short($r));
+
+// =============================================================================
+// C. Ending a loan is NEVER refused for a deleted asset (#1047 round 3)
+// =============================================================================
+// Check-in locks the asset (and a kit's components) up front as "lock if live",
+// so a deleted one is not refused. Round 3 of the check measured that, with the
+// helper changed to refuse a gone asset, check-in IGNORED the helper's null and
+// reported "Loan checked in" while both loans stayed active. It asks now; these
+// checks make sure a deleted asset's loan and a deleted kit's loan really end.
+echo "\nC — a deleted asset's loan, and a deleted kit's loan, can still be checked in\n";
+$activeLoan = static fn (int $a, ?int $parentLoan = null): int => $insertId(
+    "INSERT INTO `tblAssetLoans` (`siteID`, `assetID`, `direction`, `counterpartyType`, `counterpartyName`, `status`, `requestedByID`, `parentLoanID`, `dateOut`) VALUES (?, ?, 'out', 'other', 'Selftest borrower', 'active', ?, ?, NOW())",
+    'iiii', [$site, $a, AD_USER, $parentLoan]);
+$makeOut = static function () use ($asset, $lender, $activeLoan, $db): array {
+    $a = $asset('checked out');
+    $lender($a);
+    run($db, "UPDATE `tblAssets` SET `status` = 'on-loan' WHERE `assetID` = ?", 'i', [$a]);
+    return ['op' => 'checkin', 'a' => $a, 'l' => $activeLoan($a)];
+};
+$makeKitOut = static function () use ($asset, $lender, $activeLoan, $db): array {
+    $kit  = $asset('kit out');
+    $part = $asset('kit out part');
+    run($db, 'UPDATE `tblAssets` SET `parentAssetID` = ? WHERE `assetID` = ?', 'ii', [$kit, $part]);
+    $lender($kit);
+    $loan = $activeLoan($kit);
+    return ['op' => 'checkin', 'a' => $kit, 'l' => $loan, 'part' => $part, 'partLoan' => $activeLoan($part, $loan)];
+};
+$job = $makeOut();
+$deleteAsset($db, $job['a']);
+$r = $runJob($job, $liveDir);
+check('C1 checking in the loan of a DELETED asset works: it answers success and the loan is returned',
+    ($r['result']['ok'] ?? null) === true && $field('tblAssetLoans', 'status', 'loanID', $job['l']) === 'returned', $short($r));
+$kitJob = $makeKitOut();
+$deleteAsset($db, $kitJob['a']);
+$r = $runJob($kitJob, $liveDir);
+check('C2 checking in the loan of a DELETED kit works: the kit\'s loan AND its component\'s loan are both returned',
+    ($r['result']['ok'] ?? null) === true && $field('tblAssetLoans', 'status', 'loanID', $kitJob['l']) === 'returned'
+    && $field('tblAssetLoans', 'status', 'loanID', $kitJob['partLoan']) === 'returned', $short($r));
+$changed = $plantText(["if (in_array(\$id, \$required, true) === false) {\n                        continue;\n                    }\n" => '']);
+$kitJob = $makeKitOut();
+$deleteAsset($db, $kitJob['a']);
+$r = $runJob($kitJob, $plantDir);
+check('C2P with the `continue` planted out (a gone asset then refuses), the same check-in is NOT done and does NOT claim it was: both loans stay active and the answer is a failure — so C2 can fail, and the helper\'s null is not ignored',
+    $changed === 1 && ($r['result']['ok'] ?? null) === false
+    && $field('tblAssetLoans', 'status', 'loanID', $kitJob['l']) === 'active' && $field('tblAssetLoans', 'status', 'loanID', $kitJob['partLoan']) === 'active',
+    'plant changed ' . $changed . '; ' . $short($r));
+
+/** The skipped component is named even when no component went out (round 3). */
+$kit    = $makeKit();
+$holder = $holdAsset($kit['c']);
+$r      = $runJob($kit, $liveDir, $holder, $kit['c']); // the component is deleted while the checkout waits
+check('C3 a kit whose ONLY component was deleted while it went out says so: the message names the component as no longer in the register',
+    ($r['result']['ok'] ?? null) === true && str_contains((string) ($r['result']['msg'] ?? ''), 'no longer in the register') === true, $short($r));
 
 // =============================================================================
 // O. ONE lock order: two writes on the same two assets never deadlock
