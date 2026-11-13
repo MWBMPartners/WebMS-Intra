@@ -463,8 +463,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <a href="<?php echo htmlspecialchars(Router::url('expenses/receipt') . '?claim=' . (int) $claim['claimID'] . '&id=' . (int) $f['fileID'], ENT_QUOTES, 'UTF-8'); ?>"
                                data-receipt-link="<?php echo (int) $f['fileID']; ?>"
                                title="Download this receipt"><?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?></a>
+                        <?php elseif ((int) $f['fileID'] === $pdfFileId): ?>
+                            <?php
+                            // 📄 #954: the NEWEST version of the generated PDF opens, through
+                            //    `expenses/claim-pdf`, which asks the same rule as this page.
+                            //    Only this row: every stage overwrites ONE file, so an older
+                            //    stage's row describes a version that no longer exists, and a
+                            //    link on it would hand out the newest bytes under the old name.
+                            ?>
+                            <a href="<?php echo htmlspecialchars(Router::url('expenses/claim-pdf') . '?claim=' . (int) $claim['claimID'], ENT_QUOTES, 'UTF-8'); ?>"
+                               data-claim-pdf-link="<?php echo (int) $f['fileID']; ?>"
+                               title="Download the claim's PDF"><?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?></a>
                         <?php else: ?>
                             <?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if ($f['stage'] !== '' && (string) $f['storedFilename'] === (string) $claim['fileName']): ?>
+                                <small class="text-muted" data-claim-pdf-replaced="<?php echo (int) $f['fileID']; ?>">(replaced by a later version; earlier versions are not kept)</small>
+                            <?php endif; ?>
                         <?php endif; ?>
                         <?php if ($f['stage'] !== null && $f['stage'] !== ''): ?>
                             <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars(ucfirst($f['stage']), ENT_QUOTES, 'UTF-8'); ?></span>
@@ -589,7 +603,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <p class="mb-0">
             <i class="fa-solid fa-download me-1"></i>
-            <strong><?php echo htmlspecialchars($claim['fileName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+            <?php if ($pdfFileId > 0): ?>
+                <?php // #954: a link only when a stage row names this file — the same test the address makes. ?>
+                <strong><a href="<?php echo htmlspecialchars(Router::url('expenses/claim-pdf') . '?claim=' . (int) $claim['claimID'], ENT_QUOTES, 'UTF-8'); ?>"
+                           data-claim-pdf-card="1"><?php echo htmlspecialchars($claim['fileName'], ENT_QUOTES, 'UTF-8'); ?></a></strong>
+            <?php else: ?>
+                <strong><?php echo htmlspecialchars($claim['fileName'], ENT_QUOTES, 'UTF-8'); ?></strong>
+            <?php endif; ?>
             <?php if ($pdfStage !== ''): ?>
                 <small class="text-muted ms-2">(Last generated for status: <?php echo htmlspecialchars($pdfStage, ENT_QUOTES, 'UTF-8'); ?><?php echo $claim['status'] === 'Withdrawn' ? '. It was not remade when the claim was withdrawn.' : ''; ?>)</small>
             <?php endif; ?>

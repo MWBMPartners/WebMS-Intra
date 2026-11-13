@@ -1873,7 +1873,16 @@ final class ExpenseRules
         if ($folder === false || is_dir($folder) === false) {
             return null;
         }
-        $file = realpath($folder . DIRECTORY_SEPARATOR . $storedFilename);
+        // 🔗 A link is refused outright, asked of the file system afresh, as
+        //    `claimPdfFile()` does and for the reason written there (#954):
+        //    `realpath()`'s answers are cached across requests, so a plain
+        //    file later replaced by a link could still pass the test below.
+        $named = $folder . DIRECTORY_SEPARATOR . $storedFilename;
+        clearstatcache(true, $named);
+        if (is_link($named) === true) {
+            return null;
+        }
+        $file = realpath($named);
         // 🔗 `realpath()` follows links, so a link inside the folder that
         //    points anywhere else resolves to that somewhere else and fails
         //    this test. DIRECTLY inside: the portal never makes sub-folders
@@ -1975,6 +1984,91 @@ final class ExpenseRules
         $ascii = $stem . ($ext === '' ? '' : '.' . $ext);
 
         return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($clean);
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* 📄 Opening a claim's generated PDF (#954)                               */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WAS WRONG. The claim page listed the claim's own generated PDF (the
+    // `tblExpenseClaimFiles` rows WITH a `stage`) by name only, and nothing
+    // served it. #867 closed the same gap for receipts and left this one on
+    // purpose, because that PDF is not a receipt and lives in another folder.
+    //
+    // WHO MAY OPEN IT. Exactly the people who may open the claim: the
+    // `expenses/claim-pdf` address asks `reachToSee()` and `mayViewClaim()`,
+    // the same two calls as the claim page and the receipt address, and keeps
+    // no rule of its own. Refused is answered exactly as not there.
+    //
+    // ONE FILE, NOT ONE PER STAGE. `ExpensePdf::generate()` writes the SAME
+    // file (`ExpensePdf::pathFor()`, `_uploads/pdfs/claim_<id>.pdf`) at every
+    // stage, each replacing the last, and adds a row per stage that names that
+    // one file. So an older stage's version is NOT KEPT anywhere, and the
+    // address takes the CLAIM'S number alone: whoever opens it, from the page
+    // or from a link saved while the claim was still Pending, gets the newest
+    // version, the one the newest stage row describes. Offering "the Pending
+    // version" would hand out the Approved bytes under the Pending name.
+    //
+    // WHY THE PATH IS JUDGED HERE. Nothing a request sends reaches the file
+    // system: the path is `ExpensePdf::pathFor()` of the claim number. The
+    // name stored on the claim must also be exactly the name that function
+    // gives, so a restored or hand-edited `fileName` cannot point the address
+    // at anything else; and the file, with links followed, must be directly
+    // inside the PDF folder.
+
+    /**
+     * The real path of a claim's generated PDF, or null when it must not be
+     * served: the stored name is not exactly the one `ExpensePdf::pathFor()`
+     * gives for this claim, the folder or file does not exist or cannot be
+     * read, it is not a regular file, or (with every symbolic link followed)
+     * it is not directly inside the PDF folder. The caller answers every null
+     * the same way.
+     *
+     * @param int    $claimID    The claim's number.
+     * @param string $storedName `tblExpenseClaims.fileName`.
+     *
+     * @return string|null The resolved path to read, or null.
+     */
+    public static function claimPdfFile(int $claimID, string $storedName): ?string
+    {
+        if ($claimID <= 0) {
+            return null;
+        }
+        $expected = ExpensePdf::pathFor($claimID);
+        if ($storedName !== basename($expected)) {
+            return null;
+        }
+        $folder = realpath(dirname($expected));
+        if ($folder === false || is_dir($folder) === false) {
+            return null;
+        }
+        $named = $folder . DIRECTORY_SEPARATOR . $storedName;
+        // 🔗 A LINK IS REFUSED OUTRIGHT, and the realpath test below is the
+        //    second guard, not the first. Measured while building #954: PHP
+        //    keeps the answers `realpath()` gave in a cache that outlives the
+        //    request (the "realpath cache", two minutes by default, per server
+        //    process). A file that was a plain file when it was last served and
+        //    was then replaced by a link still RESOLVED TO ITSELF from that
+        //    cache, the test passed, and `fopen()` followed the link to the key
+        //    file outside the folder — served with 200. `is_link()` asks the
+        //    file system (lstat) afresh, and `clearstatcache(true, …)` drops
+        //    the cached answer for this one path before `realpath()` is asked.
+        //    The portal never writes a link into this folder.
+        clearstatcache(true, $named);
+        if (is_link($named) === true) {
+            return null;
+        }
+        $file = realpath($named);
+        // `realpath()` follows links, so a link anywhere in the path pointing
+        // elsewhere resolves there and fails this test.
+        if ($file === false || dirname($file) !== $folder) {
+            return null;
+        }
+        if (is_file($file) === false || is_readable($file) === false) {
+            return null;
+        }
+
+        return $file;
     }
 
     /**

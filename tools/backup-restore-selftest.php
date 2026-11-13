@@ -118,6 +118,10 @@
  *       Backup page can say whether anything is really calling the scheduled
  *       job. Reaches, on one server, the state a host set to READ COMMITTED is
  *       in when the isolation line is missing                        (#581)
+ *   30  This month's translation counters survive a restore, the larger
+ *       figure kept per organisation and counter; earlier months come back
+ *       as the snapshot has them; a rehearsal does it and undoes it; a
+ *       one-table restore of the counters does it too                (#801)
  *   24  A value that is not on its column's list of choices: the snapshot is
  *       taken and SAYS it cannot be put back whole, naming the table, the
  *       column and how many; mended, a new snapshot goes back exactly
@@ -5191,6 +5195,167 @@ function brs_proof29(): void
 }
 
 /**
+ * PROOF 30 (#801). `tblTranslationUsage` counts, per organisation per month,
+ * the translation requests made and their reported cost, and both monthly
+ * limits read it (#762). A restore used to put it back to the snapshot's
+ * figures, so a backup from earlier in the month gave an organisation its
+ * limit again. Now the CURRENT month's rows keep the larger figure per
+ * organisation and per counter; earlier months come back as the snapshot has
+ * them.
+ *
+ * Every figure is read back from the database over this test's own
+ * connection. The made-up organisations need no `tblSites` row: the table has
+ * no link to it, which is why a row of an organisation the snapshot does not
+ * know is kept too (970303).
+ */
+function brs_proof30(): void
+{
+    require_once __DIR__ . '/../web/_core/Translation.php';
+    $backup = brs_backup('p30');
+    $before = brs_fingerprint();
+    $month  = gmdate('Y-m-01');
+    // The month before, worked out from the first of this one, so it is
+    // never this month whatever day the test runs.
+    $last   = (new DateTimeImmutable($month, new DateTimeZone('UTC')))->modify('-1 month')->format('Y-m-d');
+
+    brs_check(
+        $month === \Portal\Core\Translation::usageMonth(),
+        'the restore\'s idea of "this month" is the same as the translation limits\' own (Translation::usageMonth())',
+        $month . ' against ' . \Portal\Core\Translation::usageMonth()
+    );
+
+    /** site => [calls, costPence] for one month, read back from the database. */
+    $figures = static function (string $which): array {
+        $out  = [];
+        $stmt = Brs::$writer->prepare('SELECT siteID, calls, costPence FROM tblTranslationUsage WHERE monthStartUtc = ? AND siteID BETWEEN 970301 AND 970309 ORDER BY siteID');
+        $stmt->bind_param('s', $which);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while (($row = $result->fetch_assoc()) !== null) {
+            $out[(int) $row['siteID']] = [(int) $row['calls'], (int) $row['costPence']];
+        }
+        $stmt->close();
+
+        return $out;
+    };
+    $set = static function (string $which, int $site, int $calls, int $pence): void {
+        $stmt = Brs::$writer->prepare(
+            'INSERT INTO tblTranslationUsage (siteID, monthStartUtc, calls, costPence) VALUES (?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE calls = ?, costPence = ?'
+        );
+        $stmt->bind_param('isiiii', $site, $which, $calls, $pence, $calls, $pence);
+        $stmt->execute();
+        $stmt->close();
+    };
+
+    // ---------------------------------------------------------------------
+    // A. Earlier in the month: a snapshot.
+    // ---------------------------------------------------------------------
+    $set($month, 970301, 5, 100);
+    $set($month, 970302, 2, 900);
+    $set($last, 970301, 50, 50);
+    $taken = $backup->snapshot('proof 30, earlier this month');
+    if (brs_check($taken['success'] === true, 'a snapshot is taken with this month\'s and last month\'s counters in it', brs_say($taken)) === false) {
+        return;
+    }
+    $dir = (string) $taken['directory'];
+
+    // Since then: more requests by 970301 (both counters higher), 970302's
+    // count LOWERED by hand while its money went up (each counter is judged
+    // on its own), a new organisation 970303, and last month's figure changed.
+    $set($month, 970301, 12, 300);
+    $set($month, 970302, 1, 950);
+    $set($month, 970303, 3, 0);
+    $set($last, 970301, 99, 99);
+    $live = [970301 => [12, 300], 970302 => [1, 950], 970303 => [3, 0]];
+
+    // ---------------------------------------------------------------------
+    // B. A rehearsal carries them and then undoes everything.
+    // ---------------------------------------------------------------------
+    $rehearsal = $backup->restoreAll($dir, true);
+    brs_check(($rehearsal['success'] ?? false) === true, 'the rehearsal succeeds', brs_say($rehearsal));
+    brs_check(
+        str_contains(implode(' ', $rehearsal['warnings'] ?? []), 'This month\'s translation figures for 3 organisation(s) would be kept at what they were before the restore') === true,
+        'and says this month\'s figures for three organisations WOULD be kept',
+        brs_say($rehearsal['warnings'] ?? [])
+    );
+    brs_check(
+        $figures($month) === $live && $figures($last) === [970301 => [99, 99]],
+        'and afterwards every figure is exactly as it was before the rehearsal',
+        brs_say([$figures($month), $figures($last)])
+    );
+
+    // ---------------------------------------------------------------------
+    // C. The restore: this month keeps the larger figure; last month is the
+    //    snapshot's.
+    // ---------------------------------------------------------------------
+    $restored = $backup->restoreAll($dir);
+    brs_check(($restored['success'] ?? false) === true, 'the restore succeeds', brs_say($restored));
+    $now = $figures($month);
+    brs_check(
+        ($now[970301] ?? null) === [12, 300],
+        'an organisation that made more requests since the snapshot keeps its HIGHER figures (12 requests, 300p): the counter does not go down',
+        brs_say($now)
+    );
+    brs_check(
+        ($now[970302] ?? null) === [2, 950],
+        'each counter is judged on its own: the snapshot\'s larger request count (2) and the live larger money (950p)',
+        brs_say($now)
+    );
+    brs_check(
+        ($now[970303] ?? null) === [3, 0],
+        'an organisation the snapshot had no row for keeps the row it has now',
+        brs_say($now)
+    );
+    brs_check(
+        $figures($last) === [970301 => [50, 50]],
+        'last month comes back exactly as the snapshot has it (50, 50), not the later 99',
+        brs_say($figures($last))
+    );
+    brs_check(
+        str_contains(implode(' ', $restored['warnings'] ?? []), 'This month\'s translation figures for 3 organisation(s) were kept at what they were before the restore') === true,
+        'and the restore says so, with the number of organisations',
+        brs_say($restored['warnings'] ?? [])
+    );
+
+    // ---------------------------------------------------------------------
+    // D. When the live figures are LOWER (this month's rows all gone), the
+    //    snapshot's come back and nothing is said about translation.
+    // ---------------------------------------------------------------------
+    Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
+    $again = $backup->restoreAll($dir);
+    brs_check(
+        ($again['success'] ?? false) === true && $figures($month) === [970301 => [5, 100], 970302 => [2, 900]],
+        'with nothing larger to keep, the snapshot\'s own figures come back',
+        brs_say([$again['error'] ?? '', $figures($month)])
+    );
+    brs_check(
+        str_contains(implode(' ', $again['warnings'] ?? []), 'translation figures') === false,
+        'and nothing is said about translation figures, because nothing was kept',
+        brs_say($again['warnings'] ?? [])
+    );
+
+    // ---------------------------------------------------------------------
+    // E. Putting back ONLY the counters' table does the same.
+    // ---------------------------------------------------------------------
+    $set($month, 970301, 20, 400);
+    $one = $backup->restoreTable($dir, 'tblTranslationUsage');
+    brs_check(
+        ($one['success'] ?? false) === true && ($figures($month)[970301] ?? null) === [20, 400] && ($figures($month)[970302] ?? null) === [2, 900],
+        'a one-table restore of the counters keeps this month\'s higher figure (20, 400p) too',
+        brs_say([$one, $figures($month)])
+    );
+    brs_check(
+        str_contains((string) ($one['notice'] ?? ''), 'This month\'s translation figures for 1 organisation(s) were kept') === true,
+        'and says so in its notice',
+        brs_say($one['notice'] ?? null)
+    );
+
+    Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
+    brs_checkSame($before, 'the whole database is back to how this proof found it');
+}
+
+/**
  * A connection that cannot be given the isolation level a consistent read
  * needs: the one statement that asks for it is swallowed and answers yes.
  * Everything else is the real thing.
@@ -5246,6 +5411,7 @@ $proofs = [
     27 => ['Rows a restore cannot put back are kept, not lost (#694)', 'brs_proof27', false],
     28 => ['Rows waiting to be put back survive a restore (#697)', 'brs_proof28', false],
     29 => ['A snapshot says whether it was read at one moment in time, and whether anything is calling the scheduled job (#581)', 'brs_proof29', false],
+    30 => ['This month\'s translation counters are not put back by a restore (#801)', 'brs_proof30', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

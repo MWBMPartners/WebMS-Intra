@@ -62,8 +62,9 @@
  * A read-only GET, so it asks for no form token (the house rule for a
  * read-only GET; `giving/statements-download.php` is the same).
  *
- * WHAT IT CANNOT DO: it does not serve the claim's generated PDF, and it does
- * not let anybody add or replace a receipt.
+ * WHAT IT CANNOT DO: it does not serve the claim's generated PDF (that is
+ * `expenses/claim-pdf`, `claim-pdf.php` beside this file, #954, which asks
+ * the same rule), and it does not let anybody add or replace a receipt.
  *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)

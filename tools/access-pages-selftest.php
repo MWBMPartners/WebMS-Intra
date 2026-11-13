@@ -125,6 +125,13 @@
  *      claimant's own looks and the spreadsheet's form-token refusal, and
  *      covers the rest of D-130: the approvals, treasury and own-claims lists,
  *      the change form, and the report builder's preview, run and export.
+ *  L5. #954 — a claim's generated PDF (`expenses/claim-pdf`) opens for
+ *      exactly the people who may open the claim, as the newest version under
+ *      the newest stage's name, answers a Range request (206), refuses
+ *      everybody else byte for byte as a made-up claim, writes one D-130
+ *      record per look and none per refusal, is linked from the claim page
+ *      (the older stage row marked replaced), and refuses another claim's
+ *      file, a link, and a missing file.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -299,7 +306,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 527; // 521 until #918 and #1014 added six (three Q11b, one per person who downloads the attendance spreadsheet, and H1-H3 on the venues year schedule message); 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 551; // 527 until #954 added part L5 (twenty-four: who may open a claim's generated PDF, the newest version under the newest stage's name, a Range request, every refusal compared with a made-up claim, D-130's record and the refusal's absent one, the claim page's links, and three file and four number tricks); 521 until #918 and #1014 added six (three Q11b, one per person who downloads the attendance spreadsheet, and H1-H3 on the venues year schedule message); 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3613,6 +3620,172 @@ ok(
 q('DELETE FROM `tblExpenseClaims` WHERE `claimID` IN (?, ?)', 'ii', [L4_ONE_CLAIM, L4_ONE_OWN]);
 q('DELETE FROM `tblUserDepts` WHERE `deptID` = ?', 'i', [L4_ONE_DEPT]);
 q('DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [L4_ONE_DEPT]);
+
+// =============================================================================
+head('L5. #954 — a claim\'s generated PDF opens for exactly the people who may open the claim');
+// =============================================================================
+/**
+ * WHAT WAS WRONG. The claim page listed the generated PDF (the rows of
+ * `tblExpenseClaimFiles` WITH a stage) by name with no link, and nothing
+ * served `_uploads/pdfs`. `expenses/claim-pdf?claim=` now sends it, asking
+ * the claim page's own rule, through `ByteRange::send()`.
+ *
+ * THE WORLD. L3's three claims each given `fileName = claim_<n>.pdf`, a file
+ * of that name in the scratch copy's PDF folder, and a stage row. LEAD's claim
+ * in DEPT has TWO stage rows (L4's Pending one and a newer Approved one), the
+ * shape every stage leaves behind: one file, a row per stage.
+ *
+ * WHAT IT CANNOT DO: drive a browser, and it does not compare the database
+ * work of a refusal with a made-up number (L4-12 does that for receipts; this
+ * page works its reach out first in the same way, read rather than measured).
+ */
+const L5_R_APPROVED = 916875; // the newer stage row on L3_OWN_DEPT (L4_R_PDF is the older)
+const L5_R_MEM      = 916876; // the stage row on L3_MEM_CLAIM
+const L5_R_OTHER    = 916877; // the stage row on L3_OTHER_DEPT
+$l5Folder = $child . $sep . 'web' . $sep . '_uploads' . $sep . 'pdfs';
+if (is_dir($l5Folder) === false && mkdir($l5Folder, 0700, true) === false) {
+    refuse('the scratch copy\'s PDF folder could not be made');
+}
+/** claim number => the bytes of its PDF on disk. */
+$l5Bytes = [
+    L3_OWN_DEPT   => "%PDF-1.4 the APPROVED version\n" . random_bytes(2000) . "\n%%EOF\n",
+    L3_MEM_CLAIM  => "%PDF-1.4 the member's own claim\n" . random_bytes(1200) . "\n%%EOF\n",
+    L3_OTHER_DEPT => "%PDF-1.4 the other department's claim\n" . random_bytes(900) . "\n%%EOF\n",
+];
+foreach ($l5Bytes as $claimId => $bytes) {
+    if (file_put_contents($l5Folder . $sep . 'claim_' . $claimId . '.pdf', $bytes) !== strlen($bytes)) {
+        refuse('a claim PDF could not be written into the scratch copy');
+    }
+    q('UPDATE `tblExpenseClaims` SET `fileName` = ? WHERE `claimID` = ?', 'si', ['claim_' . $claimId . '.pdf', $claimId]);
+}
+$l4Add(L5_R_APPROVED, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Approved.pdf', 'claim_' . L3_OWN_DEPT . '.pdf', 'application/pdf', 'Approved', null);
+$l4Add(L5_R_MEM, L3_MEM_CLAIM, 'Claim_' . L3_MEM_CLAIM . '_Pending.pdf', 'claim_' . L3_MEM_CLAIM . '.pdf', 'application/pdf', 'Pending', null);
+$l4Add(L5_R_OTHER, L3_OTHER_DEPT, 'Claim_' . L3_OTHER_DEPT . '_Pending.pdf', 'claim_' . L3_OTHER_DEPT . '.pdf', 'application/pdf', 'Pending', null);
+$secretPdfLeak = static fn (array $answer): bool => str_contains($answer['body'], $secretBytes)
+    || array_filter($l5Bytes, static fn (string $b): bool => str_contains($answer['body'], $b)) !== [];
+
+$l5Get = static fn (string $who, int $claimId, string $addr = ADDR_A, array $extra = []): array => req($who, 'GET', $addr . '/expenses/claim-pdf?claim=' . $claimId, null, '', null, $extra);
+/** Served exactly: 200, the newest file's bytes, PDF, attachment with the newest stage's name, nosniff, no-store, sandboxed, ranges offered. */
+$l5Served = static function (array $answer, int $claimId, string $stage) use ($l5Bytes, $l4Header): bool {
+    return $answer['status'] === 200
+        && $answer['body'] === $l5Bytes[$claimId]
+        && $l4Header($answer, 'Content-Type') === 'application/pdf'
+        && str_starts_with($l4Header($answer, 'Content-Disposition'), 'attachment; filename="Claim_' . $claimId . '_' . $stage . '.pdf"') === true
+        && strtolower($l4Header($answer, 'X-Content-Type-Options')) === 'nosniff'
+        && str_contains($l4Header($answer, 'Cache-Control'), 'no-store') === true
+        && str_contains($l4Header($answer, 'Content-Security-Policy'), 'sandbox') === true
+        && $l4Header($answer, 'Accept-Ranges') === 'bytes'
+        && $l4Header($answer, 'Content-Length') === (string) strlen($l5Bytes[$claimId]);
+};
+
+foreach ([
+    ['L5-1. the CLAIMANT opens their own claim\'s PDF, on "it is mine" alone', 'mem', L3_MEM_CLAIM, 'Pending'],
+    ['L5-2. an APPROVER of the claim\'s department opens it, and gets the NEWEST version under the newest stage\'s name (two stage rows, one file)', 'appr', L3_OWN_DEPT, 'Approved'],
+    ['L5-3. a TREASURER opens it in a department they hold nothing in', 'trs', L3_OTHER_DEPT, 'Pending'],
+    ['L5-4. an ADMINISTRATOR of the organisation opens it', 'adm', L3_OTHER_DEPT, 'Pending'],
+    ['L5-5. a GLOBAL administrator opens it', 'gadm', L3_OWN_DEPT, 'Approved'],
+] as [$label, $who, $claimId, $stage]) {
+    $answer = $l5Get($jar[$who], $claimId);
+    ok($label . ': HTTP 200, the file\'s own bytes, application/pdf, attachment, nosniff, no-store, sandboxed, Accept-Ranges', $l5Served($answer, $claimId, $stage), $l4Why($answer));
+}
+$piece = $l5Get($jar['appr'], L3_OWN_DEPT, ADDR_A, ['Range: bytes=0-9']);
+ok(
+    'L5-6. a Range request is answered by ByteRange (#880): 206, exactly the first ten bytes, and Content-Range naming the whole size',
+    $piece['status'] === 206 && $piece['body'] === substr($l5Bytes[L3_OWN_DEPT], 0, 10)
+        && $l4Header($piece, 'Content-Range') === 'bytes 0-9/' . strlen($l5Bytes[L3_OWN_DEPT]),
+    'HTTP ' . $piece['status'] . ', ' . strlen($piece['body']) . ' bytes, range "' . $l4Header($piece, 'Content-Range') . '"'
+);
+
+// --- who may not: exactly what a made-up claim gets --------------------------
+$l5Refused = static function (string $label, string $who, int $claimId, string $addr, int $want) use (&$jar, $l5Get, $l4Same, $secretPdfLeak, $l3Head): void {
+    $real = $l5Get($jar[$who], $claimId, $addr);
+    $none = $l5Get($jar[$who], L3_NO_CLAIM, $addr);
+    ok(
+        $label . ': HTTP ' . $want . ', byte for byte what a made-up claim gets, and none of the PDF',
+        $real['status'] === $want && $l4Same($real, $none) === true && $secretPdfLeak($real) === false && strlen($none['body']) > 200,
+        'HTTP ' . $real['status'] . '/' . $none['status'] . '; headers only in one: '
+            . implode(' | ', array_diff(explode("\n", $l3Head($real['head'])), explode("\n", $l3Head($none['head']))))
+    );
+};
+$l5Refused('L5-7. an approver of ANOTHER department (APPR, on a claim of L3_DEPT)', 'appr', L3_OTHER_DEPT, ADDR_A, 404);
+$l5Refused('L5-8. an ORDINARY member of the claim\'s own department (MEM, on LEAD\'s claim)', 'mem', L3_OWN_DEPT, ADDR_A, 404);
+$l5Refused('L5-9. the other organisation\'s ADMINISTRATOR, through THAT organisation\'s own address', 'badm', L3_OWN_DEPT, ADDR_B, 404);
+$l5Refused('L5-10. the other organisation\'s TREASURER, through THAT organisation\'s own address', 'btrs', L3_OTHER_DEPT, ADDR_B, 404);
+membersGate(false);
+$l5Refused('L5-11. a MEMBER of the other organisation on this one\'s address, with the door stood down so the page itself answers', 'bmem', L3_OWN_DEPT, ADDR_A, 404);
+membersGate(true);
+$outReal = $l5Get($nobody, L3_OWN_DEPT);
+ok(
+    'L5-12. a SIGNED-OUT visitor is sent to sign in, and given none of the PDF',
+    $outReal['status'] === 302 && str_contains($outReal['location'], '/login') === true && $secretPdfLeak($outReal) === false,
+    'HTTP ' . $outReal['status'] . ' to ' . $outReal['location']
+);
+
+// --- D-130: one record per look, none for a refusal --------------------------
+$m = $l4LogMark();
+$l5Get($jar['appr'], L3_OWN_DEPT);
+$seen = $l4LogSince($m);
+ok(
+    'L5-13. opening the PDF writes EXACTLY ONE ExpenseClaimPdfOpen record naming the person, with the claim number and nothing else',
+    $l4Expense($seen) === [APPR . '|' . ORG_A . '|ExpenseClaimPdfOpen|Opened the generated PDF of expense claim #' . L3_OWN_DEPT],
+    implode(' || ', $seen)
+);
+$refusedP = $traceOf(static fn () => $l5Get($jar['appr'], L3_OTHER_DEPT));
+$noneP    = $traceOf(static fn () => $l5Get($jar['appr'], L3_NO_CLAIM));
+ok(
+    'L5-14. a REFUSED PDF and a made-up claim leave the same trace in the log: no expense record',
+    $refusedP === $noneP && $l4Expense($refusedP) === [],
+    implode(' || ', $refusedP) . '  ##  ' . implode(' || ', $noneP)
+);
+
+// --- the claim page's links ---------------------------------------------------
+$page = $l3Open('appr', L3_OWN_DEPT);
+$pdfHref = 'href="' . ADDR_A . '/expenses/claim-pdf?claim=' . L3_OWN_DEPT . '"';
+ok(
+    'L5-15. the claim page links the Generated PDF card and the NEWEST stage row to the PDF address; the OLDER stage row has no link and says it was replaced',
+    $page['status'] === 200 && substr_count($page['body'], $pdfHref) === 2
+        && str_contains($page['body'], 'data-claim-pdf-link="' . L5_R_APPROVED . '"') === true
+        && str_contains($page['body'], 'data-claim-pdf-link="' . L4_R_PDF . '"') === false
+        && str_contains($page['body'], 'data-claim-pdf-replaced="' . L4_R_PDF . '"') === true,
+    'HTTP ' . $page['status'] . ', ' . substr_count($page['body'], $pdfHref) . ' link(s)'
+);
+ok(
+    'L5-16. somebody who may not open the claim is shown no PDF address (the claim page\'s own 404)',
+    ($r = $l3Open('mem', L3_OWN_DEPT))['status'] === 404 && str_contains($r['body'], 'expenses/claim-pdf') === false,
+    'HTTP ' . $r['status']
+);
+
+// --- path and number tricks, asked by an ADMINISTRATOR who may open the claim -
+$secretOk = static fn (array $a): bool => $a['status'] === 404 && str_contains($a['body'], $secretBytes) === false && $l4Header($a, 'Content-Disposition') === '';
+// The claim's stored name pointing at ANOTHER claim's PDF (with a stage row naming it).
+q('UPDATE `tblExpenseClaims` SET `fileName` = ? WHERE `claimID` = ?', 'si', ['claim_' . L3_OTHER_DEPT . '.pdf', L3_MEM_CLAIM]);
+$l4Add(916878, L3_MEM_CLAIM, 'Claim_' . L3_MEM_CLAIM . '_Approved.pdf', 'claim_' . L3_OTHER_DEPT . '.pdf', 'application/pdf', 'Approved', null);
+$cross = $l5Get($jar['adm'], L3_MEM_CLAIM);
+ok('L5-17. a claim whose stored PDF name is ANOTHER claim\'s file: 404, and none of that file', $secretOk($cross) && $secretPdfLeak($cross) === false, $l4Why($cross));
+// A link in the PDF folder, under the claim's own name, to the key file.
+q('UPDATE `tblExpenseClaims` SET `fileName` = ? WHERE `claimID` = ?', 'si', ['claim_' . L3_MEM_CLAIM . '.pdf', L3_MEM_CLAIM]);
+unlink($l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf');
+if (symlink($l4Secret, $l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf') === false) {
+    refuse('a link could not be made inside the scratch copy\'s PDF folder');
+}
+$linked = $l5Get($jar['adm'], L3_MEM_CLAIM);
+ok('L5-18. the claim\'s own name in the PDF folder is a LINK to a file outside it: 404, and nothing of the key file', $secretOk($linked), $l4Why($linked));
+unlink($l5Folder . $sep . 'claim_' . L3_MEM_CLAIM . '.pdf');
+$gone = $l5Get($jar['adm'], L3_MEM_CLAIM);
+ok('L5-19. the file is not there: 404', $secretOk($gone), $l4Why($gone));
+$l5Logged = (int) one("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'CLAIM_PDF_UNAVAILABLE' AND `siteID` = ?", 'i', [ORG_A])['n'];
+ok('L5-20. …and each of those three is recorded for an administrator as a PDF that could not be opened', $l5Logged === 3, $l5Logged . ' record(s)');
+foreach ([
+    'claim=' . L3_OWN_DEPT . 'abc' => 'a number with letters after it',
+    'claim[]=' . L3_OWN_DEPT       => 'the number sent as a LIST',
+    'claim=0' . L3_OWN_DEPT        => 'a leading zero',
+    'claim=-' . L3_OWN_DEPT        => 'a negative number',
+] as $query => $words) {
+    $answer = req($jar['adm'], 'GET', ADDR_A . '/expenses/claim-pdf?' . $query);
+    ok('L5-21. ' . $words . ': 404, and the PDF is not sent', $answer['status'] === 404 && $secretPdfLeak($answer) === false, $l4Why($answer));
+}
+q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['CLAIM_PDF_UNAVAILABLE', ORG_A]);
+q('UPDATE `tblExpenseClaims` SET `fileName` = NULL WHERE `claimID` IN (?, ?, ?)', 'iii', [L3_OWN_DEPT, L3_OTHER_DEPT, L3_MEM_CLAIM]);
 
 q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['RECEIPT_UNAVAILABLE', ORG_A]);
 q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` BETWEEN ? AND ?', 'ii', [L4_R_OWN, L4_NO_FILE]);

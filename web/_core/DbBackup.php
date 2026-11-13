@@ -4209,6 +4209,12 @@ class DbBackup
             //    emptied again when that table's turn came.
             $waitingRows = $this->readWaitingHeldRows($tables);
 
+            // 🌐 THIS MONTH'S TRANSLATION COUNTERS, read while they are still
+            //    there, so a restore cannot hand an organisation its monthly
+            //    limit back (#801). Written again after every table is back,
+            //    below, in a rehearsal too.
+            $translationUse = $this->readThisMonthsTranslationUse($tables);
+
             // Empty children first, so nothing is ever left pointing at a row
             // that has just gone.
             foreach (array_reverse($order) as $table) {
@@ -4259,6 +4265,13 @@ class DbBackup
             }
             if ($waitingRows['couldNotRead'] === true) {
                 $warnings[] = self::couldNotReadKeptRowsWarning($dryRun);
+            }
+
+            // 🌐 And this month's translation counters, the larger figure kept
+            //    (#801). A rehearsal does it too and is undone with the rest.
+            $translationKept = $this->keepThisMonthsTranslationUse($translationUse, $dryRun);
+            if ($translationKept !== '') {
+                $warnings[] = $translationKept;
             }
 
             // 🛟 Now the rescued rows, after every table is back — including
@@ -5317,6 +5330,186 @@ class DbBackup
         return ['rows' => $found, 'tooMany' => 0, 'canKeep' => $canKeep];
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* 🌐 This month's translation use survives a restore (#801)               */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WAS WRONG. `tblTranslationUsage` counts, per organisation per month,
+    // how many requests were sent to the translation company and what they were
+    // reported to cost (#762), and both monthly limits read it. A restore put
+    // it back to the snapshot's figures, so restoring a backup taken earlier in
+    // the month gave an organisation its limit again, although the money had
+    // really been spent. (Found by #762's independent check.)
+    //
+    // WHAT HAPPENS NOW. The CURRENT month's rows are read before anything is
+    // emptied and written back after every table is in place, keeping the
+    // LARGER figure for each organisation and each of the two counters. Money
+    // spent cannot be un-spent by putting a database back, so the larger figure
+    // is the true one; the snapshot's figure can only be larger when the live
+    // one was itself put back or edited by hand, and then the snapshot's is
+    // kept too. EARLIER MONTHS come back exactly as the snapshot has them: no
+    // limit reads them, so they are history, and a restore puts history back.
+    //
+    // Same read-early, write-late order as #694's rescue and #697's carry, for
+    // the same reason: the table is itself in the snapshot, so anything written
+    // before its turn would be emptied again. A REHEARSAL does it too, inside
+    // the transaction that is then undone, so a rehearsal can say what a
+    // restore would keep. A one-table restore of `tblTranslationUsage` does the
+    // same, because it would reset the counters just as surely.
+    //
+    // A FAILURE IS SAID, NOT FATAL. Unlike the kept rows of #697, nothing is
+    // lost for good if this does not happen: the counters are a limit on
+    // spending, and the worst case is that an organisation may spend up to one
+    // month's limit again. Refusing a recovery over that would be the wrong
+    // trade at the one moment somebody is recovering, so the restore goes on
+    // and the answer SAYS the figures may have gone back.
+
+    /**
+     * This month's translation counters, read before a restore empties
+     * anything (#801).
+     *
+     * The month is `gmdate('Y-m-01')`, which MUST stay the same expression as
+     * `Translation::usageMonth()` (this class is also loaded by itself, so it
+     * does not ask that class; section L of tools/backup-restore-selftest.php
+     * compares the two).
+     *
+     * @param list<string> $replacing The tables this restore is going to empty.
+     *
+     * @return array{rows: list<array{siteID: int, calls: int, costPence: int}>, month: string, couldNotRead: bool}
+     */
+    private function readThisMonthsTranslationUse(array $replacing): array
+    {
+        $month   = \gmdate('Y-m-01');
+        $nothing = ['rows' => [], 'month' => $month, 'couldNotRead' => false];
+        // `namedIn()`, never `in_array()`: on a server with
+        // lower_case_table_names = 1 the restore's list of tables holds the
+        // name in lower case (#697).
+        if (self::namedIn('tblTranslationUsage', $replacing) === false) {
+            return $nothing;
+        }
+        try {
+            // Not there before migration 254 has run. Asked of the database by
+            // name, ignoring capitals, never by catching an error.
+            $exists = $this->db->query(
+                "SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` "
+                . "WHERE `TABLE_SCHEMA` = DATABASE() AND LOWER(`TABLE_NAME`) = 'tbltranslationusage'"
+            );
+            if ($exists === false) {
+                return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+            }
+            $there = (int) ($exists->fetch_assoc()['n'] ?? 0) > 0;
+            $exists->free();
+            if ($there === false) {
+                return $nothing;
+            }
+            $stmt = $this->db->prepare(
+                'SELECT `siteID`, `calls`, `costPence` FROM `tblTranslationUsage` WHERE `monthStartUtc` = ? ORDER BY `siteID`'
+            );
+            if ($stmt === false) {
+                return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+            }
+            $stmt->bind_param('s', $month);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $rows   = [];
+            while ($result instanceof \mysqli_result && ($row = $result->fetch_assoc()) !== null) {
+                $rows[] = ['siteID' => (int) $row['siteID'], 'calls' => (int) $row['calls'], 'costPence' => (int) $row['costPence']];
+            }
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Said out loud by the caller, never read as "nothing was used".
+            return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+        }
+
+        return ['rows' => $rows, 'month' => $month, 'couldNotRead' => false];
+    }
+
+    /**
+     * Write this month's translation counters back after a restore, keeping
+     * the LARGER figure per organisation and per counter (#801). Called inside
+     * the restore's transaction, so a rolled-back restore or a rehearsal takes
+     * this with it.
+     *
+     * @param array{rows: list<array{siteID: int, calls: int, costPence: int}>, month: string, couldNotRead: bool} $read
+     *        What `readThisMonthsTranslationUse()` found.
+     * @param bool $dryRun A rehearsal: the words say "would".
+     *
+     * @return string A sentence for the restore's answer, or '' when there is
+     *                nothing to say (no counters, or the snapshot already held
+     *                figures at least as large).
+     */
+    private function keepThisMonthsTranslationUse(array $read, bool $dryRun): string
+    {
+        $failed = ($dryRun === true ? 'This rehearsal could not' : 'This restore could not')
+                . ' be sure of keeping this month\'s translation figures (how many translation requests each organisation '
+                . 'has made, and what they cost), so some or all of them may be as this snapshot recorded them. If the snapshot is from earlier this month, an organisation may be '
+                . 'able to spend up to its monthly translation limit again. Everything else '
+                . ($dryRun === true ? 'would be' : 'was') . ' put back as normal.';
+        if ($read['couldNotRead'] === true) {
+            return $failed;
+        }
+        if ($read['rows'] === []) {
+            return '';
+        }
+        $raised = 0;
+        $look   = null;
+        $write  = null;
+        try {
+            $look = $this->db->prepare(
+                'SELECT `calls`, `costPence` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?'
+            );
+            // GREATEST on each counter on its own: the larger number of
+            // requests and the larger amount of money, which need not come
+            // from the same copy.
+            $write = $this->db->prepare(
+                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?) '
+                . 'ON DUPLICATE KEY UPDATE `calls` = GREATEST(`calls`, ?), `costPence` = GREATEST(`costPence`, ?)'
+            );
+            if ($look === false || $write === false) {
+                return $failed;
+            }
+            $month = $read['month'];
+            foreach ($read['rows'] as $row) {
+                $siteId = $row['siteID'];
+                $calls  = $row['calls'];
+                $pence  = $row['costPence'];
+                $look->bind_param('is', $siteId, $month);
+                $look->execute();
+                $found = $look->get_result();
+                $now   = $found instanceof \mysqli_result ? $found->fetch_assoc() : null;
+                if ($found instanceof \mysqli_result) {
+                    $found->free();
+                }
+                if (is_array($now) === true && (int) $now['calls'] >= $calls && (int) $now['costPence'] >= $pence) {
+                    continue; // the snapshot's figures are already at least as large
+                }
+                $write->bind_param('isiiii', $siteId, $month, $calls, $pence, $calls, $pence);
+                $write->execute();
+                $raised++;
+            }
+        } catch (\Throwable $e) {
+            // A statement error rolls back that statement only; the restore's
+            // transaction is still alive, so it can go on. The fault's own
+            // words are not repeated: they can quote values.
+            return $failed;
+        } finally {
+            foreach ([$look, $write] as $stmt) {
+                if ($stmt instanceof \mysqli_stmt) {
+                    $stmt->close();
+                }
+            }
+        }
+        if ($raised === 0) {
+            return '';
+        }
+
+        return 'This month\'s translation figures for ' . $raised . ' organisation(s) '
+             . ($dryRun === true ? 'would be' : 'were')
+             . ' kept at what they were before the restore, because they are higher than this snapshot recorded: '
+             . 'translation requests already made and paid for this month still count against the monthly limits. '
+             . 'Earlier months\' figures ' . ($dryRun === true ? 'would be' : 'were') . ' put back as the snapshot has them.';
+    }
+
     /**
      * The rows still waiting to be put back, read BEFORE anything is emptied,
      * so a restore cannot write over them (#697).
@@ -6059,6 +6252,11 @@ class DbBackup
             if ($this->db->begin_transaction() === false) {
                 throw new RuntimeException('The database would not start a transaction.');
             }
+            // 🌐 #801: putting `tblTranslationUsage` back by itself would reset
+            //    this month's counters just as a whole restore would, so the
+            //    same read-early, write-late keeps the larger figure. For every
+            //    other table this reads nothing.
+            $translationUse = $this->readThisMonthsTranslationUse([$table]);
             $this->emptyTable($table, $pointers, $tableFacts);
 
             $rows = $this->rows($dir, $table, $format);
@@ -6218,6 +6416,8 @@ class DbBackup
             //    sent (#610): see holdRestoredTexts().
             $heldTexts = $this->holdRestoredTexts([$table], false);
 
+            $translationKept = $this->keepThisMonthsTranslationUse($translationUse, false);
+
             $atCommit = true;
             if ($this->db->commit() === false) {
                 throw new RuntimeException('The database would not make the restore permanent.');
@@ -6235,6 +6435,9 @@ class DbBackup
             if ($heldMail !== '') {
                 // In `notice`, which the page already shows: no new key for a page to forget.
                 $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldMail);
+            }
+            if ($translationKept !== '') {
+                $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $translationKept);
             }
             if ($heldTexts !== '') {
                 $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldTexts);
