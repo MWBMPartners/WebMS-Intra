@@ -565,8 +565,9 @@ class Geocoder
      * was chosen over keeping the old rows for look-ups with no country,
      * because an old row cannot say whether it was written by a limited
      * look-up — keeping them would keep exactly the wrong answers #1035 is
-     * about. The old rows are not deleted (nothing here removes cache rows);
-     * they stay in the table unused. Reverse rows are untouched. No
+     * about. The old rows were not deleted here; they stay unused until the
+     * nightly clear-out removes them as unused (#1037, D-182,
+     * `GeocodeCacheRetention`). Migration 290 removed the reverse rows. No
      * installation existed when this changed (D-135), so in practice there
      * were no such rows.
      *
@@ -645,6 +646,8 @@ class Geocoder
      * it (the cache names nobody, so there is nothing to match an erasure on).
      * Neither column was needed: the row is FOUND by `queryHash`, and no caller
      * used the wording. Migration 290 removes both columns and every row's text.
+     * Rows are now also deleted once unused for the period in force
+     * (`GeocodeCacheRetention`, D-182), by the nightly clear-out.
      *
      * What stays, said plainly: `queryHash` is SHA-256 of the lower-cased
      * address and country. It is one-way, but an address is guessable, so

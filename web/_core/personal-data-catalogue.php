@@ -2409,7 +2409,10 @@ return [
                     . ' home). Somebody who already knows an address can tell from'
                     . ' the fingerprint that it was looked up here; nobody can read'
                     . ' an address out of it, so there is nothing for an erasure to'
-                    . ' find.',
+                    . ' find. An answer not used for the period in force (each'
+                    . ' organisation\'s own, capped by the installation\'s; the'
+                    . ' shortest applies, as the cache is shared) is deleted by the'
+                    . ' nightly clear-out (D-182).',
         'columns'  => ['latitude', 'longitude'],
     ],
     'tblResource' => [

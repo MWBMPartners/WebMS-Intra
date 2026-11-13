@@ -11819,8 +11819,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('288_email_log_site_comment.sql
 
 -- ── from 290_geocode_cache_keeps_no_address.sql (#1037) ─────────────────────
 -- tblGeocodeCache is written above without queryText and formatted. A fresh
--- install holds no cache rows for the migration's delete to act on; this is
--- the record.
+-- install holds no cache rows for the migration's delete to act on. The
+-- migration also seeds how long a remembered map answer is kept (D-182),
+-- installation-wide, a year by default; each organisation may choose a
+-- shorter figure on Admin, Maintenance, Retention (GeocodeCacheRetention).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'geo.cache.retentionDays', '365', '365', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 INSERT INTO `tblMigrations` (`filename`) VALUES ('290_geocode_cache_keeps_no_address.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 

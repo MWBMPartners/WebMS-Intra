@@ -9,6 +9,12 @@
 --      (No page has ever called reverse(); in practice there are none.)
 --   B. Drops `tblGeocodeCache`.`queryText` — the address as somebody typed it.
 --   C. Drops `tblGeocodeCache`.`formatted` — the provider's wording of it.
+--   D. Seeds `geo.cache.retentionDays` = '365', installation-wide: how long a
+--      remembered answer may go unused before the nightly clear-out deletes
+--      it (D-182). Each organisation may choose a shorter figure of its own;
+--      `Portal\Core\GeocodeCacheRetention` is the one place that decides.
+--      The usual settings-seed shape: it writes the built-in default and
+--      NEVER overwrites a value somebody has chosen.
 --
 -- Forward rows stay, with their key, position and provider, so nothing has to
 -- be looked up again.
@@ -28,7 +34,7 @@
 -- So rather than teach an erasure to find addresses, the cache stops keeping
 -- them (the second of the two remedies #1037 allows).
 --
--- How long a row is kept at all is a separate question, still open on #1037.
+-- How long a row is kept at all is step D (the owner's decision, D-182).
 --
 -- -----------------------------------------------------------------------------
 -- HOW IT IS WRITTEN
@@ -85,6 +91,11 @@ ALTER TABLE `tblGeocodeCache`
     MODIFY COLUMN `queryHash` CHAR(64) NOT NULL COMMENT 'sha256(direction | lowercased query text). One-way: the address itself is not stored (#1037)';
 ALTER TABLE `tblGeocodeCache`
     COMMENT = 'Geocoder result cache — an address geocodes once (Nominatim policy); keeps no address text (migrations 180, 290)';
+
+-- 🗺️ D. how long a remembered answer is kept
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'geo.cache.retentionDays', '365', '365', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('290_geocode_cache_keeps_no_address.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
