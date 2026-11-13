@@ -229,6 +229,34 @@ if ($eventName === '' || $startDateTime === '') {
     exit();
 }
 
+// 🕐 ONLY WHAT `I18n::wallClockFromInput()` READS IS STORED (#1045 round 3).
+//    The start and end are replaced HERE by the reading that helper makes of
+//    them, so everything below — the checks, the slug, the repeat, the INSERT
+//    and the UPDATE — sees and binds that reading, never the raw posted text.
+//
+//    The raw text used to be bound, and MySQL then made what it liked of it:
+//    measured, a start of `2200-12-31T23:30:00-05:00` (the helper reads no
+//    offset; the range check fell back to the text and passed it) was STORED
+//    as 2201-01-01 04:30:00, past the range, with "created successfully";
+//    and `1900-01-01T00:30:00+01:00` reached the INSERT and failed with a
+//    bare database error 1292. The form's date-and-time box never sends an
+//    offset, so a value the helper cannot read — an offset, a five-digit
+//    year, anything else — is refused in plain words, for create and edit
+//    alike. There is deliberately NO fallback to the text: a fallback is how
+//    the unread value got to the database.
+$unreadableWords = static fn (string $which): string => 'The ' . $which . ' is not a date and time this form can save. '
+    . 'Use the date and time boxes, or write it as YYYY-MM-DD HH:MM. Nothing was saved.';
+$startRead = I18n::wallClockFromInput($startDateTime);
+$endRead   = $endDateTime === '' ? '' : I18n::wallClockFromInput($endDateTime);
+if ($startRead === null || $endRead === null) {
+    $_SESSION['flash_msg']  = $unreadableWords($startRead === null ? 'start' : 'end');
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
+$startDateTime = $startRead;
+$endDateTime   = $endRead;
+
 // 📆 The end cannot come before the start.
 //
 //    This was accepted until now, and it caused real harm rather than merely
@@ -293,22 +321,16 @@ if (
 }
 
 // 📅 THE RANGE AN EVENT MAY BE STORED ON (#1045, D-181): from 1 January 1900
-//    to the end of the later of 2200 and this year plus fifty. Asked of the
-//    same normalised text as the check above, by the ONE place that decides
-//    (`EventDateRange`), for a new event and an edit alike. A browser's
-//    date-and-time box will send a five-digit year if one is typed, and that
-//    is outside the range too, so it is refused here rather than reaching the
-//    database as a bare error.
-// ⚠️ ASKED OF THE READING THAT IS STORED, not of the "T"-to-space text
-//    above: `I18n::wallClockFromInput()` reads ISO basic form
-//    (`20300601T100000`) as 2030, which the text above leaves unreadable, so
-//    round 1 refused a 2030 start as out of range. Anything that helper
-//    cannot read falls back to the text, which is then judged as it stands.
-$readingFor = static fn (string $when): string => I18n::wallClockFromInput($when) ?? $normaliseWhen($when);
-$rangeProblem = EventDateRange::whyRefused([
-    $readingFor($startDateTime),
-    $endDateTime !== '' ? $readingFor($endDateTime) : null,
-]);
+//    to the end of the later of 2200 and this year plus fifty, asked by the
+//    ONE place that decides (`EventDateRange`), for a new event and an edit
+//    alike. (A five-digit year, which a browser's box will send if one is
+//    typed, never gets here: the reading helper cannot read it, so it is
+//    refused above as not a date and time this form can save.)
+// ⚠️ ASKED OF THE READING THAT IS STORED: by this point `$startDateTime` and
+//    `$endDateTime` ARE `I18n::wallClockFromInput()`'s readings (see "ONLY
+//    WHAT ... READS IS STORED" above), so ISO basic form (`20300601T100000`)
+//    is judged as the 2030 it is, which round 1 refused by judging the text.
+$rangeProblem = EventDateRange::whyRefused([$startDateTime, $endDateTime !== '' ? $endDateTime : null]);
 if ($rangeProblem !== null) {
     $_SESSION['flash_msg']  = $rangeProblem . ' Nothing was saved.';
     $_SESSION['flash_type'] = 'danger';

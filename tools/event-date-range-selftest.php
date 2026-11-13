@@ -26,8 +26,12 @@
  *      whose dates would fall outside — a first date the pattern MOVES past
  *      the edge, ten dates from the last December, an "until" five years
  *      past it, a last date whose END spills — refused WHOLE with nothing
- *      stored, beside a repeat wholly inside that is made in full; and a
- *      start in ISO basic form judged by the reading actually stored
+ *      stored (the moved case also with ONE date, so a check skipping the
+ *      first date cannot pass), beside a repeat wholly inside that is made in
+ *      full; a start in ISO basic form judged by the reading actually stored;
+ *      and a value the reading helper cannot read — an offset at either edge,
+ *      a five-digit year, an offset end on an EDIT — refused in plain words
+ *      with nothing stored, since only the reading is ever bound
  *   D  the public "suggest an event" form: refused with `?err=range`, and the
  *      form shows the range in words
  *   E  the series pattern page: a pattern outside the range is refused before
@@ -676,8 +680,6 @@ $formCases = [
     ['P1045 form day after', ($L + 1) . '-01-01T00:00',     '',                 0],
     ['P1045 form year 1',    '0001-01-01T10:00',            '',                 0],
     ['P1045 form year 9999', '9999-12-31T10:00',            '',                 0],
-    // A browser's date-and-time box sends a five-digit year if one is typed.
-    ['P1045 form year 10000', '10000-01-01T10:00',          '',                 0],
     ['P1045 form end 9999',  '2030-06-01T10:00',            '9999-12-31T10:00', 0],
 ];
 $formRun = static function () use ($formCases, $formCreate): array {
@@ -719,6 +721,11 @@ $lastDayWeekday = (string) (int) (new DateTimeImmutable($L . '-12-31', new DateT
 $repeatCases = [
     // name                     start                     end                       repeat fields
     ['P1045 repeat moved',      $L . '-12-30T22:00',      $L . '-12-31T01:00',      ['repeatCount' => '3', 'repeatDays' => [$lastDayWeekday]]],
+    // ⚠️ THE SAME, ONE DATE ONLY. With count 3 every later date is past the
+    //    edge too, so a guard that skipped the first date still refused it
+    //    (round 3 of the check: `array_slice(..., 1)` left 97/97). With count
+    //    1 the moved first date is the ONLY date — plant P4d.
+    ['P1045 repeat moved 1',    $L . '-12-30T22:00',      $L . '-12-31T01:00',      ['repeatCount' => '1', 'repeatDays' => [$lastDayWeekday]]],
     ['P1045 repeat count 10',   $L . '-12-10T10:00',      $L . '-12-10T11:00',      ['repeatCount' => '10']],
     ['P1045 repeat until',      $L . '-12-10T10:00',      $L . '-12-10T11:00',      ['repeatUntil' => ($L + 5) . '-12-31']],
     ['P1045 repeat spill',      $L . '-12-24T23:00',      $L . '-12-25T00:30',      ['repeatCount' => '3']],
@@ -755,6 +762,56 @@ $basicRun = static function () use ($formCreate, $rowNamed): array {
 $basic = $basicRun();
 check('C a start in ISO basic form (20300601T100000) is saved, as 2030-06-01 10:00:00', [$basic[0], $basic[1]], [1, '2030-06-01 10:00:00']);
 check('C and it is not refused for the range', str_contains($basic[2], $range), false);
+
+// ONLY WHAT I18n::wallClockFromInput() READS IS STORED (#1045 round 3). The
+// handler used to bind the RAW posted text, and MySQL converted a value
+// carrying an offset: measured, `{last}-12-31T23:30:00-05:00` was stored as
+// 1 January of the year after, past the range, "created successfully"; and
+// `1900-01-01T00:30:00+01:00` failed at the INSERT with a bare error 1292.
+// The form's box never sends an offset, so such a value is refused in plain
+// words, nothing stored — on create AND on edit, start AND end.
+$unreadable = 'is not a date and time this form can save';
+$formEdit = static function (int $eventId, string $name, string $start, string $end) use ($http, $tokenOn, $flashOn): string {
+    $token = $tokenOn($http('GET', '/calendar/manage')['body']);
+    $http('POST', '/calendar/manage/save', [
+        'csrf_token'    => $token,
+        'action'        => 'update',
+        'eventID'       => (string) $eventId,
+        'eventName'     => $name,
+        'description'   => 'Edited by tools/event-date-range-selftest.php.',
+        'startDateTime' => $start,
+        'endDateTime'   => $end,
+        'timezone'      => ZONE,
+        'status'        => 'published',
+        'locationName'  => 'The selftest hall',
+    ]);
+    return $flashOn($http('GET', '/calendar/manage')['body']);
+};
+$offsetRun = static function () use ($formCreate, $formEdit, $rowNamed): array {
+    $L   = $GLOBALS['L'];
+    $out = [
+        'start' => $formCreate('P1045 offset start', $L . '-12-31T23:30:00-05:00'),
+        'end'   => $formCreate('P1045 offset end', '2030-06-01T10:00', $L . '-12-31T23:30:00-05:00'),
+        '1900'  => $formCreate('P1045 offset 1900', '1900-01-01T00:30:00+01:00'),
+        '10000' => $formCreate('P1045 offset 10000', '10000-01-01T10:00'),
+    ];
+    $formCreate('P1045 offset edit', '2030-06-01T10:00', '2030-06-01T11:00');
+    $row     = $rowNamed('P1045 offset edit');
+    $message = $formEdit((int) ($row['eventID'] ?? 0), 'P1045 offset edit', '2030-06-01T10:00', $L . '-12-31T23:30:00-05:00');
+    $after   = $rowNamed('P1045 offset edit');
+    $out['edit'] = ['saved' => $after === null ? 0 : 1, 'message' => $message,
+        'end' => $after === null ? null : (string) $after['endDateTime']];
+    return $out;
+};
+$off = $offsetRun();
+foreach (['start' => 'a start carrying an offset (-05:00) at the far edge', 'end' => 'an end carrying an offset at the far edge',
+          '1900' => '1900-01-01T00:30:00+01:00', '10000' => 'a five-digit year'] as $k => $what) {
+    check("C {$what} is refused in plain words and nothing is stored",
+        [$off[$k]['saved'], str_contains($off[$k]['message'], $unreadable), str_contains($off[$k]['message'], 'Nothing was saved.')],
+        [0, true, true]);
+}
+check('C an EDIT whose end carries an offset is refused in plain words and the stored end is unchanged',
+    [str_contains($off['edit']['message'], $unreadable), $off['edit']['end']], [true, '2030-06-01 11:00:00']);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nD  The public \"suggest an event\" form\n";
@@ -866,13 +923,34 @@ check('P4 Manage Events without the whole-repeat refusal: the moved first date i
     $pg['P1045 repeat moved']['events'] > 0, true);
 check('P4b and the count-10 repeat near the edge is stored again (all ten)', $pg['P1045 repeat count 10']['events'], 10);
 
-// The first range check put back on the "T"-to-space text, as in round 1.
-$was = $plant('_apps/calendar/manage/save.php', '    $readingFor($startDateTime),', '    $normaliseWhen($startDateTime),');
+// The raw posted text kept instead of the reading, as in round 1: the range
+// check then judges the text, and the 2030 basic-form start reads as no year.
+$was = $plant('_apps/calendar/manage/save.php', '$startDateTime = $startRead;', '// planted: the raw text is kept');
 $clearEvents();
 $pg  = $basicRun();
 $unplant('_apps/calendar/manage/save.php', $was);
 check('P4c judging the text rather than the reading: the 2030 basic-form start is refused as out of range again',
     [$pg[0], str_contains($pg[2], $range)], [0, true]);
+
+// The whole-repeat check made to skip the first date (round 3's finding).
+$was = $plant('_apps/calendar/manage/save.php', "foreach (\$worked['dates'] as \$wouldMake) {", "foreach (array_slice(\$worked['dates'], 1) as \$wouldMake) {");
+$clearEvents();
+$pg  = $repeatAll();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P4d the whole-repeat check skipping the first date: the one-date moved repeat is stored past the range again',
+    $pg['P1045 repeat moved 1']['events'], 1);
+
+// Round 2's fallback to the text put back: an unreadable value is no longer
+// refused, the raw text is bound, and MySQL converts the offset past the edge.
+$was = $plant('_apps/calendar/manage/save.php', '$startRead = I18n::wallClockFromInput($startDateTime);',
+    "\$startRead = I18n::wallClockFromInput(\$startDateTime) ?? trim(str_replace('T', ' ', \$startDateTime));");
+$plant('_apps/calendar/manage/save.php', "\$endRead   = \$endDateTime === '' ? '' : I18n::wallClockFromInput(\$endDateTime);",
+    "\$endRead   = \$endDateTime === '' ? '' : (I18n::wallClockFromInput(\$endDateTime) ?? trim(str_replace('T', ' ', \$endDateTime)));");
+$clearEvents();
+$pg  = $offsetRun();
+$unplant('_apps/calendar/manage/save.php', $was);
+check('P4e the text fallback back: the offset start is STORED past the range again', [$pg['start']['saved'], $rowNamed('P1045 offset start')['startDateTime'] ?? null],
+    [1, ($L + 1) . '-01-01 04:30:00']);
 
 $was = $plant('_apps/calendar/submit-save.php', 'if (EventDateRange::whyRefused([$startUtc, $endUtc]) !== null) {', 'if (false) {');
 $clearEvents();
