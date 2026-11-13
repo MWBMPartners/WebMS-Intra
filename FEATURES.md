@@ -1347,6 +1347,8 @@ another repo, ever**.
 - My account, Outside services: a Save from a page opened before a change made elsewhere leaves that change in place
   and says so (#815).
 - Roles: D-093 (only a global administrator hands out "Set up the public website") is judged again inside the save (#866).
+- Event dates are limited to 1 January 1900 – 31 December of the later of 2200 and fifty years from now;
+  every way of adding or changing an event says so plainly when a date falls outside (#1045).
 - Erasure request for an e-mail address (whether or not it also belongs to an account): the name and address on
   event suggestions made without signing in, every prayer request sent through the anonymous form with that address
   (name, address, network address, the sender's own words and any prayer partner's note emptied; the request kept),

@@ -24296,3 +24296,76 @@ planted fault can deadlock such a test (the request's own row locks against the 
 (#683), the queue row, and every send-log line the request writes (`$message['logSite']`, `false`
 = this request's when the caller named none). The job's lines already follow the row
 (`queueRowSite()`, #1006).
+
+
+## Page messages that say what happened (#982, #922, #926, #973)
+
+- #922: `Auth::signInFacts()` + `signInVerdict()` are the ONE read and judgement of whether a
+  session's sign-in survives; `signInStateNow()` asks without ending. `DbBackup::signInsEndedByRestoring()`
+  counts accounts, not browsers. A restore line for a restorer not in the database goes through
+  `Logger::activityNamingNobody()` (#988), never `Logger::activity()`. After a restore, an account's
+  password, passkeys and Microsoft or Google links are as the snapshot held them - for both kinds of
+  snapshot, because none of the three tables is on `WHOLE_DATABASE_ONLY`; a snapshot holding tblUsers
+  but not one of them leaves it EMPTY (ON DELETE CASCADE), never "as it is today".
+- #982: a message about whether somebody can sign in states what the account HAS, read after the
+  commit; "set up" is not "works" (the callbacks match by e-mail address, within the tenant or hosted
+  domain), and "cannot be given a password" is true only while another way in exists (step 10b,
+  D-018); where the save might still refuse, the page says to TRY rather than promising, instead of
+  repeating the save's rules. `Auth::passwordState()` is the one read of the password row outside the
+  writer.
+- #926: a catalogue `reason` is read by members; developer notes go in the comment above it, and a
+  reason must not promise what a Data Controller's review (#724) can undo.
+
+## The range an event's dates may fall in (#1045, D-181)
+
+`Portal\Core\EventDateRange` is the ONE place. `lastYear()` = max(2200, this year + 50), worked out
+every time; `contains()` compares the reading's YEAR DIGITS (no moment is built — #777); `whyRefused()`
+takes the start and the end (null = no end) and answers the one sentence, `refusalWords()`.
+
+- **The end is checked too** (the builder's choice; the decision names the start). Nothing else stopped
+  an end in 9999 after a start in 2026, and it is the end that makes a page walk an event's days.
+- **Writers, and where each asks:** `calendar/submit-save.php` (after the end-before-start test,
+  `?err=range`); `events/api/create.php` (on the STORED readings, after any offset is put onto the
+  event's clock — `1900-01-01T00:30+01:00` is 23:30 on 31 December 1899 in London and is refused);
+  `events/api/update.php` (only the readings THIS request sends, so a stored date written before the
+  range existed does not block a rename); `calendar/manage/save.php` (the posted start and end are
+  REPLACED by `I18n::wallClockFromInput()`'s reading before anything else, so only that reading is ever
+  checked or bound — the "T"-to-space normaliser, the shape test, `$toReading()` and every `?? text`
+  fallback are deleted; a value it cannot read — an offset, which the form's box never sends, or anything
+  else — is refused as "not a date and time this form can save", nothing saved, on create and edit,
+  start and end (a five-digit year gets the range's own words instead, since it is a year). ISO basic form `20300601T100000` is read and stored as 2030-06-01 10:00:00.
+  Then, before the uploads and the insert, every date a repeat would make); `calendar/manage/series-repattern.php` (the new pattern's first date,
+  then every date it makes, before any preview); `calendar/manage/import.php` (inside the `$fmtStore` wrapper,
+  replacing the old "year before 1000" floor, so preview and store agree); `FeedImporter`
+  (`writeOccurrences()`, skipped and counted as `rowsSkipped`, beside the old `isStorableMoment()`).
+- **Never bind the raw posted text.** Round 2 fell back to the text for a value the helper could not
+  read and bound the raw text; MySQL then converted an offset: `{last}-12-31T23:30:00-05:00` was stored
+  as 1 January of the year after, past the range, "created successfully", and
+  `1900-01-01T00:30:00+01:00` failed at the INSERT with a bare error 1292. The fallback is removed.
+- **A repeat is judged WHOLE, before anything is written, and never shortened.** Manage Events now works
+  out a repeat's dates (the generator call that used to run after the insert, moved up unchanged) before
+  the uploads and the insert; if ANY date — the first included, after the pattern moves it — falls
+  outside, the whole save is refused with the range in words and "Nothing was saved." The pattern page
+  gives the same answer. Round 1 capped the pattern at the last allowed day and skipped a date whose end
+  spilled; that shortened a repeat silently (ten asked, four made, "3 more date(s) were added"),
+  withdrew its rule with only the error log saying so, and never checked a first date the pattern MOVED
+  (2200-12-30 22:00 with Wednesdays ticked was stored as 2200-12-31 22:00 to 2201-01-01 01:00,
+  "created successfully"). The cap and the skip are deleted, on both pages.
+- **What the importer check can reach today:** only an END. The reader keeps a date only when its START
+  falls in the importer's period (a month back, a year ahead), so the start half is a backstop until the
+  far edge is within a year.
+- **Which writers did NOT change:** `FeedResolver`, `HiddenSeriesDates`, `EventCancelReason`,
+  `Events::...timezone` and every soft-delete write a row's dates never. Found by searching for
+  `INSERT INTO tblEvents` and `UPDATE tblEvents ... SET` with a start or end column.
+- **How "only the reading is bound" is proved:** a lower-case `t` and a fractional second
+  (`10:00:45.600`) through create AND edit must be stored as the reading (10:00:00, 10:00:45); bound raw,
+  MySQL refuses the `t` and ROUNDS the fraction to 10:00:46 (plants P10 for the INSERT, P11 for the
+  UPDATE). Every other value reads the same either way, which is why binding the raw post once passed.
+- The end-before-start comparison (text, "before" not "before or equal") is pinned by an end equal to its
+  start (kept) and one second / one minute before on the same day (refused) — plants P12 (`<=`) and P13
+  (date only). A repeat posted at 19:30:15 must keep `:15` on every date (plant P14 drops seconds).
+- Tests: `tools/event-date-range-selftest.php` (118 checks, real HTTP, rule checked as of 2150/2151/2160;
+  plants P1-P14 with P4b-P4e and P6b, each proved applied and each bringing its fault back; run against
+  round 1's `web/` the ten repeat/basic-form checks go red, against round 2's the five unreadable-value
+  checks go red), section K08 of
+  `tools/clock-change-selftest.php`, part N of `tools/feed-importer-selftest.php` (planted: N2 and N3 red).

@@ -4,6 +4,37 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Event dates within 1900 to 2200; page messages that say what happened (#1045, #982, #922, #926, #973)
+
+- **An event's dates must fall between 1900 and at least 2200 (#1045, D-181).** Every writer of an
+  event's start now refuses a date before 1 January 1900 or after 31 December of the later of 2200 and
+  the current year plus fifty, with a plain reason that names the range: the public "suggest an event"
+  form (`?err=range`, with the words on the form), the events API create and update (400), Manage Events
+  (a single event; a repeat any of whose dates would fall outside is refused whole, with nothing saved),
+  the series pattern page (refused before any preview), and the CSV import (the row is refused at preview
+  with the range as its reason). An outside calendar's date outside the range is
+  skipped and counted in that refresh's "skipped" figure on the calendar's page. The end is held to the
+  same range. `Portal\Core\EventDateRange` is the one place that decides it; the far year is worked out
+  from today, so it moves with the calendar (2210 in 2160). `api-spec.json` says so.
+- The Offboarding page now shows the message its actions leave, in plain words and never an
+  exception's own text: refusals (#518, #977), the undo window passing, a missing reason, failures
+  ("nothing was changed") and outcomes worded from the account as it is after the offboarding -
+  including when it is NOT switched off. Rehiring says what the account has (a password, passkeys,
+  Microsoft or Google sign-in set up and the condition it works under) and, when it has no way in,
+  says to try giving it a password on the Users page; the Rehire and Offboard confirmations and the
+  offboarding note no longer promise a password reset; an account erased since it was offboarded is
+  no longer offered a Rehire button (#982, #985).
+- Restoring a whole backup: the snapshot's page says beforehand how many accounts it will sign out,
+  in three groups, and whether yours is one (and whether you could open the backup page afterwards);
+  the restore's result says what your next page will do; the sign-in page says why you were signed
+  out (never for a switched-off account); the result is recorded even when the person who ran it is
+  not in the restored database; and the backup page shows the last whole restore for seven days
+  (#922).
+- Request erasure and My data no longer show members a developer note about room bookings and
+  equipment loans, and say truthfully that booking notes are decided case by case (#926).
+- The page listing an installation's organisations is called "Organisations" everywhere, matching
+  every sentence that sends people there (#973, D-179).
+
 ### Fixed — expense amounts read strictly, Gift Aid counted once and in pounds only, the giving job's selection held to one copy (#1013, #999, #820)
 
 - **Expense claims (#1013).** Every typed figure on a claim — unit cost, quantity and
