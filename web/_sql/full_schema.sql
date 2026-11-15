@@ -2126,6 +2126,16 @@ INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `default
 VALUES ('auth.password.selfAdd', '1', 0, '1')
 ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
 
+-- ─── Auth — may a Microsoft or Google sign-in make a NEW account? (#1042) ────
+--    '1' allow (the default, D-185: "nothing changes until somebody chooses"),
+--    '0' refuse. The STRICTER level wins, as for `auth.password.selfAdd`: an
+--    organisation may add its own row of '0' on Admin, Integrations and may
+--    never allow what this row refuses. A MISSING row counts as allow (the
+--    opposite of selfAdd, on purpose — see `Portal\Core\SsoNewAccounts`).
+INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
+VALUES ('auth.sso.createAccounts', '1', 0, '1')
+ON DUPLICATE KEY UPDATE `settingKey` = `settingKey`;
+
 -- ─── Auth — MS365 OAuth credentials (dormant until configured) ───────────────
 INSERT INTO `tblSettings` (`settingKey`, `settingValue`, `isSensitive`, `defaultValue`)
 VALUES ('auth.ms365.tenantID', '', 1, '')
@@ -9398,6 +9408,12 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/integrations/ms365-mail-save', 'admin/integrations/ms365-mail-save.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- #1042 (migration 294): where the "may a Microsoft or Google sign-in make a
+-- new account" choice is saved, from the Integrations page.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/integrations/sso-accounts-save', 'admin/integrations/sso-accounts-save.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 INSERT INTO `tblMigrations` (`filename`) VALUES ('176_ms365_shared_mailbox.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
@@ -11851,6 +11867,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('290_geocode_cache_keeps_no_add
 -- The `expenses/claim-pdf` address is written above, in the Expenses block of
 -- the routes; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('292_expense_claim_pdf_route.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 294_sso_new_accounts_setting.sql (#1042) ───────────────────────────
+-- One setting (`auth.sso.createAccounts`, in the auth block) and one address
+-- (`admin/integrations/sso-accounts-save`, beside the other Integrations
+-- addresses), both declared above. Nothing else.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('294_sso_new_accounts_setting.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
