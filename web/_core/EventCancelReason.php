@@ -52,7 +52,10 @@
  * WHAT IT DOES NOT DO
  *   • It does not touch a HIDDEN date (`isDeleted = 1`). A hidden date keeps
  *     its reason so it can come back with it (D-146, D-147); the only thing
- *     that changes a hidden date is `HiddenSeriesDates::restore()`.
+ *     that changes a hidden date is `HiddenSeriesDates::restore()`, which
+ *     calls `write()` once the date is live again, so a date that comes back
+ *     as a draft (a suggestion still waiting to be approved, #1081) loses a
+ *     reason it can no longer carry.
  *   • It does not touch an imported event (`externalFeedID IS NOT NULL`):
  *     `FeedImporter` is the only writer of those (#514).
  *   • It does not decide who may change a status. Each caller keeps its own

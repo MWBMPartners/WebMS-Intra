@@ -52,6 +52,18 @@
  *     the one read UNDER THE LOCK in step 3, so it is the status the row
  *     really has at the moment of writing.
  *
+ *   • AND EXCEPT A VISITOR'S SUGGESTION STILL WAITING TO BE APPROVED, which
+ *     ALWAYS comes back as a draft, with any reason emptied (#1081). D-169
+ *     says such a suggestion cannot be published before it is approved, and
+ *     #965 refuses cancelled and postponed for it too, because members see
+ *     both. Before #965 a suggestion COULD be cancelled; hidden like that,
+ *     the rule above would have brought it back cancelled, in front of
+ *     members and unapproved. `statusOnReturn()` asks
+ *     `EventSuggestions::whyStatusRefused()`, the one rule, rather than
+ *     knowing about suggestions itself. D-146's reason for keeping a
+ *     cancellation (a draft can be published by accident) does not arise:
+ *     publishing a waiting suggestion is refused everywhere.
+ *
  *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
  *     a reason is optional (`EventCancelReason`, #998, is the one writer, and
  *     it never touches a hidden date), so the words say "with its reason if it
@@ -197,6 +209,12 @@ final class HiddenSeriesDates
     // sentence rather than a word slotted into a shared one.
     public const RESTORED_POSTPONED          = 'restored-postponed';
     public const RESTORED_SAME_DAY_POSTPONED = 'restored-same-day-postponed';
+    // And for a visitor's SUGGESTION still waiting to be approved (#1081),
+    // which always comes back as a draft: the words for RESTORED tell the
+    // administrator to publish it from the list, and the bulk edit refuses
+    // exactly that for a suggestion (D-169), so they would be untrue here.
+    public const RESTORED_SUGGESTION          = 'restored-suggestion';
+    public const RESTORED_SAME_DAY_SUGGESTION = 'restored-same-day-suggestion';
 
     /**
      * 🚦 The statuses a date KEEPS when it is brought back (D-146, D-147).
@@ -209,10 +227,33 @@ final class HiddenSeriesDates
 
     /**
      * The status a hidden date with status `$was` comes back with.
+     *
+     * `$submissionStatus` is the row's own `tblEvents.submissionStatus`, and it
+     * is REQUIRED (no default) on purpose: a caller that forgot it would
+     * silently get the old answer for a suggestion. A suggestion still waiting
+     * to be approved (`'pending'`) comes back as a draft WHATEVER it was before
+     * it was hidden (#1081). Before #965 a pending suggestion could be set to
+     * "Cancelled" or "Postponed"; hidden like that, D-146/D-147 would have
+     * brought it back still cancelled or postponed — in front of members,
+     * unapproved, which D-169 rules out. D-146's own reason for keeping the
+     * status (a draft can be published by accident) does not arise for a
+     * suggestion, because publishing one before it is approved is refused.
+     * The decision is not made here: `EventSuggestions::whyStatusRefused()` is
+     * the ONE rule for what a pending suggestion may hold, and is asked.
      */
-    public static function statusOnReturn(string $was): string
+    public static function statusOnReturn(string $was, ?string $submissionStatus): string
     {
-        return in_array($was, self::KEEPS_STATUS, true) === true ? $was : 'draft';
+        $keeps = in_array($was, self::KEEPS_STATUS, true) === true ? $was : 'draft';
+
+        return EventSuggestions::whyStatusRefused($submissionStatus, $keeps) === null
+            ? $keeps
+            : EventSuggestions::STATUS_WHILE_PENDING;
+    }
+
+    /** Whether a row's `submissionStatus` marks a suggestion still waiting to be approved. */
+    private static function isWaitingSuggestion(?string $submissionStatus): bool
+    {
+        return EventSuggestions::whyStatusRefused($submissionStatus, 'published') !== null;
     }
     public const NOT_FOUND     = 'not-found';
     public const ALREADY_BACK  = 'already-back';
@@ -229,12 +270,15 @@ final class HiddenSeriesDates
      * has gone lists nothing — its dates' `seriesID` is NULL by then anyway,
      * through `fk_event_series … ON DELETE SET NULL`.
      *
-     * @return list<array{eventID:int, eventName:string, startDateTime:string, endDateTime:?string, status:string, dayTaken:bool}>
+     * `submissionStatus` is returned so the page's button can say what the date
+     * will really come back as (`statusOnReturn()` needs it, #1081).
+     *
+     * @return list<array{eventID:int, eventName:string, startDateTime:string, endDateTime:?string, status:string, submissionStatus:?string, dayTaken:bool}>
      */
     public static function listFor(mysqli $db, int $siteId, int $seriesId): array
     {
         $stmt = $db->prepare(
-            'SELECT `e`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `e`.`endDateTime`, `e`.`status`, '
+            'SELECT `e`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `e`.`endDateTime`, `e`.`status`, `e`.`submissionStatus`, '
             // 📅 Does a LIVE date of the series already sit on this day? Asked
             //    here only so the page can say so beside the button; the
             //    restore asks again, under its lock, and that answer is the one
@@ -264,6 +308,7 @@ final class HiddenSeriesDates
                 'startDateTime' => (string) $row['startDateTime'],
                 'endDateTime'   => $row['endDateTime'] === null ? null : (string) $row['endDateTime'],
                 'status'        => (string) $row['status'],
+                'submissionStatus' => $row['submissionStatus'] === null ? null : (string) $row['submissionStatus'],
                 'dayTaken'      => (int) $row['dayTaken'] > 0,
             ];
         }
@@ -356,7 +401,7 @@ final class HiddenSeriesDates
             //    another organisation's event number — is NOT_FOUND, the same
             //    answer as a number that does not exist.
             $event = $db->prepare(
-                'SELECT `eventID`, `eventSlug`, `startDateTime`, `isDeleted`, `status` FROM `tblEvents` '
+                'SELECT `eventID`, `eventSlug`, `startDateTime`, `isDeleted`, `status`, `submissionStatus` FROM `tblEvents` '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `externalFeedID` IS NULL '
                 . 'FOR UPDATE'
             );
@@ -432,9 +477,13 @@ final class HiddenSeriesDates
             //    `deletedAt` is emptied because the column means "when it was
             //    hidden", and a live row was not. Status: a DRAFT (D-145), or
             //    still CANCELLED / still POSTPONED if it was before it was
-            //    hidden (D-146, D-147). Nothing else is written, so such a date
-            //    keeps its `cancelReason` and who changed its status, untouched.
-            $newStatus    = self::statusOnReturn((string) $row['status']);
+            //    hidden (D-146, D-147) — but ALWAYS a draft for a suggestion
+            //    still waiting to be approved (#1081, D-169), both read from
+            //    the row locked in step 3. Such a date keeps its `cancelReason`
+            //    and who changed its status, untouched.
+            $submission   = $row['submissionStatus'] === null ? null : (string) $row['submissionStatus'];
+            $suggestion   = self::isWaitingSuggestion($submission);
+            $newStatus    = self::statusOnReturn((string) $row['status'], $submission);
             $write        = $db->prepare(
                 'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ? '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `isDeleted` = 1 AND `externalFeedID` IS NULL'
@@ -454,11 +503,22 @@ final class HiddenSeriesDates
                 return self::NOT_FOUND;
             }
 
+            // ✍️ The reason, through its ONE writer (`EventCancelReason`, #998),
+            //    which decides from the status the row now holds: a cancelled
+            //    or postponed date keeps its own reason untouched, and a date
+            //    that came back as a draft — a pending suggestion that had been
+            //    cancelled before #965 (#1081) — has its reason emptied, so it
+            //    can never reappear under a later cancellation it does not
+            //    belong to. In this transaction, after the write, so the two
+            //    land together; the row is live now, which is what it touches.
+            EventCancelReason::write($db, $siteId, [$eventId], false, null, $seriesId);
+
             $db->commit();
-            $answer = match ($newStatus) {
-                'cancelled' => $dayTaken === true ? self::RESTORED_SAME_DAY_CANCELLED : self::RESTORED_CANCELLED,
-                'postponed' => $dayTaken === true ? self::RESTORED_SAME_DAY_POSTPONED : self::RESTORED_POSTPONED,
-                default     => $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED,
+            $answer = match (true) {
+                $suggestion === true       => $dayTaken === true ? self::RESTORED_SAME_DAY_SUGGESTION : self::RESTORED_SUGGESTION,
+                $newStatus === 'cancelled' => $dayTaken === true ? self::RESTORED_SAME_DAY_CANCELLED : self::RESTORED_CANCELLED,
+                $newStatus === 'postponed' => $dayTaken === true ? self::RESTORED_SAME_DAY_POSTPONED : self::RESTORED_POSTPONED,
+                default                    => $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED,
             };
         } catch (\Throwable $e) {
             try {
@@ -482,6 +542,7 @@ final class HiddenSeriesDates
             'SeriesDateRestored',
             'Event #' . $eventId . ' of series #' . $seriesId . ' brought back '
             . ($newStatus === 'draft' ? 'as a draft' : 'still ' . $newStatus)
+            . ($suggestion === true ? ', a suggestion still waiting to be approved' : '')
             . ($dayTaken === true ? ', confirmed onto a day the series already had a date on' : ''),
             $userId
         );
@@ -564,6 +625,21 @@ final class HiddenSeriesDates
                 'words' => 'That date is back in the series, still postponed, as you confirmed, because it had been '
                     . 'postponed before it was hidden. Members see it as postponed, with its reason if it was given one. '
                     . 'This series now has two dates on that day — hide or move one of them if that is not what you want.',
+            ],
+            self::RESTORED_SUGGESTION => [
+                'type'  => 'success',
+                'words' => 'That date is back in the series as a draft, so members cannot see it yet. It is a suggestion '
+                    . 'still waiting to be approved, so it comes back as a draft whatever it was before it was hidden. '
+                    . 'Approve it on Admin, Calendar, Moderation when it is ready: approving is what publishes it and '
+                    . 'tells the person who suggested it.',
+            ],
+            self::RESTORED_SAME_DAY_SUGGESTION => [
+                'type'  => 'warning',
+                'words' => 'That date is back in the series as a draft, as you confirmed, so members cannot see it yet. It '
+                    . 'is a suggestion still waiting to be approved, so it comes back as a draft whatever it was before it '
+                    . 'was hidden. This series now has two dates on that day — hide or move one of them if that is not '
+                    . 'what you want. Approve it on Admin, Calendar, Moderation when it is ready: approving is what '
+                    . 'publishes it and tells the person who suggested it.',
             ],
             self::ALREADY_BACK => [
                 'type'  => 'info',

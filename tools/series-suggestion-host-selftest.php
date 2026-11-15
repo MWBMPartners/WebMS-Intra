@@ -3,7 +3,7 @@
 /**
  * -----------------------------------------------------------------------------
  * Three owner's decisions, driven over real HTTP — self-test 🔁🚦🏠
- * (#847 / D-159, #965 / D-169, #952 / D-168)
+ * (#847 / D-159, #965 / D-169, #952 / D-168; and #1081, #1084)
  * -----------------------------------------------------------------------------
  * WHAT IT CHECKS, with two organisations (A and B) and several kinds of person
  * (an administrator of each organisation, a global administrator, a group's
@@ -28,6 +28,18 @@
  *      bulk publish of the series' OTHER date alone is allowed; organisation
  *      B's administrator is refused on B's suggestion too, and A's
  *      administrator cannot reach B's at all.
+ *   B  #1081: a visitor's suggestion still waiting to be approved that was
+ *      cancelled or postponed (possible before #965) and then hidden comes
+ *      back through the series page's "Bring back" as a DRAFT, still waiting,
+ *      with its old reason emptied, and the page's button and message say so.
+ *      Controls: an ordinary cancelled date still comes back cancelled with
+ *      its reason (D-146); the same-day confirmation (D-144) still applies;
+ *      A's administrator cannot reach B's date; approving it afterwards
+ *      publishes it.
+ *   N  #1084: `SmallGroups::offboardingHomesWords()` in every mix of what
+ *      became of each group's leaders — e-mailed, could not be, no other
+ *      leader — each sentence written out in full here. Database-free: it is
+ *      asked in its own PHP process from the copy of web/, so plants apply.
  *   H  #952, D-168: when a host leaves a small group — on their own, removed
  *      by a leader, or offboarded from the whole portal — their homes stop
  *      being that group's meeting places at once (the listed home emptied and
@@ -1371,9 +1383,192 @@ $sectionO = static function (): void {
     check('O05 ...and that a deleted small-group home address is gone for good', str_contains($words, 'a small-group home address that was deleted is gone for good'));
 };
 
+// =============================================================================
+// B. #1081: A HIDDEN SUGGESTION STILL WAITING TO BE APPROVED COMES BACK A DRAFT
+// =============================================================================
+/** A HIDDEN date of a series, written straight in. `$submission` 'pending' makes it a visitor's suggestion. */
+function hiddenDate(int $site, int $series, string $name, string $start, string $status, ?string $submission, ?string $reason): int
+{
+    global $db;
+    $pending = $submission === 'pending';
+    q('INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `seriesID`, `isDeleted`, `deletedAt`, '
+        . '`cancelReason`, `submissionStatus`, `submitterName`, `submitterEmail`, `submittedAt`) '
+        . "VALUES (?, ?, ?, ?, 'Europe/Paris', ?, ?, 1, NOW(), ?, ?, ?, ?, " . ($pending === true ? 'NOW()' : 'NULL') . ')',
+        'issssissss', [$site, $name, 'p847-b' . bin2hex(random_bytes(5)), $start, $status, $series, $reason, $submission,
+            $pending === true ? 'Pat Visitor' : null, $pending === true ? 'p847.visitor@example.invalid' : null]);
+
+    return (int) $db->insert_id;
+}
+
+function hiddenState(int $id): array
+{
+    return one('SELECT `status`, `submissionStatus`, `isDeleted`, `cancelReason` FROM `tblEvents` WHERE `eventID` = ?', 'i', [$id]) ?? [];
+}
+
+/** The part of the series page drawn for ONE hidden date (its row, up to the next one). */
+function hiddenRowOf(string $html, int $id): string
+{
+    $at = strpos($html, 'data-hidden-event="' . $id . '"');
+    if ($at === false) {
+        return '';
+    }
+    $next = strpos($html, 'data-hidden-event="', $at + 20);
+
+    return squash(substr($html, $at, ($next === false ? 3000 : $next - $at)));
+}
+
+$sectionB = static function (): void {
+    global $db;
+    head('B. #1081: a hidden suggestion still waiting to be approved comes back as a draft, whatever it was');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 B%'");
+    $db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` LIKE 'p847-bs%'");
+    q("INSERT INTO `tblEventSeries` (`siteID`, `seriesName`, `seriesSlug`) VALUES (?, 'P847 B series', ?)", 'is', [ORG_A, 'p847-bs-' . bin2hex(random_bytes(4))]);
+    $seriesA = (int) $db->insert_id;
+    q("INSERT INTO `tblEventSeries` (`siteID`, `seriesName`, `seriesSlug`) VALUES (?, 'P847 B Bee series', ?)", 'is', [ORG_B, 'p847-bs-' . bin2hex(random_bytes(4))]);
+    $seriesB = (int) $db->insert_id;
+    // The state #1081 is about: a pending suggestion CANCELLED (with a reason)
+    // before #965 refused that, and then hidden. Beside it the same thing
+    // postponed, an ordinary cancelled date (the D-146 control), and a
+    // suggestion on a day the series already holds a live date on.
+    $sugCancelled = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion cancelled', '2027-07-03 15:00:00', 'cancelled', 'pending', 'P847 rained off');
+    $sugPostponed = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion postponed', '2027-07-17 15:00:00', 'postponed', 'pending', 'P847 later');
+    $ordinary     = hiddenDate(ORG_A, $seriesA, 'P847 B ordinary cancelled', '2027-07-10 15:00:00', 'cancelled', null, 'P847 hall flooded');
+    $sugSameDay   = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion same day', '2027-07-24 15:00:00', 'cancelled', 'pending', null);
+    q("INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `seriesID`) VALUES (?, 'P847 B live date', ?, '2027-07-24 10:00:00', 'Europe/Paris', 'draft', ?)",
+        'isi', [ORG_A, 'p847-b' . bin2hex(random_bytes(5)), $seriesA]);
+    $sugB = hiddenDate(ORG_B, $seriesB, 'P847 B Bee suggestion', '2027-07-03 15:00:00', 'cancelled', 'pending', 'P847 bee reason');
+    $jarA  = signIn(AADMIN, ORG_A);
+    $jarB  = signIn(BADMIN, ORG_B);
+    $pageA = '/calendar/manage/series-edit?seriesID=' . $seriesA;
+    $pageB = '/calendar/manage/series-edit?seriesID=' . $seriesB;
+    $bringBack = static fn (string $jar, string $page, int $series, int $id, bool $confirm = false): array => post($jar, $page, $page,
+        ['seriesID' => (string) $series, 'action' => 'restore', 'restoreEventID' => (string) $id] + ($confirm === true ? ['confirmSameDay' => '1'] : []));
+
+    $html = req($jarA, 'GET', $pageA)['body'];
+    $row  = hiddenRowOf($html, $sugCancelled);
+    check('B00 the page\'s button for the cancelled SUGGESTION says it comes back as a draft', str_contains($row, 'Bring back as a draft') && str_contains($row, 'Bring back, still') === false, substr($row, 0, 400));
+    check('B00b control: the button for an ordinary cancelled date still says it comes back cancelled (D-146)', str_contains(hiddenRowOf($html, $ordinary), 'Bring back, still cancelled'));
+
+    $r  = $bringBack($jarA, $pageA, $seriesA, $sugCancelled);
+    $st = hiddenState($sugCancelled);
+    check('B01 #1081: a pending suggestion hidden while cancelled comes back as a DRAFT, still pending',
+        (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && ($st['submissionStatus'] ?? '') === 'pending', json_encode($st));
+    check('B02 ...and the cancellation reason it can no longer carry is emptied', array_key_exists('cancelReason', $st) && $st['cancelReason'] === null, json_encode($st));
+    $words = flashAfter($jarA, $r);
+    check('B03 ...and the page says it is a suggestion to approve, not a date to publish',
+        str_contains($words, 'It is a suggestion still waiting to be approved, so it comes back as a draft whatever it was before it was hidden.')
+        // The ordinary draft message's own sentence, which would send them to
+        // a Publish the bulk edit refuses. (Not just "set Status to
+        // Published": the page's bulk-edit card says that too.)
+        && str_contains($words, 'Tick it in the list below and set Status to Published when it is ready') === false, aroundWords($words, 'That date'));
+
+    $bringBack($jarA, $pageA, $seriesA, $sugPostponed);
+    $st = hiddenState($sugPostponed);
+    check('B04 a pending suggestion hidden while POSTPONED comes back as a draft too, its reason emptied',
+        (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && $st['cancelReason'] === null, json_encode($st));
+
+    $r  = $bringBack($jarA, $pageA, $seriesA, $ordinary);
+    $st = hiddenState($ordinary);
+    check('B05 control (D-146): an ordinary cancelled date still comes back cancelled, with its reason',
+        (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'cancelled' && ($st['cancelReason'] ?? '') === 'P847 hall flooded', json_encode($st));
+    check('B05b ...and the page says so', str_contains(flashAfter($jarA, $r), 'still cancelled, because it had been cancelled before it was hidden'));
+
+    $bringBack($jarA, $pageA, $seriesA, $sugSameDay);
+    check('B06 premise: onto a day the series already uses, the first press is refused (D-144)', (int) (hiddenState($sugSameDay)['isDeleted'] ?? 0) === 1);
+    $r     = $bringBack($jarA, $pageA, $seriesA, $sugSameDay, true);
+    $st    = hiddenState($sugSameDay);
+    $words = flashAfter($jarA, $r);
+    check('B06b confirmed, it comes back as a draft, and the page says both: a suggestion, and two dates on that day',
+        ($st['status'] ?? '') === 'draft' && (int) ($st['isDeleted'] ?? 1) === 0
+        && str_contains($words, 'is a suggestion still waiting to be approved') && str_contains($words, 'This series now has two dates on that day'),
+        json_encode($st) . ' ' . aroundWords($words, 'That date'));
+
+    // Organisation B: A's administrator cannot reach B's date; B's own can.
+    $bringBack($jarA, $pageA, $seriesB, $sugB);
+    check('B07 A\'s administrator cannot bring back B\'s hidden suggestion', (int) (hiddenState($sugB)['isDeleted'] ?? 0) === 1);
+    $bringBack($jarB, $pageB, $seriesB, $sugB);
+    $st = hiddenState($sugB);
+    check('B08 B\'s administrator brings it back, as a draft with no reason, in B too',
+        (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && $st['cancelReason'] === null, json_encode($st));
+
+    // The way forward the words name really works.
+    $mod = post($jarA, '/admin/calendar/moderation?status=pending', '/admin/calendar/moderate', ['eventID' => (string) $sugCancelled, 'action' => 'approve']);
+    $st  = hiddenState($sugCancelled);
+    check('B09 approving it on the moderation page then publishes it', ($st['status'] ?? '') === 'published' && ($st['submissionStatus'] ?? '') === 'approved', 'HTTP ' . $mod['status'] . ' ' . json_encode($st));
+};
+
+// =============================================================================
+// N. #1084: THE OFFBOARDING NOTE, EVERY MIX OF WHAT BECAME OF THE LEADERS
+// =============================================================================
+// Database-free: `SmallGroups::offboardingHomesWords()` takes facts and returns
+// words. It is called in a separate PHP process from the COPY of web/, so a
+// fault planted in the copy is what is measured. Each sentence is written out
+// here in full by hand, never built from the method (a test holding its own
+// copy of the rule tests nothing).
+function homesWordsFromCopy(array $cases): array
+{
+    global $child, $sep;
+    $script = $child . $sep . 'homes-words.php';
+    file_put_contents($script, "<?php\ndeclare(strict_types=1);\nrequire " . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'SmallGroups.php', true) . ";\n"
+        . '$out = [];' . "\n" . 'foreach (json_decode((string) file_get_contents("php://stdin"), true) as $k => [$n, $o]) { $out[$k] = \Portal\Core\SmallGroups::offboardingHomesWords($n, $o); }' . "\n"
+        . 'echo json_encode($out);' . "\n");
+    $proc = proc_open([PHP_BINARY, '-d', 'opcache.enable_cli=0', $script], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    if (is_resource($proc) === false) {
+        refuse('could not start PHP to ask offboardingHomesWords()');
+    }
+    fwrite($pipes[0], (string) json_encode($cases));
+    fclose($pipes[0]);
+    $raw = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($proc);
+    $words = json_decode($raw, true);
+
+    return is_array($words) === true ? $words : [];
+}
+
+$sectionN = static function (): void {
+    head('N. #1084: the offboarding note says every sentence that applies, in every mix');
+    $o = static fn (array $told = [], array $noLeader = [], array $notSent = []): array => ['told' => $told, 'noLeader' => $noLeader, 'notSent' => $notSent];
+    $two   = ' Their home was taken off 2 small groups as a meeting place.';
+    $tell  = ' The leaders of Ash are being e-mailed to choose a new place.';
+    $fail  = ' The leaders of Birch could not be e-mailed, so please tell them to choose a new place.';
+    $alone = ' Cedar has no other current leader to tell, so please choose a new place for it or name a new leader.';
+    $cases = [
+        'N00' => [0, $o(['Ash'])],
+        'N01' => [2, $o(['Ash'], [], ['Birch'])],
+        'N02' => [1, $o(['Ash'])],
+        'N03' => [1, $o([], [], ['Birch'])],
+        'N04' => [1, $o([], ['Cedar'])],
+        'N05' => [2, $o([], ['Cedar', 'Damson'])],
+        'N06' => [2, $o(['Ash'], ['Cedar'])],
+        'N07' => [2, $o([], ['Cedar'], ['Birch'])],
+        'N08' => [3, $o(['Ash'], ['Cedar'], ['Birch'])],
+        'N09' => [3, $o(['Ash', 'Elm', 'Fir'])],
+    ];
+    $want = [
+        'N00' => ['no home taken off: nothing is said at all', ''],
+        'N01' => ['#1084: one group\'s leaders e-mailed and another\'s could not be: BOTH sentences', $two . $tell . $fail],
+        'N02' => ['leaders e-mailed only', ' Their home was taken off 1 small group as a meeting place.' . $tell],
+        'N03' => ['leaders could not be e-mailed only', ' Their home was taken off 1 small group as a meeting place.' . $fail],
+        'N04' => ['one group with no other leader', ' Their home was taken off 1 small group as a meeting place.' . $alone],
+        'N05' => ['two groups with no other leader ("have", "them")', $two . ' Cedar and Damson have no other current leader to tell, so please choose a new place for them or name a new leader.'],
+        'N06' => ['e-mailed, and one with no other leader', $two . $tell . $alone],
+        'N07' => ['could not be e-mailed, and one with no other leader', $two . $fail . $alone],
+        'N08' => ['all three at once, in that order', ' Their home was taken off 3 small groups as a meeting place.' . $tell . $fail . $alone],
+        'N09' => ['three groups e-mailed, named "A, B and C"', ' Their home was taken off 3 small groups as a meeting place. The leaders of Ash, Elm and Fir are being e-mailed to choose a new place.'],
+    ];
+    $got = homesWordsFromCopy($cases);
+    foreach ($want as $id => [$what, $expected]) {
+        check($id . ' ' . $what, array_key_exists($id, $got) && $got[$id] === $expected, 'said: ' . var_export($got[$id] ?? null, true));
+    }
+};
+
 // ── Run everything once ─────────────────────────────────────────────────────
 $sectionW();
 $sectionS();
+$sectionB();
+$sectionN();
 $sectionH();
 $sectionR();
 $sectionF();
@@ -1411,6 +1606,14 @@ $plants = [
     ['P20', '_apps/offboarding/do.php', "has been recorded.' . \$erasureNote . \$homesNote;", "has been recorded.' . \$erasureNote;", $sectionH, 'H14', 'the offboarding message saying nothing about the homes'],
     ['P21', '_apps/offboarding/user.php', 'and cancels any erasure request for them still waiting for review', 'and', $sectionO, 'O04', 'the rehire paragraph not saying it cancels a waiting erasure request'],
     ['P15', '_apps/offboarding/user.php', '<li>Take their home off every small group that meets there', '<li>Take them off', $sectionO, 'O02', 'the offboarding page not saying their home leaves every group'],
+    // #1081
+    ['P23', '_core/HiddenSeriesDates.php', "return EventSuggestions::whyStatusRefused(\$submissionStatus, \$keeps) === null\n            ? \$keeps", "return true\n            ? \$keeps", $sectionB, 'B01', 'a waiting suggestion brought back still cancelled (the rule not asked)'],
+    ['P24', '_core/HiddenSeriesDates.php', 'EventCancelReason::write($db, $siteId, [$eventId], false, null, $seriesId);', '', $sectionB, 'B02', 'a suggestion brought back as a draft keeping its old reason'],
+    ['P25', '_core/HiddenSeriesDates.php', '$suggestion   = self::isWaitingSuggestion($submission);', '$suggestion   = false;', $sectionB, 'B03', 'the page told to publish a suggestion it cannot publish'],
+    ['P26', '_apps/calendar/manage/series-edit.php', "statusOnReturn(\$hd['status'], \$hd['submissionStatus'])", "statusOnReturn(\$hd['status'], null)", $sectionB, 'B00', 'the button promising a suggestion comes back cancelled'],
+    // #1084
+    ['P27', '_core/SmallGroups.php', "if (\$outcome['notSent'] !== []) {", "if (\$outcome['notSent'] !== [] && \$outcome['told'] === []) {", $sectionN, 'N01', 'the "could not be e-mailed" sentence dropped whenever another group was e-mailed'],
+    ['P28', '_core/SmallGroups.php', "(\$one === true ? ' has' : ' have')", "' has'", $sectionN, 'N05', 'two leaderless groups worded as one'],
 ];
 foreach ($plants as [$id, $file, $find, $with, $section, $mustFail, $what]) {
     $path     = $web . str_replace('/', $sep, $file);
@@ -1448,6 +1651,8 @@ check('P99 every planted file in the copy is byte-for-byte the repository\'s aga
 $results = [];
 $sectionW();
 $sectionS();
+$sectionB();
+$sectionN();
 $sectionH();
 $sectionR();
 $sectionF();

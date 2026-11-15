@@ -244,7 +244,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             hidden dates under <em>Hidden dates</em>, each with a button to bring it back. It returns as a
             draft, so members do not see it until you publish it &mdash; except a date that had been
             cancelled or postponed before it was hidden, which comes back still cancelled or still postponed,
-            with its reason if it had one. If
+            with its reason if it had one. A visitor's suggestion that is still waiting to be approved
+            always comes back as a draft, whatever it was before; approve it on Admin, Calendar, Moderation
+            to publish it. If
             the series has since been given another date on that day &mdash; which is what happens if you
             shorten a series and then extend it over the same weeks again &mdash; the first press is
             refused and says so. If you really do want both (a morning and an evening service, say), press
