@@ -7,7 +7,7 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed and closed since 12 November: #1004, #1003, #880,
 #1021, #1031, #824, #865, #1028, #1025, #1024, #1043, #1040, #1013, #999, #820, #967, #991, #815, #866, #1039,
-#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4) (and everything listed in earlier handoffs).
+#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4), #1051 + #1050 + #1053 (landed with its docs) (and everything listed in earlier handoffs).
 Decisions recorded 12-13 November: D-180 to D-185 (D-181 event years 1900-2200+; D-182 map-memory period is a capped
 setting; D-183 a home's remembered position is personal data, homes vs public places chosen; D-184 care cases in the
 data copy; D-185 Microsoft/Google sign-in may create accounts by setting, default allow, plus a merge feature #1064 —
@@ -18,7 +18,6 @@ the owner says D-185 applies to SIGNula.id too: record it there when that reposi
 | Package | Branch | State (15 Nov, new session; four agents dispatched, one worktree each) |
 |---|---|---|
 | #1037, #1036, #1029 — map memory (D-182, D-183) | `p1037-build` | Uncommitted round-2 edits found; builder finishing and committing |
-| #1051, #1050, #1053 — send-log lines | `p1051-build` | Round 2 committed; independent check running |
 | #1049, #1042 — Users-page wording; sign-in may create accounts (D-185) | `p1042-build` | Uncommitted edits found; builder finishing (migration 294) |
 
 Migration numbers: 289 (#1041, landed), 290 (#1037), 292 (#954, landed), 294 (#1042). 291 and 293 free.

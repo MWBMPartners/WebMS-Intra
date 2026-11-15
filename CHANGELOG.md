@@ -4,6 +4,23 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### One true send-log line per mail route tried; error rows under the message's organisation (#1051, #1050, #1053)
+
+- **The send log tells the truth about each route (#1051).** A message handed to a route is logged once
+  per route actually tried, first as waiting and then settled to the queue's verdict, so a refused
+  Microsoft 365 or Google attempt and a fallback are each one honest line. A route that is not set up and
+  throws stays "not set up".
+- **A network failure names its reason (#1050)** using libcurl's fixed wording, which cannot quote an
+  address or the message.
+- **Errors-page rows follow the message's organisation (#1053).** Microsoft 365, Google, the fallback and
+  a mis-typed shared mailbox all file their error row under the organisation the message belongs to, not
+  the one the sending request happened to resolve to. Five of these rows are pinned by tests that use two
+  organisations; the two `curl_init()` rows cannot be reached by a test and are not.
+- **Checked:** `mail-queue-selftest` 197, `mail-pages-selftest` 122, `mail-queue-pages-selftest` 118 on
+  MySQL 8.0.36, all audit scripts green; three rounds of independent check, the last clean. **Not run:**
+  MySQL 8.4, MariaDB. Codex has not reviewed this. Open: #1070 (an alert e-mail still goes to the
+  request's own alert recipients).
+
 ### Erasure words, a fuller data copy, giving edge cases, care cases (#1018, #813, #970, #1015)
 
 - **A member's full data copy is fuller (#813, #1015).** It now names every organisation the member
