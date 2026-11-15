@@ -504,7 +504,15 @@ if ($latitude === null && $addressLine1 !== null && Geocoder::autoEnabled() === 
             'line1' => $addressLine1, 'line2' => $addressLine2, 'city' => $city,
             'region' => $region, 'postcode' => $postcode,
         ]);
-        $geo = Geocoder::forward($addressLine, $countryCode !== '' ? $countryCode : null);
+        // 🏠 D-183: a group's meeting place is its host's HOME unless the form
+        //    marked it "not anybody's home" (D-123) — the plain choice this form
+        //    already gives, decided by SmallGroups::placeAgreementAfterSave()
+        //    above. Unmarked is a home, which is the safe direction.
+        $geo = Geocoder::forward(
+            $addressLine,
+            $countryCode !== '' ? $countryCode : null,
+            (int) $placeNotAHome === 1 ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME
+        );
         if ($geo !== null) {
             $geocodedAt    = date('Y-m-d H:i:s');
             $geocodeSource = (string) ($geo['source'] ?? 'unknown');

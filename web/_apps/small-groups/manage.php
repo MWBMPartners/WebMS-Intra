@@ -286,6 +286,9 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                     'w3w'         => $locValues['what3words'] ?? '',
                 ],
                 'lookup'     => true,
+                // 🏠 D-183: the host's home, unless "not anybody's home" (D-123) is ticked.
+                'addressKind'                 => 'home',
+                'addressKindPublicWhenTicked' => 'notAHome',
                 'w3wSuggest' => true,
                 // 🌍 #942: a NEW group starts on the organisation's own
                 //    country, else the installation's, else nothing. An

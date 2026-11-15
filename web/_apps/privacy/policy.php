@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\GivingRetention;
 use Portal\Core\Site;
 
@@ -74,6 +75,10 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 
 <h3>Data we hold</h3>
 <p>Sign in to see the exact inventory at <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a>. In summary we hold: profile information (name, email), authentication tokens, app-specific records (attendance, expenses, giving, etc.), and audit logs.</p>
+<?php // 🏠 #1037, D-183: remembered map positions of homes are personal data, worded in ONE place
+      //    (GeocodeCacheRetention::privacyWords()). Its own paragraph here, deliberately OUTSIDE the
+      //    "Retention policy" list, whose rendered text is pinned whole by the erasure-pages test. ?>
+<p data-geocode-home-notice="1"><strong>Remembered map positions of homes.</strong> <?php echo htmlspecialchars(GeocodeCacheRetention::privacyWords($mysqli), ENT_QUOTES, 'UTF-8'); ?></p>
 
 <h3>Retention policy</h3>
 <ul>

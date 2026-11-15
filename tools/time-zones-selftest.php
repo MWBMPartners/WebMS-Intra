@@ -127,7 +127,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 327;  // + two in part L (#1041 round 3: L25, L26) on the 325 before: + four in part L (#1041 round 2: L21-L24) on the 321 before: + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 328;  // + one in part P (#1029: P19b) on the 327 before: + two in part L (#1041 round 3: L25, L26) on the 325 before: + four in part L (#1041 round 2: L21-L24) on the 321 before: + six in part L (#1041: L15-L20) on the 315 before: + six in part X (#824: X18m-X18r) on the 309 before: + six in part L round 2 (L04a, L04, L05, L06, L10b, L12b) on the 303 before: + nine in part L (#1024: L00-L03; #1028: L10-L14) on the 294 before: + five in part X (#811: X20-X24) and thirteen in part P (#945: P17b-P17n) on the 276 before: + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4236,7 +4236,8 @@ $geoHash    = (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'cach
     (string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $geoAddress, 'GB')
 );
 q('DELETE FROM tblGeocodeCache WHERE queryHash = ?', 's', [$geoHash]);
-q("INSERT INTO tblGeocodeCache (queryHash, direction, queryText, latitude, longitude, formatted, provider) VALUES (?, 'forward', ?, 12.3456789, 45.6, NULL, 'selftest')", 'ss', [$geoHash, $geoAddress]);
+// No address text in the row: the cache keeps none since #1037 (migration 290).
+q("INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`) VALUES (?, 'forward', 12.3456789, 45.6, 'selftest')", 's', [$geoHash]);
 setting('geo.autoGeocode', 'true');
 post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
     ['addressLine1' => $geoAddress, 'countryCode' => 'GB', 'latitude' => '0.00004', 'longitude' => '0']);
@@ -4273,6 +4274,37 @@ ok(
     'P19 a coordinate already stored with an exponent ("4.0E-5", as the organisation page used to write it) is read as a place, not as "no place"',
     $exponent['threw'] === '' && ($exponent['place']['from'] ?? '') === 'organisation' && ($exponent['place']['lat'] ?? null) === 4.0E-5,
     json_encode($exponent)
+);
+// P19b (#1029): ONE rule for what a coordinate NUMBER is. Sabbath::coordinate()
+// held its own copy of GeoLocation's pattern; it now asks GeoLocation and adds
+// only the limit. DRIVEN, not read (#1037 round 2: a substring pin was
+// satisfied by a call inside a dead `if (false)`): the real method, loaded
+// from the repository, is asked a set of values covering what the rule
+// accepts and refuses, with the answers pinned here by hand.
+$coreDir = __DIR__ . DIRECTORY_SEPARATOR . '..' . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
+if (class_exists(\Portal\Core\GeoLocation::class, false) === false) {
+    require_once $coreDir . 'GeoLocation.php';
+}
+if (class_exists(\Portal\Core\Sabbath::class, false) === false) {
+    require_once $coreDir . 'Sabbath.php';
+}
+$coordCases = [
+    ['51.5', 90.0, 51.5], [' -0.12 ', 180.0, -0.12], ['.5', 90.0, 0.5], ['0', 90.0, 0.0], ['4.0E-5', 90.0, 4.0E-5],
+    [12, 90.0, 12.0], [-33.45, 90.0, -33.45], ['90', 90.0, 90.0], ['90.0000001', 90.0, null], ['-181', 180.0, null],
+    ['', 90.0, null], ['north', 90.0, null], ['51,5', 90.0, null], ['0x1A', 90.0, null], ['1e999', 90.0, null],
+    [['1'], 90.0, null], [true, 90.0, null], [null, 90.0, null], [INF, 90.0, null], [NAN, 90.0, null],
+];
+$coordWrong = [];
+foreach ($coordCases as [$in, $limit, $want]) {
+    $got = \Portal\Core\Sabbath::coordinate($in, $limit);
+    if ($got !== $want) {
+        $coordWrong[] = json_encode([$in, $limit]) . ' gave ' . var_export($got, true) . ', wanted ' . var_export($want, true);
+    }
+}
+ok(
+    'P19b Sabbath::coordinate() reads ' . count($coordCases) . ' values as the one coordinate rule does (#1029), driven: numbers and numeric text in range kept, words, commas, hex, lists, true/false, infinity and out of range refused',
+    $coordWrong === [],
+    implode('; ', $coordWrong)
 );
 // P20: 0 and 0 typed on the Sabbath page is saved and used.
 $siteRow('org.latitude', '');

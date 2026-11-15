@@ -23,6 +23,7 @@ declare(strict_types=1);
 use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\Site;
 
 $pageTitle   = 'Privacy & Data Protection';
@@ -85,6 +86,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <li><strong>Authentication events</strong> — login successes, failures, password-reset requests, 2FA verifications. IP address + user agent for security audit.</li>
     <li><strong>Activity logs</strong> — what you did inside the portal (e.g. submitted a prayer request, recorded attendance, approved an expense). Used for incident investigation and reverting accidental changes.</li>
     <li><strong>Linked SSO accounts</strong> — if you signed in with Microsoft 365 or Google, the provider's "sub" identifier and the email they returned.</li>
+    <?php // 🏠 #1037, D-183: a remembered map position of a home is personal data. Worded in ONE
+          //    place (GeocodeCacheRetention::privacyWords()), with the period the clear-out uses. ?>
+    <li data-geocode-home-notice="1"><strong>Map positions of homes</strong> — <?php echo htmlspecialchars(GeocodeCacheRetention::privacyWords($mysqli), ENT_QUOTES, 'UTF-8'); ?></li>
     <li><strong>Uploaded content</strong> — anything you create inside the portal (event RSVPs, expense receipts, document library uploads, etc.).</li>
 </ul>
 

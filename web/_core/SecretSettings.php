@@ -707,8 +707,15 @@ final class SecretSettings
      * The same test is written out in bootstrap.php (portal_key_file_contents()),
      * which the two older helper functions use. tools/settings-secrets-selftest.php
      * holds the two to the same answer for a file of every kind.
+     *
+     * PUBLIC since #1037 round 5, for ONE other reader:
+     * `AddressFingerprint::installationKey()`, which salts a home's remembered
+     * map answer and a network address with the same file. It had its own
+     * copy of this test, missing the is_file() half. Ask this method; never
+     * write another copy. It reads the file afresh on every call (only the
+     * key DERIVED from it is kept, in key()), which that caller relies on.
      */
-    private static function keyFileContents(): ?string
+    public static function keyFileContents(): ?string
     {
         $path = self::keyFilePath();
         // is_file() first: is_readable() says yes to a folder, and reading one
