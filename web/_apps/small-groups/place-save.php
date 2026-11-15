@@ -178,6 +178,17 @@ if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {
     exit();
 }
 $w3w       = GeoLocation::validateW3W($w3wPosted);
+// 📍 A map position TYPED but unusable is refused the same way, with the
+//    reason (#1030). It used to be stored as none (an edit wiping the one
+//    stored) while the page said the home was saved, and a home holding only
+//    that position was then refused as having "no address" -- untrue.
+$positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+if ($positionRefusal !== null) {
+    $_SESSION['flash_msg']  = $positionRefusal;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $formUrl);
+    exit();
+}
 $coords    = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 $latitude  = $coords['lat'] ?? null;
 $longitude = $coords['lng'] ?? null;

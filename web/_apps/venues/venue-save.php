@@ -107,6 +107,19 @@ if ($action === 'save') {
         exit();
     }
 
+    // 📍 A map position typed but unusable is REFUSED with the reason (#1030),
+    //    like the what3words address above. It used to be dropped: a new venue
+    //    was saved with no position, and an edit WIPED the one already stored,
+    //    while the page said "Venue updated.". GeoLocation::positionRefusal()
+    //    is the one place that decides and words it; saveVenue() asks it again.
+    $positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+    if ($positionRefusal !== null) {
+        $_SESSION['flash_msg']  = $positionRefusal;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
+    }
+
     $data = [
         'venueName'      => (string) ($_POST['venueName'] ?? ''),
         'landlordOrgID'  => $landlordOrgId,

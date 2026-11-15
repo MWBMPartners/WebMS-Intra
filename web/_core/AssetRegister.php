@@ -3289,7 +3289,8 @@ class AssetRegister
      * @param array<string, mixed> $data
      *
      * @return int The location's id (new or existing), or 0 on failure /
-     *             validation error (blank name)
+     *             validation error (blank name, or a typed map position
+     *             that cannot be used, #1030)
      */
     public static function saveLocation(int $siteId, int $locationId, array $data, int $actorUserId): int
     {
@@ -3310,6 +3311,15 @@ class AssetRegister
         // field; invalid non-empty W3W is treated as null here (the HTTP
         // handler has no dedicated flash for this field yet, so a bad
         // value simply doesn't persist rather than the whole save failing).
+        //
+        // A map position TYPED but unusable is refused (#1030), unlike the
+        // what3words value: the handler (assets/locations.php) asks
+        // GeoLocation::positionRefusal() first and words it, and this asks
+        // again so no other caller can drop a typed position, or wipe a stored
+        // one on an edit, without a word. It used to be saved as none.
+        if (GeoLocation::typedPositionProblem($data['latitude'] ?? null, $data['longitude'] ?? null) !== '') {
+            return 0;
+        }
         $coords = GeoLocation::validateCoords($data['latitude'] ?? null, $data['longitude'] ?? null);
         $w3w    = GeoLocation::validateW3W($data['what3words'] ?? null);
         $geocodedAt    = null;

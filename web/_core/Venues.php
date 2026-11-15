@@ -647,6 +647,14 @@ class Venues
         // same as every other new location field; invalid non-empty W3W
         // is treated as null here (the HTTP handler pre-validates and
         // flashes — the model layer never fatals).
+        //
+        // A position TYPED but unusable is refused (#1030): the save handler
+        // asks GeoLocation::positionRefusal() FIRST so it can word the refusal;
+        // asked again here so that no other caller can drop a typed position
+        // (or wipe a stored one) without a word. It used to be saved as none.
+        if (GeoLocation::typedPositionProblem($data['latitude'] ?? null, $data['longitude'] ?? null) !== '') {
+            return 0;
+        }
         $coords = GeoLocation::validateCoords($data['latitude'] ?? null, $data['longitude'] ?? null);
         $w3w    = GeoLocation::validateW3W($data['what3words'] ?? null);
         $geocodedAt    = null;
