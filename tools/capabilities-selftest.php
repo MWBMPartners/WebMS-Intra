@@ -579,6 +579,9 @@ $OTHERS = [
     Capabilities::WEBSITE_SETUP,
     // #529 (D-106): who, beside administrators, sees the attendance totals.
     Capabilities::ATTENDANCE_REPORTS,
+    // #1064 (D-185): who may merge two accounts. Falls CLOSED for a global
+    // administrator; pinned beside #724's check in section C.
+    Capabilities::ACCOUNTS_MERGE,
 ];
 
 // =============================================================================
@@ -598,23 +601,27 @@ cap_section('A — the registry as declared');
 cap_check(
     'every offered capability is declared, in order, and nothing has been added, '
         . 'dropped or swapped: #724\'s, the five the owner named on 3 November 2026, '
-        . 'the six #739 converted, #756\'s, #477\'s, #493\'s two and #529\'s',
+        . 'the six #739 converted, #756\'s, #477\'s, #493\'s two, #529\'s and #1064\'s',
     Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
-// ⚠️ EVERY ONE OF THE OTHER ELEVEN FALLS OPEN FOR A GLOBAL ADMINISTRATOR, AND
-//    #724'S DOES NOT. Both halves are asserted, because the whole reason
+// ⚠️ EVERY OTHER CAPABILITY FALLS OPEN FOR A GLOBAL ADMINISTRATOR, AND #724'S
+//    AND #1064'S DO NOT. Both halves are asserted, because the whole reason
 //    `globalAdminFallsOpen` has no default is that the registry holds opposite
-//    answers to one question: a check that only tested the `false` one would
+//    answers to one question: a check that only tested the `false` ones would
 //    pass on a registry where every other entry had quietly flipped.
+//    #1064's exception is NAMED here rather than the loop loosened, so a third
+//    capability that falls closed still turns this red until somebody decides
+//    it on purpose. (#1064's is provisional: owner question 2 on that issue.)
+$FALLS_CLOSED = [Capabilities::ACCOUNTS_MERGE];
 $allOthersFallOpen = true;
 foreach ($OTHERS as $otherCap) {
-    if (Capabilities::fallsOpenForGlobalAdmin($otherCap) === false) {
+    if (Capabilities::fallsOpenForGlobalAdmin($otherCap) !== (in_array($otherCap, $FALLS_CLOSED, true) === false)) {
         $allOthersFallOpen = false;
     }
 }
 cap_check(
-    'every capability but #724\'s falls open for a global administrator, as the owner asked',
+    'every capability but #724\'s and #1064\'s falls open for a global administrator, as the owner asked',
     $allOthersFallOpen === true
 );
 // And each one ships with at least one role, which is what makes an
@@ -1690,6 +1697,22 @@ cap_check(
     '#724: a global administrator with no role is REFUSED, where App::hasRole() let them in',
     Capabilities::allows($mysqli, $rootId, $siteA, $CAP, true) === false
     && $oldHasRole($rootId, $siteA, 'data_controller', true) === true
+);
+// 🔀 #1064 (D-185): the SECOND capability that does not fall open, pinned here
+//    in the same change that adds it (#739's rule). It is not in
+//    `$shouldShipWith` because that list asserts falling open. Its shipped role
+//    is pinned by name, and both people are measured, because "ships with A
+//    role" is what let #739's worst fault through.
+cap_check(
+    '#1064: accounts.merge ships with data_controller and does NOT fall open for a global administrator',
+    Capabilities::standardRoleKeys(Capabilities::ACCOUNTS_MERGE) === ['data_controller']
+    && Capabilities::fallsOpenForGlobalAdmin(Capabilities::ACCOUNTS_MERGE) === false
+);
+cap_check(
+    '#1064: a global administrator with no role is refused; the data controller of A is let in',
+    Capabilities::allows($mysqli, $rootId, $siteA, Capabilities::ACCOUNTS_MERGE, true) === false
+    && Capabilities::allows($mysqli, $dcId, $siteA, Capabilities::ACCOUNTS_MERGE, false) === true
+    && Capabilities::allows($mysqli, $otherId, $siteA, Capabilities::ACCOUNTS_MERGE, false) === false
 );
 
 // =============================================================================

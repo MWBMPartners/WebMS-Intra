@@ -296,6 +296,16 @@ final class Capabilities
     public const ATTENDANCE_REPORTS = 'attendance.reports';
 
     /**
+     * #1064 (D-185): who may merge two accounts that belong to one person. It
+     * opens Admin → Users → Merge two accounts, asked there and on the Users
+     * page that links to it, and `AccountMerge::factsFor()` asks it again in
+     * EVERY organisation either account belongs to. Ships with
+     * `data_controller` and does NOT fall open for a global administrator —
+     * provisionally, pending owner question 2 on #1064 (see the entry).
+     */
+    public const ACCOUNTS_MERGE = 'accounts.merge';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -1043,6 +1053,39 @@ final class Capabilities
                 . 'still record a new session.',
             'askedAt' => [
                 'web/_core/AttendanceAccess.php',
+            ],
+        ],
+
+        // 🔀 MERGING TWO ACCOUNTS (#1064, D-185). A merge moves every record
+        //    one account holds onto another, so whoever can do it can, by
+        //    choosing an account they control as the one that stays, come to
+        //    hold somebody else's records. That is why it ships with the role
+        //    answerable for personal data, and why it is the SECOND capability
+        //    that does not fall open for a global administrator.
+        self::ACCOUNTS_MERGE => [
+            'label' => 'Merge two accounts',
+            'opens' => 'Admin, Users, Merge two accounts: choosing two accounts that belong to one person and '
+                . 'seeing how many of each kind of record would move from the duplicate to the account that '
+                . 'stays. Only counts are shown, never what the records say. The merge itself is not available '
+                . 'yet. The permission is needed in every organisation either account belongs to.',
+            'standard' => ['data_controller'],
+            // ⚠️ FALSE, PROVISIONALLY, AND IT DEPARTS FROM D-017's DEFAULT ON
+            //    PURPOSE. D-017 has a global administrator fall open everywhere
+            //    except the erasure review (#724), whose reason applies here with
+            //    more force: an installation's administrator and an
+            //    organisation's may be different parties, and a merge into an
+            //    account the installation's administrator controls would hand
+            //    them a member's records. Whether this stays false is owner
+            //    question 2 on #1064; the safer direction is the recoverable one,
+            //    because an organisation can give the role to anybody it trusts.
+            'globalAdminFallsOpen' => false,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'Nobody in this organisation will be able to open the merge page or see what a merge '
+                . 'would move. No record is changed by this. Any administrator can name a role here again on this page.',
+            'askedAt' => [
+                'web/_apps/admin/users/merge.php',
+                'web/_apps/admin/users/index.php',
+                'web/_core/AccountMerge.php',
             ],
         ],
     ];

@@ -11908,6 +11908,17 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('295_network_address_period.sql
 INSERT INTO `tblMigrations` (`filename`) VALUES ('296_publisher_website_setting.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 297_account_merge_preview.sql (#1064, D-185) ───────────────────────
+-- The address of Admin, Users, Merge two accounts: a preview that counts what
+-- merging a duplicate account would move and changes nothing. The permission it
+-- needs, `accounts.merge`, is declared in code (Portal\Core\Capabilities) and
+-- needs no row until an organisation re-points it.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/users/merge', 'admin/users/merge.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('297_account_merge_preview.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── from 298_member_limits.sql (#989, #992; D-171, D-172) ───────────────────
 -- tblRotaSwapRequest.createdAtUtc is written above, in the table itself. A
 -- fresh install holds no requests for the migration to leave empty. Here: the

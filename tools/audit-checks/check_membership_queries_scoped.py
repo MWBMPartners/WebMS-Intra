@@ -97,6 +97,7 @@ MARKER = "siteID"
 ALLOWED: dict[str, str] = {
     "_apps/offboarding/do.php": "whole-portal exit: deletes every organisation's memberships on purpose (steps 6a/6b)",
     "_core/GdprEraser.php": "erasure list entries (table names in an array), not queries",
+    "_core/AccountMerge.php": "account-merge column list (table names in an array); its preview counts every organisation on purpose, because a merge reaches all of them (#1064)",
     "_core/personal-data-catalogue.php": "erasure list entries (table names as array keys), not queries",
 }
 

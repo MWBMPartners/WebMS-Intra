@@ -182,6 +182,10 @@ FILE_ALLOWLIST: dict[str, str] = {
     # be joined to it for scoping, never to show an event's own content
     # to a viewer.
     "_core/Discipleship.php": "counts/joins tblEvents only to auto-complete a formation step from attendance; shows no event detail",
+    # 🔀 #1064: names tblEvents' account columns in a list, and COUNTS rows
+    # naming a duplicate account for the merge preview. Never reads or shows
+    # what an event says.
+    "_core/AccountMerge.php": "lists tblEvents' account-number columns and counts rows naming an account for the merge preview; shows no event",
     # 🧒 #816: lists the events whose OWN registration period is longer than a
     # ceiling a global administrator is trying to set, so the refusal can name
     # them. Imported and soft-deleted events are included ON PURPOSE, because the

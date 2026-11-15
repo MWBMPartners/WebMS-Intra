@@ -621,7 +621,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps selftest_geocoder selftest_rowrule selftest_position selftest_seriessuggest; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps selftest_geocoder selftest_rowrule selftest_position selftest_seriessuggest selftest_accountmerge; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1268,6 +1268,17 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_i18nlang
         run: php tools/i18n-member-language-http-selftest.php
+
+      # 🔀 #1064 (D-185). The account merge's list of account-number columns
+      #    against the LOADED database (the half the text-only hard gate
+      #    cannot prove), its refusals over two organisations, its preview
+      #    with one made-up row per listed column, and the page over HTTP.
+      #    Needs curl and proc_open, and REFUSES rather than skipping.
+      - name: "Merging two accounts: the preview and its refusals (#1064)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_accountmerge
+        run: php tools/account-merge-selftest.php
 
       # 🔔 #667. Two pages save a member's notification choices into ONE
       #    column; until #667 one rebuilt the whole column and dropped every

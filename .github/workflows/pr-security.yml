@@ -2100,6 +2100,16 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_worker_records_listed.py
 
+      # 🔀 #1064 (D-185): every column that holds an account number is known to
+      #    Portal\Core\AccountMerge, so a merge can never leave a new table's
+      #    rows naming the duplicate account. Fails both ways (an unlisted
+      #    account column; a listed column that is gone). Reads text only. Its
+      #    self-test runs in the audit self-tests step with the others (#919).
+      - name: 'The account merge knows every account-number column (hard gate, #1064)'
+        id: account_merge_columns
+        if: always()
+        run: python3 -I tools/audit-checks/check_account_merge_columns.py
+
       # 🙈 #988: a record that names nobody is written only where a page
       #    promises anonymity. Logger::activityNamingNobody() leaves out the
       #    account, session fingerprint and facts, address, browser and headers;
