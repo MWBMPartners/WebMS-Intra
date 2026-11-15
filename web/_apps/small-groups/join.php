@@ -152,7 +152,8 @@ if ($action === 'join') {
     $homeWords = '';
     if ($ok === true && $outcome['released'] !== []) {
         $told      = SmallGroups::tellLeadersHomesReleased($db, $outcome['released'], $userId);
-        $homeWords = ' Your home is no longer one of its meeting places, and its address has been removed. '
+        $homeWords = ' Your home is no longer one of its meeting places, and its address has been taken off the group\'s places '
+            . '(a map position the portal looked up for it may be remembered until its keeping period ends). '
             . ($told > 0
                 ? 'The group\'s leaders are being e-mailed to choose a new place.'
                 : 'No e-mail could be sent to the group\'s leaders, so please let them know.');

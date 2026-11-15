@@ -1347,10 +1347,12 @@ jobs:
       #    the form and stored on every date; a suggestion still waiting to be
       #    approved is refused by Manage Events, the events API and the series
       #    bulk edit; a host who leaves a small group (on their own, removed,
-      #    or offboarded) takes their home off it and its leaders are e-mailed,
-      #    including a race held open on a second database connection. Nine
-      #    planted faults, each required to turn its check red. REFUSES rather
-      #    than skipping when anything is missing.
+      #    or offboarded) takes their home off it and its CURRENT leaders are
+      #    e-mailed, three races held open on a second database connection,
+      #    and offboarding's home step all-or-nothing (a trigger it creates and
+      #    drops). Its planted faults must each turn their check red; one that
+      #    cannot be applied fails the run. REFUSES rather than skipping when
+      #    anything is missing.
       - name: "Series website window, pending suggestions, departing hosts (#847, #965, #952)"
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:

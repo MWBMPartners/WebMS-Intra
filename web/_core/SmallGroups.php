@@ -519,6 +519,14 @@ final class SmallGroups
      * step of offboarding's single transaction. The rows are read `FOR UPDATE`
      * before they are changed, so what it answers is exactly what it emptied.
      *
+     * A FAILURE PART-WAY (round 1 of #952's check) throws, and the caller
+     * decides what survives: `endMembership()` rolls its whole transaction
+     * back, so the membership does not end either and the request fails with
+     * nothing changed; offboarding wraps this in a SAVEPOINT and rolls back
+     * to it, so the step is all-or-nothing while the rest of the offboarding
+     * goes on, the step is recorded as failed, and no leader is told
+     * (section F of tools/series-suggestion-host-selftest.php).
+     *
      * The PLANNED meetings it counts (dated today or later on the organisation's
      * clock, `todayFor()`) are the ones that were to be held at the emptied
      * place: a meeting pointing at a removed home now reads "a place no longer
@@ -708,7 +716,8 @@ final class SmallGroups
             $what[] = $released['homes'] === 1 ? 'one of the homes on the group\'s list' : $released['homes'] . ' of the homes on the group\'s list';
         }
         $body = $who . ' has left ' . $group . '. Their home was ' . implode(' and ', $what) . ', so it is no longer '
-            . 'a meeting place for the group, and its address has been removed from the portal.' . "\n\n"
+            . 'a meeting place for the group, and its address has been taken off the group\'s places. (If the portal '
+            . 'looked up a map position for that address, it may remember the position until its keeping period ends.)' . "\n\n"
             . 'Please choose a new place for the group to meet.';
         if ($released['plannedMeetings'] > 0) {
             // Worded for BOTH kinds of place: a meeting at the usual place

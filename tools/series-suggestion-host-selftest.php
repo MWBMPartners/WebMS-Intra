@@ -14,7 +14,11 @@
  *      The new-event form SAYS so (and the edit form, which makes no series,
  *      does not), and a weekly series made with a window really stores the
  *      same two dates on every date — the behaviour D-159 chose, pinned so a
- *      later change to it (#1016) is a visible decision.
+ *      later change to it (#1016) is a visible decision. The form also says
+ *      what the window DOES, and that is DRIVEN through the real public door
+ *      (round 1 of the check: the first sentence was untrue): while today is
+ *      inside the window every date still to come is listed, even those after
+ *      the Until date; after the Until date none is; before the From date none.
  *   S  #965, D-169: a suggestion still waiting to be approved cannot be
  *      published (or cancelled or postponed, which members also see) by
  *      Manage Events' edit, by the events API's update, or by the series bulk
@@ -32,16 +36,29 @@
  *      attempt with its subject), and NOTHING else changes: another host's
  *      home, the same person's home in ANOTHER organisation's group (when they
  *      leave only A's), and a member without a home leaving changes no place.
- *   R  #952, the race: a member adding their own home WHILE their departure
- *      is part-way through. This test holds the membership row locked on its
- *      own connection with the membership already ended (uncommitted), sends
- *      the add through the real page WITHOUT waiting (curl_multi), checks the
- *      request is really still waiting (a sleep is a hope; this is the
- *      premise), commits, and requires the add to have been REFUSED and no
- *      home stored. Without the lock taken in place-save the add goes through.
+ *      Only CURRENT leaders are told: a leader whose membership has ended and
+ *      a co-leader whose account is switched off each stand in the world and
+ *      neither is e-mailed (round 1 of the check: that rule was pinned by
+ *      nothing).
+ *   R  #952, the race, on all THREE saves that name a host: a member adding
+ *      their own home, a leader naming the host of a listed home, and a
+ *      leader naming the host of the group's usual place — each WHILE that
+ *      person's departure is part-way through. This test holds the membership
+ *      row locked on its own connection with the membership already ended
+ *      (uncommitted), sends the save through the real page WITHOUT waiting
+ *      (curl_multi), checks the request is really still waiting (a sleep is a
+ *      hope; this is the premise), commits, and requires the save to have
+ *      been REFUSED. Without the lock each save goes through.
+ *   F  #952: offboarding's home step is ALL OR NOTHING. A trigger makes the
+ *      step fail after it has already emptied one home; that home must be
+ *      put back, no leader told, the step recorded as failed, and the rest of
+ *      the offboarding still done.
+ *   O  #952: the offboarding page names the small-group steps, the remembered
+ *      map position, and what a rehire does NOT put back.
  *   P  the plants: each new guard is broken in a COPY of web/, one at a time,
  *      each proved applied, and the check meant to catch it must go red;
- *      every copy is then put back and compared byte for byte.
+ *      every copy is then put back and compared byte for byte. A plant that
+ *      cannot find its text STOPS the run as a failure: it tested nothing.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It drives ONE web worker, so two administrators pressing two buttons at
@@ -61,7 +78,10 @@
  *   groups 847201-847209 and places 847301-847309; they are removed at the
  *   START and the END. It changes the installation's `multisite.*`,
  *   `small-groups.enabled`, `offboarding.enabled`, `mail.provider` and
- *   `mail.smtp.host` rows and puts them back.
+ *   `mail.smtp.host` and `site.url` rows and puts them back. Section F creates
+ *   a trigger (`p847_fail_usual_place`) and drops it straight after, and the
+ *   start and end of every run drop it too; the database user therefore needs
+ *   CREATE TRIGGER, and the test fails loudly (an uncaught error) without it.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/series-suggestion-host-selftest.php
@@ -100,9 +120,18 @@ const HOST2  = 847022; // hosts another listed home in A
 const PLAIN  = 847023; // plain member of A's group, no home
 const HOST3  = 847024; // hosts a home in A's group and in B's group; offboarded
 const RACER  = 847025; // section R: a member adding their own home while leaving
+const HOST4  = 847026; // section F: offboarded while the home step fails part-way
+const RACER2 = 847027; // section R: named host of the usual place while leaving
+const RACER3 = 847028; // section R: named host of a listed home while leaving
+const FORMER_LEAD = 847013; // section H: a leader whose membership has ENDED (role still "leader")
+const OFF_LEAD    = 847014; // section H: an active co-leader whose ACCOUNT is switched off
 const GROUP_A = 847201;
 const GROUP_B = 847202;
 const GROUP_R = 847203;
+const GROUP_F = 847204;
+const GROUP_U = 847205;
+const PLACE_HOST4_A = 847306;
+const PLACE_RACE    = 847307;
 const PLACE_HOST_A  = 847301;
 const PLACE_HOST2_A = 847302;
 const PLACE_HOST_B  = 847303;
@@ -215,16 +244,20 @@ function all(string $sql, string $types = '', array $values = []): array
 function removeWorld(): void
 {
     global $db;
-    $people = [AADMIN, BADMIN, GADMIN, LEAD_A, LEAD_B, HOST, HOST2, PLAIN, HOST3, RACER];
+    $people = [AADMIN, BADMIN, GADMIN, LEAD_A, LEAD_B, HOST, HOST2, PLAIN, HOST3, RACER, HOST4, RACER2, RACER3, FORMER_LEAD, OFF_LEAD];
+    // The trigger section F plants, in case a run was killed while it stood.
+    $db->query('DROP TRIGGER IF EXISTS `p847_fail_usual_place`');
+    $db->query('DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (' . ORG_A . ',' . ORG_B . ')');
     $list   = implode(',', $people);
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 %'");
     $db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` LIKE 'p847-%'");
     $db->query("DELETE FROM `tblEmailLog` WHERE `subject` LIKE 'A meeting place of P847 %' OR `toRecipients` = 'p847.visitor@example.invalid'");
     $db->query("DELETE FROM `tblApiKeys` WHERE `name` LIKE 'P847 %'");
-    $db->query('DELETE FROM `tblSmallGroupMeetings` WHERE `groupID` IN (' . GROUP_A . ',' . GROUP_B . ',' . GROUP_R . ')');
-    $db->query('DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` IN (' . GROUP_A . ',' . GROUP_B . ',' . GROUP_R . ')');
-    $db->query('DELETE FROM `tblSmallGroupMembers` WHERE `groupID` IN (' . GROUP_A . ',' . GROUP_B . ',' . GROUP_R . ')');
-    $db->query('DELETE FROM `tblSmallGroups` WHERE `groupID` IN (' . GROUP_A . ',' . GROUP_B . ',' . GROUP_R . ')');
+    $groups = implode(',', [GROUP_A, GROUP_B, GROUP_R, GROUP_F, GROUP_U]);
+    $db->query("DELETE FROM `tblSmallGroupMeetings` WHERE `groupID` IN ({$groups})");
+    $db->query("DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` IN ({$groups})");
+    $db->query("DELETE FROM `tblSmallGroupMembers` WHERE `groupID` IN ({$groups})");
+    $db->query("DELETE FROM `tblSmallGroups` WHERE `groupID` IN ({$groups})");
     $rs = $db->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers'");
     while ($row = $rs->fetch_assoc()) {
         try {
@@ -313,6 +346,7 @@ q("INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `isActive`, `timezon
 $people = [
     AADMIN => ['aadmin', 0], BADMIN => ['badmin', 0], GADMIN => ['gadmin', 1], LEAD_A => ['leada', 0], LEAD_B => ['leadb', 0],
     HOST => ['host', 0], HOST2 => ['host2', 0], PLAIN => ['plain', 0], HOST3 => ['host3', 0], RACER => ['racer', 0],
+    HOST4 => ['host4', 0], RACER2 => ['racer2', 0], RACER3 => ['racer3', 0], FORMER_LEAD => ['formerlead', 0], OFF_LEAD => ['offlead', 0],
 ];
 $password = bin2hex(random_bytes(12)) . 'Aa1!';
 $hash     = password_hash($password, PASSWORD_DEFAULT);
@@ -329,7 +363,8 @@ foreach ($people as $id => [$who, $root]) {
     q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-p847-' . $who, $hash]);
 }
 foreach ([[AADMIN, ORG_A, 1], [BADMIN, ORG_B, 1], [GADMIN, ORG_A, 0], [GADMIN, ORG_B, 0], [LEAD_A, ORG_A, 0], [LEAD_B, ORG_B, 0],
-          [HOST, ORG_A, 0], [HOST, ORG_B, 0], [HOST2, ORG_A, 0], [PLAIN, ORG_A, 0], [HOST3, ORG_A, 0], [HOST3, ORG_B, 0], [RACER, ORG_A, 0]] as [$user, $site, $admin]) {
+          [HOST, ORG_A, 0], [HOST, ORG_B, 0], [HOST2, ORG_A, 0], [PLAIN, ORG_A, 0], [HOST3, ORG_A, 0], [HOST3, ORG_B, 0], [RACER, ORG_A, 0],
+          [HOST4, ORG_A, 0], [RACER2, ORG_A, 0], [RACER3, ORG_A, 0], [FORMER_LEAD, ORG_A, 0], [OFF_LEAD, ORG_A, 0]] as [$user, $site, $admin]) {
     q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, ?, ?)', 'iiii', [$user, $site, $admin, $admin]);
 }
 
@@ -524,34 +559,108 @@ if ($up === false) {
 // =============================================================================
 // W. #847, D-159: ONE FIXED WEBSITE WINDOW FOR A SERIES, SAID ON THE FORM
 // =============================================================================
+// The form's sentence, in two halves: the D-159 point (one fixed pair of dates
+// for every date) and what that pair really DOES, which is judged against
+// TODAY (round 1 of #847's check: the first sentence said a window ending
+// before a later date "keeps that date off the website", which is untrue for
+// every day the window is open). The second half is then DRIVEN, below.
 const SERIES_SENTENCE = 'the same From and Until dates apply to every date in the series: they are not worked out again for each date';
+const SERIES_TRUTH    = 'While today is between the two dates, every date of the series still to come is on the website, including those after the Until date; once the Until date has passed, none of them is, so a later date comes off the website before its day.';
+
+/** A day relative to today on organisation A's own clock, as Y-m-d. */
+function dayFromToday(int $days): string
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('Europe/Paris')))->modify(($days >= 0 ? '+' : '') . $days . ' days')->format('Y-m-d');
+}
+
+/**
+ * The event numbers organisation A's PUBLIC DOOR lists now (`/w/{name}/events.json`,
+ * asked as nobody, exactly as another website asks), or null when the door did
+ * not answer in its own format — so a "not listed" check can never pass on a
+ * door that answered nothing. The door is opened for the one request and
+ * closed again (public-website-tick-selftest.php does the same).
+ *
+ * @return list<int>|null
+ */
+function doorListsNow(): ?array
+{
+    global $port;
+    $name = bin2hex(random_bytes(12));
+    q('DELETE FROM `tblPublicDoorNames` WHERE `siteID` = ?', 'i', [ORG_A]);
+    q('INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())', 'is', [ORG_A, $name]);
+    setting('site.url', 'http://127.0.0.1:' . $port);
+    try {
+        $r = req('', 'GET', '/w/' . $name . '/events.json?limit=50');
+    } finally {
+        q('DELETE FROM `tblPublicDoorNames` WHERE `siteID` = ?', 'i', [ORG_A]);
+    }
+    $j = json_decode($r['body'], true);
+    if ($r['status'] !== 200 || is_array($j) === false || ($j['format'] ?? null) !== 'webms-public-events' || is_array($j['events'] ?? null) === false) {
+        return null;
+    }
+    $ids = [];
+    foreach ($j['events'] as $e) {
+        $row = one('SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ?', 'is', [ORG_A, (string) ($e['id'] ?? '')]);
+        if ($row !== null) {
+            $ids[] = (int) $row['eventID'];
+        }
+    }
+
+    return $ids;
+}
 
 $sectionW = static function (): void {
     global $db;
-    head('W. #847, D-159: a series keeps one fixed public-website window, and the form says so');
+    head('W. #847, D-159: a series keeps one fixed public-website window, the form says so, and says truly what it does');
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 W%'");
     $db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` LIKE 'p847-w%'");
     $jar = signIn(AADMIN, ORG_A);
     $new = req($jar, 'GET', '/calendar/manage');
     check('W00 premise: the Manage Events page answered with the new-event form', $new['status'] === 200 && str_contains($new['body'], 'id="websiteFrom-new"'), 'HTTP ' . $new['status']);
     check('W01 the new-event form says the same two dates apply to every date in a series', str_contains(squash($new['body']), SERIES_SENTENCE));
+    check('W01b ...and says what they do: judged against today, so a later date comes off before its day', str_contains(squash($new['body']), SERIES_TRUTH));
 
-    $made = post($jar, '/calendar/manage', '/calendar/manage/save', [
-        'action' => 'create', 'eventName' => 'P847 Weekly study', 'startDateTime' => '2027-05-04T19:00', 'endDateTime' => '2027-05-04T20:00',
-        'timezone' => 'Europe/Paris', 'status' => 'published', 'isPublic' => '1',
-        'websiteFields' => '1', 'showOnWebsite' => '1', 'websiteFrom' => '2027-04-27', 'websiteUntil' => '2027-05-05',
-        'repeatFrequency' => 'weekly', 'repeatCount' => '3',
-    ]);
-    $rows = all("SELECT `eventID`, `seriesID`, LEFT(`startDateTime`, 10) AS `day`, `showOnWebsite`, LEFT(`websiteFrom`, 10) AS `wf`, LEFT(`websiteUntil`, 10) AS `wu` "
-        . "FROM `tblEvents` WHERE `siteID` = ? AND `eventName` = 'P847 Weekly study' AND `isDeleted` = 0 ORDER BY `startDateTime`", 'i', [ORG_A]);
-    check('W02 premise: the weekly series was made, three dates in one series', count($rows) === 3 && count(array_unique(array_column($rows, 'seriesID'))) === 1 && $rows[0]['seriesID'] !== null,
-        'HTTP ' . $made['status'] . ', ' . json_encode($rows));
+    // Three weekly series, each made through the real form, each three dates
+    // still to come (20, 27 and 34 days from now): one whose window is OPEN
+    // today and ends long before its dates, one whose window has CLOSED, one
+    // whose window has NOT YET OPENED.
+    $make = static function (string $name, string $from, string $until) use ($jar): array {
+        $start = dayFromToday(20);
+        $made  = post($jar, '/calendar/manage', '/calendar/manage/save', [
+            'action' => 'create', 'eventName' => $name, 'startDateTime' => $start . 'T19:00', 'endDateTime' => $start . 'T20:00',
+            'timezone' => 'Europe/Paris', 'status' => 'published', 'isPublic' => '1',
+            'websiteFields' => '1', 'showOnWebsite' => '1', 'websiteFrom' => $from, 'websiteUntil' => $until,
+            'repeatFrequency' => 'weekly', 'repeatCount' => '3',
+        ]);
+
+        return ['status' => $made['status'], 'rows' => all("SELECT `eventID`, `seriesID`, LEFT(`startDateTime`, 10) AS `day`, `showOnWebsite`, "
+            . "LEFT(`websiteFrom`, 10) AS `wf`, LEFT(`websiteUntil`, 10) AS `wu` FROM `tblEvents` WHERE `siteID` = ? AND `eventName` = ? AND `isDeleted` = 0 "
+            . 'ORDER BY `startDateTime`', 'is', [ORG_A, $name])];
+    };
+    $open   = $make('P847 Weekly open window', dayFromToday(-1), dayFromToday(5));
+    $closed = $make('P847 Weekly closed window', dayFromToday(-10), dayFromToday(-1));
+    $later  = $make('P847 Weekly later window', dayFromToday(3), dayFromToday(40));
+    $rows   = $open['rows'];
+    check('W02 premise: each weekly series was made, three dates in one series each',
+        count($rows) === 3 && count($closed['rows']) === 3 && count($later['rows']) === 3
+        && count(array_unique(array_column($rows, 'seriesID'))) === 1 && $rows[0]['seriesID'] !== null,
+        'HTTP ' . $open['status'] . '/' . $closed['status'] . '/' . $later['status'] . ', ' . json_encode($rows));
     $same = $rows !== [];
     foreach ($rows as $r) {
-        $same = $same && $r['wf'] === '2027-04-27' && $r['wu'] === '2027-05-05' && (int) $r['showOnWebsite'] === 1;
+        $same = $same && $r['wf'] === dayFromToday(-1) && $r['wu'] === dayFromToday(5) && (int) $r['showOnWebsite'] === 1;
     }
     check('W03 D-159: every date of the series stores the SAME two dates, as typed', $same, json_encode($rows));
-    check('W03b so the third date (18 May) is outside its own window, which is what the form warns about', ($rows[2]['day'] ?? '') === '2027-05-18');
+
+    $listed = doorListsNow();
+    check('W05 premise: the public door answered in its own format', $listed !== null);
+    $listed ??= [];
+    $ids = static fn (array $made): array => array_map('intval', array_column($made['rows'], 'eventID'));
+    check('W06 while today is inside the window, the door lists EVERY date still to come, all three after the Until date',
+        $ids($open) !== [] && array_diff($ids($open), $listed) === [], 'listed ' . json_encode($listed) . ', open ' . json_encode($ids($open)));
+    check('W07 once the Until date has passed, the door lists NONE of them, though every date is still to come',
+        $ids($closed) !== [] && array_intersect($ids($closed), $listed) === [], 'listed ' . json_encode($listed));
+    check('W08 before the From date, none is listed either', $ids($later) !== [] && array_intersect($ids($later), $listed) === [], 'listed ' . json_encode($listed));
+
     $edit = req($jar, 'GET', '/calendar/manage?edit=' . (int) ($rows[0]['eventID'] ?? 0));
     check('W04 the EDIT form makes no series, and does not carry the series sentence', $edit['status'] === 200 && str_contains($edit['body'], 'id="websiteFrom-edit"') === true
         && str_contains(squash($edit['body']), SERIES_SENTENCE) === false, 'HTTP ' . $edit['status']);
@@ -724,6 +833,15 @@ $sectionH = static function (): void {
     group(GROUP_A, ORG_A, GROUP_A_NAME, HOST);
     group(GROUP_B, ORG_B, GROUP_B_NAME, null);
     member(GROUP_A, ORG_A, LEAD_A, 'leader');
+    // Round 1 of #952's check: the rule that only CURRENT leaders are told
+    // was pinned by nothing, because no former or switched-off leader stood
+    // in this world. Each now has a person who holds that ground and no
+    // other: a leader whose membership has ENDED (role still "leader"), and
+    // an active co-leader whose ACCOUNT is switched off.
+    $formerLead = member(GROUP_A, ORG_A, FORMER_LEAD, 'leader');
+    q("UPDATE `tblSmallGroupMembers` SET `status` = 'ended', `endedAt` = NOW() WHERE `membershipID` = ?", 'i', [$formerLead]);
+    member(GROUP_A, ORG_A, OFF_LEAD, 'co-leader');
+    q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [OFF_LEAD]);
     $hostA  = member(GROUP_A, ORG_A, HOST);
     $host2A = member(GROUP_A, ORG_A, HOST2);
     member(GROUP_A, ORG_A, PLAIN);
@@ -761,6 +879,8 @@ $sectionH = static function (): void {
         untouched(placeRow(PLACE_HOST_B), HOST) && membershipStatus(GROUP_B, HOST) === 'active', json_encode(placeRow(PLACE_HOST_B)));
     check('H06 D-168: the group\'s leader (and only the leader) was e-mailed', leadersTold(GROUP_A_NAME) === [mailOf(LEAD_A)], json_encode(leadersTold(GROUP_A_NAME)));
     check('H06b B\'s leader was not', leadersTold(GROUP_B_NAME) === []);
+    check('H06c a FORMER leader (membership ended, role still leader) was not e-mailed', in_array(mailOf(FORMER_LEAD), leadersTold(GROUP_A_NAME), true) === false);
+    check('H06d a co-leader whose account is SWITCHED OFF was not e-mailed', in_array(mailOf(OFF_LEAD), leadersTold(GROUP_A_NAME), true) === false);
     check('H07 the leaver is told their home was removed', str_contains(flashAfter($jarHost, $left), 'Your home is no longer one of its meeting places'));
 
     // 3. A leader removes the second host.
@@ -787,40 +907,85 @@ $sectionH = static function (): void {
 };
 
 // =============================================================================
-// R. #952: A HOME ADDED WHILE THE DEPARTURE IS PART-WAY THROUGH
+// R. #952: A HOST NAMED WHILE THEIR DEPARTURE IS PART-WAY THROUGH
 // =============================================================================
-$sectionR = static function (): void {
-    global $db, $dbHost, $dbUser, $dbPass, $dbName, $dbPort;
-    head('R. #952: a member adding their own home while their departure is part-way through is refused');
-    $db->query('DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` = ' . GROUP_R);
-    $db->query('DELETE FROM `tblSmallGroupMembers` WHERE `groupID` = ' . GROUP_R);
-    $db->query('DELETE FROM `tblSmallGroups` WHERE `groupID` = ' . GROUP_R);
-    group(GROUP_R, ORG_A, 'P847 Racing', null);
-    member(GROUP_R, ORG_A, LEAD_A, 'leader');
-    member(GROUP_R, ORG_A, RACER);
-    $jar  = signIn(RACER, ORG_A);
-    $form = req($jar, 'GET', '/small-groups/place?id=' . GROUP_R);
-    $tok  = token($form['body']);
-    check('R00 premise: the racer may add their own home (the form is offered)', $form['status'] === 200 && $tok !== '', 'HTTP ' . $form['status']);
+/**
+ * Every field of the FIRST form on a page posting to `$actionEnd`, exactly as a
+ * browser sends it untouched: inputs (a box or a choice only when ticked),
+ * each select's selected option (else its first), and textareas. So a staged
+ * save below changes only what the test says it changes.
+ *
+ * @return array<string,string>
+ */
+function formAsDrawn(string $html, string $actionEnd): array
+{
+    $doc = new DOMDocument();
+    @$doc->loadHTML('<?xml encoding="utf-8"?>' . $html);
+    foreach ($doc->getElementsByTagName('form') as $form) {
+        if (str_ends_with((string) $form->getAttribute('action'), $actionEnd) === false) {
+            continue;
+        }
+        $fields = [];
+        foreach ($form->getElementsByTagName('input') as $in) {
+            $type = strtolower((string) $in->getAttribute('type'));
+            $name = (string) $in->getAttribute('name');
+            if ($name === '' || in_array($type, ['submit', 'button', 'file', 'reset'], true) === true) {
+                continue;
+            }
+            if (in_array($type, ['checkbox', 'radio'], true) === true && $in->hasAttribute('checked') === false) {
+                continue;
+            }
+            $fields[$name] = (string) $in->getAttribute('value');
+        }
+        foreach ($form->getElementsByTagName('select') as $sel) {
+            // A browser sends the selected option, or the first when none is.
+            $chosen = null;
+            foreach ($sel->getElementsByTagName('option') as $opt) {
+                if ($opt->hasAttribute('selected') === true) {
+                    $chosen = (string) $opt->getAttribute('value');
+                    break;
+                }
+                $chosen ??= (string) $opt->getAttribute('value');
+            }
+            $fields[(string) $sel->getAttribute('name')] = (string) $chosen;
+        }
+        foreach ($form->getElementsByTagName('textarea') as $ta) {
+            $fields[(string) $ta->getAttribute('name')] = (string) $ta->textContent;
+        }
 
-    // This connection stands in for `endMembership()` part-way through: the
-    // membership row locked and already ended, not yet committed.
+        return $fields;
+    }
+
+    return [];
+}
+
+/**
+ * Stage a departure part-way through and send one request into it. This
+ * connection stands in for `SmallGroups::endMembership()`: `$user`'s
+ * membership of `$group` is locked and already ended, NOT committed. The
+ * request is sent without waiting (curl_multi); after 2.5 seconds the test
+ * asks whether it is still waiting (a sleep is a hope; this is the premise),
+ * then commits the departure and collects the answer.
+ *
+ * @return array{waiting:bool, answer:array{status:int, location:string, body:string}}
+ */
+function stagedDeparture(int $group, int $user, \CurlHandle $handle): array
+{
+    global $dbHost, $dbUser, $dbPass, $dbName, $dbPort;
     $other = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
     $other->query('SET SESSION innodb_lock_wait_timeout = 30');
     $other->begin_transaction();
-    $other->query('SELECT `membershipID` FROM `tblSmallGroupMembers` WHERE `groupID` = ' . GROUP_R . ' AND `userID` = ' . RACER . ' FOR UPDATE');
-    $other->query("UPDATE `tblSmallGroupMembers` SET `status` = 'ended', `endedAt` = NOW() WHERE `groupID` = " . GROUP_R . ' AND `userID` = ' . RACER);
+    $other->query('SELECT `membershipID` FROM `tblSmallGroupMembers` WHERE `groupID` = ' . $group . ' AND `userID` = ' . $user . ' FOR UPDATE');
+    $other->query("UPDATE `tblSmallGroupMembers` SET `status` = 'ended', `endedAt` = NOW() WHERE `groupID` = " . $group . ' AND `userID` = ' . $user);
 
-    $multi  = curl_multi_init();
-    $handle = handle($jar, 'POST', '/small-groups/place-save', ['csrf_token' => $tok, 'groupID' => (string) GROUP_R, 'action' => 'create',
-        'addressLine1' => '9 Race Road', 'city' => 'Hostville', 'countryCode' => 'GB']);
+    $multi = curl_multi_init();
     curl_multi_add_handle($multi, $handle);
     $deadline = microtime(true) + 2.5;
     do {
         curl_multi_exec($multi, $running);
         curl_multi_select($multi, 0.1);
     } while ($running > 0 && microtime(true) < $deadline);
-    check('R01 premise: the add is still WAITING after 2.5 seconds (blocked on the membership row)', $running > 0);
+    $waiting = $running > 0;
     $other->commit();
     $other->close();
     do {
@@ -830,12 +995,137 @@ $sectionR = static function (): void {
     $answer = answerOf($handle, curl_multi_getcontent($handle));
     curl_multi_remove_handle($multi, $handle);
     curl_multi_close($multi);
+
+    return ['waiting' => $waiting, 'answer' => $answer];
+}
+
+/** The page a person sees next, as plain words (a flash message waits in the session for it). */
+function nextPageWords(string $jar, string $path): string
+{
+    return squash(strip_tags(html_entity_decode(req($jar, 'GET', $path)['body'], ENT_QUOTES, 'UTF-8')));
+}
+
+const HOST_REFUSAL = 'The host must be an active member of this group. Nothing was saved.';
+
+$sectionR = static function (): void {
+    global $db;
+    head('R. #952: somebody named as a host while their departure is part-way through is refused, on all three saves');
+    $groups = GROUP_R . ',' . GROUP_U;
+    $db->query("DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` IN ({$groups})");
+    $db->query("DELETE FROM `tblSmallGroupMembers` WHERE `groupID` IN ({$groups})");
+    $db->query("DELETE FROM `tblSmallGroups` WHERE `groupID` IN ({$groups})");
+    group(GROUP_R, ORG_A, 'P847 Racing', null);
+    member(GROUP_R, ORG_A, LEAD_A, 'leader');
+    member(GROUP_R, ORG_A, RACER);
+    member(GROUP_R, ORG_A, RACER3);
+    // A listed home with NO host yet, which a leader then names RACER3 as host of.
+    q("INSERT INTO `tblSmallGroupPlaces` (`placeID`, `siteID`, `groupID`, `placeLabel`, `addressLine1`, `city`, `countryCode`) VALUES (?, ?, ?, 'The annexe', '7 Annexe Way', 'Hostville', 'GB')",
+        'iii', [PLACE_RACE, ORG_A, GROUP_R]);
+    // A group whose usual place has an address and NO host yet, which a leader then names RACER2 as host of.
+    group(GROUP_U, ORG_A, 'P847 Usual', null);
+    q("UPDATE `tblSmallGroups` SET `addressLine1` = '5 Usual Road' WHERE `groupID` = ?", 'i', [GROUP_U]);
+    member(GROUP_U, ORG_A, LEAD_A, 'leader');
+    member(GROUP_U, ORG_A, RACER2);
+
+    // 1. A member adding their OWN home (place-save, create).
+    $jar  = signIn(RACER, ORG_A);
+    $form = req($jar, 'GET', '/small-groups/place?id=' . GROUP_R);
+    $tok  = token($form['body']);
+    check('R00 premise: the racer may add their own home (the form is offered)', $form['status'] === 200 && $tok !== '', 'HTTP ' . $form['status']);
+    $run = stagedDeparture(GROUP_R, RACER, handle($jar, 'POST', '/small-groups/place-save', ['csrf_token' => $tok, 'groupID' => (string) GROUP_R,
+        'action' => 'create', 'addressLine1' => '9 Race Road', 'city' => 'Hostville', 'countryCode' => 'GB']));
+    check('R01 premise: the add is still WAITING after 2.5 seconds (blocked on the membership row)', $run['waiting']);
     $stored = (int) (one('SELECT COUNT(*) AS n FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `hostUserID` = ?', 'ii', [GROUP_R, RACER])['n'] ?? -1);
-    check('R02 #952: once the departure commits, the add is REFUSED and no home is stored for somebody who has gone', $stored === 0, "stored {$stored}, HTTP {$answer['status']}");
+    check('R02 #952: once the departure commits, the add is REFUSED and no home is stored for somebody who has gone', $stored === 0, "stored {$stored}, HTTP {$run['answer']['status']}");
     // The refusal sends them back to the place form, which a non-member may no
     // longer open; the message waits in their session for the next page drawn.
-    $next = squash(strip_tags(html_entity_decode(req($jar, 'GET', '/small-groups/group?id=' . GROUP_R)['body'], ENT_QUOTES, 'UTF-8')));
-    check('R02b ...and the racer is told why', str_contains($next, 'The host must be an active member of this group. Nothing was saved.'), 'HTTP ' . $answer['status'] . ' to ' . $answer['location']);
+    check('R02b ...and the racer is told why', str_contains(nextPageWords($jar, '/small-groups/group?id=' . GROUP_R), HOST_REFUSAL));
+
+    // 2. A leader naming a member as host of a LISTED home (place-save, update).
+    $lead   = signIn(LEAD_A, ORG_A);
+    $page   = '/small-groups/place?id=' . GROUP_R . '&placeID=' . PLACE_RACE;
+    $fields = formAsDrawn(req($lead, 'GET', $page)['body'], '/small-groups/place-save');
+    check('R03 premise: the leader\'s edit form for the hostless home is drawn, with a host picker', ($fields['action'] ?? '') === 'update'
+        && array_key_exists('hostUserID', $fields) && ($fields['csrf_token'] ?? '') !== '', json_encode(array_keys($fields)));
+    $fields['hostUserID'] = (string) RACER3;
+    $run = stagedDeparture(GROUP_R, RACER3, handle($lead, 'POST', '/small-groups/place-save', $fields));
+    check('R04 premise: the save is still WAITING after 2.5 seconds (blocked on the new host\'s membership row)', $run['waiting']);
+    $host = one('SELECT `hostUserID` FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [PLACE_RACE])['hostUserID'] ?? null;
+    check('R05 #952: once the departure commits, the home is NOT handed to the person who has gone', $host === null, 'host ' . var_export($host, true) . ", HTTP {$run['answer']['status']}");
+    check('R05b ...and the leader is told why', str_contains(nextPageWords($lead, $page), HOST_REFUSAL));
+
+    // 3. A leader naming a member as host of the group's USUAL place (save.php).
+    $page   = '/small-groups/manage?id=' . GROUP_U;
+    $fields = formAsDrawn(req($lead, 'GET', $page)['body'], '/small-groups/save');
+    check('R06 premise: the leader\'s group form is drawn, with a host picker', (int) ($fields['groupID'] ?? 0) === GROUP_U
+        && array_key_exists('hostUserID', $fields) && ($fields['csrf_token'] ?? '') !== '', json_encode(array_keys($fields)));
+    $fields['hostUserID'] = (string) RACER2;
+    $run = stagedDeparture(GROUP_U, RACER2, handle($lead, 'POST', '/small-groups/save', $fields));
+    check('R07 premise: the save is still WAITING after 2.5 seconds (blocked on the new host\'s membership row)', $run['waiting']);
+    $usual = one('SELECT `hostUserID`, `addressLine1` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [GROUP_U]) ?? [];
+    // array_key_exists, not `??`: a stored NULL is the answer wanted here, and
+    // `??` would read it as a missing row.
+    check('R08 #952: once the departure commits, the usual place is NOT handed to the person who has gone',
+        array_key_exists('hostUserID', $usual) === true && $usual['hostUserID'] === null
+        && ($usual['addressLine1'] ?? '') === '5 Usual Road', json_encode($usual) . ", HTTP {$run['answer']['status']}");
+    check('R08b ...and the leader is told why', str_contains(nextPageWords($lead, '/small-groups/group?id=' . GROUP_U), HOST_REFUSAL));
+};
+
+// =============================================================================
+// F. #952: OFFBOARDING'S HOME STEP IS ALL OR NOTHING
+// =============================================================================
+$sectionF = static function (): void {
+    global $db;
+    head('F. #952: when offboarding\'s home step fails part-way, none of it is kept and nobody is told a half-truth');
+    $db->query('DROP TRIGGER IF EXISTS `p847_fail_usual_place`');
+    $db->query('DELETE FROM `tblSmallGroupPlaces` WHERE `placeID` = ' . PLACE_HOST4_A);
+    $db->query('DELETE FROM `tblSmallGroupMembers` WHERE `groupID` = ' . GROUP_F . ' OR `userID` = ' . HOST4);
+    $db->query('DELETE FROM `tblSmallGroups` WHERE `groupID` = ' . GROUP_F);
+    $db->query("DELETE FROM `tblEmailLog` WHERE `subject` = 'A meeting place of P847 Failing needs replacing'");
+    q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOST4]);
+    q('UPDATE `tblUserSites` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOST4]);
+    // HOST4 hosts a listed home of group F and group F's usual place. The step
+    // empties the listed home FIRST, then the usual place; a trigger makes the
+    // second of those fail, so a step that is not all-or-nothing keeps the first.
+    group(GROUP_F, ORG_A, 'P847 Failing', HOST4);
+    member(GROUP_F, ORG_A, LEAD_A, 'leader');
+    member(GROUP_F, ORG_A, HOST4);
+    home(PLACE_HOST4_A, GROUP_F, ORG_A, HOST4, '6 Fourth Street');
+    $db->query("CREATE TRIGGER `p847_fail_usual_place` BEFORE UPDATE ON `tblSmallGroups` FOR EACH ROW BEGIN "
+        . 'IF OLD.`groupID` = ' . GROUP_F . " AND NEW.`hostUserID` IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p847 planted failure'; END IF; END");
+    try {
+        $jarG = signIn(GADMIN, ORG_A);
+        $off  = post($jarG, '/admin/users', '/offboarding/do', ['userID' => (string) HOST4, 'reason' => 'P847 failing step', 'dataDisposition' => 'retain', 'effectiveDate' => date('Y-m-d')]);
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `p847_fail_usual_place`');
+    }
+    $acct = (int) (one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [HOST4])['isActive'] ?? -1);
+    check('F01 premise: the offboarding itself went through (the account is switched off)', $acct === 0, 'HTTP ' . $off['status'] . ', isActive ' . $acct);
+    check('F02 the home the step had ALREADY emptied is put back: it is all or nothing', untouched(placeRow(PLACE_HOST4_A), HOST4), json_encode(placeRow(PLACE_HOST4_A)));
+    $usual = one('SELECT `hostUserID`, `addressLine1` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [GROUP_F]) ?? [];
+    check('F03 the usual place is as it was', (int) ($usual['hostUserID'] ?? 0) === HOST4 && ($usual['addressLine1'] ?? null) !== null, json_encode($usual));
+    check('F04 and no leader is told about homes that were not released', leadersTold('P847 Failing') === []);
+    $step = (string) (one('SELECT `stepsLog` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [HOST4])['stepsLog'] ?? '');
+    $rel  = array_values(array_filter((array) json_decode($step, true), static fn ($s): bool => is_array($s) && ($s['step'] ?? '') === 'release_small_group_homes'));
+    check('F05 the step is recorded as FAILED, not as done', count($rel) === 1 && ($rel[0]['ok'] ?? true) === false, substr($step, 0, 300));
+    check('F06 and the administrator is told that step failed', str_contains(flashAfter($jarG, $off), 'removing their home from small groups\' meeting places'));
+};
+
+// =============================================================================
+// O. #952: THE OFFBOARDING PAGE SAYS WHAT OFFBOARDING AND A REHIRE REALLY DO
+// =============================================================================
+$sectionO = static function (): void {
+    head('O. #952: the offboarding page names the small-group steps, and what a rehire does NOT put back');
+    $jarG  = signIn(GADMIN, ORG_A);
+    $words = nextPageWords($jarG, '/offboarding/user?id=' . PLAIN);
+    check('O00 premise: the offboarding page for a member was drawn', str_contains($words, 'Offboarding will:'));
+    check('O01 it says small-group memberships end', str_contains($words, 'End their small-group memberships and join requests, in every organisation'));
+    check('O02 it says their home leaves every group, the address deleted, and the leaders e-mailed', str_contains($words,
+        'Take their home off every small group that meets there, in every organisation, deleting its address from the group at once'));
+    check('O03 it names the remembered map position honestly', str_contains($words, 'a map position the portal looked up for it may be remembered until its keeping period ends'));
+    check('O04 the rehire paragraph says only the account and organisation memberships come back', str_contains($words,
+        'A rehire switches the account back on and restores its organisation memberships (every organisation for a global administrator, only this one for anybody else), and NOTHING ELSE'));
+    check('O05 ...and that a deleted small-group home address is gone for good', str_contains($words, 'a small-group home address that was deleted is gone for good'));
 };
 
 // ── Run everything once ─────────────────────────────────────────────────────
@@ -843,6 +1133,8 @@ $sectionW();
 $sectionS();
 $sectionH();
 $sectionR();
+$sectionF();
+$sectionO();
 
 // =============================================================================
 // P. THE PLANTS
@@ -851,6 +1143,7 @@ head('P. Each new guard broken in the copy, one at a time: the check meant to ca
 $web = $child . $sep . 'web' . $sep;
 $plants = [
     ['P01', '_apps/calendar/manage/_event_form.php', 'they are not worked out again for each date', 'they are worked out again', $sectionW, 'W01', 'the series sentence reworded away'],
+    ['P01b', '_apps/calendar/manage/_event_form.php', 'once the Until date has passed, none of them is, so a later date comes off the website before its', 'a later date stays off the website', $sectionW, 'W01b', 'the series sentence\'s true half reworded back to the untrue one'],
     ['P02', '_apps/calendar/manage/save.php', 'if ($pendingRefusal !== null) {', 'if ($pendingRefusal !== null && false) {', $sectionS, 'S01', 'Manage Events\' refusal switched off'],
     ['P03', '_apps/events/api/update.php', 'if ($pendingRefusal !== null) {', 'if ($pendingRefusal !== null && false) {', $sectionS, 'S04', 'the events API\'s refusal switched off'],
     ['P04', '_apps/calendar/manage/series-edit.php', 'if ($pendingAmongChosen > 0) {', 'if ($pendingAmongChosen > 0 && false) {', $sectionS, 'S06', 'the bulk edit\'s refusal switched off'],
@@ -858,18 +1151,29 @@ $plants = [
     ['P06', '_core/SmallGroups.php', '? self::releaseHomesOf($db, $userId, $siteId, $groupId) : [];', '? [] : [];', $sectionH, 'H02', 'a departure releasing nothing'],
     ['P07', '_apps/offboarding/do.php', '$releasedHomes = \Portal\Core\SmallGroups::releaseHomesOf($db, $userId);', '$releasedHomes = [];', $sectionH, 'H10', 'offboarding releasing nothing'],
     ['P08', '_core/SmallGroups.php', "AND m.`memberRole` IN ('leader','co-leader') AND u.`isActive` = 1 AND m.`userID` <> ?", "AND m.`memberRole` IN ('none') AND u.`isActive` = 1 AND m.`userID` <> ?", $sectionH, 'H06', 'the leaders not told'],
-    ['P09', '_apps/small-groups/place-save.php', 'if ($host !== null && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {', 'if (false) {', $sectionR, 'R02', 'the add not asking under the lock'],
+    ['P10', '_core/SmallGroups.php', "AND m.`siteID` = ? AND m.`status` = 'active' \"", "AND m.`siteID` = ? \"", $sectionH, 'H06c', 'a former leader told too (membership status not asked)'],
+    ['P11', '_core/SmallGroups.php', "AND u.`isActive` = 1 AND m.`userID` <> ?", "AND m.`userID` <> ?", $sectionH, 'H06d', 'a switched-off leader told too (account not asked)'],
+    ['P09', '_apps/small-groups/place-save.php', 'if ($host !== null && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {', 'if (false) {', $sectionR, 'R02', 'adding a home not asking under the lock'],
+    ['P12', '_apps/small-groups/place-save.php', 'if ($host !== null && $host !== $storedHost && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {', 'if (false) {', $sectionR, 'R05', 'naming a listed home\'s host not asking under the lock'],
+    ['P13', '_apps/small-groups/save.php', "&& SmallGroups::hostStillBelongs(\$db, \$siteId, \$groupId, \$hostPick['host']) === false) {", '&& false) {', $sectionR, 'R08', 'naming the usual place\'s host not asking under the lock'],
+    ['P14', '_apps/offboarding/do.php', "\$db->query('ROLLBACK TO SAVEPOINT `release_small_group_homes`');", '', $sectionF, 'F02', 'offboarding\'s home step not rolled back on a part-way failure'],
+    ['P15', '_apps/offboarding/user.php', '<li>Take their home off every small group that meets there', '<li>Take them off', $sectionO, 'O02', 'the offboarding page not saying their home leaves every group'],
 ];
 foreach ($plants as [$id, $file, $find, $with, $section, $mustFail, $what]) {
     $path     = $web . str_replace('/', $sep, $file);
     $original = (string) file_get_contents($path);
     $count    = substr_count($original, $find);
     if ($count !== 1) {
-        check("{$id} plant could be applied ({$what})", false, "the text to replace appears {$count} times in {$file}");
-        continue;
+        // A plant that cannot find its text has tested nothing. That is a
+        // FAILURE of this run, never a skip, and it stops here so a red
+        // reading cannot hide behind the rest (round 1 of #952's check).
+        $failed += 1;
+        echo "  ✗ {$id} plant could not be applied ({$what}): the text to replace appears {$count} times in {$file}\n";
+        echo "\nFAIL — a planted fault could not be applied, so the run stops; {$passed} passed, {$failed} failed\n";
+        exit(1);
     }
     file_put_contents($path, str_replace($find, $with, $original));
-    $applied = str_contains((string) file_get_contents($path), $with);
+    $applied = str_contains((string) file_get_contents($path), $with) && substr_count((string) file_get_contents($path), $find) === 0;
     $quiet   = true;
     $results = [];
     try {
@@ -893,6 +1197,8 @@ $sectionW();
 $sectionS();
 $sectionH();
 $sectionR();
+$sectionF();
+$sectionO();
 check('P99b and every check is green again', array_filter($results, static fn (bool $ok): bool => $ok === false) === [],
     implode(', ', array_keys(array_filter($results, static fn (bool $ok): bool => $ok === false))));
 

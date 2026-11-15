@@ -4370,10 +4370,19 @@ ok('M13o an account with no way in and an e-mail address over 50 characters is p
 // Google-only one; both are facts now, with the erasure condition. The note and
 // the confirmation are drawn in the same block, only where offboarding is
 // possible, so one live page carries both.
+//
+// #952 (round 1 of its check) rewrote both: they named only the credentials as
+// "not put back", so they read as if a rehire restored everything else, which
+// was untrue for roles, groups and above all a small-group home address, which
+// offboarding now DELETES (D-168). The same facts are pinned here — password,
+// passkeys and Microsoft or Google links not put back, the erasure condition —
+// in the new, complete words. tools/series-suggestion-host-selftest.php section O
+// pins the list itself.
 $eliPage = req($jar['root'], 'GET', '/offboarding/user?id=' . M13_ELI)['body'];
-ok('M13q the Offboard page for a live account says the removed password, passkeys and Microsoft or Google links are not put back, and that the account can be switched on again unless it has been erased by then - in the note AND the Offboard confirmation - and never "reset password" or "re-enrol" (#982 round 12)',
-    str_contains($eliPage, '— the account is switched on again, unless it has been erased by then. The password, passkeys and Microsoft or Google links that offboarding removed are not put back; the page shown after a rehire says what the account still has.') === true
-    && str_contains($eliPage, '? This removes their password, passkeys and Microsoft or Google links. Within the undo window the account can be switched on again, unless it has been erased by then, but those are not put back."') === true
+ok('M13q the Offboard page for a live account says the removed password, passkeys and Microsoft or Google links are not put back, and that the account can be switched on again unless it has been erased by then - in the note AND the Offboard confirmation - and never "reset password" or "re-enrol" (#982 round 12; #952)',
+    str_contains($eliPage, 'unless the account has been erased by then. A rehire switches the account back on and restores its organisation memberships (every organisation for a global administrator, only this one for anybody else), and NOTHING ELSE: the password, passkeys, Microsoft or Google links,') === true
+    && str_contains($eliPage, 'The page shown after a rehire says what the account still has.') === true
+    && str_contains($eliPage, '? This removes their password, passkeys, Microsoft or Google links, roles and group memberships, and deletes their home from every small group that meets there. Within the undo window the account and its organisation memberships can be switched on again, unless it has been erased by then, but nothing else is put back."') === true
     && stripos($eliPage, 'reset password') === false && stripos($eliPage, 're-enrol') === false
     && stripos($eliPage, "they'll need") === false && stripos($eliPage, 'they&#039;ll need') === false,
     'confirmations: ' . implode(' | ', preg_match_all('/data-confirm="([^"]*)"/', $eliPage, $eliConfirm) > 0 ? $eliConfirm[1] : ['(none)']));

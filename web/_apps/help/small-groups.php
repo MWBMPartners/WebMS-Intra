@@ -181,7 +181,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             "a place no longer recorded".</li>
         <li><strong>When a host leaves the group,</strong> whether they leave themselves, a leader removes them, or
             they are offboarded, their home stops being one of the group's meeting places straight away: it is
-            removed from the list and its address deleted, as above, and if it was the group's usual meeting place,
+            removed from the list and its address deleted, as above (a map position the portal looked up for the address
+            may be remembered until its keeping period ends), and if it was the group's usual meeting place,
             every part of that place except the country is cleared. The group's leaders are e-mailed to choose a new
             place.</li>
         <li><strong>Members see the next meeting.</strong> A meeting given a future date is a planned meeting. The

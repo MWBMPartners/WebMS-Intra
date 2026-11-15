@@ -214,14 +214,30 @@ try {
     //     transaction. Recorded like every other step; a deadlock or a lock
     //     wait ends the offboarding exactly as `$run` does, and the leaders
     //     are e-mailed only after the commit, below.
+    //
+    //     ALL OR NOTHING (round 1 of #952's check). The step is several
+    //     statements (every listed home, then every usual place, then the
+    //     planned meetings are counted), and the catch below lets the
+    //     offboarding carry on and commit, as every other step does — so a
+    //     failure part-way used to commit the homes already emptied, record
+    //     the step as failed, and tell no leader about them. A SAVEPOINT makes
+    //     the step one unit inside the transaction: on a failure it is rolled
+    //     back to the point before it, so either every home is released and
+    //     the leaders are told, or none is and the step is recorded as failed
+    //     on Admin, Errors (the homes then stay, as they were before #952).
+    //     A deadlock or a lock wait still ends the whole offboarding, as `$run`
+    //     does, because those undo more than this step.
     $releasedHomes = [];
+    $db->savepoint('release_small_group_homes');
     try {
         $releasedHomes = \Portal\Core\SmallGroups::releaseHomesOf($db, $userId);
+        $db->release_savepoint('release_small_group_homes');
         $stepsLog[]    = ['step' => 'release_small_group_homes', 'ok' => true, 'affected' => count($releasedHomes)];
     } catch (\Throwable $e) {
         if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
             throw $e;
         }
+        $db->query('ROLLBACK TO SAVEPOINT `release_small_group_homes`');
         $releasedHomes = [];
         $stepsLog[]    = ['step' => 'release_small_group_homes', 'ok' => false, 'error' => $e->getMessage()];
     }

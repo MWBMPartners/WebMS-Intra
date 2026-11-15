@@ -598,14 +598,29 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                 //    storing the window relative to each date is #1016.
                 //    Shown on the NEW-event form only, because a series is made
                 //    only there: editing one date later changes that date alone.
-                //    The words are pinned by tools/series-website-window-selftest.php.
+                //
+                //    WHAT THE WINDOW REALLY DOES, and the second sentence must
+                //    say it (round 1 of #847's check): it is judged against
+                //    TODAY, not against each date's own day
+                //    (`EventVisibility::where()` in "website" mode: "today is
+                //    inside the dates"), and the public door lists every date
+                //    still to come with no look-ahead limit. So while today is
+                //    inside the window EVERY date still to come is listed, the
+                //    ones after the Until date included, and once the Until date
+                //    has passed NONE is — a later date comes off the website
+                //    before its day. A first version said such a window "keeps
+                //    that date off the website", which is untrue for every day
+                //    the window is open.
+                //    The words AND that behaviour are pinned by section W of
+                //    tools/series-suggestion-host-selftest.php.
                 if ($isEdit === false): ?>
                     <p class="small text-secondary mt-2 mb-0" id="websiteSeries-help-<?php echo $websiteIdSuffix; ?>">
                         If this event repeats (see Repeats above), the same From and Until dates apply to every date in
-                        the series: they are not worked out again for each date. So a window that ends before a later
-                        date keeps that date off the website, and one that starts long before a date shows it early.
-                        Leave both empty for no date limit on any of them, or edit a single date afterwards to give it
-                        dates of its own.
+                        the series: they are not worked out again for each date. While today is between the two dates,
+                        every date of the series still to come is on the website, including those after the Until date;
+                        once the Until date has passed, none of them is, so a later date comes off the website before its
+                        day. Leave both empty for no date limit, or edit a single date afterwards to give it dates of its
+                        own.
                     </p>
                 <?php endif; ?>
             <?php else: ?>

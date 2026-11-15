@@ -80,17 +80,32 @@ $csrf = Auth::csrfToken();
 
 <?php if ($canOffboard === true): ?>
 <div class="alert alert-warning">
+    <?php
+    // 📋 #952 round 1 of the check: this list named seven of the steps and
+    //    said nothing of small groups, and the paragraph under it named only
+    //    three things a rehire does not put back, so it read as if everything
+    //    else came back. Both are now written from the steps themselves —
+    //    `offboarding/do.php` (steps 1 to 10) and `offboarding/rehire.php`
+    //    (which switches on the account and its organisation memberships and
+    //    nothing else). Change all three together; the words are pinned by
+    //    section O of tools/series-suggestion-host-selftest.php.
+    ?>
     <strong>Offboarding will:</strong>
     <ul class="mb-0">
-        <li>Mark the user inactive (no longer able to sign in)</li>
-        <li>Delete every passkey / WebAuthn credential</li>
-        <li>Disable the local-account password (cleared hash)</li>
-        <li>End active site memberships (<code>tblUserSites.isActive = 0</code>)</li>
-        <li>End leadership assignments (<code>endDate = NOW()</code> on open rows)</li>
-        <li>Remove role assignments</li>
-        <li>Audit-log the action to <code>tblOffboarding</code> with per-step success/failure</li>
+        <li>Switch the account off, so they can no longer sign in</li>
+        <li>Delete every passkey</li>
+        <li>Remove their password</li>
+        <li>End their membership of every organisation</li>
+        <li>End their leadership roles</li>
+        <li>End their small-group memberships and join requests, in every organisation</li>
+        <li>Take their home off every small group that meets there, in every organisation, deleting its address from the group at once (a map position the portal looked up for it may be remembered until its keeping period ends); the leaders of each group are e-mailed to choose a new place</li>
+        <li>Remove all their roles, user groups and departments, in every organisation</li>
+        <li>Remove their Microsoft and Google sign-in links</li>
+        <li>Forget every device they told the portal to trust</li>
+        <li>Stop notifications to their devices</li>
+        <li>Record what each step did, and file an erasure request if you choose to erase their details</li>
     </ul>
-    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a> — the account is switched on again, unless it has been erased by then. The password, passkeys and Microsoft or Google links that offboarding removed are not put back; the page shown after a rehire says what the account still has.</p>
+    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a>, unless the account has been erased by then. A rehire switches the account back on and restores its organisation memberships (every organisation for a global administrator, only this one for anybody else), and NOTHING ELSE: the password, passkeys, Microsoft or Google links, roles, user groups, departments, leadership roles, small-group memberships, trusted devices and notification subscriptions stay removed, and a small-group home address that was deleted is gone for good. The page shown after a rehire says what the account still has.</p>
 </div>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/do'), ENT_QUOTES, 'UTF-8'); ?>">
@@ -153,7 +168,7 @@ $csrf = Auth::csrfToken();
                 <input type="date" name="effectiveDate" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
             </div>
             <button type="submit" class="btn btn-danger"
-                    data-confirm="Offboard <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?>? This removes their password, passkeys and Microsoft or Google links. Within the undo window the account can be switched on again, unless it has been erased by then, but those are not put back." data-confirm-destructive="true"
+                    data-confirm="Offboard <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?>? This removes their password, passkeys, Microsoft or Google links, roles and group memberships, and deletes their home from every small group that meets there. Within the undo window the account and its organisation memberships can be switched on again, unless it has been erased by then, but nothing else is put back." data-confirm-destructive="true"
                     data-confirm-confirm-label="Offboard">
                 Offboard user
             </button>
