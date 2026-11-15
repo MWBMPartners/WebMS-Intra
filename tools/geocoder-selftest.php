@@ -48,6 +48,22 @@
  *   I  the country a look-up is limited to is part of the cache key (#1035):
  *      the same address limited to Great Britain and to the US is asked of
  *      the provider twice and cached twice; "GB" and "gb" share one row
+ *   M  the Google leg is sent the country too, as `components=country:XX`
+ *      (#1036); a "country" that is not two letters adds no filter
+ *   O  a HOME's remembered answer (D-183) is marked `home` and keyed with the
+ *      installation's secret, so it differs from the plain key a public place
+ *      gets for the same address; a missing or unknown kind is a home; and
+ *      the small-group form sends home, or public when "not anybody's home"
+ *      is ticked, and the event form sends what its home/public pair says
+ *      (home when nothing is chosen), each driven over HTTP (the venue
+ *      form's public mark is D5)
+ *   Q  the privacy page and the privacy notice name the period really in
+ *      force for a home's remembered position: an organisation's shorter
+ *      figure as the shortest any organisation has chosen, and with none, the
+ *      installation's as the whole portal's (#1037 round 3)
+ *   N  the cache keeps no address text (#1037): no column for it, no value
+ *      in any row this run wrote holds any part of an address, and a forward
+ *      answer carries no wording of the address
  *
  * WHAT #1033 CLAIMED, AND WHY SECTION A EXISTS ANYWAY
  * The issue said a fresh answer had no `lat`/`lng`. Measured before any change,
@@ -62,10 +78,13 @@
  *   company changing the shape of its answer. The stand-in answers in the
  *   shape each documents today.
  *   It drives ONE worker, so two look-ups at once are untested.
- *   It drives two callers (`/geo/lookup` and a venue save). The other three
- *   (event, organisation, small group) are read, not driven: each asks
- *   `$geocoded !== null` before it reads a position, so "no answer" leaves
- *   them storing nothing.
+ *   It drives four callers: `/geo/lookup`, a venue save, and (section O,
+ *   for the home/public mark only) a small-group save and an event save. The
+ *   organisation's address save is read, not driven, and none of the event,
+ *   organisation and small-group savers is driven with a bad answer: each
+ *   asks `$geocoded !== null` before it reads a position, so "no answer"
+ *   leaves them storing nothing. The look-up button's script, which reads the
+ *   form's home/public choice in a browser, is driven by nothing here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_geocoder SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/geocoder-selftest.php
@@ -73,9 +92,10 @@
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
  *         PHP's curl extension and `proc_open()`. It REFUSES rather than
  *         skipping when anything is missing, because a skipped test reads
- *         exactly like a passing one. It changes three installation-wide
- *         settings (`geo.autoGeocode`, `geo.google.apiKey`,
- *         `geo.nominatim.lastCallAt`) and puts each back as it found it.
+ *         exactly like a passing one. It changes the installation-wide
+ *         settings named in `$settingKeys` below and puts each back as it
+ *         found it; section Q also writes one organisation's own
+ *         `geo.cache.retentionDays` row and deletes it again.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -151,8 +171,8 @@ if ($tables < 100) {
 // venues can be found and removed without touching anybody else's.
 const GT_MARK = 'Selftest1033';
 
-// ── The three settings it changes, read first so they can be put back ──────
-$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt'];
+// ── The settings it changes, read first so they can be put back ────────────
+$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt', 'small-groups.enabled', 'geo.cache.retentionDays'];
 $settingsBefore = [];
 foreach ($settingKeys as $key) {
     $st = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
@@ -182,14 +202,32 @@ $setSetting = static function (string $key, ?string $value) use ($db): void {
     $st->close();
 };
 
+// 🔒 The cache keeps no address text since #1037, so this test's rows cannot be
+//    found by the word in their address any more. They are found instead as
+//    the rows NEWER than the newest one there was when it started.
+$cacheIdBefore = (int) ($db->query('SELECT COALESCE(MAX(`cacheID`), 0) AS n FROM `tblGeocodeCache`')->fetch_assoc()['n'] ?? 0);
+
 /** Remove this test's cache rows and venues. Children of a venue cascade. */
-$tidyRows = static function () use ($db): void {
+$tidyRows = static function () use ($db, $cacheIdBefore): void {
+    $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `cacheID` > ?');
+    $st->bind_param('i', $cacheIdBefore);
+    $st->execute();
+    $st->close();
     $like = '%' . GT_MARK . '%';
-    $st = $db->prepare('DELETE FROM `tblGeocodeCache` WHERE `queryText` LIKE ?');
+    $st = $db->prepare('DELETE FROM `tblVenues` WHERE `venueName` LIKE ?');
     $st->bind_param('s', $like);
     $st->execute();
     $st->close();
-    $st = $db->prepare('DELETE FROM `tblVenues` WHERE `venueName` LIKE ?');
+    // Section Q's organisation figure (#1037 round 3). No organisation held
+    // one when this run started (the settings check refuses otherwise).
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'geo.cache.retentionDays' AND `siteID` IS NOT NULL");
+    // Section O's events (#1037, D-183).
+    $st = $db->prepare('DELETE FROM `tblEvents` WHERE `eventName` LIKE ?');
+    $st->bind_param('s', $like);
+    $st->execute();
+    $st->close();
+    // Section O's small groups (#1037, D-183).
+    $st = $db->prepare('DELETE FROM `tblSmallGroups` WHERE `groupName` LIKE ?');
     $st->bind_param('s', $like);
     $st->execute();
     $st->close();
@@ -297,7 +335,10 @@ file_put_contents(
         'db_port' => $dbPort,
     ], true) . ";\n"
 );
-file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
+// The installation's secret key for this run. Kept in a variable because
+// section O recomputes a HOME's cache key from it (#1037 round 3).
+$encKey = bin2hex(random_bytes(32));
+file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', $encKey);
 
 // The router imitates web/public_html/.htaccess, as the other page tests do.
 $router = <<<'ROUTER'
@@ -334,10 +375,16 @@ $uri   = (string) ($_SERVER['REQUEST_URI'] ?? '');
 $leg   = str_starts_with($uri, '/google') ? 'google' : 'nominatim';
 $asked = strtolower((string) ($_GET['address'] ?? $_GET['q'] ?? ''));
 file_put_contents(__DIR__ . '/stub-calls.log', $leg . "\n", FILE_APPEND);
+// The country filter Google was sent (#1036): only the `components` value, or
+// "-" for none — never the address.
+if ($leg === 'google') {
+    file_put_contents(__DIR__ . '/stub-components.log', (string) ($_GET['components'] ?? '-') . "\n", FILE_APPEND);
+}
 header('Content-Type: application/json');
 
 $pos = ['google' => [51.5007292, -0.1246254], 'nominatim' => ['52.2053', '0.1218']][$leg];
 if ($leg === 'nominatim' && strtolower((string) ($_GET['countrycodes'] ?? '')) === 'us') { $pos = ['39.7817', '-89.6501']; }
+if ($leg === 'google' && (string) ($_GET['components'] ?? '') === 'country:US') { $pos = [39.7817, -89.6501]; }
 if (str_contains($asked, 'googlejunk')) { $pos = $leg === 'google' ? ['abc', 'def'] : $pos; }
 elseif (str_contains($asked, 'emptyjunk'))  { $pos = ['', '']; }
 elseif (str_contains($asked, 'wordjunk'))   { $pos = ['abc', 'def']; }
@@ -372,6 +419,7 @@ echo json_encode([['lat' => $pos[0], 'lon' => $pos[1], 'display_name' => 'Stand-
 STUB;
 file_put_contents($child . $sep . 'stub.php', $stub);
 touch($child . $sep . 'stub-calls.log');
+touch($child . $sep . 'stub-components.log');
 
 /** Which legs the stand-in has been asked, since the log was last emptied. */
 $stubCalls = static function () use ($child, $sep): array {
@@ -380,6 +428,12 @@ $stubCalls = static function () use ($child, $sep): array {
 };
 $stubReset = static function () use ($child, $sep): void {
     file_put_contents($child . $sep . 'stub-calls.log', '');
+    file_put_contents($child . $sep . 'stub-components.log', '');
+};
+/** The country filter each Google call was sent, since the log was emptied. */
+$stubComponents = static function () use ($child, $sep): array {
+    $raw = trim((string) file_get_contents($child . $sep . 'stub-components.log'));
+    return $raw === '' ? [] : explode("\n", $raw);
 };
 
 $serverDescriptors = static fn (string $log): array => [
@@ -556,9 +610,20 @@ $freshToken = static function () use ($http, $tokenOn): string {
     return $t;
 };
 
-/** Ask the real `/geo/lookup` page. Returns the decoded JSON, or null. */
-$lookup = static function (string $address, string $country = '') use ($http, $freshToken): ?array {
-    $answer = $http('POST', '/geo/lookup', ['csrf_token' => $freshToken(), 'address' => $address, 'countryCode' => $country]);
+/**
+ * Ask the real `/geo/lookup` page. Returns the decoded JSON, or null.
+ *
+ * `$kind` is the `addressKind` the form's button sends (D-183). It defaults to
+ * 'public' so every section written before #1037 round 2 keeps the PLAIN key
+ * it checks with `$cacheRow()`; section O asks for 'home' (and for nothing at
+ * all, with null) on purpose.
+ */
+$lookup = static function (string $address, string $country = '', ?string $kind = 'public') use ($http, $freshToken): ?array {
+    $fields = ['csrf_token' => $freshToken(), 'address' => $address, 'countryCode' => $country];
+    if ($kind !== null) {
+        $fields['addressKind'] = $kind;
+    }
+    $answer = $http('POST', '/geo/lookup', $fields);
     $decoded = json_decode($answer['body'], true);
     return is_array($decoded) === true ? $decoded : null;
 };
@@ -582,10 +647,34 @@ $portalKey =static function (string $address, string $country): string {
     return (string) $key->invoke(null, 'forward', (string) $text->invoke(null, trim($address), $country !== '' ? $country : null));
 };
 
-/** How many forward cache rows hold this address, whatever their key. */
-$rowsFor = static function (string $address) use ($db): int {
-    $st = $db->prepare("SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `direction` = 'forward' AND `queryText` = ?");
-    $st->bind_param('s', $address);
+/**
+ * The newest cache row's number, and how many rows were written after a given
+ * one. Since #1037 a row holds no address, so "a row for this address under
+ * ANY key" can no longer be asked; "any row written since" is asked instead,
+ * which is stricter: it sees a row filed under any key, for any address.
+ */
+$cacheMark = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(`cacheID`), 0) AS n FROM `tblGeocodeCache`')->fetch_assoc()['n'] ?? 0);
+/** The `addressKind` of every row written after a mark, oldest first. */
+$kindsSince = static function (int $mark) use ($db): array {
+    $st = $db->prepare('SELECT `addressKind` FROM `tblGeocodeCache` WHERE `cacheID` > ? ORDER BY `cacheID`');
+    $st->bind_param('i', $mark);
+    $st->execute();
+    $out = array_map(static fn (array $r): string => (string) $r['addressKind'], $st->get_result()->fetch_all(MYSQLI_ASSOC));
+    $st->close();
+    return $out;
+};
+/** The key of every row written after a mark, oldest first. */
+$hashesSince = static function (int $mark) use ($db): array {
+    $st = $db->prepare('SELECT `queryHash` FROM `tblGeocodeCache` WHERE `cacheID` > ? ORDER BY `cacheID`');
+    $st->bind_param('i', $mark);
+    $st->execute();
+    $out = array_map(static fn (array $r): string => (string) $r['queryHash'], $st->get_result()->fetch_all(MYSQLI_ASSOC));
+    $st->close();
+    return $out;
+};
+$rowsSince = static function (int $mark) use ($db): int {
+    $st = $db->prepare('SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `cacheID` > ?');
+    $st->bind_param('i', $mark);
     $st->execute();
     $n = (int) $st->get_result()->fetch_assoc()['n'];
     $st->close();
@@ -674,12 +763,16 @@ $setSetting('geo.google.apiKey', '');
 // ── D ────────────────────────────────────────────────────────────────────────
 echo "D. A real caller that STORES: a venue saved with no position typed\n";
 $stubReset();
+$markD = $cacheMark();
 $venue = $saveVenue(GT_MARK . ' Fresh Venue', GT_MARK . ' Fresh Venue Lane');
 check('D1 the venue was saved', $venue['saved'] ?? false, true);
 check('D2 THE ISSUE\'S "DONE WHEN": the first live look-up stored the stand-in\'s position',
     [$venue['latitude'] ?? null, $venue['longitude'] ?? null], ['52.2053000', '0.1218000']);
 check('D3 ...recorded as found by Nominatim', $venue['geocodeSource'] ?? null, 'nominatim');
 check('D4 ...and it was a FRESH look-up, not a cached one', $stubCalls(), ['nominatim']);
+// D-183: a venue is a public place. With Venues.php sending no kind (a home,
+// the default) this goes red (planted).
+check('D5 the venue\'s remembered answer is marked a PUBLIC place (D-183)', $kindsSince($markD), ['public']);
 
 // ── E ────────────────────────────────────────────────────────────────────────
 echo "E. An answer that is not a real position is \"no answer\", never 0,0\n";
@@ -693,10 +786,12 @@ $n = 0;
 foreach ($bad as $word => $what) {
     $n++;
     $addr = GT_MARK . ' ' . $word . ' Street';
+    $markE = $cacheMark();
     $answer = $lookup($addr);
     check("E{$n}a {$what}: /geo/lookup says not found", [$answer['ok'] ?? null, $answer['reason'] ?? null], [false, 'not_found']);
-    // Counted by ADDRESS, not by key, so a row filed under any key at all is seen.
-    check("E{$n}b ...and nothing is cached, so it is not served for ever", $rowsFor($addr), 0);
+    // Any row written since, under any key at all (the cache holds no address
+    // to count by since #1037).
+    check("E{$n}b ...and nothing is cached, so it is not served for ever", $rowsSince($markE), 0);
     $v = $saveVenue(GT_MARK . ' Venue ' . $word, $addr);
     // ⚠️ array_key_exists, never `??`: a stored NULL is the answer wanted
     //    here, and `??` would read it as "no such column".
@@ -736,10 +831,10 @@ echo "H. A cache row with no coordinates is a miss, not 0,0\n";
 $addrH = GT_MARK . ' Fresh Hollow Row';
 $hashH = $portalKey($addrH, '');
 $st = $db->prepare(
-    "INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `queryText`, `latitude`, `longitude`, `formatted`, `provider`) "
-    . "VALUES (?, 'forward', ?, NULL, NULL, NULL, 'nominatim')"
+    "INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`) "
+    . "VALUES (?, 'forward', NULL, NULL, 'nominatim')"
 );
-$st->bind_param('ss', $hashH, $addrH);
+$st->bind_param('s', $hashH);
 $st->execute();
 $st->close();
 check('H0 premise: the cache row exists, with no coordinates',
@@ -782,9 +877,10 @@ foreach ($badPairs as $id => [$la, $ln, $what]) {
     $addr = GT_MARK . " {$id} pos[{$la},{$ln}]";
     $setSetting('geo.google.apiKey', '');
     $stubReset();
+    $markJ = $cacheMark();
     $a = $lookup($addr);
     check("{$id}a {$what}, from Nominatim: not found, and not cached",
-        [$stubCalls(), $a['ok'] ?? null, $a['reason'] ?? null, $rowsFor($addr)], [['nominatim'], false, 'not_found', 0]);
+        [$stubCalls(), $a['ok'] ?? null, $a['reason'] ?? null, $rowsSince($markJ)], [['nominatim'], false, 'not_found', 0]);
     $setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
     $stubReset();
     $g = $lookup(GT_MARK . " {$id} gonly pos[{$la},{$ln}]");
@@ -882,6 +978,7 @@ echo "I. The country a look-up is limited to is part of the cache key (#1035)\n"
 // The stand-in puts a US-limited Nominatim look-up in Springfield, Illinois,
 // and any other in Cambridge, so a shared row shows up as the wrong place.
 $addrI = GT_MARK . ' Springfield Fresh';
+$markI = $cacheMark();
 $stubReset();
 $gb = $lookup($addrI, 'GB');
 $us = $lookup($addrI, 'US');
@@ -891,7 +988,7 @@ check('I1 the two countries get their own places, not the first one asked',
     [isset($gb['lat']) ? (float) $gb['lat'] : null, isset($us['lat']) ? (float) $us['lat'] : null], [52.2053, 39.7817]);
 check('I2 THE #1035 QUESTION: the second country was asked of the provider, not served the first one\'s row',
     $stubCalls(), ['nominatim', 'nominatim']);
-check('I3 ...so the cache holds one row per country', $rowsFor($addrI), 2);
+check('I3 ...so the cache holds one row per country', $rowsSince($markI), 2);
 $stubReset();
 $gbAgain = $lookup($addrI, 'gb');
 check('I4 GB and gb are one country: the repeat is served from the cache', $stubCalls(), []);
@@ -899,9 +996,315 @@ check('I5 ...with the GB answer', $gbAgain, $gb);
 $stubReset();
 $lookup($addrI);
 check('I6 a look-up limited to NO country is asked of the provider and filed as its own row',
-    [$stubCalls(), $rowsFor($addrI)], [['nominatim'], 3]);
+    [$stubCalls(), $rowsSince($markI)], [['nominatim'], 3]);
 check('I7 ...the three rows are the three keys the portal builds',
     [$cacheRow($addrI, '') !== null, $cacheRow($addrI, 'gb') !== null, $cacheRow($addrI, 'us') !== null], [true, true, true]);
+
+// ── M ────────────────────────────────────────────────────────────────────────
+echo "M. The Google leg is limited to the country asked for (#1036)\n";
+// The stand-in records only the `components` value Google was sent ("-" for
+// none). With the country left off the Google call, as before #1036, M1, M2
+// and M3 go red (measured); M4 and M5 pass either way, being over-reach guards.
+$setSetting('geo.google.apiKey', 'selftest-not-a-real-key');
+$addrM = GT_MARK . ' Springfield Google';
+$stubReset();
+$mGb = $lookup($addrM, 'GB');
+check('M1 a look-up limited to GB sends Google components=country:GB',
+    [$stubCalls(), $stubComponents()], [['google'], ['country:GB']]);
+$stubReset();
+$mUs = $lookup($addrM, 'us');
+check('M2 a look-up limited to us sends country:US (upper case, as Google documents it)',
+    [$stubCalls(), $stubComponents()], [['google'], ['country:US']]);
+check('M3 ...and so the two countries get the stand-in\'s two different places',
+    [$posOf($mGb), $posOf($mUs)], [[51.5007292, -0.1246254], [39.7817, -89.6501]]);
+$stubReset();
+$lookup(GT_MARK . ' Springfield Google Unlimited');
+check('M4 a look-up limited to NO country sends no country filter', $stubComponents(), ['-']);
+$stubReset();
+$lookup(GT_MARK . ' Springfield Google Piped', 'GB|locality:Paris');
+// Over-reach and injection in one: a "country" that is not two letters must
+// not become a filter (`|` would add one nobody chose), and the look-up still
+// happens, unlimited on this leg, as every Google look-up was before #1036.
+check('M5 a "country" that is not two letters adds no filter, and the look-up still goes to Google',
+    [$stubCalls(), $stubComponents()], [['google'], ['-']]);
+$setSetting('geo.google.apiKey', '');
+
+// ── N ────────────────────────────────────────────────────────────────────────
+echo "N. The cache keeps no address text (#1037)\n";
+$cols = [];
+$colRes = $db->query(
+    "SELECT `COLUMN_NAME` FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblGeocodeCache' ORDER BY `ORDINAL_POSITION`"
+);
+while (($c = $colRes->fetch_assoc()) !== null) {
+    $cols[] = (string) $c['COLUMN_NAME'];
+}
+check('N1 the cache table has no column for the address as typed or the provider\'s wording of it',
+    [in_array('queryText', $cols, true), in_array('formatted', $cols, true)], [false, false]);
+// Every row this run wrote, every column of it: none may hold the marker word
+// that every address this test looked up carries, in any case.
+$leaks = 0;
+$written = 0;
+$rowRes = $db->query('SELECT * FROM `tblGeocodeCache` WHERE `cacheID` > ' . (int) $cacheIdBefore);
+while (($r = $rowRes->fetch_assoc()) !== null) {
+    $written++;
+    foreach ($r as $v) {
+        if ($v !== null && stripos((string) $v, GT_MARK) !== false) {
+            $leaks++;
+        }
+    }
+}
+// A premise, so N2 cannot pass on an empty table: this run cached answers.
+check('N2a premise: this run wrote cache rows to look in', $written > 0, true);
+check('N2 ...and no value in any of them holds any part of an address that was looked up', $leaks, 0);
+check('N3 a forward answer passes on no wording of the address, fresh or cached',
+    [array_key_exists('formatted', $fresh) ? $fresh['formatted'] : 'missing', array_key_exists('formatted', $cached) ? $cached['formatted'] : 'missing',
+     array_key_exists('formatted', $freshG) ? $freshG['formatted'] : 'missing'],
+    [null, null, null]);
+
+// ── O ────────────────────────────────────────────────────────────────────────
+echo "O. A home's remembered answer is marked, and keyed with the installation's secret (#1037, D-183)\n";
+$addrO = GT_MARK . ' Home Lane';
+$markO = $cacheMark();
+$stubReset();
+$homeO = $lookup($addrO, '', 'home');
+check('O1 a look-up marked as a HOME writes one row, marked home', [$stubCalls(), $kindsSince($markO)], [['nominatim'], ['home']]);
+$homeHash = $hashesSince($markO)[0] ?? '';
+// #1037 round 3: this used to ask only that the key DIFFERED from the plain
+// one, and an unkeyed sha256 of other text passed it. The expected key is now
+// rebuilt here from the enc.key this run wrote, exactly as
+// AddressFingerprint::withInstallationKey() makes it (sha256 of key | text), over the text
+// Geocoder::homeCacheKey() fingerprints. This IS a second copy of the rule
+// (#647's warning), kept on purpose: the property is "the installation's
+// secret is in it", and only a value made from that secret can show it.
+$homeText = 'geocode-home|forward|' . mb_strtolower(trim((string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $addrO, null)));
+check('O2 ...whose key is EXACTLY the address fingerprinted with this installation\'s secret key, and no row has the plain key',
+    [$homeHash, $cacheRow($addrO)], [hash('sha256', $encKey . '|' . $homeText), null]);
+$stubReset();
+check('O3 the same home again is served from its row, and the stand-in is not asked', [$lookup($addrO, '', 'home'), $stubCalls()], [$homeO, []]);
+$stubReset();
+check('O4 a request carrying NO kind is a home too, served from the home row (the safe default)', [$lookup($addrO, '', null), $stubCalls()], [$homeO, []]);
+$stubReset();
+check('O5 ...and so is a kind that is not exactly "public"', [$lookup($addrO, '', 'Public'), $stubCalls()], [$homeO, []]);
+$markO2 = $cacheMark();
+$stubReset();
+$lookup($addrO, '', 'public');
+check('O6 the same address as a PUBLIC place is its own row, asked of the provider, marked public, under the plain key',
+    [$stubCalls(), $kindsSince($markO2), $hashesSince($markO2)], [['nominatim'], ['public'], [$portalKey($addrO, '')]]);
+
+// The small-group form, over HTTP (automatic look-up is on, set at the top).
+$setSetting('small-groups.enabled', '1');
+$saveGroup = static function (string $name, string $line1, bool $notAHome) use ($http, $freshToken): int {
+    $fields = [
+        'csrf_token' => $freshToken(), 'action' => 'create', 'groupName' => $name,
+        'addressLine1' => $line1, 'city' => 'Testtown', 'postcode' => 'TE1 1ST', 'countryCode' => 'GB',
+        'latitude' => '', 'longitude' => '',
+    ];
+    if ($notAHome === true) {
+        $fields['notAHomeAsked'] = '1';
+        $fields['notAHome']      = '1';
+    }
+    return $http('POST', '/small-groups/save', $fields)['status'];
+};
+$markG = $cacheMark();
+$stubReset();
+$gHome = $saveGroup(GT_MARK . ' Group At Home', GT_MARK . ' Host Home Road', false);
+check('O7 a small group saved with an address and no "not anybody\'s home" mark remembers its answer as a HOME',
+    [$gHome === 302 || $gHome === 303, $stubCalls(), $kindsSince($markG)], [true, ['nominatim'], ['home']]);
+$markG2 = $cacheMark();
+$stubReset();
+$gPublic = $saveGroup(GT_MARK . ' Group At Hall', GT_MARK . ' Church Hall Road', true);
+check('O8 one saved with "not anybody\'s home" ticked remembers its answer as a PUBLIC place',
+    [$gPublic === 302 || $gPublic === 303, $stubCalls(), $kindsSince($markG2)], [true, ['nominatim'], ['public']]);
+$setSetting('small-groups.enabled', $settingsBefore['small-groups.enabled']);
+
+// The Manage Events form, over HTTP: its own "This is someone's home" / "This
+// is a public place" pair (locationAddressKind), home when nothing is chosen.
+$saveEvent = static function (string $name, string $address, ?string $kind) use ($http, $freshToken): int {
+    $fields = [
+        'csrf_token' => $freshToken(), 'action' => 'create', 'eventName' => $name,
+        'description' => 'Made by tools/geocoder-selftest.php.',
+        'startDateTime' => date('Y-m-d', strtotime('+30 days')) . 'T19:00', 'endDateTime' => '',
+        'timezone' => 'Europe/London', 'status' => 'published', 'locationName' => 'Selftest place',
+        'locationAddress' => $address, 'locationGeoLat' => '', 'locationGeoLng' => '',
+    ];
+    if ($kind !== null) {
+        $fields['locationAddressKind'] = $kind;
+    }
+    return $http('POST', '/calendar/manage/save', $fields)['status'];
+};
+$markE1 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Hall', GT_MARK . ' Event Hall Street', 'public');
+check('O9 an event saved with "This is a public place" chosen remembers its address as a PUBLIC place',
+    [$stubCalls(), $kindsSince($markE1)], [['nominatim'], ['public']]);
+$markE2 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Home', GT_MARK . ' Event Home Street', null);
+check('O10 an event saved with NO choice sent remembers its address as a HOME (the default)',
+    [$stubCalls(), $kindsSince($markE2)], [['nominatim'], ['home']]);
+$markE3 = $cacheMark();
+$stubReset();
+$saveEvent(GT_MARK . ' Event At Home Two', GT_MARK . ' Event Home Two Street', 'home');
+check('O11 ...and so does one with "This is someone\'s home" chosen',
+    [$stubCalls(), $kindsSince($markE3)], [['nominatim'], ['home']]);
+$manage = $http('GET', '/calendar/manage')['body'];
+check('O12 the Manage Events form draws the choice, with "This is someone\'s home" chosen to start, and the look-up button reads it',
+    [preg_match('/name="locationAddressKind" id="locationAddressKindHome" value="home" checked/', $manage) === 1,
+     str_contains($manage, 'name="locationAddressKind" id="locationAddressKindPublic" value="public">'),
+     str_contains($manage, 'data-address-kind-public-field="locationAddressKind"')],
+    [true, true, true]);
+
+// ── Q ────────────────────────────────────────────────────────────────────────
+echo "Q. The privacy page and notice say the period really in force for a home's position (#1037 round 3)\n";
+/** The text of the element marked data-geocode-home-notice on one page, or ''. */
+$noticeOn = static function (string $path) use ($http): string {
+    $body = $http('GET', $path)['body'];
+    if (preg_match('#data-geocode-home-notice="1">(.*?)</(?:li|p)>#s', $body, $m) !== 1) {
+        return '';
+    }
+    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8')));
+};
+$setSetting('geo.cache.retentionDays', '365');
+$put40 = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, 'geo.cache.retentionDays', '40', '', 0)");
+$put40->bind_param('i', $siteId);
+$put40->execute();
+$put40->close();
+foreach (['/privacy' => 'Q1', '/privacy/policy' => 'Q2'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} {$path} names the organisation's 40 days, not the installation's 365, as the SHORTEST any organisation has chosen",
+        [str_contains($said, '40 days (the shortest period any organisation on this portal has chosen)'), str_contains($said, '365')],
+        [true, false]);
+}
+$db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'geo.cache.retentionDays' AND `siteID` IS NOT NULL");
+foreach (['/privacy' => 'Q3', '/privacy/policy' => 'Q4'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} with no organisation's own figure, {$path} names the 365 days as the period set for the whole portal, not as any organisation's choice",
+        [str_contains($said, '365 days (the period set for this whole portal; no organisation has chosen a shorter one)'), str_contains($said, 'any organisation on this portal has chosen)')],
+        [true, false]);
+}
+$setSetting('geo.cache.retentionDays', $settingsBefore['geo.cache.retentionDays']);
+
+// ── R ────────────────────────────────────────────────────────────────────────
+echo "R. With the installation's secret key unreadable, a home's answer is not remembered at all (#1037 round 4, D-183)\n";
+// Until round 4 AddressFingerprint::of() fell back to the portal VERSION as its
+// salt, which is printed in every release: a home was then remembered under a
+// key anybody could test against a list of addresses (the unsalted fingerprint
+// D-183 rules out), while the privacy notice said "mixed with a secret key
+// belonging to this installation". The key file is moved aside in THIS RUN'S
+// COPY only, and put back straight after.
+$keyFile  = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key';
+$keyAside = $keyFile . '.aside';
+rename($keyFile, $keyAside);
+check('R0 premise: the copy\'s secret key file is not there to read', is_readable($keyFile), false);
+$addrR = GT_MARK . ' Keyless Home Close';
+$markR = $cacheMark();
+$stubReset();
+$homeR = $lookup($addrR, '', 'home');
+check('R1 a HOME is still looked up (the stand-in is asked and its position comes back)',
+    [$stubCalls(), $homeR['ok'] ?? null, isset($homeR['lat']) === true], [['nominatim'], true, true]);
+check('R2 THE POINT: ...and NO row is written for it, under any key', $rowsSince($markR), 0);
+$stubReset();
+$lookup($addrR, '', 'home');
+check('R3 asked again, it is asked of the map service again, and still nothing is remembered', [$stubCalls(), $rowsSince($markR)], [['nominatim'], 0]);
+$stubReset();
+$lookup($addrO, '', 'home');
+check('R4 a home remembered while the key COULD be read is not served without it (its key cannot be made)', $stubCalls(), ['nominatim']);
+$markR2 = $cacheMark();
+$stubReset();
+$lookup($addrR, '', 'public');
+check('R5 a PUBLIC place is remembered exactly as before, under its plain key',
+    [$stubCalls(), $kindsSince($markR2), $hashesSince($markR2)], [['nominatim'], ['public'], [$portalKey($addrR, '')]]);
+foreach (['/privacy' => 'R6', '/privacy/policy' => 'R7'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} {$path} says the key cannot be read and a home's position is not remembered, and does not say one is kept mixed with the key",
+        [str_contains($said, 'That key cannot be read just now, so while it cannot, the position of a home is not remembered at all'),
+         str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation')],
+        [true, false]);
+}
+rename($keyAside, $keyFile);
+
+// #1037 round 5: R0-R7 moved the file away, and nothing asked about the other
+// ways there is NO key. Removing the `!== ''` test from the key reader left
+// this test at 125 of 125 while an EMPTY key file fingerprinted a home with
+// nothing secret in it — the SHA-256 of '|' plus the address, which anybody can
+// make (D-183 rules that out by name). And a FOLDER in the file's place made
+// the reader raise a PHP notice on every look-up and every privacy page,
+// because it asked is_readable() and not is_file(). So each kind of "no key"
+// is made here, in THIS RUN'S COPY only, and each must behave as R2 and R6 say;
+// then two short files, which ARE working keys (any length is; only empty or
+// not-a-file is no key) and so must be remembered, keyed with exactly that
+// content. The real file is put back between cases and at the end.
+$errMark   = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS n FROM `tblErrors`')->fetch_assoc()['n'] ?? 0);
+$phpLog    = $child . $sep . 'php-errors.log';
+$logSize   = static function () use ($phpLog): int { clearstatcache(true, $phpLog); return is_file($phpLog) === true ? (int) filesize($phpLog) : 0; };
+$homeTextOf = static fn (string $addr): string => 'geocode-home|forward|' . mb_strtolower(trim((string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $addr, null)));
+$noKeyCases = [
+    'RE' => ['an EMPTY key file', static function () use ($keyFile): void { file_put_contents($keyFile, ''); }],
+    'RF' => ['a FOLDER in the key file\'s place', static function () use ($keyFile): void { mkdir($keyFile); }],
+    'RU' => ['a key file that cannot be read', static function () use ($keyFile): void { file_put_contents($keyFile, 'some key'); chmod($keyFile, 0000); }],
+];
+foreach ($noKeyCases as $id => [$what, $make]) {
+    rename($keyFile, $keyAside);
+    $make();
+    clearstatcache();
+    if ($id === 'RU' && is_readable($keyFile) === true) {
+        // 🧱 Running as a user that reads anything (root): the case cannot be
+        //    made here, and a check that passed on it would prove nothing.
+        echo "  SKIP {$id}: this user can read a file with no permissions (root?), so an unreadable key file cannot be made\n";
+    } else {
+        $errBefore = $errMark();
+        $logBefore = $logSize();
+        $addr = GT_MARK . " Keyless {$id} Close";
+        $mark = $cacheMark();
+        $stubReset();
+        $got = $lookup($addr, '', 'home');
+        $stubReset();
+        $lookup($addr, '', 'home');
+        check("{$id}1 with {$what}, a HOME is looked up, asked again of the map service, and NO row is written",
+            [$got['ok'] ?? null, $stubCalls(), $rowsSince($mark)], [true, ['nominatim'], 0]);
+        foreach (['/privacy', '/privacy/policy'] as $path) {
+            $said = $noticeOn($path);
+            check("{$id}2 with {$what}, {$path} says a home's position is not remembered, and not that one is kept mixed with the key",
+                [str_contains($said, 'That key cannot be read just now, so while it cannot, the position of a home is not remembered at all'),
+                 str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation')],
+                [true, false]);
+        }
+        check("{$id}3 with {$what}, nothing was written to the error log table or to PHP's own error log",
+            [$errMark() - $errBefore, $logSize() - $logBefore], [0, 0]);
+    }
+    if (is_dir($keyFile) === true) {
+        rmdir($keyFile);
+    } else {
+        @chmod($keyFile, 0600);
+        unlink($keyFile);
+    }
+    rename($keyAside, $keyFile);
+}
+foreach (['RK1' => ['a ONE-BYTE key file', 'x'], 'RK2' => ['a key file holding only a newline', "\n"]] as $id => [$what, $content]) {
+    rename($keyFile, $keyAside);
+    file_put_contents($keyFile, $content);
+    $addr = GT_MARK . " Short Key {$id} Close";
+    $mark = $cacheMark();
+    $stubReset();
+    $lookup($addr, '', 'home');
+    check("{$id} {$what} IS a working key: the home is remembered, marked home, keyed with exactly that content",
+        [$stubCalls(), $kindsSince($mark), $hashesSince($mark)],
+        [['nominatim'], ['home'], [hash('sha256', $content . '|' . $homeTextOf($addr))]]);
+    $said = $noticeOn('/privacy');
+    check("{$id}b ...and the privacy page says a home's position is kept, mixed with the installation's secret key",
+        [str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation'),
+         str_contains($said, 'cannot be read just now')],
+        [true, false]);
+    unlink($keyFile);
+    rename($keyAside, $keyFile);
+}
+check('RZ the copy\'s real key file is back, unchanged', (string) file_get_contents($keyFile), $encKey);
+
+$said = $noticeOn('/privacy');
+check('R8 with the key back, the notice says again that a home\'s position is kept, mixed with the installation\'s secret key',
+    [str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation'),
+     str_contains($said, 'cannot be read just now')],
+    [true, false]);
 
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');
@@ -911,5 +1314,5 @@ echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 echo "It reaches no real provider: a stand-in on this machine answers in each\n";
 echo "provider's documented shape, so a change in Google's or OpenStreetMap's own\n";
 echo "answers would not be seen here. It drives /geo/lookup and the venue save;\n";
-echo "the event, organisation and small-group savers are read, not driven.\n";
+echo "the organisation saver is read, not driven; the small-group and event savers are driven only for the home/public mark.\n";
 exit($failed === 0 ? 0 : 1);

@@ -323,21 +323,17 @@ class Sabbath
      *
      * WHAT WAS WRONG: the value was cast with (float), so empty text, a word or
      * a missing field all read as 0: a place in the Gulf of Guinea.
+     *
+     * Since #1029 the NUMBER is judged by `GeoLocation::coordinateNumber()`,
+     * the one rule for what a typed coordinate may be; only the limit is here.
      */
     public static function coordinate(mixed $value, float $limit): ?float
     {
-        if (is_int($value) === true || is_float($value) === true) {
-            $value = (string) $value;
-        }
-        if (is_string($value) === false) {
-            return null;
-        }
-        $text = trim($value);
-        if (preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d{1,3})?$/', $text) !== 1) {
-            return null;
-        }
-        $number = (float) $text;
-        if (is_finite($number) === false || abs($number) > $limit) {
+        // 📐 What counts as a coordinate NUMBER is GeoLocation's rule (#1029);
+        //    this method adds only the limit. It used to hold its own copy of
+        //    the same pattern, which agreed today and had nothing keeping it so.
+        $number = GeoLocation::coordinateNumber($value);
+        if ($number === null || abs($number) > $limit) {
             return null;
         }
 

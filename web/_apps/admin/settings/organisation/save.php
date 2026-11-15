@@ -663,24 +663,12 @@ $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longit
 //    Both boxes EMPTY is unchanged: no position typed, so the look-ups may
 //    fill one where they are set up, and otherwise the position is cleared.
 //
-//    "Typed" is asked of the text after trimming spaces, and anything that is
-//    not text (a request can send `latitude[]=1`) counts as typed, because it
-//    was sent.
-$coordTyped = static function (mixed $value): bool {
-    return $value !== null && (is_string($value) === false || trim($value) !== '');
-};
-$latTyped = $coordTyped($_POST['latitude'] ?? null);
-$lngTyped = $coordTyped($_POST['longitude'] ?? null);
-$positionKept = '';   // '' = the boxes decide the position; otherwise the reason it was left alone
-if ($coords === null && ($latTyped === true || $lngTyped === true)) {
-    if ($latTyped === false || $lngTyped === false) {
-        $positionKept = 'only one of the two boxes was filled in';
-    } elseif (GeoLocation::coordinateNumber($_POST['latitude']) === null || GeoLocation::coordinateNumber($_POST['longitude']) === null) {
-        $positionKept = 'the latitude and longitude must be numbers, written with a full stop for the decimal point (for example 51.5074 and -0.1278)';
-    } else {
-        $positionKept = 'the latitude must be from -90 to 90 and the longitude from -180 to 180';
-    }
-}
+//    WHY the position could not be used is decided by
+//    GeoLocation::typedPositionProblem(), the ONE judge (#1030): it was written
+//    here first, and seven other forms now ask the same question. Only the
+//    OUTCOME differs: those forms refuse, this one keeps the stored position.
+// '' = the boxes decide the position; otherwise the reason it was left alone.
+$positionKept = GeoLocation::typedPositionProblem($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 
 $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
 $w3w = null;
@@ -710,7 +698,8 @@ if ($w3w !== null && What3Words::isConfigured() === true) {
 if ($coords === null && $positionKept === '' && Geocoder::autoEnabled() === true) {
     $formatted = GeoLocation::formatAddress($address);
     if ($formatted !== '') {
-        $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null);
+        // 🏛️ The organisation's own address is a public place (D-183).
+        $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null, Geocoder::KIND_PUBLIC);
         if ($geocoded !== null) {
             $coords = ['lat' => $geocoded['lat'], 'lng' => $geocoded['lng']];
         }

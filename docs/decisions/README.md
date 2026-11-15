@@ -241,7 +241,8 @@ appended with its real date and a note that it was added later.
 | [D-183](183-a-remembered-home-position-is-personal-data.md) | 2026-11-13 | A remembered map answer for a home is personal data; which addresses are homes is chosen | in force |
 | [D-184](184-a-members-data-copy-includes-their-care-cases.md) | 2026-11-13 | A member's data copy includes their own pastoral care cases, without workers' names or visit notes | in force |
 | [D-185](185-microsoft-google-sign-in-may-create-accounts-by-setting.md) | 2026-11-13 | Whether a Microsoft or Google sign-in may create a new account is a setting (default: allow), and duplicate accounts can be merged | in force |
+| [D-186](186-checks-and-reviews-by-claude-always-use-opus.md) | 2026-11-15 | Any check or review carried out by Claude uses Opus, whatever model is otherwise set | in force |
 
-*185 decisions. This index is checked against the folder by
+*186 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

@@ -40,11 +40,22 @@ $vBio     = $validVisibility((string) ($_POST['visibilityBio']     ?? 'members')
 $vRoles   = $validVisibility((string) ($_POST['visibilityRoles']   ?? 'members'));
 
 // 📍 #456 Chunk B — member's own coordinates + what3words. Pair-or-null
-// (GeoLocation::validateCoords()); an out-of-range or half-supplied pair
-// is silently dropped to NULL rather than fatalling the whole save. A
-// non-empty INVALID W3W value, however, is rejected with a flash + the
-// save aborted entirely — never silently drop what looks like a typo'd
-// three-word address.
+// (GeoLocation::validateCoords()). A non-empty INVALID W3W value is rejected
+// with a flash + the save aborted entirely — never silently drop what looks
+// like a typo'd three-word address.
+//
+// A map position TYPED but unusable is now refused the same way (#1030). It
+// used to be "silently dropped to NULL rather than fatalling the whole save",
+// as this note said: the member was told their entry was saved while the
+// position they had already given was WIPED. GeoLocation::positionRefusal()
+// decides and words it. Both boxes empty still means "no position".
+$positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+if ($positionRefusal !== null) {
+    $_SESSION['flash_msg']  = $positionRefusal;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('directory/my-settings'));
+    exit();
+}
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 $latVal = $coords['lat'] ?? null;
 $lngVal = $coords['lng'] ?? null;

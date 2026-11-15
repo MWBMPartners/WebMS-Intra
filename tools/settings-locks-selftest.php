@@ -27,6 +27,7 @@
  * THE ONE LIST is the set of those methods, read out of `web/_core/` by PHP's
  * tokeniser — never typed into this file, and WHICH keys are pressed in
  * section B is decided by that list alone. What IS typed by hand, and why:
+ *   - `geo.cache.retentionDays` (#1037), for the premise check B0c, the same way;
  *   - `audit.retentionDays` (#932), for the premise check B0b — a lock method
  *     answering `false` for everything drops its key from the enumeration
  *     and leaves the run green, so the key is named here on purpose;
@@ -86,7 +87,12 @@
  *      rule's own note, and nobody but a global administrator sees Delete.
  *      Then the global administrator: every row no lock method locks draws
  *      Edit and Delete. S3 reads that the rule is asked on the change, delete
- *      and drawing paths.
+ *      and drawing paths. R8 (#1048) makes the race the save's own UPDATE
+ *      exists for: the control row is renamed to a "public." name inside an
+ *      open transaction, the save is sent, and the rename is committed only
+ *      once the database shows the save's UPDATE waiting for that row; the
+ *      UPDATE's name rule (SettingsRowRule::nameRuleSql()) must then write
+ *      nothing.
  *   P  plants, in a COPY of the portal: the transcription refusal taken out of
  *      the delete; the giving refusal taken out of the delete; every delete
  *      refusal taken out at once; the transcription refusal taken out of BOTH
@@ -97,7 +103,8 @@
  *      currency's note taken away (P9) and the country's (P9b, #967); and for #1021 the drawing's row-rule
  *      ask switched off (P11), asked as if every viewer were a global
  *      administrator (P12), the save handler's row refusal taken out (P13),
- *      and, in memory, the drawing's ask replaced by another call (P4d). Each
+ *      and, in memory, the drawing's ask replaced by another call (P4d); and
+ *      the name rule taken out of the save's own UPDATE (P14, #1048). Each
  *      must go red.
  *
  * HOW THE KEYS ARE ENUMERATED
@@ -1031,6 +1038,14 @@ check('B0 PREMISE: the issue\'s own key is among those the methods lock (so the 
 check('B0b PREMISE (#932): audit.retentionDays is locked, by ActivityLogRetention::lockedInGeneralEditor()',
     in_array('ActivityLogRetention::lockedInGeneralEditor', $locked['audit.retentionDays'] ?? [], true) === true,
     'locked by: ' . json_encode($locked['audit.retentionDays'] ?? null));
+// 🗺️ #1037 round 2: the same premise for how long remembered map answers are
+//    kept. Measured: with GeocodeCacheRetention::lockedInGeneralEditor()
+//    gutted to `return false;` the run stayed GREEN, the key simply dropping
+//    out of the enumeration — while the general editor would then let a global
+//    administrator delete the installation's row unrecorded.
+check('B0c PREMISE (#1037): geo.cache.retentionDays is locked, by GeocodeCacheRetention::lockedInGeneralEditor()',
+    in_array('GeocodeCacheRetention::lockedInGeneralEditor', $locked['geo.cache.retentionDays'] ?? [], true) === true,
+    'locked by: ' . json_encode($locked['geo.cache.retentionDays'] ?? null));
 
 // The controls: the very same request shapes DO delete, change and add an ordinary setting.
 foreach ([null, $site] as $level) {
@@ -1402,6 +1417,84 @@ check('R7 for the GLOBAL administrator every row no lock method locks — the th
     $rootPage['status'] === 200 && $rootWrong === [] && isset($rootPage['rows'][$rIds['portal-wide']]) === true,
     implode('; ', array_slice($rootWrong, 0, 10)));
 
+// R8 (#1048): THE RULE IN THE SAVE'S OWN UPDATE, exercised by the real save.
+// The refusal above is a PHP decision on the row as READ; the UPDATE carries the
+// same rule (SettingsRowRule::nameRuleSql()) so that a row renamed between that
+// read and the write is not written. Nothing drove that half: the SQL test runs
+// the rule's text in statements it types itself, so taking the call out of
+// settings/save.php left every test green. Here the race is MADE: this
+// connection renames the control row to a "public." name inside a transaction
+// (so the save still reads the old, ordinary name), the save is sent, and only
+// once the database says the save's UPDATE is WAITING for that row is the
+// rename committed. The UPDATE then judges the renamed row, and must write
+// nothing. Asserting the wait is the premise: without it the rename could land
+// before the read, and the PHP refusal would be what refused.
+$raceId = (int) $rIds['control'];
+/** @return array{waited: bool, row: ?array, said: bool, status: int} */
+$raceSave = static function () use ($db, $port, $jar, $freshToken, $rowNow, $http, $raceId): array {
+    run($db, "UPDATE `tblSettings` SET `settingKey` = 'selftest1021.ordinary', `settingValue` = 'r1021' WHERE `settingID` = ?", 'i', [$raceId]);
+    $token = $freshToken();
+    $db->begin_transaction();
+    run($db, "UPDATE `tblSettings` SET `settingKey` = 'public.selftest1021race' WHERE `settingID` = ?", 'i', [$raceId]);
+    $multi  = curl_multi_init();
+    $handle = curl_init('http://127.0.0.1:' . $port . '/settings/save');
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => false, CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $token, 'settingID' => (string) $raceId,
+            'settingKey' => 'selftest1021.ordinary', 'settingValue' => 'r1021-race']),
+    ]);
+    curl_multi_add_handle($multi, $handle);
+    $waited   = false;
+    $deadline = microtime(true) + 30;
+    $running  = 1;
+    try {
+        do {
+            curl_multi_exec($multi, $running);
+            // ⚠️ INNODB_TRX is a cached copy that InnoDB refreshes at most every
+            //    0.1 seconds. Polled every 50 ms it went on showing a stale
+            //    picture for the whole wait (measured on 8.0.36: the save stood
+            //    in the processlist as "updating" for two seconds while
+            //    INNODB_TRX listed only this connection). Hence the pause.
+            usleep(250000);
+            $waiting = (int) $db->query(
+                "SELECT COUNT(*) FROM `information_schema`.`INNODB_TRX` WHERE `trx_state` = 'LOCK WAIT' "
+                . "AND `trx_query` LIKE 'UPDATE `tblSettings` SET `settingValue`%'"
+            )->fetch_row()[0];
+            if ($waiting > 0) {
+                $waited = true;
+                break;
+            }
+            curl_multi_select($multi, 0.01);
+        } while ($running > 0 && microtime(true) < $deadline);
+    } finally {
+        $db->commit();
+    }
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.1);
+    } while ($running > 0);
+    $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+    curl_multi_remove_handle($multi, $handle);
+    curl_multi_close($multi);
+    // No curl_close(): deprecated, and the handle is freed with the closure's scope (#1003).
+    $row  = $rowNow($raceId);
+    $said = str_contains(html_entity_decode($http('GET', '/settings')['body'], ENT_QUOTES, 'UTF-8'),
+        'Nothing was changed. The setting "selftest1021.ordinary" may have been changed or removed by somebody else');
+    run($db, "UPDATE `tblSettings` SET `settingKey` = 'selftest1021.ordinary', `settingValue` = 'r1021' WHERE `settingID` = ?", 'i', [$raceId]);
+
+    return ['waited' => $waited, 'row' => $row, 'said' => $said, 'status' => $status];
+};
+$signIn('selftest-settings-locks-org');
+$race = $raceSave();
+$signIn();
+check('R8 PREMISE (#1048): the save\'s UPDATE really WAITED for the row this run had renamed (so the rename landed between the save\'s read and its write)',
+    $race['waited'] === true, 'HTTP ' . $race['status']);
+check('R8a ...and the real save then wrote NOTHING to the renamed "public." row — its own UPDATE\'s name rule refused it — and the page says nothing was changed',
+    $race['row'] !== null && $race['row']['settingKey'] === 'public.selftest1021race' && $race['row']['settingValue'] === 'r1021' && $race['said'] === true,
+    json_encode($race));
+
 // =============================================================================
 head('Section P — the plants: each refusal taken out of a COPY must turn this red');
 // =============================================================================
@@ -1578,6 +1671,22 @@ check('P13 (#1021) with the save handler\'s row refusal taken out, the plant app
     $p13['applied'] === true && ($p13['result']['logged'] ?? true) === false,
     'applied: ' . var_export($p13['applied'], true) . '; ' . json_encode($p13['result']));
 
+// #1048: the name rule taken out of the save's own UPDATE (an always-true
+// clause of the same shape, so the statement still runs with its six values).
+$p14 = $plant($copyOf('save.php'),
+    ["        . 'AND ' . SettingsRowRule::nameRuleSql()\n    );" => "        . 'AND (? = 1 OR 1 = 1)'\n    );"],
+    static function () use ($raceSave, $signIn): array {
+        $signIn('selftest-settings-locks-org');
+        $result = $raceSave();
+        $signIn();
+
+        return $result;
+    }
+);
+check('P14 (#1048) with the name rule taken out of the save\'s UPDATE, the plant applied AND R8a goes red: the renamed "public." row is WRITTEN',
+    $p14['applied'] === true && ($p14['result']['waited'] ?? false) === true && ($p14['result']['row']['settingValue'] ?? '') === 'r1021-race',
+    'applied: ' . var_export($p14['applied'], true) . '; ' . json_encode($p14['result']));
+
 // Section S's own plants, in memory.
 $plantedIndex = str_replace(
     "\\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$lockedKey['settingKey'])",
@@ -1625,11 +1734,12 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 // ── Tidy up: only what this run made (the shutdown function would do it too) ─
 $cleanUp();
 
-// S1 four times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
+// S1 four times, S2, B0, B0b, B0c (#1037), B1a/b twice, B1c, B2 and B3 once per row, B4 once
 // per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5;
-// #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d; #967: P9b.
-$expected = 4 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
-    + 1 + 10 + 3 + 1 + 1;
+// #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d; #967: P9b;
+// #1048: R8, R8a, P14.
+$expected = 4 + 1 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
+    + 1 + 10 + 3 + 1 + 1 + 3;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

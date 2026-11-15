@@ -4,6 +4,64 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A remembered map answer for a home is personal data (#1037, #1036, #1029; D-182, D-183)
+
+- **Homes and public places are told apart (D-183).** The event form, a small group's meeting place and a
+  host's home say whether an address is somebody's home or a public place. A home's remembered position is
+  stored under a fingerprint mixed with the installation's secret key, so it cannot be looked up from an
+  address alone; a public place keeps the plain key. Migration 290 adds the column that records which.
+- **No secret key, no remembered home.** When `_auth_keys/enc.key` is missing, empty, a folder or unreadable,
+  a home is still looked up but nothing is remembered, and both privacy pages say so. One byte or a lone
+  newline is a working key. `SecretSettings::keyFileContents()` is now the one reader of that file.
+- **How long a remembered answer is kept is a capped setting (D-182).** The installation caps each
+  organisation, a stored 0 means "nothing chosen" and never "keep for ever", and the retention page and both
+  privacy pages say truthfully whose period is in force.
+- **A restore does not turn old answers into homes.** A snapshot taken before migration 290 puts no
+  remembered map answers back (whole restore, rehearsal and one-table restore), and says so; a newer snapshot
+  restores them with their kinds.
+- **Checked:** geocoder 142, activity-log-retention 103, backup-restore 559 checks, settings-locks, gdpr-eraser
+  313, gdpr-coverage, time-zones and every audit script green on MySQL 8.0.36; five rounds of independent
+  check (personal data and backups), the last found one untrue comment, now corrected. **Not run:** MySQL 8.4,
+  MariaDB on the package's own tests, a real browser (the look-up button's script is driven by nothing: #1071),
+  real look-up services. Codex has not reviewed this. Open: #1067 (an erasure cannot remove a cached home),
+  #1068, #1069.
+
+### An unusable map position is refused with the reason; the Settings row rule's SQL is tested (#1030, #1048)
+
+- **Eight forms refuse an unusable position (#1030).** Asset locations, venues, resources, events, a
+  date's own details, a member's directory entry, a small group and a host's home used to save
+  without a position they could not use, say "saved", and — on an edit — wipe the position already
+  stored. They now refuse with the reason and write nothing. One shared judge, `GeoLocation::typedPositionProblem()`,
+  decides why; `positionRefusal()` builds the sentence. The organisation page keeps its own behaviour (#945).
+- **Two pages now print their message.** Per-occurrence overrides and "My directory profile" printed none,
+  so their what3words refusal was invisible too.
+- **A refused venue leaves nothing behind.** The venue page used to create a new landlord before its
+  refusals, so every refused save added one. Every refusal now comes before the first write, and a test
+  counts rows in every table on a refused post for all 14 sections.
+- **The row rule's SQL is tested (#1048).** `settings-row-rule-sql-selftest.php` runs the real
+  `nameRuleSql()` on a real database, and R8 in `settings-locks-selftest.php` drives the real save through a
+  race to prove the rule is applied in the save's own UPDATE.
+- **Checked:** `position-refusal-selftest` 94, `settings-row-rule-sql-selftest` 45, `settings-locks-selftest`
+  239, time-zones 327, geocoder 90, access-pages 554, every audit script green, MySQL 8.0.36. Two rounds of
+  independent check (writes stored data; the last clean). **Not run:** MySQL 8.4, MariaDB, a real browser or
+  look-up service. Codex has not reviewed this. Open: #1072, #1074 and the issues raised from round 2.
+
+### Page headers wrap on a phone (#848)
+
+- **One shared rule.** A page header (the row holding a title and its buttons) is a flex row, and a flex
+  row does not wrap unless told to, so on a 320-390px phone the buttons ran off the screen and the page
+  scrolled sideways. One rule in `portal.css` now lets every such row wrap below 768px, and the button
+  group inside it. It finds the row by its shape with `:has()`, so a page written later in the same
+  shape is covered without editing it. Nothing changes at 768px and wider (every element box in all 170
+  headers measured identical at 768, 1024 and 1440). A browser without `:has()` keeps the old look.
+- **Guards.** A hard gate, `check_page_headers_wrap.py` (170 headers found, 72 relying on the rule; the
+  issue's "79" could not be reproduced), and a real-browser test that draws every header at 320 and
+  390px plus five made-up shapes, each with a control that must overflow. Planted faults turn each red.
+- **Not done:** nobody has looked at phone screenshots; real titles longer than the test's sample text
+  are not tested; headers built by script or written as `<h2>` are covered by neither guard; the new
+  workflow steps have not run on GitHub. Three rounds of independent check (the tooling cap). Codex has
+  not reviewed this.
+
 ### One true send-log line per mail route tried; error rows under the message's organisation (#1051, #1050, #1053)
 
 - **The send log tells the truth about each route (#1051).** A message handed to a route is logged once

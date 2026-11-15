@@ -74,6 +74,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
             // 📍 #456 Chunk A — validated the same as every other new
             // location field; invalid non-empty W3W throws (caught below,
             // flashed as an error, nothing saved).
+            // A map position typed but unusable is refused the same way, with
+            // the reason (#1030); it used to be saved as no position, under
+            // "Resource saved.".
+            $positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+            if ($positionRefusal !== null) {
+                throw new \RuntimeException($positionRefusal);
+            }
             $geoCoords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
             $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
             $w3w = null;

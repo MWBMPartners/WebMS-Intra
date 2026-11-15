@@ -260,6 +260,8 @@ public-website-tick|tools/public-website-tick-selftest.php|selftest_pwtick|SELFT
 public-door|tools/public-door-selftest.php|selftest_pubdoor|SELFTEST_WEB_PORT=9497
 htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
+settings-row-rule-sql|tools/settings-row-rule-sql-selftest.php|selftest_rowrule|
+position-refusal|tools/position-refusal-selftest.php|selftest_position|SELFTEST_WEB_PORT=9030
 currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
 assets-api-update|tools/assets-api-update-selftest.php|selftest_assetsapi|SELFTEST_WEB_PORT=9101
 assets-deleted-writes|tools/assets-deleted-writes-selftest.php|selftest_assetsdel|SELFTEST_WEB_PORT=9147
@@ -312,6 +314,7 @@ public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
 offline-page-browser|node tools/offline-page-selftest.mjs
+page-headers-browser|node tools/page-headers-wrap-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 # 🔎 Every audit check's own self-test (#919), FOUND rather than listed: the

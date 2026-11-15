@@ -75,7 +75,12 @@ if ($address === '') {
 }
 
 $countryCode = isset($_POST['countryCode']) ? trim((string) $_POST['countryCode']) : null;
-$result = Geocoder::forward($address, $countryCode !== '' ? $countryCode : null);
+// 🏠 Whether the address is somebody's home or a public place (D-183), as the
+//    form's button says (`portal_location_input()`'s `addressKind`). ONLY the
+//    exact word 'public' makes it public; anything else, a missing field or a
+//    non-string (`addressKind[]=x`) is a home, the safe direction.
+$addressKind = ($_POST['addressKind'] ?? null) === Geocoder::KIND_PUBLIC ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME;
+$result = Geocoder::forward($address, $countryCode !== '' ? $countryCode : null, $addressKind);
 
 if ($result === null) {
     echo json_encode(['ok' => false, 'reason' => 'not_found']);

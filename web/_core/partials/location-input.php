@@ -62,8 +62,19 @@ if (function_exists('portal_location_input') === false) {
      *     w3wSuggest?: bool,
      *     countryStart?: string,
      *     countryPlaceholder?: string,
-     *     showCountry?: bool
+     *     showCountry?: bool,
+     *     addressKind?: string,
+     *     addressKindPublicWhenTicked?: string
      * } $cfg
+     *
+     * 🏠 `addressKind` (D-183, #1037): whether the address the "Look up
+     * coordinates" button sends is somebody's HOME ('home', the default) or a
+     * PUBLIC place ('public'). A home's remembered map answer is personal data.
+     * `addressKindPublicWhenTicked` names a checkbox on the same form which,
+     * when ticked, makes it a public place instead — the small groups' "not
+     * anybody's home" (D-123) — or a radio pair whose chosen value 'public'
+     * does (the event form's "This is someone's home" / "This is a public
+     * place"), so a form that can be either asks the person.
      */
     function portal_location_input(array $cfg): void
     {
@@ -198,7 +209,11 @@ if (function_exists('portal_location_input') === false) {
                 . '<button type="button" class="btn btn-outline-secondary btn-sm portal-geo-lookup" data-geo-lookup'
                 . ' data-lat-target="' . $name('lat') . '" data-lng-target="' . $name('lng') . '"'
                 . $addressAttrs
-                . ' data-w3w-field="' . $name('w3w') . '">'
+                . ' data-w3w-field="' . $name('w3w') . '"'
+                . ' data-address-kind="' . (($cfg['addressKind'] ?? 'home') === 'public' ? 'public' : 'home') . '"'
+                . (isset($cfg['addressKindPublicWhenTicked']) === true
+                    ? ' data-address-kind-public-field="' . $esc((string) $cfg['addressKindPublicWhenTicked']) . '"' : '')
+                . '>'
                 . '<i class="fa-solid fa-magnifying-glass-location me-1"></i>' . $esc(t('location.lookup_coords'))
                 . '</button> <span class="small text-muted portal-geo-lookup-status" role="status" aria-live="polite"></span>'
                 . '</div>';

@@ -391,6 +391,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             exit();
         }
 
+        // 🗺️ #1037: nor how long remembered map answers are kept. Deleting the
+        //    installation's row would quietly move every organisation that
+        //    follows it back to the built-in year. See
+        //    GeocodeCacheRetention::lockedInGeneralEditor().
+        if ($lockedKey !== null && \Portal\Core\GeocodeCacheRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is how long remembered map answers are kept and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\GeocodeCacheRetention::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
         if ($lockedKey !== null && \Portal\Core\TranscriptRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
@@ -813,6 +829,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    its own administrator (D-118), the installation's by a global
                                     //    administrator.
                                     $activityLogLocked = \Portal\Core\ActivityLogRetention::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for how long remembered map answers are kept (#1037): set
+                                    //    on the same page, by the same people.
+                                    $geocodeCacheLocked = \Portal\Core\GeocodeCacheRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
                                     // #493 P3: WHICH page — the copied-in rule's or Admin, Public website — is
                                     // asked of the ONE place that decides it, never written here.
@@ -859,6 +878,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     $editLocked = $givingLocked === true || $organisationsLocked === true || $mailLocked === true
                                         || $versionLocked === true || $capabilityLocksLocked === true || $zoneLocked === true
                                         || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
+                                        || $geocodeCacheLocked === true
                                         || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
                                         || $transcriptLocked === true || $currencyLocked === true || $countryLocked === true || $rowRefusal !== null;
                                     $deleteLocked = $editLocked === true || $isGivingRule === true;
@@ -901,7 +921,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/integrations/webhooks'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isRoot === true ? 'Changed at Admin, Integrations, Webhooks' : 'Changed by a global administrator, at Admin, Integrations, Webhooks'; ?></a>
                                     <?php elseif ($foyerLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Noticeboard, Foyer screen</a>
-                                    <?php elseif ($activityLogLocked === true): ?>
+                                    <?php elseif ($activityLogLocked === true || $geocodeCacheLocked === true): ?>
                                         <?php /* D-118: an organisation's administrator can open that page for
                                                  THEIR organisation's figure; the installation's is a global
                                                  administrator's, which the page itself enforces. */ ?>

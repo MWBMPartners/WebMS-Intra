@@ -374,8 +374,14 @@ const PAGE_WIDTH = (asked, premise) => `(async () => {
     //    so with the whole body searched an attendance page with NO row
     //    passed this premise (#833 round 1, planted: an emptied list stayed
     //    green). A row or a card is where the data the width depends on is.
-    premise: [...document.querySelectorAll('main .portal-data-row:not(.portal-data-header), main .card')]
-      .some(e => e.textContent.includes(${JSON.stringify(premise)})),
+    //    A premise written "h1:Words" (#848) is looked for in the page's
+    //    <h1> instead, and ONLY there: for a page whose width depends on its
+    //    header's buttons rather than on rows, the title is what shows the
+    //    page drew rather than refused. No other premise is loosened by it.
+    premise: ${JSON.stringify(premise)}.startsWith('h1:')
+      ? [...document.querySelectorAll('main h1')].some(e => e.textContent.includes(${JSON.stringify(premise.slice(3))}))
+      : [...document.querySelectorAll('main .portal-data-row:not(.portal-data-header), main .card')]
+        .some(e => e.textContent.includes(${JSON.stringify(premise)})),
     title: document.title,
   };
 })()`;

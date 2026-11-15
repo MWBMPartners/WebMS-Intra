@@ -4698,8 +4698,10 @@ ge_ok('THE JOB ITSELF: with the file now deletable, the whole sweep clears that 
     //    by backdating every date in the world and watching nothing be
     //    deleted. Naming the fourth term keeps the clause honest even while
     //    that term is 0 here.
+    //    #1037 added remembered map answers (-1 when that part could not
+    //    run, which counts as 0), named here for the same reason.
     && $full['totalDeleted'] === $full['activityDeleted'] + $full['errorsDeleted']
-        + $full['registrationsDeleted'] + $full['transcriptsDeleted'], json_encode($full));
+        + $full['registrationsDeleted'] + $full['transcriptsDeleted'] + max(0, $full['geocodeCacheDeleted']), json_encode($full));
 // A donor whose last gift is so old that the keep-until date has ALREADY
 // passed on the day they are erased, at an organisation that has confirmed
 // its figure and has no hold. Nothing has to be kept any longer, so the
