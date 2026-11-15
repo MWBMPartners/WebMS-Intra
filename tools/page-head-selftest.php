@@ -1058,7 +1058,10 @@ $setSetting('product.publisherUrl', $plantedSite);
 $u = $servedUrl();
 $u === $plantedSite ? ok('H08', 'with the setting given, the served link is exactly that address: "' . $u . '"') : bad('H08', 'the served link does not follow the setting', 'expected "' . $plantedSite . '", got ' . var_export($u, true));
 $unusable = [];
-foreach (['javascript:alert(1)', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
+// 'javascript:1' and the three after it are a scheme-shaped name read as a host
+// and a port; until round 2 of #910's check they were served as
+// "https://javascript:1" and the like.
+foreach (['javascript:alert(1)', 'javascript:1', 'javascript:443/alert(1)', 'vbscript:8080', 'data:80/x', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
     $setSetting('product.publisherUrl', $bad);
     if ($servedUrl() !== null) {
         $unusable[] = $bad;
@@ -1069,6 +1072,9 @@ $unusable === [] ? ok('H09', 'a stored value that is not a usable http(s) addres
 $setSetting('product.publisherUrl', '  Publisher.Example.org  ');
 $u = $servedUrl();
 $u === 'https://publisher.example.org' ? ok('H10', 'a bare host name, typed untidily, is served tidied as an https address') : bad('H10', 'a bare host name was not served as its tidied https address', var_export($u, true));
+$setSetting('product.publisherUrl', 'publisher.example.org:8080/about');
+$u = $servedUrl();
+$u === 'https://publisher.example.org:8080/about' ? ok('H10b', 'a bare host name with a port and a page (no "https://") is still accepted, as an https address') : bad('H10b', 'a bare host name with a port was not served', var_export($u, true));
 
 $openapiFile   = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'openapi.php';
 $openapiBefore = (string) file_get_contents($openapiFile);

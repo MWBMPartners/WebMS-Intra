@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 99; // +14 hostile cases over seven loops, A08, B05, C05, F07, F08 (#910)
+const EXPECTED = 141; // 99 + five more hostile cases over seven loops, A09, A10, C06, C07, F09-F11 (#910 round 2)
 
 function refuse(string $why): never
 {
@@ -610,6 +610,13 @@ function hostile(string $prefix, ?string $other): array
         // go red if that rule is ever loosened.
         '"javascript:alert(1)"'                  => 'javascript:alert(1)',
         '"data:text/html,x"'                     => 'data:text/html,x',
+        // #910 round 2: the backslash and control-character rules now read only
+        // the PATH. In the path, each of these must still be refused, encoded or not.
+        'an encoded backslash ("/%5C...")'       => '/%5Coutside.example',
+        'an encoded tab between two slashes'     => '/%09/outside.example',
+        'an encoded line break between slashes'  => '/%0a/outside.example',
+        'two encoded slashes ("%2F%2F...")'      => '%2F%2Foutside.example',
+        'a backslash after an encoded "?" (still the path to a browser)' => '/%3F\\outside.example',
         'a backslash ("/\\outside.example")'     => '/\\outside.example',
         'a tab before the slashes'               => "/\t/outside.example",
         'a ".." part leaving the organisation'   => $prefix . '/assets/../../outside',
@@ -638,6 +645,10 @@ foreach (hostile(B, A . '/giving/give') as $label => $address) {
 }
 $got = checkoutGoesTo($jarB, B, B . '/calendar?from=2026-06-01T10:30');
 ok('A08 checkout (#910, D-161): an address of B whose query holds a time ("T10:30", once read as a scheme) is followed', $got['status'] === 302 && $got['location'] === B . '/calendar?from=2026-06-01T10:30', said($got));
+$got = checkoutGoesTo($jarB, B, B . '/people?search=C%3A%5CUsers');
+ok('A09 checkout (#910 round 2): an address of B whose QUERY holds an encoded backslash is followed', $got['status'] === 302 && $got['location'] === B . '/people?search=C%3A%5CUsers', said($got));
+$got = checkoutGoesTo($jarB, B, B . '/people?q=x%09y');
+ok('A10 checkout (#910 round 2): an address of B whose QUERY holds an encoded tab is followed', $got['status'] === 302 && $got['location'] === B . '/people?q=x%09y', said($got));
 $got = checkoutGoesTo($jarB, B, '/giving/give');
 ok('A04 checkout refuses an address with NO organisation\'s part from inside B (the default organisation\'s page)', $got['status'] === 302 && $got['location'] === $frontB, said($got));
 
@@ -682,6 +693,10 @@ $got  = checkoutGoesTo($jarS, '', '/projects/my-pledges');
 ok('C01 checkout: the page\'s own address is followed', $got['status'] === 302 && $got['location'] === '/projects/my-pledges', said($got));
 $got = checkoutGoesTo($jarS, '', '/calendar?from=2026-06-01T10:30');
 ok('C05 checkout (#910): with one organisation, an address whose query holds a time is followed', $got['status'] === 302 && $got['location'] === '/calendar?from=2026-06-01T10:30', said($got));
+$got = checkoutGoesTo($jarS, '', '/people?search=C%3A%5CUsers');
+ok('C06 checkout (#910 round 2): with one organisation, a query holding an encoded backslash is followed', $got['status'] === 302 && $got['location'] === '/people?search=C%3A%5CUsers', said($got));
+$got = checkoutGoesTo($jarS, '', '/people?q=x%09y');
+ok('C07 checkout (#910 round 2): with one organisation, a query holding an encoded tab is followed', $got['status'] === 302 && $got['location'] === '/people?q=x%09y', said($got));
 foreach (hostile('', null) as $label => $address) {
     $got = checkoutGoesTo($jarS, '', $address);
     ok('C02 checkout refuses ' . $label . ': ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
@@ -801,6 +816,14 @@ $got = req($jarF, 'GET', '/calendar?tag[]=a&lang=cy');
 ok('F07 one organisation: a list in the query comes back rebuilt, and the switch does not fall over', $got['status'] === 302 && $got['location'] === '/calendar?tag%5B0%5D=a', said($got));
 $got = req($jarF, 'GET', '/calendar?next=javascript:alert(1)&lang=cy');
 ok('F08 one organisation: scheme-shaped text in the QUERY is not a scheme, and comes back encoded on this page', $got['status'] === 302 && $got['location'] === '/calendar?next=javascript%3Aalert%281%29', said($got));
+// #910 round 2: http_build_query() writes a backslash as "%5C" and a tab as
+// "%09", which the judge refused anywhere until it read only the path.
+$got = req($jarF, 'GET', '/people?search=C%3A%5CUsers&lang=cy');
+ok('F09 one organisation: a query holding a backslash comes back to the same page', $got['status'] === 302 && $got['location'] === '/people?search=C%3A%5CUsers', said($got));
+$got = req($jarF, 'GET', '/people?q=x%09y&lang=cy');
+ok('F10 one organisation: a query holding an encoded tab comes back to the same page', $got['status'] === 302 && $got['location'] === '/people?q=x%09y', said($got));
+$got = req($jarF, 'GET', '/%5Coutside.example?lang=cy');
+ok('F11 one organisation: an ENCODED backslash in the path is still refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
 
 // =============================================================================
 head('Summary');

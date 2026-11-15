@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 110; // + S17b, S27b (#910)
-const EXPECTED_NO_CRAWL = 100;
+const EXPECTED_FULL     = 112; // + S16b, S17b, S27b, S27c (#910)
+const EXPECTED_NO_CRAWL = 102;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1184,6 +1184,7 @@ if ($only === []) {
         'S14 a tab between two slashes'                             => "/\t/outside.selftest.invalid",
         'S15 a tab, encoded, between two slashes'                   => '/%09/outside.selftest.invalid',
         'S16 a line break between two slashes'                      => "/\n/outside.selftest.invalid",
+        'S16b a line break, encoded, between two slashes (#910 round 2: the path is still read decoded)' => '/%0a/outside.selftest.invalid',
         'S17 a scheme: "javascript:"'                               => 'javascript:alert(1)',
         'S17b a scheme: "data:" (#910: the scheme rule now lives in "must begin with /")' => 'data:text/html,x',
         'S18 another organisation\'s part'                          => '/' . KEY_A . '/account',
@@ -1203,6 +1204,7 @@ if ($only === []) {
     $kept = [
         'S27 control: a page of B, with a query' => B . '/calendar?view=list',
         'S27b control (#910, D-161): a page of B whose query holds a time, "T10:30", which the judge used to read as a scheme' => B . '/calendar?from=2026-06-01T10:30',
+        'S27c control (#910 round 2): a page of B whose query holds an encoded backslash and tab' => B . '/people?search=C%3A%5CUsers&q=x%09y',
         'S28 control: B\'s front page'            => B . '/',
         'S29 control: B\'s front page, no slash'  => B,
     ];

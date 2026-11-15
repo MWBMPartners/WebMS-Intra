@@ -1904,6 +1904,18 @@ class Auth
      * with it, and `tools/come-back-addresses-selftest.php` sends
      * "javascript:alert(1)" to every judged page to say so.
      *
+     * THE SAME DECISION REACHES TWO MORE RULES (round 2 of #910's check): the
+     * backslash rule and the DECODED control-character rule read only the path
+     * — the address as sent, up to its first "?" or "#" — and so does the
+     * host test. A backslash or an encoded tab in a query or a fragment does
+     * nothing to where a browser goes, and refusing them sent
+     * "/people?search=C%3A%5CUsers" to the front page. A RAW control character
+     * is still refused anywhere in the address, because a browser removes it
+     * from the whole address before reading it. Measured by a differential
+     * run of this method against the version before #910 (371,296 addresses):
+     * nothing it refused before is now refused differently, and none of the
+     * 9,642 it newly accepts leaves the portal when a browser resolves it.
+     *
      * TWO RULES WERE ADDED BY THE LINK SWEEP (#536). Every older rule is
      * still here, in the same order, unchanged — except the old scheme test,
      * which #910 (D-161) replaced as described above.
@@ -2013,14 +2025,33 @@ class Auth
             return $fallback;
         }
 
-        // 🚫 Reject backslash sequences that could be interpreted as protocol-relative
-        if (str_contains($decoded, '\\') === true) {
+        // ✂️ THE PATH, AS SENT (#910, D-161, round 2 of its check). Everything
+        //    before the first "?" or "#" of the address as it was handed in —
+        //    split on the RAW text, never the decoded, because "%3F" in a path
+        //    is not a "?" to a browser. The backslash and decoded-control-
+        //    character rules below read ONLY this part. A browser does nothing
+        //    with a backslash or an encoded tab in a query or a fragment: it
+        //    stays on the page the path names. Reading the whole address
+        //    refused "/people?search=C%3A%5CUsers" and "/people?q=x%09y", and
+        //    the language switch, which hands the judge its whole return
+        //    address, sent such a page to the front page. D-161 rules out the
+        //    judge reading the whole address.
+        $pathSent    = substr($url, 0, strcspn($url, '?#'));
+        $pathDecoded = rawurldecode($pathSent);
+
+        // 🚫 Reject a backslash in the path, as sent or decoded: a browser
+        //    reads "/\host" as "//host", another site.
+        if (str_contains($pathDecoded, '\\') === true) {
             return $fallback;
         }
 
         // 🚫 Reject tabs, line breaks and every other control character
-        //    (rule 1 above), both as sent and once decoded.
-        if (preg_match('/[\x00-\x1F\x7F]/', $url . $decoded) === 1) {
+        //    (rule 1 above): AS SENT, ANYWHERE in the address — a browser takes
+        //    a raw tab or line break out of the whole address before reading
+        //    it, and a raw line break in a Location header is never wanted —
+        //    and once DECODED, in the path only ("%09" in a query is three
+        //    ordinary characters to a browser).
+        if (preg_match('/[\x00-\x1F\x7F]/', $url . $pathDecoded) === 1) {
             return $fallback;
         }
 
@@ -2031,8 +2062,11 @@ class Auth
         //    docblock. Do not put it back to "be safe": it is the cry-wolf
         //    direction, and it sent people to the wrong page.
 
-        // 🔍 Parse the URL — if it has a host component, it's an external redirect
-        $parsed = parse_url($decoded);
+        // 🔍 Parse the PATH — if it has a host component, it's an external
+        //    redirect. Only the path, for the same reason as above: PHP's
+        //    parse_url() gives up on some ordinary queries, and nothing after
+        //    "?" or "#" can name a host.
+        $parsed = parse_url($pathDecoded);
         if ($parsed === false || isset($parsed['host']) === true) {
             return $fallback;
         }

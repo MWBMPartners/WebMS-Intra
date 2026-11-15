@@ -151,10 +151,13 @@ if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET[
     //    organisation's front page.
     //
     //    The WHOLE address is judged, query included. That works because the
-    //    judge now looks for a scheme only before the first "/", "?" or "#"
-    //    (the other half of D-161): it used to refuse "T10:" in
-    //    `/calendar?from=2026-06-01T10:30`, which would have sent the switch
-    //    to the front page on every such page.
+    //    judge reads only the part of an address that can send a browser
+    //    elsewhere (the other half of D-161): it looks for a scheme only
+    //    before the first "/", "?" or "#", and applies its backslash and
+    //    encoded-control-character rules to the path alone. It used to refuse
+    //    "T10:" in `/calendar?from=2026-06-01T10:30`, and the "%5C" that
+    //    http_build_query() writes for a backslash in a query, which would
+    //    have sent the switch to the front page from every such page.
     $redirect = Auth::safeRedirectUrl($path . ($newQuery !== '' ? '?' . $newQuery : ''));
     header('Location: ' . $redirect, true, 302);
     exit();

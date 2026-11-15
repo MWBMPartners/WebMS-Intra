@@ -26,16 +26,28 @@
  * nobody checked must never reach a developer's page as a link.
  *
  * WHAT IT ACCEPTS: an http:// or https:// address with a host name, with or
- * without a folder, page, "?" or "#" after it — a company's "about" page is a
- * perfectly good website link, unlike the portal's own address, which must
- * stop at the name (that is PortalAddress's rule, not this one). A bare host
- * name is taken to mean https, as PortalAddress does.
+ * without a port and a folder, page, "?" or "#" after it — a company's
+ * "about" page is a perfectly good website link, unlike the portal's own
+ * address, which must stop at the name (that is PortalAddress's rule, not
+ * this one). A bare name typed WITHOUT "http://" or "https://" is taken to
+ * mean https, as PortalAddress does — but only when it holds a dot
+ * ("www.example.org", "example.org:8080"), as every public website's name
+ * does.
  *
  * WHAT IT REFUSES, never repairs: a space, line break or other control
- * character; any other beginning (`javascript:`, `data:`, `ftp:` ...); a user
- * name or password; a host name that is not plain letters, digits, hyphens and
- * dots; anything over 255 characters; and, after the host name, any character
- * an address may not carry unencoded (quotes, angle brackets and the like).
+ * character; a beginning with "://" other than http:// or https://
+ * (`ftp://` ...); a bare name with no dot in it, which is also how
+ * `javascript:1`, `javascript:443/alert(1)`, `vbscript:8080` and
+ * `data:80/x` are refused — without that rule PortalAddress reads each as a
+ * host named "javascript" (or "vbscript", "data") with a port, and the link
+ * became "https://javascript:1" (round 2 of #910's check found it; the output
+ * was always http(s), so it was never a script, but it was not what the
+ * person typed and the header said it was refused); a beginning such as
+ * `javascript:alert(1)` or `mailto:` that is not a name and port at all; a
+ * user name or password; a host name that is not plain letters, digits,
+ * hyphens and dots; anything over 255 characters; and, after the host name,
+ * any character an address may not carry unencoded (quotes, angle brackets
+ * and the like).
  *
  * The host name itself is judged by `PortalAddress::check()`, so there is ONE
  * rule in the portal for what a host name is. This class adds only the part
@@ -100,6 +112,15 @@ final class PublisherWebsite
         }
         $nameLength = strcspn($rest, '/?#');
         $after      = substr($rest, $nameLength);
+
+        // 🔤 A bare name (no "://") must hold a dot before any port. Without
+        //    this, "javascript:443/alert(1)" is a host called "javascript"
+        //    with port 443 to PortalAddress, and became a link the person
+        //    never typed. A public website's name always has a dot; a name
+        //    without one ("localhost") can still be given with its http://.
+        if ($scheme === '' && str_contains(explode(':', substr($rest, 0, $nameLength), 2)[0], '.') === false) {
+            return $refuse('Type the website address in full, beginning with https://, for example https://www.example.org. A name with no dot in it is not a website\'s address.');
+        }
 
         $server = PortalAddress::check($scheme . substr($rest, 0, $nameLength));
         if ($server['problem'] !== '') {
