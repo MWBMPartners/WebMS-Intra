@@ -75,6 +75,9 @@ $signedOutMsg = Auth::takeSignedOutNotice();
 //    first and is WRONG — a message somebody ELSE left waiting in this browser
 //    would be shown to whoever opens the sign-in page next (#900's concern;
 //    part K of two-step-selftest.php went red on it). Said once.
+//    This page says it only to somebody NOT signed in: a signed-in browser
+//    was sent on at the top of this page, so `oauthError()` sends a signed-in
+//    member to the Account page or "Add a password" instead, which read it.
 $signInProblem = Auth::takeSignInProblem();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

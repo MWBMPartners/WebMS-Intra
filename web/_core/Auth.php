@@ -4850,22 +4850,54 @@ class Auth
     {
         self::ensureSession();
         http_response_code($httpCode);
-        // #1042: under the sign-in page's OWN key. It used to be the general
+        // #1042: under the sign-in problem's OWN key. It used to be the general
         // `flash_msg`, which the sign-in page never printed, so the person was
         // told nothing; see takeSignInProblem().
         $_SESSION[self::SIGN_IN_PROBLEM_KEY] = $message;
-        header('Location: ' . Site::url('login'));
+        // 👤 Somebody ALREADY SIGNED IN reaches these callbacks on purpose: the
+        //    Account page's "link" buttons and "Add a password" (#731) both
+        //    send them to login/ms365 or login/google. The sign-in page sends
+        //    a signed-in browser straight on before it reads anything, so for
+        //    them it would never be said (#1042 round 3). They go back to a
+        //    page that reads it instead. Their session is still their own: no
+        //    callback grants anything before the step that fails.
+        header('Location: ' . (self::check() === true ? self::signedInProblemPage() : Site::url('login')));
         exit();
     }
 
-    /** The session key a failed Microsoft or Google sign-in leaves its words under, for the sign-in page (#1042). */
+    /** The session key a failed Microsoft or Google sign-in leaves its words under (#1042). */
     private const SIGN_IN_PROBLEM_KEY = 'sign_in_problem';
+
+    /**
+     * 🔙 Where a SIGNED-IN member whose Microsoft or Google sign-in failed is
+     * sent (#1042 round 3): back to "Add a password" when that is the page that
+     * sent them (it leaves its own address as the come-back, #731), else the
+     * Account page. Both print `takeSignInProblem()`. The come-back is TAKEN
+     * here, because the attempt it was kept for is over.
+     *
+     * @return string
+     */
+    private static function signedInProblemPage(): string
+    {
+        $addPassword = Site::url('account/add-password');
+
+        return self::comeBackAfterSignIn() === $addPassword ? $addPassword : Site::url('account');
+    }
 
     /**
      * ❌ Why the last Microsoft or Google sign-in in this browser failed, or ''
      * (#1042). Taken out of the session as it is read, so it is said once.
      * The ONE reader; only `oauthError()` writes it, always with this file's
      * own words, never a visitor's.
+     *
+     * THREE PAGES ASK IT, and each reaches only the person the words are for.
+     * The sign-in page asks it for somebody NOT signed in (`oauthError()`
+     * sends them there directly). The Account page and "Add a password" ask
+     * it for somebody who IS (`signedInProblemPage()`), and those words were
+     * written while that same person was signed in: a sign-in by anybody,
+     * from a session nobody was signed in to or by somebody else, starts with
+     * only the language kept (`beginSessionFor()`), and signing out empties
+     * the session, so another person's words cannot be waiting there.
      *
      * @return string
      */

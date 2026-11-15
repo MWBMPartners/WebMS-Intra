@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 172; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b)
+const EXPECTED_CHECKS = 177; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13)
 
 function refuse(string $why): never
 {
@@ -3202,6 +3202,116 @@ ok('M08 once the organisation follows the installation again (its row deleted by
     $ownRow() === null && count($madeForXena()) === 1 && $m08['in'] === true,
     'own ' . var_export($ownRow(), true) . '; callback ' . describe($m08['back']));
 $dropMadeForXena();
+q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
+
+// =============================================================================
+// M09-M13 (#1042 round 3): a member who is ALREADY SIGNED IN is told why.
+// =============================================================================
+// Signed-in members reach the two callbacks on purpose: the Account page's
+// "link" buttons and "Add a password" (#731) both send them to login/ms365 or
+// login/google. The sign-in page sends a signed-in browser straight on BEFORE
+// it reads anything, so with the words left for it alone a signed-in member
+// was told nothing (the independent check's round-2 finding). These sign a
+// REAL member in, put each failure through the real callback, and read the
+// page the browser is sent to. Each also proves the words were said ONCE and
+// that the session is still the member's own.
+$wrongState = static function (string $jar, int $ipLast, string $provider = 'ms365'): array {
+    req($jar, 'GET', '/login/' . $provider, null, ip($ipLast));         // the real start, which stores a state
+
+    return req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => str_repeat('0', 32), 'code' => 'p1042-not-a-code']), null, ip($ipLast));
+};
+$stateWords = 'Invalid OAuth state. Please try signing in again.';
+$saidOnce   = static function (string $jar, int $ipLast, string $path, string $words): bool {
+    $entries = sessionEntries($jar);
+
+    return $entries !== null && array_key_exists('sign_in_problem', $entries) === false
+        && str_contains(req($jar, 'GET', $path, null, ip($ipLast))['body'], $words) === false;
+};
+
+// M09: signed in by password, a Microsoft sign-in with a WRONG state.
+[$xenaIn, $xenaPw] = passwordStep('xena', ip(200));
+$m09      = $wrongState($xenaIn, 200);
+$m09Page  = $m09['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(200)) : ['status' => 0, 'body' => ''];
+$m09Who   = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
+ok('M09 a member SIGNED IN by password whose Microsoft sign-in comes back with a wrong state is sent to the Account page, which says "' . $stateWords . '" - and it is said once, and she is still signed in as herself',
+    $xenaPw['status'] === 302 && $m09['status'] === 302 && $m09['location'] === '/account'
+    && $m09Page['status'] === 200 && str_contains($m09Page['body'], $stateWords) === true
+    && $m09Who === PEOPLE['xena'] && $saidOnce($xenaIn, 200, '/account', $stateWords) === true,
+    'sign-in ' . describe($xenaPw) . '; callback ' . describe($m09) . '; page ' . $m09Page['status'] . '; session person ' . $m09Who);
+
+// M10: the same signed-in member, with this organisation REFUSING new
+// accounts, and Microsoft sending the address that matches no account (the
+// state a restore leaves, M01). Nothing is made, and SHE is told why.
+$ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '0']);
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+try {
+    $m10Start = req($xenaIn, 'GET', '/login/ms365', null, ip(201));
+    $m10State = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $m10Start['location'], $m) === 1 ? $m[1] : '';
+    $m10      = req($xenaIn, 'GET', '/login/ms365/callback?' . http_build_query(['state' => $m10State, 'code' => STUB . json_encode(['sub' => 'p1042-ms-xena', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena'])]), null, ip(201));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+$m10Page = $m10['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(201)) : ['status' => 0, 'body' => ''];
+$m10Who  = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
+ok('M10 the same SIGNED-IN member, with this organisation refusing new accounts, whose Microsoft sign-in matches no account: no account is made, she is sent to the Account page, which says "' . $ssoWords . '", once - and she is still signed in as herself',
+    $ownRow() === '0' && $m10State !== '' && $madeForXena() === [] && $m10['status'] === 302 && $m10['location'] === '/account'
+    && $m10Page['status'] === 200 && str_contains($m10Page['body'], $ssoWords) === true
+    && $m10Who === PEOPLE['xena'] && $saidOnce($xenaIn, 201, '/account', $ssoWords) === true,
+    'own row ' . var_export($ownRow(), true) . '; callback ' . describe($m10) . '; page ' . $m10Page['status'] . '; session person ' . $m10Who);
+
+// M11: the Google callback does the same for a signed-in member (its own
+// calls to oauthError(); the refusal there is M04b's).
+$m11     = $wrongState($xenaIn, 202, 'google');
+$m11Page = $m11['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(202)) : ['status' => 0, 'body' => ''];
+ok('M11 the GOOGLE callback with a wrong state sends the same signed-in member to the Account page, which says "' . $stateWords . '", once',
+    $m11['status'] === 302 && $m11['location'] === '/account' && str_contains($m11Page['body'], $stateWords) === true
+    && (int) (sessionEntries($xenaIn)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaIn, 202, '/account', $stateWords) === true,
+    'callback ' . describe($m11));
+$ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => 'follow']);
+
+// M12: "Add a password" sends the person to the callback with ITS OWN address
+// as the come-back (#731), so a failure brings them back THERE. Xena is made
+// what that page is for - signed in by Microsoft, with no password, and the
+// proof of that sign-in older than its window (her session's proof is
+// emptied; the real page then asks her to sign in again and writes the
+// come-back itself).
+q('DELETE FROM tblLocalAccounts WHERE userID = ?', 'i', [PEOPLE['xena']]);
+$xenaSso = newJar();
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+try {
+    $m12In = ssoIn($xenaSso, 'ms365', 'xena', ip(203));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+putInSession($xenaSso, ['reauth_proof' => null]);
+$m12Ask  = req($xenaSso, 'GET', '/account/add-password', null, ip(203));
+$m12Back = sessionEntries($xenaSso)['login_redirect'] ?? null;
+$m12     = $wrongState($xenaSso, 203);
+$m12Page = $m12['location'] === '/account/add-password' ? req($xenaSso, 'GET', '/account/add-password', null, ip(203)) : ['status' => 0, 'body' => ''];
+ok('M12 a member signed in by Microsoft with no password, sent from "Add a password" to sign in again, whose sign-in comes back with a wrong state is sent BACK to "Add a password", which says "' . $stateWords . '", once',
+    $m12In['back']['status'] === 302 && $m12Ask['status'] === 200 && $m12Back === '/account/add-password'
+    && $m12['status'] === 302 && $m12['location'] === '/account/add-password'
+    && $m12Page['status'] === 200 && str_contains($m12Page['body'], $stateWords) === true
+    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaSso, 203, '/account/add-password', $stateWords) === true,
+    'sso sign-in ' . describe($m12In['back']) . '; page ' . $m12Ask['status'] . '; come-back ' . var_export($m12Back, true) . '; callback ' . describe($m12));
+
+// M13: an ORGANISATION cannot choose "allow" (only follow or refuse are
+// offered, because "allow" could never undo the installation's refusal). A
+// hand-made post of choice=1 at the organisation's level is refused, said so,
+// and stores nothing - with the installation refusing, so storing anything
+// would matter.
+$ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => '0']);
+$m13      = $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '1']);
+$m13Page  = req($vicSso, 'GET', '/admin/integrations', null, ip(191));
+ok('M13 an organisation-level post of choice=1 ("allow") is refused: nothing is stored for the organisation, the installation still refuses, and the page says an organisation cannot allow what the installation refuses',
+    $m13['status'] === 302 && $ownRow() === null && $installRow() === '0'
+    && str_contains($m13Page['body'], 'it cannot allow what the installation refuses') === true,
+    'post ' . describe($m13) . '; own ' . var_export($ownRow(), true) . ', install ' . var_export($installRow(), true));
+$ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => '1']);
 q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
 
 
