@@ -394,8 +394,22 @@ if ($committed === true) {
     //    person's home are told to choose a new one. After the commit, and
     //    `tellLeadersHomesReleased()` never throws, so a broken mail route
     //    can never reach the catch above ("nothing was changed").
+    //    The page then SAYS what happened (round 2 of #952's check: it said
+    //    nothing, while leaving and removing say when nobody could be told).
+    //    Appended to every message below, the failure ones included.
+    $homesNote = '';
     if ($releasedHomes !== []) {
-        \Portal\Core\SmallGroups::tellLeadersHomesReleased($db, $releasedHomes, $userId);
+        $groupsNotTold = 0;
+        \Portal\Core\SmallGroups::tellLeadersHomesReleased($db, $releasedHomes, $userId, $groupsNotTold);
+        $groupCount = count($releasedHomes);
+        $homesNote  = ' Their home was taken off ' . ($groupCount === 1 ? '1 small group' : $groupCount . ' small groups')
+            . ' as a meeting place. '
+            . ($groupsNotTold === 0
+                ? ($groupCount === 1 ? 'Its leaders are' : 'Their leaders are') . ' being e-mailed to choose a new place.'
+                : ($groupsNotTold === $groupCount
+                    ? 'No e-mail could be sent to ' . ($groupCount === 1 ? 'its' : 'their') . ' leaders, so please tell them to choose a new place.'
+                    : 'The leaders of ' . $groupsNotTold . ' of them could not be e-mailed, so please tell them to choose a new place; '
+                      . 'the others are being e-mailed.'));
     }
 
     // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after
@@ -461,11 +475,11 @@ if ($committed === true) {
         ? ''
         : ' These steps failed: ' . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.';
     if ($isActiveNow === 0 && $failedSteps === []) {
-        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
+        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'success';
     } elseif ($isActiveNow === 0) {
         $_SESSION['flash_msg']  = 'The offboarding was recorded and their account is switched off, but not everything was done.'
-            . $failedWords . $erasureNote;
+            . $failedWords . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'danger';
     } else {
         $_SESSION['flash_msg']  = ($isActiveNow === null
@@ -473,7 +487,7 @@ if ($committed === true) {
                   . 'still be able to sign in: check it, and switch it off, on the Users page.'
                 : 'The offboarding was recorded, but their account is NOT switched off, so they may still be able to sign '
                   . 'in: switch it off on the Users page.')
-            . $failedWords . $erasureNote;
+            . $failedWords . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'danger';
     }
 }

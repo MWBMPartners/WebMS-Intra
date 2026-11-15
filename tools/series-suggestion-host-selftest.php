@@ -78,7 +78,10 @@
  *   groups 847201-847209 and places 847301-847309; they are removed at the
  *   START and the END. It changes the installation's `multisite.*`,
  *   `small-groups.enabled`, `offboarding.enabled`, `mail.provider` and
- *   `mail.smtp.host` and `site.url` rows and puts them back. Section F creates
+ *   `mail.smtp.host`, `mail.smtp.port`, `mail.smtp.username`,
+ *   `mail.smtp.password`, `mail.smtp.security`, `mail.limit.perHour`,
+ *   `mail.fallbackProvider`, `mail.defaultFromAddress` and `site.url` rows and the
+ *   mail job's last-ran moment, and puts them back. Section F creates
  *   a trigger (`p847_fail_usual_place`) and drops it straight after, and the
  *   start and end of every run drop it too; the database user therefore needs
  *   CREATE TRIGGER, and the test fails loudly (an uncaught error) without it.
@@ -106,7 +109,7 @@ $passed  = 0;
 $failed  = 0;
 $results = [];
 $quiet   = false;
-$state   = ['proc' => null, 'child' => null, 'settings' => [], 'started' => false, 'cleaned' => false];
+$state   = ['proc' => null, 'child' => null, 'settings' => [], 'started' => false, 'cleaned' => false, 'mailJob' => null];
 
 const ORG_A = 847101;
 const ORG_B = 847102;
@@ -252,6 +255,7 @@ function removeWorld(): void
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 %'");
     $db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` LIKE 'p847-%'");
     $db->query("DELETE FROM `tblEmailLog` WHERE `subject` LIKE 'A meeting place of P847 %' OR `toRecipients` = 'p847.visitor@example.invalid'");
+    $db->query("DELETE FROM `tblMailQueue` WHERE `subject` LIKE 'A meeting place of P847 %' OR `toRecipients` = 'p847.visitor@example.invalid'");
     $db->query("DELETE FROM `tblApiKeys` WHERE `name` LIKE 'P847 %'");
     $groups = implode(',', [GROUP_A, GROUP_B, GROUP_R, GROUP_F, GROUP_U]);
     $db->query("DELETE FROM `tblSmallGroupMeetings` WHERE `groupID` IN ({$groups})");
@@ -292,6 +296,11 @@ function cleanup(): void
         $state['proc'] = null;
     }
     try {
+        if ($state['mailJob'] === null || $state['mailJob']['jobLastRanAt'] === null) {
+            q("UPDATE `tblMailRouteState` SET `jobLastRanAt` = NULL WHERE `routeKey` = 'installation'");
+        } else {
+            q("UPDATE `tblMailRouteState` SET `jobLastRanAt` = ? WHERE `routeKey` = 'installation'", 's', [(string) $state['mailJob']['jobLastRanAt']]);
+        }
         foreach ($state['settings'] as $key => $before) {
             if ($before === null) {
                 q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [(string) $key]);
@@ -314,23 +323,27 @@ function cleanup(): void
 }
 
 /** Set an installation-wide setting, remembering what it was (once) so the clean-up can put it back. */
-function setting(string $key, string $value): void
+function setting(string $key, string $value, int $sensitive = 0): void
 {
     global $state;
     if (array_key_exists($key, $state['settings']) === false) {
         $state['settings'][$key] = one('SELECT `settingID`, `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
     }
     if ($state['settings'][$key] === null && one('SELECT 1 AS x FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]) === null) {
-        q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+        q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, ?, ?)', 'sssi', [$key, $value, $value, $sensitive]);
         return;
     }
-    q('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL', 'ss', [$value, $key]);
+    q('UPDATE `tblSettings` SET `settingValue` = ?, `isSensitive` = ? WHERE `settingKey` = ? AND `siteID` IS NULL', 'sis', [$value, $sensitive, $key]);
 }
 
 // ── Set-up ──────────────────────────────────────────────────────────────────
 $state['started'] = true;
 register_shutdown_function('cleanup');
 removeWorld();
+// Section F makes the portal believe its mail job is running, so a message
+// that cannot go at once is KEPT (Mailer answers true): that is the only way
+// to reach the "being e-mailed" wording without a mail server. Put back at the end.
+$state['mailJob'] = one("SELECT `jobLastRanAt` FROM `tblMailRouteState` WHERE `routeKey` = 'installation'");
 
 setting('multisite.enabled', 'true');
 setting('multisite.detectionMode', 'session');
@@ -507,6 +520,14 @@ function flashAfter(string $jar, array $answer): string
     return squash(strip_tags(html_entity_decode(req($jar, 'GET', $path)['body'], ENT_QUOTES, 'UTF-8')));
 }
 
+/** The 400 characters of a page from where `$from` first appears (for a failure's detail), or its start. */
+function aroundWords(string $words, string $from): string
+{
+    $at = strpos($words, $from);
+
+    return substr($words, $at === false ? 0 : $at, 400);
+}
+
 /** Fold every run of whitespace into one space, so a sentence wrapped in the source reads as written. */
 function squash(string $text): string
 {
@@ -565,6 +586,7 @@ if ($up === false) {
 // before a later date "keeps that date off the website", which is untrue for
 // every day the window is open). The second half is then DRIVEN, below.
 const SERIES_SENTENCE = 'the same From and Until dates apply to every date in the series: they are not worked out again for each date';
+const SERIES_LIMITS   = '(A date you later make a draft, cancel or untick on its own is not shown, and the public door gives a website at most 50 dates at a time, 20 unless it asks for more.)';
 const SERIES_TRUTH    = 'While today is between the two dates, every date of the series still to come is on the website, including those after the Until date; once the Until date has passed, none of them is, so a later date comes off the website before its day.';
 
 /** A day relative to today on organisation A's own clock, as Y-m-d. */
@@ -619,6 +641,7 @@ $sectionW = static function (): void {
     check('W00 premise: the Manage Events page answered with the new-event form', $new['status'] === 200 && str_contains($new['body'], 'id="websiteFrom-new"'), 'HTTP ' . $new['status']);
     check('W01 the new-event form says the same two dates apply to every date in a series', str_contains(squash($new['body']), SERIES_SENTENCE));
     check('W01b ...and says what they do: judged against today, so a later date comes off before its day', str_contains(squash($new['body']), SERIES_TRUTH));
+    check('W01c ...and its two limits: a date taken off on its own, and how many dates the door gives at a time', str_contains(squash($new['body']), SERIES_LIMITS));
 
     // Three weekly series, each made through the real form, each three dates
     // still to come (20, 27 and 34 days from now): one whose window is OPEN
@@ -881,7 +904,9 @@ $sectionH = static function (): void {
     check('H06b B\'s leader was not', leadersTold(GROUP_B_NAME) === []);
     check('H06c a FORMER leader (membership ended, role still leader) was not e-mailed', in_array(mailOf(FORMER_LEAD), leadersTold(GROUP_A_NAME), true) === false);
     check('H06d a co-leader whose account is SWITCHED OFF was not e-mailed', in_array(mailOf(OFF_LEAD), leadersTold(GROUP_A_NAME), true) === false);
-    check('H07 the leaver is told their home was removed', str_contains(flashAfter($jarHost, $left), 'Your home is no longer one of its meeting places'));
+    $leftWords = flashAfter($jarHost, $left);
+    check('H07 the leaver is told their home was removed', str_contains($leftWords, 'Your home is no longer one of its meeting places'));
+    check('H07b ...and, with no mail route working here, that the leaders could not be e-mailed', str_contains($leftWords, 'No e-mail could be sent to the group\'s leaders, so please let them know.'));
 
     // 3. A leader removes the second host.
     $jarLead = signIn(LEAD_A, ORG_A);
@@ -894,6 +919,9 @@ $sectionH = static function (): void {
     // 4. Offboarding a host who has homes in BOTH organisations' groups.
     $jarG = signIn(GADMIN, ORG_A);
     $off = post($jarG, '/admin/users', '/offboarding/do', ['userID' => (string) HOST3, 'reason' => 'P847 moved away', 'dataDisposition' => 'retain', 'effectiveDate' => date('Y-m-d')]);
+    $offWords = flashAfter($jarG, $off);
+    check('H14 the offboarding message says their home left 2 groups, and that no e-mail could be sent to the leaders',
+        str_contains($offWords, 'Their home was taken off 2 small groups as a meeting place. No e-mail could be sent to their leaders, so please tell them to choose a new place.'), aroundWords($offWords, 'Offboarded'));
     check('H09 premise: offboarding ended both of their memberships', membershipStatus(GROUP_A, HOST3) === 'ended' && membershipStatus(GROUP_B, HOST3) === 'ended', 'HTTP ' . $off['status']);
     check('H10 D-168: offboarding empties their homes in BOTH organisations\' groups', emptied(placeRow(PLACE_HOST3_A)) && emptied(placeRow(PLACE_HOST3_B)),
         json_encode([placeRow(PLACE_HOST3_A), placeRow(PLACE_HOST3_B)]));
@@ -1005,6 +1033,67 @@ function nextPageWords(string $jar, string $path): string
     return squash(strip_tags(html_entity_decode(req($jar, 'GET', $path)['body'], ENT_QUOTES, 'UTF-8')));
 }
 
+/**
+ * Stop one save at its WRITE and ask whether it still holds `$user`'s
+ * membership row of `$group`. A second connection runs `$holdSql` (a
+ * `FOR UPDATE` on the parent row the save's write must look up), the save is
+ * sent without waiting, and after 2.5 seconds — if it is still waiting, the
+ * premise — a THIRD connection tries to lock the membership row with a
+ * one-second wait. Refused with "lock wait timeout" means the save holds it
+ * (right); getting it means the save's lock had already gone (the fault).
+ * Then everything is let go and the save finishes.
+ *
+ * @return array{blocked:bool, held:bool, why:string}
+ */
+function saveHeldAtItsWrite(string $holdSql, int $group, int $user, \CurlHandle $handle): array
+{
+    global $dbHost, $dbUser, $dbPass, $dbName, $dbPort;
+    $holder = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $holder->begin_transaction();
+    $holder->query($holdSql);
+
+    $multi = curl_multi_init();
+    curl_multi_add_handle($multi, $handle);
+    $deadline = microtime(true) + 2.5;
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.1);
+    } while ($running > 0 && microtime(true) < $deadline);
+    $blocked = $running > 0;
+
+    $prober = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $prober->query('SET SESSION innodb_lock_wait_timeout = 1');
+    $prober->begin_transaction();
+    $held = false;
+    $why  = '';
+    try {
+        $prober->query('SELECT `membershipID` FROM `tblSmallGroupMembers` WHERE `groupID` = ' . $group . ' AND `userID` = ' . $user . ' FOR UPDATE');
+        $why = 'the membership row was free while the save was still waiting to write: its lock had already been let go';
+    } catch (mysqli_sql_exception $e) {
+        $held = $e->getCode() === 1205;
+        $why  = $held === true ? '' : 'unexpected error ' . $e->getCode();
+    }
+    $prober->rollback();
+    $prober->close();
+    $holder->commit();
+    $holder->close();
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.2);
+    } while ($running > 0);
+    curl_multi_remove_handle($multi, $handle);
+    curl_multi_close($multi);
+
+    return ['blocked' => $blocked, 'held' => $held, 'why' => $why];
+}
+
+/** Make the portal believe its mail job ran just now (true), or has not run (false). */
+function mailJobRunning(bool $running): void
+{
+    q("INSERT INTO `tblMailRouteState` (`routeKey`, `jobLastRanAt`) VALUES ('installation', " . ($running === true ? 'UTC_TIMESTAMP()' : 'NULL') . ') '
+        . 'ON DUPLICATE KEY UPDATE `jobLastRanAt` = VALUES(`jobLastRanAt`)');
+}
+
 const HOST_REFUSAL = 'The host must be an active member of this group. Nothing was saved.';
 
 $sectionR = static function (): void {
@@ -1069,6 +1158,47 @@ $sectionR = static function (): void {
         array_key_exists('hostUserID', $usual) === true && $usual['hostUserID'] === null
         && ($usual['addressLine1'] ?? '') === '5 Usual Road', json_encode($usual) . ", HTTP {$run['answer']['status']}");
     check('R08b ...and the leader is told why', str_contains(nextPageWords($lead, '/small-groups/group?id=' . GROUP_U), HOST_REFUSAL));
+
+    // ── THE OTHER ORDER (round 2 of #952's check) ──────────────────────────
+    // Above, the departure holds the membership row FIRST and each save waits.
+    // In the other order the save checks "still a member" first; its lock on
+    // the membership row must then last until the save COMMITS, or a departure
+    // could end the membership, find no home to empty, and the save would then
+    // store a home for somebody who has left (D-168 rules that out). A lock
+    // lasts that long only inside a transaction (#697), and nothing pinned the
+    // transaction: deleting it left this test green. So each save is stopped
+    // at its WRITE, after its check, by this test holding a row that write must
+    // wait for (the parent row its foreign key looks up); a third connection
+    // then tries to take the membership row and must be made to WAIT.
+    q("UPDATE `tblSmallGroupMembers` SET `status` = 'active', `endedAt` = NULL WHERE `groupID` = ? AND `userID` IN (?, ?)", 'iii', [GROUP_R, RACER, RACER3]);
+    q("UPDATE `tblSmallGroupMembers` SET `status` = 'active', `endedAt` = NULL WHERE `groupID` = ? AND `userID` = ?", 'ii', [GROUP_U, RACER2]);
+    q('DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `hostUserID` = ?', 'ii', [GROUP_R, RACER]);
+
+    // 1. Adding a home: its INSERT waits for the GROUP's row (groupID's key).
+    $jar  = signIn(RACER, ORG_A);
+    $tok  = token(req($jar, 'GET', '/small-groups/place?id=' . GROUP_R)['body']);
+    $run  = saveHeldAtItsWrite('SELECT `groupID` FROM `tblSmallGroups` WHERE `groupID` = ' . GROUP_R . ' FOR UPDATE', GROUP_R, RACER,
+        handle($jar, 'POST', '/small-groups/place-save', ['csrf_token' => $tok, 'groupID' => (string) GROUP_R, 'action' => 'create',
+            'addressLine1' => '10 Race Road', 'city' => 'Hostville', 'countryCode' => 'GB']));
+    check('R09 premise: adding a home is stopped at its write (after its membership check)', $run['blocked']);
+    check('R10 adding a home HOLDS the member\'s membership row until it commits (a departure must wait)', $run['held'], $run['why']);
+
+    // 2. Naming a listed home's host: its UPDATE waits for the HOST's account row (hostUserID's key).
+    $lead   = signIn(LEAD_A, ORG_A);
+    $fields = formAsDrawn(req($lead, 'GET', '/small-groups/place?id=' . GROUP_R . '&placeID=' . PLACE_RACE)['body'], '/small-groups/place-save');
+    $fields['hostUserID'] = (string) RACER3;
+    $run = saveHeldAtItsWrite('SELECT `userID` FROM `tblUsers` WHERE `userID` = ' . RACER3 . ' FOR UPDATE', GROUP_R, RACER3,
+        handle($lead, 'POST', '/small-groups/place-save', $fields));
+    check('R11 premise: naming a listed home\'s host is stopped at its write (after its membership check)', $run['blocked']);
+    check('R12 naming a listed home\'s host HOLDS the new host\'s membership row until it commits', $run['held'], $run['why']);
+
+    // 3. Naming the usual place's host: its UPDATE waits for the HOST's account row too.
+    $fields = formAsDrawn(req($lead, 'GET', '/small-groups/manage?id=' . GROUP_U)['body'], '/small-groups/save');
+    $fields['hostUserID'] = (string) RACER2;
+    $run = saveHeldAtItsWrite('SELECT `userID` FROM `tblUsers` WHERE `userID` = ' . RACER2 . ' FOR UPDATE', GROUP_U, RACER2,
+        handle($lead, 'POST', '/small-groups/save', $fields));
+    check('R13 premise: naming the usual place\'s host is stopped at its write (after its membership check)', $run['blocked']);
+    check('R14 naming the usual place\'s host HOLDS the new host\'s membership row until it commits', $run['held'], $run['why']);
 };
 
 // =============================================================================
@@ -1108,7 +1238,47 @@ $sectionF = static function (): void {
     $step = (string) (one('SELECT `stepsLog` FROM `tblOffboarding` WHERE `userID` = ? ORDER BY `offboardingID` DESC LIMIT 1', 'i', [HOST4])['stepsLog'] ?? '');
     $rel  = array_values(array_filter((array) json_decode($step, true), static fn ($s): bool => is_array($s) && ($s['step'] ?? '') === 'release_small_group_homes'));
     check('F05 the step is recorded as FAILED, not as done', count($rel) === 1 && ($rel[0]['ok'] ?? true) === false, substr($step, 0, 300));
-    check('F06 and the administrator is told that step failed', str_contains(flashAfter($jarG, $off), 'removing their home from small groups\' meeting places'));
+    $failWords = flashAfter($jarG, $off);
+    check('F06 and the administrator is told that step failed', str_contains($failWords, 'removing their home from small groups\' meeting places'));
+    check('F06b ...and is NOT told a home was taken off a group', str_contains($failWords, 'Their home was taken off') === false);
+    // Offboarding again, with nothing failing and the mail job running (so the
+    // leaders' message is kept to send): the home goes now, and the page says
+    // the leaders are being e-mailed.
+    // A route that IS set up (a server named, on a port nothing listens on) and
+    // a mail job that ran just now: the send fails at once and the message is
+    // KEPT for the job to retry, which is what Mailer answers true for. With no
+    // server named at all nothing can be kept, and the page rightly says no
+    // e-mail could be sent (H14 checks that wording).
+    //
+    // The password is SEALED with the copy's own key and marked secret, as the
+    // portal stores one (rota-swaps-selftest.php's section M does the same):
+    // an unsealed value counts as no password, and the route as not set up.
+    global $child, $sep;
+    $keyText = (string) file_get_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key');
+    $nonce   = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $sealed  = base64_encode($nonce . sodium_crypto_secretbox('p847-' . bin2hex(random_bytes(6)), $nonce, sodium_hex2bin(hash('sha256', $keyText))));
+    $server  = stream_socket_server('tcp://127.0.0.1:0');
+    $free    = (int) substr((string) strrchr((string) stream_socket_get_name($server, false), ':'), 1);
+    fclose($server);
+    setting('mail.smtp.host', '127.0.0.1');
+    setting('mail.smtp.port', (string) $free);
+    setting('mail.smtp.security', 'starttls');
+    setting('mail.smtp.username', 'p847-test-mailbox');
+    setting('mail.smtp.password', $sealed, 1);
+    setting('mail.defaultFromAddress', 'p847.sender@selftest.invalid');
+    setting('mail.limit.perHour', '');
+    setting('mail.fallbackProvider', '');
+    mailJobRunning(true);
+    try {
+        $again = post($jarG, '/admin/users', '/offboarding/do', ['userID' => (string) HOST4, 'reason' => 'P847 again', 'dataDisposition' => 'retain', 'effectiveDate' => date('Y-m-d')]);
+        $againWords = flashAfter($jarG, $again);
+    } finally {
+        mailJobRunning(false);
+        setting('mail.smtp.host', '');
+    }
+    check('F07 offboarding again with nothing failing takes the home off this time', emptied(placeRow(PLACE_HOST4_A)), json_encode(placeRow(PLACE_HOST4_A)));
+    check('F08 ...and says the group\'s leaders are being e-mailed',
+        str_contains($againWords, 'Their home was taken off 1 small group as a meeting place. Its leaders are being e-mailed to choose a new place.'), aroundWords($againWords, 'Offboarded'));
 };
 
 // =============================================================================
@@ -1124,7 +1294,7 @@ $sectionO = static function (): void {
         'Take their home off every small group that meets there, in every organisation, deleting its address from the group at once'));
     check('O03 it names the remembered map position honestly', str_contains($words, 'a map position the portal looked up for it may be remembered until its keeping period ends'));
     check('O04 the rehire paragraph says only the account and organisation memberships come back', str_contains($words,
-        'A rehire switches the account back on and restores its organisation memberships (every organisation for a global administrator, only this one for anybody else), and NOTHING ELSE'));
+        'A rehire switches the account back on, restores its organisation memberships (every organisation for a global administrator, only this one for anybody else) and cancels any erasure request for them still waiting for review, even one they made themselves; NOTHING ELSE is put back'));
     check('O05 ...and that a deleted small-group home address is gone for good', str_contains($words, 'a small-group home address that was deleted is gone for good'));
 };
 
@@ -1157,6 +1327,13 @@ $plants = [
     ['P12', '_apps/small-groups/place-save.php', 'if ($host !== null && $host !== $storedHost && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {', 'if (false) {', $sectionR, 'R05', 'naming a listed home\'s host not asking under the lock'],
     ['P13', '_apps/small-groups/save.php', "&& SmallGroups::hostStillBelongs(\$db, \$siteId, \$groupId, \$hostPick['host']) === false) {", '&& false) {', $sectionR, 'R08', 'naming the usual place\'s host not asking under the lock'],
     ['P14', '_apps/offboarding/do.php', "\$db->query('ROLLBACK TO SAVEPOINT `release_small_group_homes`');", '', $sectionF, 'F02', 'offboarding\'s home step not rolled back on a part-way failure'],
+    ['P01c', '_apps/calendar/manage/_event_form.php', 'gives a website at most 50 dates at a time', 'gives a website every date', $sectionW, 'W01c', 'the door\'s limit dropped from the series sentence'],
+    ['P16', '_apps/small-groups/place-save.php', "//    first: a lock outside one is decoration (#697).\n    \$db->begin_transaction();", "//    first: a lock outside one is decoration (#697).\n", $sectionR, 'R10', 'adding a home with its transaction removed (the lock let go at once)'],
+    ['P17', '_apps/small-groups/place-save.php', "\$db->begin_transaction();\ntry {\n    \$lock = \$db->prepare(", "try {\n    \$lock = \$db->prepare(", $sectionR, 'R12', 'naming a listed home\'s host with its transaction removed'],
+    ['P18', '_apps/small-groups/save.php', "    \$db->begin_transaction();\n    try {\n        \$lock = \$db->prepare(", "    try {\n        \$lock = \$db->prepare(", $sectionR, 'R14', 'naming the usual place\'s host with its transaction removed'],
+    ['P19', '_core/SmallGroups.php', "AND `userID` = ? AND `status` = 'active' FOR UPDATE\"", "AND `userID` = ? AND `status` = 'active'\"", $sectionR, 'R10', 'the membership check taking no lock at all'],
+    ['P20', '_apps/offboarding/do.php', "has been recorded.' . \$erasureNote . \$homesNote;", "has been recorded.' . \$erasureNote;", $sectionH, 'H14', 'the offboarding message saying nothing about the homes'],
+    ['P21', '_apps/offboarding/user.php', 'and cancels any erasure request for them still waiting for review', 'and', $sectionO, 'O04', 'the rehire paragraph not saying it cancels a waiting erasure request'],
     ['P15', '_apps/offboarding/user.php', '<li>Take their home off every small group that meets there', '<li>Take them off', $sectionO, 'O02', 'the offboarding page not saying their home leaves every group'],
 ];
 foreach ($plants as [$id, $file, $find, $with, $section, $mustFail, $what]) {

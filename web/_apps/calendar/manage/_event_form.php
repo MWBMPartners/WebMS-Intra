@@ -610,7 +610,11 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                 //    has passed NONE is — a later date comes off the website
                 //    before its day. A first version said such a window "keeps
                 //    that date off the website", which is untrue for every day
-                //    the window is open.
+                //    the window is open. The bracket (round 2 of the check) is
+                //    there because "every date" over-claimed: the door lists
+                //    only `published` rows with both boxes ticked, and
+                //    `PublicDoor::DEFAULT_LIMIT` (20) / `MAX_LIMIT` (50) cap a
+                //    feed — change those numbers here if they change there.
                 //    The words AND that behaviour are pinned by section W of
                 //    tools/series-suggestion-host-selftest.php.
                 if ($isEdit === false): ?>
@@ -619,8 +623,9 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                         the series: they are not worked out again for each date. While today is between the two dates,
                         every date of the series still to come is on the website, including those after the Until date;
                         once the Until date has passed, none of them is, so a later date comes off the website before its
-                        day. Leave both empty for no date limit, or edit a single date afterwards to give it dates of its
-                        own.
+                        day. (A date you later make a draft, cancel or untick on its own is not shown, and the public door
+                        gives a website at most 50 dates at a time, 20 unless it asks for more.) Leave both empty for no
+                        date limit, or edit a single date afterwards to give it dates of its own.
                     </p>
                 <?php endif; ?>
             <?php else: ?>

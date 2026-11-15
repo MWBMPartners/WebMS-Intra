@@ -86,8 +86,9 @@ $csrf = Auth::csrfToken();
     //    three things a rehire does not put back, so it read as if everything
     //    else came back. Both are now written from the steps themselves —
     //    `offboarding/do.php` (steps 1 to 10) and `offboarding/rehire.php`
-    //    (which switches on the account and its organisation memberships and
-    //    nothing else). Change all three together; the words are pinned by
+    //    (which switches on the account and its organisation memberships,
+    //    cancels a waiting erasure request, and puts nothing else back).
+    //    Change all three together; the words are pinned by
     //    section O of tools/series-suggestion-host-selftest.php.
     ?>
     <strong>Offboarding will:</strong>
@@ -105,7 +106,7 @@ $csrf = Auth::csrfToken();
         <li>Stop notifications to their devices</li>
         <li>Record what each step did, and file an erasure request if you choose to erase their details</li>
     </ul>
-    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a>, unless the account has been erased by then. A rehire switches the account back on and restores its organisation memberships (every organisation for a global administrator, only this one for anybody else), and NOTHING ELSE: the password, passkeys, Microsoft or Google links, roles, user groups, departments, leadership roles, small-group memberships, trusted devices and notification subscriptions stay removed, and a small-group home address that was deleted is gone for good. The page shown after a rehire says what the account still has.</p>
+    <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a>, unless the account has been erased by then. A rehire switches the account back on, restores its organisation memberships (every organisation for a global administrator, only this one for anybody else) and cancels any erasure request for them still waiting for review, even one they made themselves; NOTHING ELSE is put back: the password, passkeys, Microsoft or Google links, roles, user groups, departments, leadership roles, small-group memberships, trusted devices and notification subscriptions stay removed, and a small-group home address that was deleted is gone for good. The page shown after a rehire says what the account still has.</p>
 </div>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('offboarding/do'), ENT_QUOTES, 'UTF-8'); ?>">

@@ -641,12 +641,21 @@ final class SmallGroups
      *
      * @param list<array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int}> $released
      *
+     * @param int $groupsNotTold Set to how many of those groups had NO leader
+     *                           a mail service took a message for (none to
+     *                           write to, a read that failed, or a route that
+     *                           refused), so a caller covering several groups
+     *                           (offboarding) can say exactly that (#952,
+     *                           round 2 of the check).
+     *
      * @return int How many messages a mail service took or kept (for the caller's words).
      */
-    public static function tellLeadersHomesReleased(\mysqli $db, array $released, int $hostId): int
+    public static function tellLeadersHomesReleased(\mysqli $db, array $released, int $hostId, ?int &$groupsNotTold = null): int
     {
-        $told = 0;
+        $told          = 0;
+        $groupsNotTold = 0;
         foreach ($released as $group) {
+            $toldHere = 0;
             try {
                 $info = $db->prepare('SELECT `groupName` FROM `tblSmallGroups` WHERE `groupID` = ? AND `siteID` = ? LIMIT 1');
                 $info->bind_param('ii', $group['groupID'], $group['siteID']);
@@ -673,6 +682,7 @@ final class SmallGroups
                 );
             } catch (\Throwable $e) {
                 Logger::errorPlatform('SmallGroups', 'Warning', 'SG_HOST_LEFT_READ', 'The leaders of a group whose host left could not be read, so they were not told', '');
+                $groupsNotTold++;
                 continue;
             }
             foreach ($addresses as $address) {
@@ -683,12 +693,16 @@ final class SmallGroups
                 try {
                     if (Mailer::send($address, $words['subject'], $words['body'], [], ['siteId' => $group['siteID'], 'bodyIsText' => true]) === true) {
                         $told++;
+                        $toldHere++;
                     }
                 } catch (\Throwable $e) {
                     // The fault's own words are never recorded: a mail server's
                     // refusal can quote the recipient's address.
                     Logger::errorPlatform('Mailer', 'Warning', 'SG_HOST_LEFT_MAIL', 'A leader could not be told that a host left their group', '');
                 }
+            }
+            if ($toldHere === 0) {
+                $groupsNotTold++;
             }
         }
 
