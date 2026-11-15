@@ -470,6 +470,18 @@ $db->query("DELETE FROM `tblEventRSVPs` WHERE `userID` IN ({$pk}, {$pd})");
 $db->query("INSERT INTO `tblEventRSVPs` (`eventID`, `userID`, `response`) VALUES (7001, {$pd}, 'going'), (7001, {$pk}, 'going'), (7002, {$pd}, 'going'), (7003, {$pk}, 'going')");
 $rsvp = array_values(array_filter(M::preview($db, $pk, $pd)['lines'], static fn (array $l): bool => $l['table'] === 'tblEventRSVPs'));
 check('D11 a clash is counted only where the other key columns really match', ($rsvp[0]['rows'] ?? 0) === 2 && ($rsvp[0]['clashes'] ?? 0) === 1, json_encode($rsvp));
+// A polymorphic column holds an account number on SOME rows only. Two audience
+// entries of kind "role" whose role numbers happen to equal the two account
+// numbers are not people, so they must not count as rows or as a clash. Without
+// this fixture, leaving the condition out of the clash count stayed green
+// (planted, 15 November 2026).
+$audienceBefore = array_values(array_filter(M::preview($db, $pk, $pd)['lines'], static fn (array $l): bool => $l['table'] . '.' . $l['column'] === 'tblExternalAudienceMembers.refID'));
+$roleOwner = random_int(1000000, 9000000);
+$insert('tblExternalAudienceMembers', ['kind' => 'role', 'refID' => $pd, 'ownerType' => 'feed', 'ownerID' => $roleOwner]);
+$insert('tblExternalAudienceMembers', ['kind' => 'role', 'refID' => $pk, 'ownerType' => 'feed', 'ownerID' => $roleOwner]);
+$audienceAfter = array_values(array_filter(M::preview($db, $pk, $pd)['lines'], static fn (array $l): bool => $l['table'] . '.' . $l['column'] === 'tblExternalAudienceMembers.refID'));
+check('D12 rows where a polymorphic column holds something else (a role) are neither counted nor a clash',
+    $audienceBefore !== [] && $audienceAfter === $audienceBefore, json_encode([$audienceBefore, $audienceAfter]));
 $db->query('SET FOREIGN_KEY_CHECKS = 1');
 
 // =============================================================================
