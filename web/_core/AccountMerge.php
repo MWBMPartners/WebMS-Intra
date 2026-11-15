@@ -515,6 +515,14 @@ final class AccountMerge
      * grounds `App::isAdmin()` reads, asked of a named organisation rather than
      * the open one, because a merge reaches every organisation either account
      * is in and `App::isAdmin()` can only speak for the one in the session.
+     *
+     * ⚠️ The `us.isActive = 1` term below CANNOT CHANGE ANY ANSWER TODAY, and
+     *    that is said rather than implied: it is always asked together with the
+     *    permission, and holding the permission's role already requires a
+     *    switched-on membership of that organisation (`Roles::hasAnyOf()` joins
+     *    `us.isActive = 1`). Planted out, the self-test stayed green, measured
+     *    15 November 2026. It is kept so this method means what its name says
+     *    if it is ever asked on its own.
      */
     private static function isAdministratorOf(mysqli $db, int $userId, int $siteId): bool
     {
