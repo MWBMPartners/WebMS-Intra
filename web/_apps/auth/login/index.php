@@ -64,6 +64,22 @@ if (isset($_GET['reset']) === true && $_GET['reset'] === '1') {
 //    included, so it is said once and never again on a reload.
 $signedOutMsg = Auth::takeSignedOutNotice();
 
+// ❌ #1042: why a Microsoft or Google sign-in just failed. Auth::oauthError()
+//    sends the browser HERE, and this page never printed its words, so every
+//    refusal from either callback ("This account has been deactivated", a
+//    failed token, and now "No account on this portal matches this sign-in")
+//    reached the person as a bare sign-in page with no reason, and the words
+//    then surfaced on whatever later page happened to print messages.
+//    `Auth::takeSignInProblem()` is the ONE reader of those words, kept under
+//    their OWN session key: printing the general `flash_msg` here was tried
+//    first and is WRONG — a message somebody ELSE left waiting in this browser
+//    would be shown to whoever opens the sign-in page next (#900's concern;
+//    part K of two-step-selftest.php went red on it). Said once.
+//    This page says it only to somebody NOT signed in: a signed-in browser
+//    was sent on at the top of this page, so `oauthError()` sends a signed-in
+//    member to the Account page or "Add a password" instead, which read it.
+$signInProblem = Auth::takeSignInProblem();
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // 🧾 Who refused this try. The two flags decide which record, if any, this
@@ -290,6 +306,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="alert alert-warning small" role="status" aria-live="polite" id="signed-out-notice">
             <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>
             <?php echo htmlspecialchars($signedOutMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- ❌ Why a Microsoft or Google sign-in just failed (#1042) -->
+    <?php if ($signInProblem !== ''): ?>
+        <div class="alert alert-danger small" role="alert" aria-live="assertive" id="sign-in-problem">
+            <i class="fa-solid fa-circle-exclamation me-1" aria-hidden="true"></i>
+            <?php echo htmlspecialchars($signInProblem, ENT_QUOTES, 'UTF-8'); ?>
         </div>
     <?php endif; ?>
 

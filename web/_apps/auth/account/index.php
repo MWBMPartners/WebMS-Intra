@@ -294,6 +294,14 @@ if (isset($_GET['error']) === true) {
     $errorMsg  = $errorMap[$errorCode] ?? 'An error occurred.';
 }
 
+// ❌ #1042 round 3: why a Microsoft or Google sign-in just failed, for a member
+//    who was ALREADY signed in. The "link" buttons below send them to
+//    login/ms365 and login/google, and when the callback fails it sends a
+//    signed-in browser HERE rather than to the sign-in page, which would pass
+//    them straight on before saying anything. `Auth::takeSignInProblem()` is
+//    the ONE reader; said once.
+$signInProblem = Auth::takeSignInProblem();
+
 // -----------------------------------------------------------------------------
 // 5. 🎨 Render page
 // -----------------------------------------------------------------------------
@@ -311,6 +319,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-circle-check me-1"></i>
         <?php echo htmlspecialchars($successMsg, ENT_QUOTES, 'UTF-8'); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
+
+<!-- ❌ Why a Microsoft or Google sign-in just failed (#1042) -->
+<?php if ($signInProblem !== ''): ?>
+    <div class="alert alert-danger" role="alert" aria-live="assertive" id="sign-in-problem">
+        <i class="fa-solid fa-circle-exclamation me-1" aria-hidden="true"></i>
+        <?php echo htmlspecialchars($signInProblem, ENT_QUOTES, 'UTF-8'); ?>
     </div>
 <?php endif; ?>
 
