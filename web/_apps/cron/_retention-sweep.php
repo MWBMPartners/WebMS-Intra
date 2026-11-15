@@ -59,7 +59,8 @@ declare(strict_types=1);
 //   installation's own period, #491; `tools/retention-caps-selftest.php`
 //   section F requires this file with exactly those three loaded and nothing
 //   else, because it calls only the log functions),
-//   ActivityLogRetention (#932 — the activity log's own period, where 0 means
+//   ActivityLogRetention and NetworkAddressRetention (#932, #1019 — the
+//   activity log's own period and the network-address period, where 0 means
 //   "never delete"). THIS ONE IS LOADED BY THIS FILE ITSELF, just below, so no
 //   caller's hand-picked list has to name it: the four self-tests that require
 //   this file each keep their own list, and one of them belongs to a package
@@ -92,6 +93,7 @@ use Portal\Core\GdprEraser;
 use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\NetworkAddressRetention;
 use Portal\Core\Pdf;
 use Portal\Core\RegistrationRetention;
 use Portal\Core\SettingLimit;
@@ -103,6 +105,10 @@ use Portal\Core\WebhookRetention;
 //    otherwise stop at the first line naming the class.
 if (class_exists(ActivityLogRetention::class, false) === false) {
     require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ActivityLogRetention.php';
+}
+// 🌐 #1019: the same, for the network-address period.
+if (class_exists(NetworkAddressRetention::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'NetworkAddressRetention.php';
 }
 // 🗺️ #1037: the same, for the address look-up cache's period.
 if (class_exists(GeocodeCacheRetention::class, false) === false) {
@@ -354,6 +360,112 @@ function log_sweep(string $which, bool $reallyDelete): int
             ? (int) $orphans->affected_rows
             : (int) ($orphans->get_result()->fetch_assoc()['cnt'] ?? 0);
         $orphans->close();
+    }
+
+    return $total;
+}
+
+/**
+ * 🌐 Count, or really EMPTY, the network addresses older than their period, in
+ *    every place `NetworkAddressRetention::PLACES` lists (#1019, D-178).
+ *
+ * NOT A DELETE. Every record stays; only the address column is set to NULL —
+ * a prayer request or a chat message is the organisation's record, and the
+ * address is the only part of them D-178 gives a period. So this figure is
+ * never added to `totalDeleted`. AND NOTHING ELSE CHANGES: a column the
+ * database would re-stamp on the update is written back to itself (each
+ * place's `hold`). The change histories are not here at all (D-187).
+ *
+ * ONE FUNCTION FOR BOTH, as `log_sweep()` is: the count an administrator is
+ * shown before confirming and the statement that then runs are built here, from
+ * the one list, so they cannot disagree.
+ *
+ * WHOSE PERIOD. A place with an organisation (its own `siteID`, or its parent's
+ * through `via`) is swept one organisation at a time by that organisation's
+ * figure; a row whose organisation column is EMPTY by the installation's (no
+ * place listed today allows one: `tblAuditTrail` did, and left the list under
+ * D-187, so that statement now matches nothing); a place belonging to an account rather than an
+ * organisation (password resets, trusted devices) by the installation's. A
+ * figure of "never" runs no statement at all, so the count and the change agree.
+ *
+ * `IS NOT NULL` is in the condition so the count says how many addresses there
+ * are to empty, not how many old rows there are; and a row whose date column is
+ * empty (an access key never used) is not old, so nothing is emptied from it.
+ *
+ * Every name in the statements is a literal from `PLACES`, never a request's.
+ *
+ * @return int Addresses counted, or addresses really emptied.
+ */
+function address_sweep(bool $reallyEmpty): int
+{
+    $db = App::db();
+
+    // 🏢 Each organisation's figure, read ONCE: the same answer for every place.
+    $siteDays = [];
+    $sites    = $db->query('SELECT `siteID` FROM `tblSites`');
+    if ($sites !== false) {
+        while ($one = $sites->fetch_assoc()) {
+            $siteDays[(int) $one['siteID']] = NetworkAddressRetention::daysForSite((int) $one['siteID']);
+        }
+        $sites->free();
+    }
+    $installationDays = NetworkAddressRetention::installationDays();
+
+    $total = 0;
+    $run   = static function (string $sql, string $types, array $values) use ($db, $reallyEmpty, &$total): void {
+        $stmt = $db->prepare($sql);
+        if ($stmt === false) {
+            // Never a silent nought: a count that could not be made is not "none".
+            throw new \RuntimeException('The network-address clear-out could not prepare a statement.');
+        }
+        $stmt->bind_param($types, ...$values);
+        $stmt->execute();
+        $total += $reallyEmpty === true
+            ? (int) $stmt->affected_rows
+            : (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    };
+
+    foreach (NetworkAddressRetention::PLACES as $place) {
+        $from    = '`' . $place['table'] . '` AS `t`';
+        $siteCol = null;
+        if ($place['via'] !== null) {
+            $from   .= ' INNER JOIN `' . $place['via'][0] . '` AS `p` ON `p`.`' . $place['via'][1] . '` = `t`.`' . $place['via'][1] . '`';
+            $siteCol = '`p`.`' . $place['site'] . '`';
+        } elseif ($place['site'] !== null) {
+            $siteCol = '`t`.`' . $place['site'] . '`';
+        }
+        // 🔒 Empty the address and NOTHING ELSE: a column the database
+        //    re-stamps on any change (ON UPDATE CURRENT_TIMESTAMP) is set to
+        //    itself, the way GdprEraser and migrations 210/211 write
+        //    `updatedAt = updatedAt` (#1019 round 3).
+        $set = '`t`.`' . $place['column'] . '` = NULL';
+        foreach ($place['hold'] as $held) {
+            $set .= ', `t`.`' . $held . '` = `t`.`' . $held . '`';
+        }
+        $head = $reallyEmpty === true
+            ? 'UPDATE ' . $from . ' SET ' . $set . ' WHERE '
+            : 'SELECT COUNT(*) AS `cnt` FROM ' . $from . ' WHERE ';
+        $old  = '`t`.`' . $place['column'] . '` IS NOT NULL AND `t`.`' . $place['dated'] . '` < DATE_SUB(NOW(), INTERVAL ? DAY)';
+
+        if ($siteCol === null) {
+            // 👤 Belongs to an account, not an organisation: the installation's figure.
+            if ($installationDays !== NetworkAddressRetention::NEVER) {
+                $run($head . $old, 'i', [$installationDays]);
+            }
+            continue;
+        }
+
+        foreach ($siteDays as $siteId => $days) {
+            if ($days === NetworkAddressRetention::NEVER) {
+                continue; // ♾️ This organisation keeps addresses for ever.
+            }
+            $run($head . $siteCol . ' = ? AND ' . $old, 'ii', [$siteId, $days]);
+        }
+        // 🏛️ And rows no organisation owns, by the installation's figure.
+        if ($installationDays !== NetworkAddressRetention::NEVER) {
+            $run($head . $siteCol . ' IS NULL AND ' . $old, 'i', [$installationDays]);
+        }
     }
 
     return $total;
@@ -728,14 +840,14 @@ function giving_identity_sweep_rows(): array
  *
  * @return array{activity:int,errors:int,registrations:int,checkinDetail:int,
  *               givingIdentityDue:int,givingIdentityOnHold:int,givingIdentityWaiting:int,givingIdentityNotDue:int,
- *               givingIdentityUnfinished:int}
+ *               givingIdentityUnfinished:int,networkAddresses:int,geocodeCache:int}
  */
 function preview_retention_counts(): array
 {
     $db = App::db();
     $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0,
         'givingIdentityDue' => 0, 'givingIdentityOnHold' => 0, 'givingIdentityWaiting' => 0, 'givingIdentityNotDue' => 0,
-        'givingIdentityUnfinished' => 0, 'geocodeCache' => 0];
+        'givingIdentityUnfinished' => 0, 'networkAddresses' => 0, 'geocodeCache' => 0];
 
     // 🗺️ Remembered map answers (#1037), by the same period and the same
     //    statement as the delete. -1 when the period could not be worked out:
@@ -757,6 +869,10 @@ function preview_retention_counts(): array
     //    Being told "12 log rows" and then silently losing several thousand
     //    children's registration records would be indefensible.
     $out['registrations'] = registration_sweep(false);
+
+    // 🌐 Network addresses past their period (#1019): counted by the same
+    //    function, from the same list, as the clear-out that empties them.
+    $out['networkAddresses'] = address_sweep(false);
 
     // 🚪 Anonymous check-in detail, counted one organisation at a time with
     //    that organisation's own setting — the same loop the clear-out itself
@@ -1437,6 +1553,10 @@ function run_retention_sweep(): array
         $checkinDetailCleared += (int) $result['rowsCleared'];
     }
 
+    // 🌐 Network addresses past their period (#1019, D-178). Not a delete:
+    //    every record stays and only its address is emptied. See address_sweep().
+    $networkAddressesCleared = address_sweep(true);
+
     // 🧾 Giving records that kept an erased donor's name for tax reasons.
     //    Not a delete either: see run_giving_identity_sweep() above.
     $giving = run_giving_identity_sweep();
@@ -1483,6 +1603,8 @@ function run_retention_sweep(): array
         // 🧾 Emptied, not deleted, so NOT added to totalDeleted — same rule as
         //    the figures above it.
         'webhookPayloadsCleared' => $webhookPayloadsCleared,
+        // 🌐 Emptied, not deleted (#1019), so NOT added to totalDeleted.
+        'networkAddressesCleared' => $networkAddressesCleared,
         // 🎙️ Transcripts really ARE deleted, so this one IS counted in
         //    totalDeleted — unlike every figure above it, which empties rows
         //    that remain.

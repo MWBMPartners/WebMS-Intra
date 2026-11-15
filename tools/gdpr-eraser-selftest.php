@@ -226,7 +226,8 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 313; // #970 added two to section 23: 311 + 2.
+const EXPECTED_CHECKS = 318; // #938/#1065 added section 24's five: 313 + 5.
+                             // #970 added two to section 23: 311 + 2.
                              // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
                              // that answered "check round N-1" (the independent check of the
                              // round before). Counts, newest first:
@@ -329,7 +330,7 @@ const EXPECTED_CHECKS = 313; // #970 added two to section 23: 311 + 2.
                              // with a kept gift inside, is DELETED. 282.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -435,6 +436,9 @@ const SITE_C4       = 16;     // section 23: the claim file's name rule over eve
 const P_TABLE_FIRST = 920800; // section 23: the first of that table's 144 donors (920800-920943)
 const SITE_C1  = 13;     // section 23: "every gift" at first, then "tax gifts only"; Europe/London
 const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stops the giving step
+const P_ASSET   = 921001; // erased in section 24: the scrambled address on their own asset changes and scans goes (#938, #1065)
+const P_ASSET_2 = 921002; // section 24: somebody else, whose asset changes and scans must survive whole
+const REQ_ASSET = 941001;
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
 const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
 const REQ_AUDIT = 940401;
@@ -518,6 +522,14 @@ const MUST_BE_EMPTIED = [
     // limit is written down in the instruction's own reason instead (#708's
     // precedent), and section 3b's loan rows are shaped the way real ones are.
     'tblAssetLoans.counterpartyUserID' => ['counterpartyContact'],
+    // #938 and #1065 (D-164, D-178): the scrambled network address of the
+    // person's own asset changes, and of their own label scans with the
+    // browser beside it. Added here IN THE SAME CHANGE as the instructions,
+    // for the reason the comment above gives. Section 24 checks the same on
+    // real-shaped rows at two organisations, beside somebody else's rows and a
+    // scan made without signing in.
+    'tblAssetAudit.actorUserID'   => ['ipHash'],
+    'tblAssetScanLog.actorUserID' => ['ipHash', 'userAgentHash'],
     // #809 (D-122, D-124): a small group's meeting place, on its HOST. Added
     // in the same change as the instructions, for the reason above. Section 22
     // checks the same thing on real-shaped rows, with two hosts and a leader.
@@ -2771,7 +2783,7 @@ foreach (MUST_BE_EMPTIED as $where => $columns) {
         }
     }
 }
-ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, a pastoral case\'s name and summary (#715), a room booking\'s stated reason and decline note (#723), and an asset loan\'s contact details (#492 part 2)',
+ge_ok('typed details about the person are emptied, by name: a prayer request\'s name, e-mail address, sender address, subject, body and partner note, a pastoral case\'s name and summary (#715), a room booking\'s stated reason and decline note (#723), an asset loan\'s contact details (#492 part 2), and the scrambled network address and browser on the person\'s own asset changes and label scans (#938, #1065)',
     $stillThere === [], implode('; ', $stillThere));
 $twoColumnTables = [];
 foreach ($worldA['rows'] as $tracked) {
@@ -7394,5 +7406,119 @@ ge_ok('THE CLAIM FILE\'S NAME, FOR EVERY COMBINATION (' . count($tableCases) . '
     && stripos($tableFile, 'Deleted') === false,
     count($tableWrong) . ' wrong (of ' . count($tableCases) . ', ' . $joinedCount . ' joining; ' . (count($tableRows) - 1) . ' rows in the file): '
     . implode(' | ', array_slice($tableWrong, 0, 8)));
+
+// =============================================================================
+ge_section('24', 'The scrambled network address on the person\'s own asset changes and label scans is emptied, at every organisation, and nobody else\'s is (#938, #1065; D-164, D-178)');
+// =============================================================================
+// 🧠 WHY THIS SECTION EXISTS. `tblAssetAudit.ipHash`, and `tblAssetScanLog`'s
+//    `ipHash` and `userAgentHash`, are salted with this installation's key, so
+//    the installation can match them against an address or a browser it is
+//    given. Until #938 and #1065 an erasure emptied the account number and left
+//    them. The only account column on either table is `actorUserID`, an "acted
+//    on it" column, so the hand-written instruction carries them through
+//    GdprEraser::ACTOR_OWN_REQUEST_COLUMNS rather than as ordinary free text.
+//
+//    The world below is real-shaped: the person's own rows at TWO
+//    organisations, somebody else's rows at both, and a public scan made
+//    without signing in. The fourth kind matters most for the scan log: it has
+//    no account number, so nothing may reach it, and it goes on its timer.
+ge_user(P_ASSET, 'Asha Asset', 'asha.asset@selftest.invalid');
+ge_user(P_ASSET_2, 'Ben Bench', 'ben.bench@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+$assetAt = [];
+foreach ([1, SITE_2] as $assetSite) {
+    $assetAt[$assetSite] = (int) array_values(ge_insert('tblAssets', [], ['siteID' => $assetSite, 'isDeleted' => 0])['key'])[0];
+}
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+$hashOf = static fn (string $what): string => hash('sha256', 'p1019|' . $what);
+
+/** One asset change, with a scrambled address; returns its number. */
+$assetChange = static function (int $siteId, int $assetId, ?int $actor, string $ip) use ($mysqli, $hashOf): int {
+    $hash  = $hashOf($ip);
+    $type  = $actor === null ? 'public' : 'user';
+    $stmt  = $mysqli->prepare(
+        'INSERT INTO `tblAssetAudit` (`siteID`, `assetID`, `entityType`, `entityID`, `action`, `actorType`, `actorUserID`, `ipHash`) '
+        . 'VALUES (?, ?, \'asset\', ?, \'update\', ?, ?, ?)'
+    );
+    $stmt->bind_param('iiisis', $siteId, $assetId, $assetId, $type, $actor, $hash);
+    $stmt->execute();
+    $id = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+/** One label scan, with a scrambled address and browser; returns its number. */
+$assetScan = static function (int $siteId, int $assetId, ?int $actor, string $ip) use ($mysqli, $hashOf): int {
+    $hash    = $hashOf($ip);
+    $browser = $hashOf('browser of ' . $ip);
+    $context = $actor === null ? 'public' : 'internal';
+    $stmt    = $mysqli->prepare(
+        'INSERT INTO `tblAssetScanLog` (`siteID`, `assetID`, `scanContext`, `actorUserID`, `ipHash`, `userAgentHash`) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->bind_param('iisiss', $siteId, $assetId, $context, $actor, $hash, $browser);
+    $stmt->execute();
+    $id = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    return $id;
+};
+
+$ashaChanges = [];
+$ashaScans   = [];
+$benChanges  = [];
+$benScans    = [];
+foreach ($assetAt as $assetSite => $assetId) {
+    $ashaChanges[] = $assetChange($assetSite, $assetId, P_ASSET, '198.51.100.' . $assetSite);
+    $ashaScans[]   = $assetScan($assetSite, $assetId, P_ASSET, '198.51.100.' . $assetSite);
+    $benChanges[]  = $assetChange($assetSite, $assetId, P_ASSET_2, '203.0.113.' . $assetSite);
+    $benScans[]    = $assetScan($assetSite, $assetId, P_ASSET_2, '203.0.113.' . $assetSite);
+}
+$publicScan   = $assetScan(1, $assetAt[1], null, '192.0.2.9');
+$publicChange = $assetChange(1, $assetAt[1], null, '192.0.2.9');
+
+$readChange = static fn (int $id): ?array => ge_one('SELECT `siteID`, `actorUserID`, `ipHash` FROM `tblAssetAudit` WHERE `auditID` = ?', 'i', [$id]);
+$readScan   = static fn (int $id): ?array => ge_one('SELECT `siteID`, `actorUserID`, `ipHash`, `userAgentHash` FROM `tblAssetScanLog` WHERE `scanID` = ?', 'i', [$id]);
+$before = [
+    'benChanges' => array_map($readChange, $benChanges), 'benScans' => array_map($readScan, $benScans),
+    'publicScan' => $readScan($publicScan), 'publicChange' => $readChange($publicChange),
+];
+$ashaBefore = array_merge(array_map($readChange, $ashaChanges), array_map($readScan, $ashaScans));
+
+ge_request(REQ_ASSET, P_ASSET, 'asha.asset@selftest.invalid', 'Asha Asset', 'processing');
+$resultAsset = ge_execute(REQ_ASSET, P_ASSET);
+
+$ashaChangesNow = array_map($readChange, $ashaChanges);
+$ashaScansNow   = array_map($readScan, $ashaScans);
+
+ge_ok('the premise: before the run, every one of the person\'s rows at both organisations held a scrambled address (and each scan a scrambled browser), so the checks below can fail',
+    count($ashaBefore) === 4
+    && array_filter($ashaBefore, static fn (?array $r): bool => is_array($r) === false || $r['ipHash'] === null || (int) $r['actorUserID'] !== P_ASSET) === []
+    && array_filter(array_slice($ashaBefore, 2), static fn (?array $r): bool => $r['userAgentHash'] === null) === [],
+    json_encode($ashaBefore));
+
+ge_ok('THE PERSON\'S OWN ASSET CHANGES, AT BOTH ORGANISATIONS, LOSE THE SCRAMBLED ADDRESS as well as the account number; the change itself stays (#938, D-164)',
+    is_array($resultAsset) === true && $resultAsset['failed'] === 0
+    && count($ashaChangesNow) === 2
+    && array_filter($ashaChangesNow, static fn (?array $r): bool => is_array($r) === false || $r['ipHash'] !== null || $r['actorUserID'] !== null) === []
+    && array_map('intval', array_column($ashaChangesNow, 'siteID')) === [1, SITE_2],
+    json_encode(['the run' => is_array($resultAsset) === true ? ['failed' => $resultAsset['failed']] : (string) $resultAsset, 'rows' => $ashaChangesNow]));
+
+ge_ok('THE PERSON\'S OWN LABEL SCANS, AT BOTH ORGANISATIONS, LOSE THE SCRAMBLED ADDRESS AND BROWSER; the scan itself stays, so the count of scans is unchanged (#1065, D-178)',
+    count($ashaScansNow) === 2
+    && array_filter($ashaScansNow, static fn (?array $r): bool => is_array($r) === false || $r['ipHash'] !== null
+        || $r['userAgentHash'] !== null || $r['actorUserID'] !== null) === []
+    && array_map('intval', array_column($ashaScansNow, 'siteID')) === [1, SITE_2],
+    json_encode($ashaScansNow));
+
+ge_ok('SOMEBODY ELSE\'S ASSET CHANGES AND SCANS ARE UNTOUCHED, at both organisations: their account number, scrambled address and browser are exactly as they were',
+    array_map($readChange, $benChanges) === $before['benChanges'] && array_map($readScan, $benScans) === $before['benScans']
+    && array_filter($before['benScans'], static fn (?array $r): bool => is_array($r) === false || $r['ipHash'] === null || $r['userAgentHash'] === null) === [],
+    json_encode(['before' => $before['benScans'], 'now' => array_map($readScan, $benScans)]));
+
+ge_ok('A SCAN AND A CHANGE MADE WITHOUT SIGNING IN ARE NOT REACHED: they carry no account number, so nothing says whose they are; the scan goes with the rest of the log on its timer',
+    $readScan($publicScan) === $before['publicScan'] && $readChange($publicChange) === $before['publicChange']
+    && is_array($before['publicScan']) === true && $before['publicScan']['ipHash'] !== null,
+    json_encode(['scan' => $readScan($publicScan), 'change' => $readChange($publicChange)]));
+
 
 ge_finish();
