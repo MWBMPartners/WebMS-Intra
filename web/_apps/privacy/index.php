@@ -136,6 +136,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h2 class="h4 mt-4">Network addresses</h2>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
 
+<?php // 🛂 #808 (D-158): every outside company a page can reach, named, through ONE template shared
+      //    with the privacy policy; the words are OutsideServices::SERVICES and ::NAMED. ?>
+<h2 class="h4 mt-4">Outside companies</h2>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'outside-services-notice.php'; ?>
+
 <h2 class="h4 mt-4">Your rights</h2>
 <ul>
     <li><strong>Access</strong> — request a copy of your data via

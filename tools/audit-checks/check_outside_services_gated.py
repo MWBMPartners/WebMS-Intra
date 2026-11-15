@@ -64,9 +64,10 @@ than none
 1. A host built up in pieces (`'www.grav' . 'atar.com'`). Matching text cannot
    follow a concatenation. That is an evasion, not an accident.
 2. An outside service whose host is not on this list. The list is of the three
-   services #778 governs; the follow-ups recorded on #778 (video players,
-   address look-up, what3words, content-delivery libraries, the robot check)
-   are NOT covered here.
+   services #778 governs. Every OTHER outside host in code is the job of
+   `check_outside_hosts_named.py` (#808, D-158), which requires each to be
+   named on the privacy pages or listed as sending nobody's details; nothing
+   switches those off yet.
 3. Whether the gated code RUNS. Checks 2, 3, 5, 6 and 7 are PRESENCE only (D-065:
    "is this code reached" is behavioural). `tools/outside-services-selftest.php`
    drives the real pages and is what proves the decision is obeyed.

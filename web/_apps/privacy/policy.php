@@ -128,6 +128,11 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 <h3>Network addresses</h3>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
 
+<?php // 🛂 #808 (D-158): every outside company a page can reach, named, through ONE template shared
+      //    with the Privacy & Data Protection page; the words are OutsideServices::SERVICES and ::NAMED. ?>
+<h3>Outside companies</h3>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'outside-services-notice.php'; ?>
+
 <h3>Contact</h3>
 <p>Data protection enquiries: <?php if ($contact !== ''): ?><a href="mailto:<?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?></a><?php else: ?><em>not configured — see your portal admin.</em><?php endif; ?></p>
 

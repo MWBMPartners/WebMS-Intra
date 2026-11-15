@@ -475,6 +475,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   builder. Strictest of installation, EVERY organisation the member belongs to, and their own
   choice; for a map, both people. Unreadable is `no`. Guards:
   `check_outside_services_gated.py` (presence) and `tools/outside-services-selftest.php` (behaviour). A member-page control sent back as drawn is never written (`OutsideServices::drawnMarkerName()`, #815); a post with no drawn value is applied only where it can make less shared.
+  Every OTHER outside company a page can reach is NAMED, not switched (D-158, #808): `OutsideServices::NAMED` is the ONE place its words are written, printed on both privacy pages by `templates/outside-services-notice.php`; it decides nothing. Hard gate `check_outside_hosts_named.py`: every host in code is in SERVICES, NAMED or its own not-about-anybody list, failing both ways.
   A small group's meeting place is its NAMED host's home, or marked not anybody's home (#809; D-120, D-123,
   D-124, D-128, D-131): `OutsideServices::allowsMeetingPlaceMap()` decides each place's map by its own host,
   `SmallGroups::hostFromPost()` / `placeAgreementAfterSave()` record host and agreement, and

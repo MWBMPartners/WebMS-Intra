@@ -89,10 +89,15 @@
  *
  * WHAT THIS CANNOT DO, said plainly
  * -----------------------------------------------------------------------------
- *   - It governs the three services listed in SERVICES and nothing else. Other
- *     outside requests the portal makes (address look-up, what3words, video
- *     players, the libraries fetched from a content-delivery network, the
- *     sign-in robot check) are recorded as follow-ups on #778, not covered.
+ *   - It DECIDES for the three services listed in SERVICES and nothing else.
+ *     The other outside companies a page can reach -- what3words, the address
+ *     look-up, videos and designs shown inside a page, the shared code
+ *     libraries, the robot check on forms and error monitoring -- are NAMED in
+ *     `NAMED` below and listed on both privacy pages, but nothing switches
+ *     them off yet. That is the owner's decision D-158 (12 November 2026):
+ *     name them truthfully before the first install, put them under the three
+ *     levels after it (#808). `NAMED` decides NOTHING; never read it as a
+ *     permission.
  *   - It cannot stop a member's browser fetching something the member typed
  *     into a page themselves; it decides only what the PORTAL asks for.
  *   - The writers' checks give an honest refusal; the READER is the enforcement.
@@ -209,6 +214,119 @@ final class OutsideServices
             //    refuse it, and the reader reads a stored "on" (hand-written, or
             //    brought back by a restore) as "off". See capFor().
             'maxLevel'   => self::OFF,
+        ],
+    ];
+
+    /**
+     * The outside companies a page can reach that are NOT yet decided here
+     * (#808, the owner's decision D-158: "name them now, gate later").
+     *
+     * Each is listed on the two privacy pages, through
+     * `templates/outside-services-notice.php`, which prints these words and
+     * nothing else -- so this constant is the ONE place they are written. It
+     * decides NOTHING: no page asks it whether something may be sent, and no
+     * page may, because the answer today is always "yes, if it is set up".
+     * Putting each under the installation, organisation and member levels is
+     * the work D-158 moves to after the first install.
+     *
+     *   name       what the service is called on the privacy pages
+     *   companies  who receives the request
+     *   when       when it happens, and whether somebody has to set it up first
+     *   sends      what the company receives, in plain words
+     *   why        why the portal uses it
+     *   hosts      the internet names of the company's machines as they are
+     *              WRITTEN in the portal's code. This is the list the hard gate
+     *              `tools/audit-checks/check_outside_hosts_named.py` reads: a
+     *              host found in code must be here, in SERVICES above, or in
+     *              that check's own list of hosts that are not about anybody;
+     *              and a host listed here that is no longer in any code fails
+     *              too. A host written with a leading dot stands for that name
+     *              and every name ending in it. Error monitoring has none: the
+     *              administrator types the monitor's address in.
+     *
+     * The words were checked against the code on 15 November 2026: Asset.php
+     * (the libraries, on every page), header.php's page rule, Captcha.php,
+     * VideoEmbed.php, Livestream.php, the noticeboard page, What3Words.php and
+     * its callers, Geocoder.php (whose Google path falls back to OpenStreetMap,
+     * #808's own comment) and ErrorMonitor.php. When one of those changes what
+     * it sends, change the words here in the same commit.
+     *
+     * @var array<string, array{name:string, companies:string, when:string, sends:string, why:string, hosts:list<string>}>
+     */
+    public const NAMED = [
+        'what3words' => [
+            'name'      => 'what3words addresses',
+            'companies' => 'what3words',
+            'when'      => 'Only if this portal has been set up with a what3words account. It happens when somebody types '
+                         . 'a what3words address (three words that name one 3-metre square anywhere in the world) into a '
+                         . 'form, while they type it and when they save it, for example on your own directory profile.',
+            'sends'     => 'The three words typed, or the first letters of them while you are still typing. For a home '
+                         . 'that names the home itself. It is sent by this portal\'s own server, not by your browser, '
+                         . 'so what3words does not learn your internet address from it.',
+            'why'       => 'To turn the three words into a position on a map, and to suggest the right words as you type.',
+            'hosts'     => ['api.what3words.com'],
+        ],
+        'addressLookup' => [
+            'name'      => 'Looking up an address on a map',
+            'companies' => 'Google (Google Maps), or OpenStreetMap (its look-up service, called Nominatim). When the '
+                         . 'portal is set up to use Google and Google cannot answer, it asks OpenStreetMap as well.',
+            'when'      => 'When somebody presses the button to find an address on the map, and when a form that is '
+                         . 'set up to do it by itself is saved -- for example a small group\'s meeting place or a venue.',
+            'sends'     => 'The address that was typed, and its country. It is sent by this portal\'s own server, not '
+                         . 'by your browser, so the company does not learn your internet address from it. The answer '
+                         . 'is remembered for a while; for a home that is personal data, described above.',
+            'why'       => 'To find where the address is, so that a map can be drawn or directions given.',
+            'hosts'     => ['maps.googleapis.com', 'nominatim.openstreetmap.org'],
+        ],
+        'embeddedContent' => [
+            'name'      => 'Videos, designs and pictures shown inside a page',
+            'companies' => 'Whichever company holds the video or design: YouTube (Google), Vimeo, Facebook (Meta), '
+                         . 'Twitch, Cloudflare (its video service, Cloudflare Stream) or Canva. On the noticeboard, '
+                         . 'also any website a poster\'s picture or video is taken from.',
+            'when'      => 'When you open a page that shows one -- a livestream, an event\'s own page with a video on it, '
+                         . 'or the noticeboard. Uploading a video to an event sends the file itself to Cloudflare.',
+            'sends'     => 'Your internet address (the number that identifies your connection, which can show roughly '
+                         . 'where you are), your browser (the program you are reading this in, and its version), and '
+                         . 'which video or design you are looking at. On an event\'s own page a YouTube video uses '
+                         . 'Google\'s "privacy-enhanced" address and a Vimeo video asks Vimeo not to track you; a '
+                         . 'livestream uses the company\'s ordinary player, and Facebook\'s player can '
+                         . 'recognise you if you are signed in to Facebook in the same browser.',
+            'why'       => 'The video or design is kept by that company, so your browser has to fetch it from there.',
+            'hosts'     => ['www.youtube-nocookie.com', 'www.youtube.com', 'player.vimeo.com', 'www.facebook.com',
+                            'player.twitch.tv', '.cloudflarestream.com', 'upload.videodelivery.net', 'www.canva.com'],
+        ],
+        'sharedLibraries' => [
+            'name'      => 'Shared code libraries',
+            'companies' => 'jsDelivr and cdnjs (run by Cloudflare), two services that hand out widely used code.',
+            'when'      => 'On every page: your browser fetches the page\'s layout and icons from them, and on some '
+                         . 'pages its maps and charts. The API guide does too, unless this portal is set to use its '
+                         . 'own copy.',
+            'sends'     => 'Your internet address, your browser, and the address of this portal. Nothing you type is sent.',
+            'why'       => 'So that your browser can use a copy of the code it may already have, which makes pages faster.',
+            'hosts'     => ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+        ],
+        'robotCheck' => [
+            'name'      => 'The check that you are not a robot',
+            'companies' => 'Whichever one this portal has been set up with: Cloudflare (Turnstile), Google (reCAPTCHA) '
+                         . 'or hCaptcha.',
+            'when'      => 'Only if it is switched on. It is shown on some forms, such as signing in, resetting a '
+                         . 'password, and the forms anybody can fill in without an account.',
+            'sends'     => 'Your browser fetches the check from the company, which receives your internet address, your '
+                         . 'browser and how you use the page. When you send the form, this portal\'s server asks the '
+                         . 'company whether you passed. Google\'s reCAPTCHA also sets Google\'s own cookies (small files '
+                         . 'your browser keeps for a website).',
+            'why'       => 'To stop automatic programs from flooding the forms or guessing passwords.',
+            'hosts'     => ['challenges.cloudflare.com', 'www.google.com', 'js.hcaptcha.com', 'hcaptcha.com'],
+        ],
+        'errorMonitoring' => [
+            'name'      => 'Error reports',
+            'companies' => 'Only if this portal\'s administrator has switched it on: a monitoring service of their '
+                         . 'choosing, such as Sentry or GlitchTip.',
+            'when'      => 'When something goes wrong while a page is being made for you.',
+            'sends'     => 'Your account number if you are signed in, the address of the page, your browser, and the '
+                         . 'fault\'s own message. It is sent by this portal\'s own server.',
+            'why'       => 'So that the people running this portal hear about faults and can fix them.',
+            'hosts'     => [],
         ],
     ];
 

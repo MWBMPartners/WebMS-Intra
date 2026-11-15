@@ -56,6 +56,12 @@
  *      host's agreement), a non-member sees nothing, a planned meeting takes no
  *      roll and no Attendance push and is left out of the report, and removing
  *      a home deletes its address at once
+ *   V  #808, D-158: both privacy pages print every outside company (the three
+ *      switchable ones and the six NAMED ones) whole, in a hand-pinned order,
+ *      word for word the same on both pages and for every reader — a visitor,
+ *      members of two organisations with different own choices, and an
+ *      organisation that has said "no" — because the list describes and
+ *      decides nothing
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It cannot show what a real browser fetches. It reads the HTML and the page
@@ -2587,6 +2593,71 @@ if ($sgEnabledBefore === null) {
 } else {
     q('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingID` = ?', 'si', [$sgEnabledBefore['settingValue'], (int) $sgEnabledBefore['settingID']]);
 }
+
+// =============================================================================
+// V. #808, D-158: EVERY OUTSIDE COMPANY IS NAMED ON BOTH PRIVACY PAGES
+// =============================================================================
+// The owner's decision: name each outside company truthfully on the privacy
+// page before the first install, gate it after. The words live in ONE place
+// (OutsideServices::SERVICES and ::NAMED) and are printed by ONE template, so
+// what is proved here is that both pages print ALL of them, WHOLE, the SAME on
+// both pages, and the same for everybody: a visitor, two members of different
+// organisations with different choices of their own, and an organisation that
+// has said "no" to a service (the list describes, it never decides).
+head('V. Every outside company is named on both privacy pages (#808, D-158)');
+setChoice(M, OutsideServices::GRAVATAR, 'off');
+setChoice(AONLY, OutsideServices::GRAVATAR, 'on');
+setAt(K_GRAV, ORG_B, 'no');
+$jarVM = signIn('m', ORG_A);
+$jarVA = signIn('aonly', ORG_A);
+$jarVB = signIn('badmin', ORG_B);
+check('V00 premise: two organisations, and members whose own choices differ', orgSeen($jarVM) === ORG_A && orgSeen($jarVB) === ORG_B
+    && choiceOf(M, OutsideServices::GRAVATAR) === 'off' && choiceOf(AONLY, OutsideServices::GRAVATAR) === 'on' && stored(K_GRAV, ORG_B) === 'no');
+/** The notice's own block, or '' when the page has none. */
+$noticeOf = static function (string $html): string {
+    return preg_match('#<div data-outside-services-notice="1">.*?</ul>\s*<p data-outside-services="not-listed">.*?</p>\s*</div>#s', $html, $m) === 1 ? $m[0] : '';
+};
+$notices = [];
+foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' => 'the privacy policy'] as $path => $what) {
+    foreach (['a visitor' => '', 'M (A and B)' => $jarVM, 'a member of A alone' => $jarVA, "B's administrator" => $jarVB] as $who => $jar) {
+        $page = req($jar, 'GET', $path);
+        $notice = $noticeOf($page['body']);
+        $notices["{$path}|{$who}"] = $notice;
+        check("V01 {$what}, for {$who}: answers a WHOLE page with the outside-companies section in it",
+            $page['status'] === 200 && str_contains($page['body'], '</html>') === true && $notice !== '', 'status ' . $page['status']);
+    }
+    $body = $notices["{$path}|a visitor"];
+    $named = preg_match_all('#<li data-outside-service="([A-Za-z0-9]+)">#', $body, $mm) > 0 ? $mm[1] : [];
+    // ✋ Hand-pinned, not derived from the constant: deriving the expected list
+    //    from NAMED would pass on a constant that had quietly lost an entry.
+    check("V02 {$what}: lists the three switchable services and the six D-158 names, in that order", $named === [
+        'gravatar', 'providerPhoto', 'memberMap',
+        'what3words', 'addressLookup', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'], implode(',', $named));
+    foreach (OutsideServices::NAMED as $key => $entry) {
+        foreach (['name', 'companies', 'when', 'sends', 'why'] as $field) {
+            check("V03 {$what}: '{$key}' prints its {$field} whole",
+                str_contains($body, htmlspecialchars($entry[$field], ENT_QUOTES, 'UTF-8')) === true);
+        }
+    }
+    foreach (['jsDelivr', 'cdnjs', 'Facebook\'s player can recognise you', 'Turnstile', 'reCAPTCHA', 'hCaptcha', 'Nominatim',
+              'what3words', 'Sentry', 'Canva', 'Cloudflare Stream'] as $words) {
+        check("V04 {$what}: names \"{$words}\" (hand-pinned)", str_contains($body, htmlspecialchars($words, ENT_QUOTES, 'UTF-8')) === true);
+    }
+    check("V05 {$what}: says plainly which companies it does NOT list", str_contains($body, 'Not listed here: companies this organisation may use to do a job') === true);
+    check("V06 {$what}: links to the member's own Outside services page", str_contains($body, 'href="/account/outside-services"') === true);
+}
+check('V07 the two pages print the SAME section, word for word', $notices['/privacy|a visitor'] === $notices['/privacy/policy|a visitor']);
+$sameForAll = true;
+foreach ($notices as $label => $notice) {
+    [$path] = explode('|', $label);
+    if ($notice !== $notices["{$path}|a visitor"]) {
+        $sameForAll = false;
+    }
+}
+check('V08 ...and the same for every reader: it describes, it decides nothing (B\'s "no" and the members\' own choices change no word)', $sameForAll === true);
+setAt(K_GRAV, ORG_B, null);
+setChoice(M, OutsideServices::GRAVATAR, null);
+setChoice(AONLY, OutsideServices::GRAVATAR, null);
 
 $errors = (string) @file_get_contents($child . $sep . 'php-errors.log');
 check('Z01 the server logged no PHP error or warning during the run', preg_match('/PHP (Fatal|Warning|Parse|Deprecated)/', $errors) !== 1, mb_substr($errors, 0, 600));
