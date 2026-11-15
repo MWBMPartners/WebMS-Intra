@@ -1072,7 +1072,7 @@ $homeHash = $hashesSince($markO)[0] ?? '';
 // #1037 round 3: this used to ask only that the key DIFFERED from the plain
 // one, and an unkeyed sha256 of other text passed it. The expected key is now
 // rebuilt here from the enc.key this run wrote, exactly as
-// AddressFingerprint::of() makes it (sha256 of key | text), over the text
+// AddressFingerprint::withInstallationKey() makes it (sha256 of key | text), over the text
 // Geocoder::homeCacheKey() fingerprints. This IS a second copy of the rule
 // (#647's warning), kept on purpose: the property is "the installation's
 // secret is in it", and only a value made from that secret can show it.
@@ -1222,6 +1222,84 @@ foreach (['/privacy' => 'R6', '/privacy/policy' => 'R7'] as $path => $id) {
         [true, false]);
 }
 rename($keyAside, $keyFile);
+
+// #1037 round 5: R0-R7 moved the file away, and nothing asked about the other
+// ways there is NO key. Removing the `!== ''` test from the key reader left
+// this test at 125 of 125 while an EMPTY key file fingerprinted a home with
+// nothing secret in it — the SHA-256 of '|' plus the address, which anybody can
+// make (D-183 rules that out by name). And a FOLDER in the file's place made
+// the reader raise a PHP notice on every look-up and every privacy page,
+// because it asked is_readable() and not is_file(). So each kind of "no key"
+// is made here, in THIS RUN'S COPY only, and each must behave as R2 and R6 say;
+// then two short files, which ARE working keys (any length is; only empty or
+// not-a-file is no key) and so must be remembered, keyed with exactly that
+// content. The real file is put back between cases and at the end.
+$errMark   = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS n FROM `tblErrors`')->fetch_assoc()['n'] ?? 0);
+$phpLog    = $child . $sep . 'php-errors.log';
+$logSize   = static function () use ($phpLog): int { clearstatcache(true, $phpLog); return is_file($phpLog) === true ? (int) filesize($phpLog) : 0; };
+$homeTextOf = static fn (string $addr): string => 'geocode-home|forward|' . mb_strtolower(trim((string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $addr, null)));
+$noKeyCases = [
+    'RE' => ['an EMPTY key file', static function () use ($keyFile): void { file_put_contents($keyFile, ''); }],
+    'RF' => ['a FOLDER in the key file\'s place', static function () use ($keyFile): void { mkdir($keyFile); }],
+    'RU' => ['a key file that cannot be read', static function () use ($keyFile): void { file_put_contents($keyFile, 'some key'); chmod($keyFile, 0000); }],
+];
+foreach ($noKeyCases as $id => [$what, $make]) {
+    rename($keyFile, $keyAside);
+    $make();
+    clearstatcache();
+    if ($id === 'RU' && is_readable($keyFile) === true) {
+        // 🧱 Running as a user that reads anything (root): the case cannot be
+        //    made here, and a check that passed on it would prove nothing.
+        echo "  SKIP {$id}: this user can read a file with no permissions (root?), so an unreadable key file cannot be made\n";
+    } else {
+        $errBefore = $errMark();
+        $logBefore = $logSize();
+        $addr = GT_MARK . " Keyless {$id} Close";
+        $mark = $cacheMark();
+        $stubReset();
+        $got = $lookup($addr, '', 'home');
+        $stubReset();
+        $lookup($addr, '', 'home');
+        check("{$id}1 with {$what}, a HOME is looked up, asked again of the map service, and NO row is written",
+            [$got['ok'] ?? null, $stubCalls(), $rowsSince($mark)], [true, ['nominatim'], 0]);
+        foreach (['/privacy', '/privacy/policy'] as $path) {
+            $said = $noticeOn($path);
+            check("{$id}2 with {$what}, {$path} says a home's position is not remembered, and not that one is kept mixed with the key",
+                [str_contains($said, 'That key cannot be read just now, so while it cannot, the position of a home is not remembered at all'),
+                 str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation')],
+                [true, false]);
+        }
+        check("{$id}3 with {$what}, nothing was written to the error log table or to PHP's own error log",
+            [$errMark() - $errBefore, $logSize() - $logBefore], [0, 0]);
+    }
+    if (is_dir($keyFile) === true) {
+        rmdir($keyFile);
+    } else {
+        @chmod($keyFile, 0600);
+        unlink($keyFile);
+    }
+    rename($keyAside, $keyFile);
+}
+foreach (['RK1' => ['a ONE-BYTE key file', 'x'], 'RK2' => ['a key file holding only a newline', "\n"]] as $id => [$what, $content]) {
+    rename($keyFile, $keyAside);
+    file_put_contents($keyFile, $content);
+    $addr = GT_MARK . " Short Key {$id} Close";
+    $mark = $cacheMark();
+    $stubReset();
+    $lookup($addr, '', 'home');
+    check("{$id} {$what} IS a working key: the home is remembered, marked home, keyed with exactly that content",
+        [$stubCalls(), $kindsSince($mark), $hashesSince($mark)],
+        [['nominatim'], ['home'], [hash('sha256', $content . '|' . $homeTextOf($addr))]]);
+    $said = $noticeOn('/privacy');
+    check("{$id}b ...and the privacy page says a home's position is kept, mixed with the installation's secret key",
+        [str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation'),
+         str_contains($said, 'cannot be read just now')],
+        [true, false]);
+    unlink($keyFile);
+    rename($keyAside, $keyFile);
+}
+check('RZ the copy\'s real key file is back, unchanged', (string) file_get_contents($keyFile), $encKey);
+
 $said = $noticeOn('/privacy');
 check('R8 with the key back, the notice says again that a home\'s position is kept, mixed with the installation\'s secret key',
     [str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation'),

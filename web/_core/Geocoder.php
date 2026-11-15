@@ -572,23 +572,28 @@ class Geocoder
     }
 
     /**
-     * 🏠 A HOME's cache key (D-183): the same text as cacheKey() would use,
-     * fingerprinted by `AddressFingerprint::of()`, which mixes in the
+     * 🏠 A HOME's cache key (D-183), or NULL when it cannot be made safely.
+     *
+     * The text is what cacheKey() would hash for the same look-up, behind
+     * leading words that keep it apart from every other value
+     * `AddressFingerprint` makes (network addresses). It is fingerprinted by
+     * `AddressFingerprint::withInstallationKey()`: SHA-256 of the
      * installation's own secret (the encryption key in `_auth_keys/enc.key`,
      * outside the web root and outside the database, so not in a database
-     * backup). A plain SHA-256 of an address can be checked against any list
-     * of addresses; this one needs the key as well. The leading words keep it
-     * apart from every other value that class makes (network addresses).
+     * backup) joined to that text. A plain SHA-256 of an address can be
+     * checked against any list of addresses; this one needs the key as well.
      *
-     * WHEN THE KEY CANNOT BE READ THIS ANSWERS NULL, AND A HOME IS NOT
-     * REMEMBERED AT ALL (#1037 round 4). The first version used
-     * `AddressFingerprint::of()`, which then falls back to the portal's version
-     * as its salt. That version is printed in every release, so it is no
-     * secret: a home's key made from it can be tested against any list of
-     * addresses, which is the unsalted fingerprint D-183 rules out by name —
-     * while the privacy notice said the key was mixed with "a secret key
-     * belonging to this installation". Forgetting a home's answer costs only a
-     * fresh look-up each time; the key coming back costs nothing either.
+     * WHEN THE KEY CANNOT BE READ — the file missing, unreadable, empty, or a
+     * folder in its place — withInstallationKey() answers null, this answers
+     * null, and a home is neither read from nor written to the cache: it is
+     * looked up afresh every time. There is deliberately no stand-in salt.
+     * `AddressFingerprint::of()` has one, the portal's version, and the first
+     * version of this method used of() (#1037 round 4): that version is
+     * printed in every release, so a home keyed with it could be tested
+     * against any list of addresses — the unsalted fingerprint D-183 rules out
+     * by name — while the privacy notice said the key was mixed with "a secret
+     * key belonging to this installation". Forgetting a home's answer costs
+     * only a fresh look-up; the key coming back costs nothing either.
      */
     private static function homeCacheKey(string $queryText): ?string
     {

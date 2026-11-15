@@ -64,7 +64,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/712
  * -----------------------------------------------------------------------------
  */
@@ -148,17 +148,30 @@ final class AddressFingerprint
             ?? (defined('PORTAL_VERSION') === true ? (string) PORTAL_VERSION : 'webms-intra');
     }
 
-    /** The contents of `_auth_keys/enc.key`, or null when it is missing, unreadable or empty. */
+    /**
+     * 🔑 The contents of `_auth_keys/enc.key`, or null when there is NO KEY:
+     *    the file is missing, cannot be read, is not a file at all (a folder of
+     *    that name), or is EMPTY. A file holding anything at all, one byte or
+     *    a lone newline included, is a working key.
+     *
+     * Asked of `SecretSettings::keyFileContents()`, the reader the portal's
+     * secrets already use, rather than read here (#1037 round 5). This class
+     * used to keep its own copy, which asked only is_readable() — and
+     * is_readable() says yes to a FOLDER, so a folder in the key file's place
+     * made file_get_contents() raise a PHP notice on every call. Since round 4
+     * that is every map look-up and both privacy pages, each writing a row to
+     * the error log. A third copy of one test is how one copy goes wrong.
+     *
+     * The require is guarded because two self-tests load this class by hand,
+     * without the portal's class loader (the house pattern, see
+     * `ActivityLogRetention::needSettingLimit()`).
+     */
     private static function installationKey(): ?string
     {
-        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
-        if (is_readable($keyPath) === true) {
-            $key = (string) file_get_contents($keyPath);
-            if ($key !== '') {
-                return $key;
-            }
+        if (class_exists(SecretSettings::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'SecretSettings.php';
         }
 
-        return null;
+        return SecretSettings::keyFileContents();
     }
 }
