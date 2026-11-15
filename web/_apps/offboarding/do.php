@@ -399,17 +399,11 @@ if ($committed === true) {
     //    Appended to every message below, the failure ones included.
     $homesNote = '';
     if ($releasedHomes !== []) {
-        $groupsNotTold = 0;
-        \Portal\Core\SmallGroups::tellLeadersHomesReleased($db, $releasedHomes, $userId, $groupsNotTold);
-        $groupCount = count($releasedHomes);
-        $homesNote  = ' Their home was taken off ' . ($groupCount === 1 ? '1 small group' : $groupCount . ' small groups')
-            . ' as a meeting place. '
-            . ($groupsNotTold === 0
-                ? ($groupCount === 1 ? 'Its leaders are' : 'Their leaders are') . ' being e-mailed to choose a new place.'
-                : ($groupsNotTold === $groupCount
-                    ? 'No e-mail could be sent to ' . ($groupCount === 1 ? 'its' : 'their') . ' leaders, so please tell them to choose a new place.'
-                    : 'The leaders of ' . $groupsNotTold . ' of them could not be e-mailed, so please tell them to choose a new place; '
-                      . 'the others are being e-mailed.'));
+        $leadersOutcome = null;
+        \Portal\Core\SmallGroups::tellLeadersHomesReleased($db, $releasedHomes, $userId, $leadersOutcome);
+        // Worded in ONE place, naming each group under what became of its
+        // leaders (round 3 of the check).
+        $homesNote = \Portal\Core\SmallGroups::offboardingHomesWords(count($releasedHomes), $leadersOutcome);
     }
 
     // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after

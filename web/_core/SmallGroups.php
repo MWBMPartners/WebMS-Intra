@@ -641,21 +641,25 @@ final class SmallGroups
      *
      * @param list<array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int}> $released
      *
-     * @param int $groupsNotTold Set to how many of those groups had NO leader
-     *                           a mail service took a message for (none to
-     *                           write to, a read that failed, or a route that
-     *                           refused), so a caller covering several groups
-     *                           (offboarding) can say exactly that (#952,
-     *                           round 2 of the check).
+     * @param ?array $outcome Filled with each group's NAME, sorted by what
+     *                        became of its leaders, so a caller covering
+     *                        several groups (offboarding) can say exactly that
+     *                        (#952, rounds 2 and 3 of the check): `told` (a mail
+     *                        service took at least one message), `noLeader`
+     *                        (no other current leader to write to — the person
+     *                        who left may have been the only one), `notSent`
+     *                        (there were leaders, but nothing could be sent, or
+     *                        they could not be read).
      *
      * @return int How many messages a mail service took or kept (for the caller's words).
      */
-    public static function tellLeadersHomesReleased(\mysqli $db, array $released, int $hostId, ?int &$groupsNotTold = null): int
+    public static function tellLeadersHomesReleased(\mysqli $db, array $released, int $hostId, ?array &$outcome = null): int
     {
-        $told          = 0;
-        $groupsNotTold = 0;
+        $told    = 0;
+        $outcome = ['told' => [], 'noLeader' => [], 'notSent' => []];
         foreach ($released as $group) {
-            $toldHere = 0;
+            $toldHere  = 0;
+            $groupName = '';
             try {
                 $info = $db->prepare('SELECT `groupName` FROM `tblSmallGroups` WHERE `groupID` = ? AND `siteID` = ? LIMIT 1');
                 $info->bind_param('ii', $group['groupID'], $group['siteID']);
@@ -682,14 +686,17 @@ final class SmallGroups
                 );
             } catch (\Throwable $e) {
                 Logger::errorPlatform('SmallGroups', 'Warning', 'SG_HOST_LEFT_READ', 'The leaders of a group whose host left could not be read, so they were not told', '');
-                $groupsNotTold++;
+                $outcome['notSent'][] = $groupName !== '' ? $groupName : 'a small group';
+                continue;
+            }
+            $addresses = array_values(array_filter(array_map(static fn ($a): string => trim((string) $a), $addresses),
+                static fn (string $a): bool => $a !== '' && filter_var($a, FILTER_VALIDATE_EMAIL) !== false));
+            $label = $groupName !== '' ? $groupName : 'a small group';
+            if ($addresses === []) {
+                $outcome['noLeader'][] = $label;
                 continue;
             }
             foreach ($addresses as $address) {
-                $address = trim((string) $address);
-                if ($address === '' || filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
-                    continue;
-                }
                 try {
                     if (Mailer::send($address, $words['subject'], $words['body'], [], ['siteId' => $group['siteID'], 'bodyIsText' => true]) === true) {
                         $told++;
@@ -701,12 +708,49 @@ final class SmallGroups
                     Logger::errorPlatform('Mailer', 'Warning', 'SG_HOST_LEFT_MAIL', 'A leader could not be told that a host left their group', '');
                 }
             }
-            if ($toldHere === 0) {
-                $groupsNotTold++;
-            }
+            $outcome[$toldHere > 0 ? 'told' : 'notSent'][] = $label;
         }
 
         return $told;
+    }
+
+    /**
+     * 🗣️ What offboarding's page says about the homes it took off small groups,
+     * and the ONE place it is worded (#952, round 3 of the check). Each group is
+     * NAMED under what became of its leaders, so an administrator knows whom to
+     * contact, and a group whose only leader was the person who left is told
+     * apart from one whose leaders simply could not be e-mailed — there are no
+     * leaders to "tell" in the first case. '' when no home was taken off.
+     *
+     * @param array{told:list<string>, noLeader:list<string>, notSent:list<string>} $outcome From tellLeadersHomesReleased().
+     */
+    public static function offboardingHomesWords(int $groupCount, array $outcome): string
+    {
+        if ($groupCount <= 0) {
+            return '';
+        }
+        $names = static function (array $list): string {
+            if (count($list) <= 1) {
+                return implode('', $list);
+            }
+            $last = array_pop($list);
+
+            return implode(', ', $list) . ' and ' . $last;
+        };
+        $words = ' Their home was taken off ' . ($groupCount === 1 ? '1 small group' : $groupCount . ' small groups') . ' as a meeting place.';
+        if ($outcome['told'] !== []) {
+            $words .= ' The leaders of ' . $names($outcome['told']) . ' are being e-mailed to choose a new place.';
+        }
+        if ($outcome['notSent'] !== []) {
+            $words .= ' The leaders of ' . $names($outcome['notSent']) . ' could not be e-mailed, so please tell them to choose a new place.';
+        }
+        if ($outcome['noLeader'] !== []) {
+            $one    = count($outcome['noLeader']) === 1;
+            $words .= ' ' . $names($outcome['noLeader']) . ($one === true ? ' has' : ' have') . ' no other current leader to tell, '
+                . 'so please choose a new place for ' . ($one === true ? 'it' : 'them') . ' or name a new leader.';
+        }
+
+        return $words;
     }
 
     /**

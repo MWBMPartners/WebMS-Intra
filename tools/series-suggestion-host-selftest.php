@@ -135,6 +135,8 @@ const GROUP_F = 847204;
 const GROUP_U = 847205;
 const PLACE_HOST4_A = 847306;
 const PLACE_RACE    = 847307;
+const GROUP_G       = 847206; // section F: a group whose ONLY leader is the person offboarded
+const PLACE_HOST4_G = 847308;
 const PLACE_HOST_A  = 847301;
 const PLACE_HOST2_A = 847302;
 const PLACE_HOST_B  = 847303;
@@ -257,7 +259,7 @@ function removeWorld(): void
     $db->query("DELETE FROM `tblEmailLog` WHERE `subject` LIKE 'A meeting place of P847 %' OR `toRecipients` = 'p847.visitor@example.invalid'");
     $db->query("DELETE FROM `tblMailQueue` WHERE `subject` LIKE 'A meeting place of P847 %' OR `toRecipients` = 'p847.visitor@example.invalid'");
     $db->query("DELETE FROM `tblApiKeys` WHERE `name` LIKE 'P847 %'");
-    $groups = implode(',', [GROUP_A, GROUP_B, GROUP_R, GROUP_F, GROUP_U]);
+    $groups = implode(',', [GROUP_A, GROUP_B, GROUP_R, GROUP_F, GROUP_U, GROUP_G]);
     $db->query("DELETE FROM `tblSmallGroupMeetings` WHERE `groupID` IN ({$groups})");
     $db->query("DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` IN ({$groups})");
     $db->query("DELETE FROM `tblSmallGroupMembers` WHERE `groupID` IN ({$groups})");
@@ -586,7 +588,24 @@ if ($up === false) {
 // before a later date "keeps that date off the website", which is untrue for
 // every day the window is open). The second half is then DRIVEN, below.
 const SERIES_SENTENCE = 'the same From and Until dates apply to every date in the series: they are not worked out again for each date';
-const SERIES_LIMITS   = '(A date you later make a draft, cancel or untick on its own is not shown, and the public door gives a website at most 50 dates at a time, 20 unless it asks for more.)';
+/**
+ * One of the door's own numbers, read from the COPY's `PublicDoor.php` at the
+ * moment it is asked (so a planted change is seen), never typed in here.
+ */
+function doorConstant(string $name): int
+{
+    global $child, $sep;
+    $src = (string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'PublicDoor.php');
+
+    return preg_match('/public const ' . preg_quote($name, '/') . ' = (\d+);/', $src, $m) === 1 ? (int) $m[1] : -1;
+}
+
+/** The sentence's bracket, built from the door's ceiling as the form builds it. */
+function seriesLimits(): string
+{
+    return '(A date you later make a draft, cancel or untick on its own is not shown, and a website is given at most '
+        . doorConstant('MAX_LIMIT') . ' dates at a time, and fewer unless it asks for more.)';
+}
 const SERIES_TRUTH    = 'While today is between the two dates, every date of the series still to come is on the website, including those after the Until date; once the Until date has passed, none of them is, so a later date comes off the website before its day.';
 
 /** A day relative to today on organisation A's own clock, as Y-m-d. */
@@ -604,7 +623,7 @@ function dayFromToday(int $days): string
  *
  * @return list<int>|null
  */
-function doorListsNow(): ?array
+function doorGet(string $surfaceAndQuery): array
 {
     global $port;
     $name = bin2hex(random_bytes(12));
@@ -612,10 +631,23 @@ function doorListsNow(): ?array
     q('INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())', 'is', [ORG_A, $name]);
     setting('site.url', 'http://127.0.0.1:' . $port);
     try {
-        $r = req('', 'GET', '/w/' . $name . '/events.json?limit=50');
+        return req('', 'GET', '/w/' . $name . '/' . $surfaceAndQuery);
     } finally {
         q('DELETE FROM `tblPublicDoorNames` WHERE `siteID` = ?', 'i', [ORG_A]);
     }
+}
+
+/** How many events a door feed answer holds, or -1 when it is not a feed answer. */
+function feedCount(array $r): int
+{
+    $j = json_decode($r['body'], true);
+
+    return ($r['status'] === 200 && is_array($j) === true && is_array($j['events'] ?? null) === true) ? count($j['events']) : -1;
+}
+
+function doorListsNow(): ?array
+{
+    $r = doorGet('events.json?limit=50');
     $j = json_decode($r['body'], true);
     if ($r['status'] !== 200 || is_array($j) === false || ($j['format'] ?? null) !== 'webms-public-events' || is_array($j['events'] ?? null) === false) {
         return null;
@@ -641,7 +673,7 @@ $sectionW = static function (): void {
     check('W00 premise: the Manage Events page answered with the new-event form', $new['status'] === 200 && str_contains($new['body'], 'id="websiteFrom-new"'), 'HTTP ' . $new['status']);
     check('W01 the new-event form says the same two dates apply to every date in a series', str_contains(squash($new['body']), SERIES_SENTENCE));
     check('W01b ...and says what they do: judged against today, so a later date comes off before its day', str_contains(squash($new['body']), SERIES_TRUTH));
-    check('W01c ...and its two limits: a date taken off on its own, and how many dates the door gives at a time', str_contains(squash($new['body']), SERIES_LIMITS));
+    check('W01c ...and its two limits: a date taken off on its own, and how many dates the door gives at a time', str_contains(squash($new['body']), seriesLimits()));
 
     // Three weekly series, each made through the real form, each three dates
     // still to come (20, 27 and 34 days from now): one whose window is OPEN
@@ -685,6 +717,38 @@ $sectionW = static function (): void {
     check('W08 before the From date, none is listed either', $ids($later) !== [] && array_intersect($ids($later), $listed) === [], 'listed ' . json_encode($listed));
 
     $edit = req($jar, 'GET', '/calendar/manage?edit=' . (int) ($rows[0]['eventID'] ?? 0));
+    // THE BRACKET'S TRUE HALF, driven (round 3 of the check: it named the
+    // feeds' default, 20, while the framed page and the pasted script show
+    // 10). More dates than any limit, then every surface asked as a website
+    // asks: each gives FEWER than the ceiling by default, and the ceiling only
+    // when it asks for it.
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 W many %'");
+    $max = doorConstant('MAX_LIMIT');
+    for ($i = 1; $i <= $max + 5; $i++) {
+        q("INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `isPublic`, `showOnWebsite`) "
+            . "VALUES (?, ?, ?, ?, 'Europe/Paris', 'published', 1, 1)", 'isss', [ORG_A, 'P847 W many ' . $i, 'p847-w-many-' . $i . '-' . bin2hex(random_bytes(3)), dayFromToday($i) . ' 10:00:00']);
+    }
+    $feedDefault = feedCount(doorGet('events.json'));
+    check('W09 the feed with no limit gives its own default, FEWER than the ceiling', $feedDefault === doorConstant('DEFAULT_LIMIT') && $feedDefault < $max,
+        "gave {$feedDefault}, default " . doorConstant('DEFAULT_LIMIT') . ", ceiling {$max}");
+    check('W10 the feed gives the ceiling when it asks for it', feedCount(doorGet('events.json?limit=' . $max)) === $max);
+    $over = doorGet('events.json?limit=' . ($max + 1));
+    check('W11 and never more: asking for one past the ceiling is refused', $over['status'] !== 200 && feedCount($over) === -1, 'HTTP ' . $over['status']);
+    $page  = doorGet('page.html');
+    $shown = -1;
+    if ($page['status'] === 200 && str_contains($page['body'], '<html') === true) {
+        $shown = count(\Dom\HTMLDocument::createFromString($page['body'], LIBXML_NOERROR)->querySelectorAll('.door__title'));
+    }
+    check('W12 the framed page with no limit shows its own default, FEWER than the ceiling', $shown === doorConstant('PAGE_DEFAULT_LIMIT') && $shown < $max,
+        "showed {$shown}, page default " . doorConstant('PAGE_DEFAULT_LIMIT') . ", ceiling {$max}");
+    global $child, $sep;
+    $script = (string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'data' . $sep . 'public-door.js');
+    $scriptOk = preg_match("/wholeNumber\\(me\\.getAttribute\\('data-limit'\\),\\s*(\\d+),\\s*1,\\s*(\\d+)\\)/", $script, $sm) === 1;
+    check('W13 the pasted script shows the page\'s default (fewer than the ceiling) unless told more, and never more than the ceiling',
+        $scriptOk && (int) $sm[1] === doorConstant('PAGE_DEFAULT_LIMIT') && (int) $sm[1] < $max && (int) $sm[2] === $max,
+        $scriptOk ? 'script default ' . $sm[1] . ', script ceiling ' . $sm[2] : 'the script\'s data-limit line was not found');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 W many %'");
+
     check('W04 the EDIT form makes no series, and does not carry the series sentence', $edit['status'] === 200 && str_contains($edit['body'], 'id="websiteFrom-edit"') === true
         && str_contains(squash($edit['body']), SERIES_SENTENCE) === false, 'HTTP ' . $edit['status']);
 };
@@ -920,8 +984,9 @@ $sectionH = static function (): void {
     $jarG = signIn(GADMIN, ORG_A);
     $off = post($jarG, '/admin/users', '/offboarding/do', ['userID' => (string) HOST3, 'reason' => 'P847 moved away', 'dataDisposition' => 'retain', 'effectiveDate' => date('Y-m-d')]);
     $offWords = flashAfter($jarG, $off);
-    check('H14 the offboarding message says their home left 2 groups, and that no e-mail could be sent to the leaders',
-        str_contains($offWords, 'Their home was taken off 2 small groups as a meeting place. No e-mail could be sent to their leaders, so please tell them to choose a new place.'), aroundWords($offWords, 'Offboarded'));
+    check('H14 the offboarding message says their home left 2 groups, and NAMES both groups whose leaders could not be e-mailed',
+        str_contains($offWords, 'Their home was taken off 2 small groups as a meeting place. The leaders of ' . GROUP_A_NAME . ' and ' . GROUP_B_NAME
+            . ' could not be e-mailed, so please tell them to choose a new place.'), aroundWords($offWords, 'Offboarded'));
     check('H09 premise: offboarding ended both of their memberships', membershipStatus(GROUP_A, HOST3) === 'ended' && membershipStatus(GROUP_B, HOST3) === 'ended', 'HTTP ' . $off['status']);
     check('H10 D-168: offboarding empties their homes in BOTH organisations\' groups', emptied(placeRow(PLACE_HOST3_A)) && emptied(placeRow(PLACE_HOST3_B)),
         json_encode([placeRow(PLACE_HOST3_A), placeRow(PLACE_HOST3_B)]));
@@ -1208,9 +1273,9 @@ $sectionF = static function (): void {
     global $db;
     head('F. #952: when offboarding\'s home step fails part-way, none of it is kept and nobody is told a half-truth');
     $db->query('DROP TRIGGER IF EXISTS `p847_fail_usual_place`');
-    $db->query('DELETE FROM `tblSmallGroupPlaces` WHERE `placeID` = ' . PLACE_HOST4_A);
-    $db->query('DELETE FROM `tblSmallGroupMembers` WHERE `groupID` = ' . GROUP_F . ' OR `userID` = ' . HOST4);
-    $db->query('DELETE FROM `tblSmallGroups` WHERE `groupID` = ' . GROUP_F);
+    $db->query('DELETE FROM `tblSmallGroupPlaces` WHERE `placeID` IN (' . PLACE_HOST4_A . ',' . PLACE_HOST4_G . ')');
+    $db->query('DELETE FROM `tblSmallGroupMembers` WHERE `groupID` IN (' . GROUP_F . ',' . GROUP_G . ') OR `userID` = ' . HOST4);
+    $db->query('DELETE FROM `tblSmallGroups` WHERE `groupID` IN (' . GROUP_F . ',' . GROUP_G . ')');
     $db->query("DELETE FROM `tblEmailLog` WHERE `subject` = 'A meeting place of P847 Failing needs replacing'");
     q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOST4]);
     q('UPDATE `tblUserSites` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOST4]);
@@ -1221,6 +1286,12 @@ $sectionF = static function (): void {
     member(GROUP_F, ORG_A, LEAD_A, 'leader');
     member(GROUP_F, ORG_A, HOST4);
     home(PLACE_HOST4_A, GROUP_F, ORG_A, HOST4, '6 Fourth Street');
+    // Round 3 of the check: a group whose ONLY leader is the person being
+    // offboarded, so there is nobody to e-mail and the page must not say
+    // "tell them" about leaders who do not exist.
+    group(GROUP_G, ORG_A, 'P847 Leaderless', null);
+    member(GROUP_G, ORG_A, HOST4, 'leader');
+    home(PLACE_HOST4_G, GROUP_G, ORG_A, HOST4, '6 Fourth Street');
     $db->query("CREATE TRIGGER `p847_fail_usual_place` BEFORE UPDATE ON `tblSmallGroups` FOR EACH ROW BEGIN "
         . 'IF OLD.`groupID` = ' . GROUP_F . " AND NEW.`hostUserID` IS NULL THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p847 planted failure'; END IF; END");
     try {
@@ -1277,8 +1348,10 @@ $sectionF = static function (): void {
         setting('mail.smtp.host', '');
     }
     check('F07 offboarding again with nothing failing takes the home off this time', emptied(placeRow(PLACE_HOST4_A)), json_encode(placeRow(PLACE_HOST4_A)));
-    check('F08 ...and says the group\'s leaders are being e-mailed',
-        str_contains($againWords, 'Their home was taken off 1 small group as a meeting place. Its leaders are being e-mailed to choose a new place.'), aroundWords($againWords, 'Offboarded'));
+    check('F07b ...from the leaderless group too', emptied(placeRow(PLACE_HOST4_G)), json_encode(placeRow(PLACE_HOST4_G)));
+    check('F08 ...and NAMES the group whose leaders are being e-mailed, and the one with no other leader to tell',
+        str_contains($againWords, 'Their home was taken off 2 small groups as a meeting place. The leaders of P847 Failing are being e-mailed to choose a new place. '
+            . 'P847 Leaderless has no other current leader to tell, so please choose a new place for it or name a new leader.'), aroundWords($againWords, 'Offboarded'));
 };
 
 // =============================================================================
@@ -1327,7 +1400,10 @@ $plants = [
     ['P12', '_apps/small-groups/place-save.php', 'if ($host !== null && $host !== $storedHost && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {', 'if (false) {', $sectionR, 'R05', 'naming a listed home\'s host not asking under the lock'],
     ['P13', '_apps/small-groups/save.php', "&& SmallGroups::hostStillBelongs(\$db, \$siteId, \$groupId, \$hostPick['host']) === false) {", '&& false) {', $sectionR, 'R08', 'naming the usual place\'s host not asking under the lock'],
     ['P14', '_apps/offboarding/do.php', "\$db->query('ROLLBACK TO SAVEPOINT `release_small_group_homes`');", '', $sectionF, 'F02', 'offboarding\'s home step not rolled back on a part-way failure'],
-    ['P01c', '_apps/calendar/manage/_event_form.php', 'gives a website at most 50 dates at a time', 'gives a website every date', $sectionW, 'W01c', 'the door\'s limit dropped from the series sentence'],
+    ['P01c', '_apps/calendar/manage/_event_form.php', 'dates at a time, and fewer', 'dates at a time, or as many', $sectionW, 'W01c', 'the series sentence no longer saying the default is fewer'],
+    ['P01d', '_apps/calendar/manage/_event_form.php', 'given at most <?php echo (int) \\Portal\\Core\\PublicDoor::MAX_LIMIT; ?> dates', 'given at most <?php echo (int) \\Portal\\Core\\PublicDoor::DEFAULT_LIMIT; ?> dates', $sectionW, 'W01c', 'the series sentence naming a default (20) as the ceiling'],
+    ['P01e', '_core/PublicDoor.php', 'public const PAGE_DEFAULT_LIMIT = 10;', 'public const PAGE_DEFAULT_LIMIT = 50;', $sectionW, 'W12', 'the framed page showing the ceiling by default ("fewer" then untrue)'],
+    ['P22', '_core/SmallGroups.php', "\$outcome['noLeader'][] = \$label;", "\$outcome['notSent'][] = \$label;", $sectionF, 'F08', 'a group with no other leader worded as leaders who could not be e-mailed'],
     ['P16', '_apps/small-groups/place-save.php', "//    first: a lock outside one is decoration (#697).\n    \$db->begin_transaction();", "//    first: a lock outside one is decoration (#697).\n", $sectionR, 'R10', 'adding a home with its transaction removed (the lock let go at once)'],
     ['P17', '_apps/small-groups/place-save.php', "\$db->begin_transaction();\ntry {\n    \$lock = \$db->prepare(", "try {\n    \$lock = \$db->prepare(", $sectionR, 'R12', 'naming a listed home\'s host with its transaction removed'],
     ['P18', '_apps/small-groups/save.php', "    \$db->begin_transaction();\n    try {\n        \$lock = \$db->prepare(", "    try {\n        \$lock = \$db->prepare(", $sectionR, 'R14', 'naming the usual place\'s host with its transaction removed'],
