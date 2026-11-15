@@ -31,6 +31,63 @@ class Giving
     //    has re-pointed the capability would still be refused by anything
     //    that asked for this key.
 
+    // -------------------------------------------------------------------------
+    // 💷 THE LARGEST GIFT THE ONLINE GIVING FORM TAKES (#992; the owner,
+    //    12 November 2026 — D-172).
+    //
+    //    It used to be `GIVING_MAX_AMOUNT_PENCE`, 10,000.00 written into
+    //    `payments/checkout.php` — the same figure in every currency, which
+    //    is a very different ceiling in, say, Thai baht (10,000 baht is a few
+    //    hundred pounds) than in pounds. It
+    //    is a LIMIT now under the three-tier rule (#668): the hard maximum
+    //    below, then the installation's figure, then the organisation's, each
+    //    unable to loosen the one above. Set on Admin, Settings, Member
+    //    limits; read only through `onlineGiftCeiling()`.
+    //
+    //    IN HUNDREDTHS OF THE ORGANISATION'S OWN CURRENCY, AND NOT CONVERTED.
+    //    The installation's figure is a number of units the same way: it is
+    //    "the most any organisation here may set", in whatever currency each
+    //    organisation uses. The portal holds no exchange rates (#993), so it
+    //    cannot compare amounts across currencies — and an installation
+    //    hosting an organisation that gives in baht can now raise its figure
+    //    for that, which the fixed number never allowed. (Not the yen, nor any
+    //    currency not counted in hundredths: `Currency::whyNotChoosable()`
+    //    refuses those for every amount, this one included, and online
+    //    payments are taken only in `Currency::PAYMENT_CURRENCIES`.)
+    //
+    //    WHAT IT COVERS: a gift through the SELF-SERVICE online form only, as
+    //    the old constant did. A pledge is paid at its own recorded amount,
+    //    and a gift an office records by hand (`giving/entry-save`) is not a
+    //    payment a stranger can mistype. 0 is NOT "no ceiling": D-172 rules
+    //    out removing it, so the saves refuse 0.
+    // -------------------------------------------------------------------------
+    public const ONLINE_GIFT_MAX_KEY      = 'giving.online.maxGift';
+    /** 10,000.00 — what the fixed ceiling was, so nothing changes until somebody chooses. */
+    public const ONLINE_GIFT_MAX_DEFAULT  = 1000000;
+    /** What the payment's amount column can hold. */
+    public const ONLINE_GIFT_MAX_HARD_MAX = Currency::INT_COLUMN_MAX;
+
+    /**
+     * 💷 The largest online gift, in hundredths of the organisation's own
+     * currency, for the organisation being served.
+     */
+    public static function onlineGiftCeiling(): int
+    {
+        return SettingLimit::effective(self::ONLINE_GIFT_MAX_KEY, self::ONLINE_GIFT_MAX_DEFAULT, self::ONLINE_GIFT_MAX_HARD_MAX);
+    }
+
+    /**
+     * 💬 What the giver reads when a gift is above the ceiling: the ceiling
+     * itself, in their own currency, and where a larger gift can go. It used
+     * to say only "For large gifts please contact the office", which left a
+     * giver guessing what "large" was.
+     */
+    public static function onlineGiftTooLargeWords(int $ceiling, string $currency): string
+    {
+        return 'The most that can be given online here in one gift is ' . Currency::format($ceiling, $currency)
+            . '. For a larger gift, please contact the office. Nothing was charged.';
+    }
+
     /**
      * ⏳ What a statement row's `errorMsg` holds while its e-mail is WAITING
      * in the mail queue (#592): kept, not yet sent. The row's `emailedAt`

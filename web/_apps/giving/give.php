@@ -102,10 +102,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="input-group-text"><?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?></span>
                         <input type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" class="form-control" id="give-amount" name="amount" placeholder="0.00" required>
                     </div>
-                    <div class="form-text">Minimum <?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?>1.00. The server always re-checks this regardless of what's typed here.</div>
+                    <?php // 💷 #992: the ceiling in force (Giving::onlineGiftCeiling()), said before anybody presses Continue. ?>
+                    <?php $giftCeiling = \Portal\Core\Giving::onlineGiftCeiling(); ?>
+                    <div class="form-text" data-gift-ceiling="<?php echo (int) $giftCeiling; ?>">Minimum <?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8'); ?>1.00, and at most <?php echo htmlspecialchars(\Portal\Core\Currency::format($giftCeiling, \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?> online: for a larger gift, please contact the office. The server always re-checks this regardless of what's typed here.</div>
                 </div>
                 <div class="mb-3 d-flex gap-2">
-                    <?php foreach ([10, 20, 50] as $quick): ?>
+                    <?php // A quick amount above the ceiling would only be turned away at checkout (#992), so it is not offered. ?>
+                    <?php foreach (array_filter([10, 20, 50], static fn (int $q): bool => $q * 100 <= $giftCeiling) as $quick): ?>
                         <button type="button" class="btn btn-outline-secondary btn-sm portal-give-quick" data-amount="<?php echo (int) $quick; ?>.00"><?php echo htmlspecialchars($sym, ENT_QUOTES, 'UTF-8') . (int) $quick; ?></button>
                     <?php endforeach; ?>
                 </div>

@@ -6478,11 +6478,12 @@ anything else coerces to `purpose = 'other'` with `purposeRef = null` (no
 fan-out target, so nothing to forge). This PR's additions sit ADJACENT to
 that, not instead of it:
 
-- **`GIVING_MAX_AMOUNT_PENCE`** (currently `1_000_000` — £10,000) rejects
-  an online GIVING amount above the ceiling with a "For large gifts please
-  contact the office" flash. Pledges are exempt — a legitimate pledge can
-  exceed this, and its amount is forced from the pledge row regardless of
-  what (if anything) was POSTed.
+- **The online giving ceiling** (was `GIVING_MAX_AMOUNT_PENCE`, a fixed `1_000_000` — 10,000.00 in every
+  currency — until #992) is now the limit `giving.online.maxGift`, read only through
+  `Giving::onlineGiftCeiling()`: hundredths of the organisation's own currency, default 10,000.00, the
+  installation's figure capping the organisation's (D-172), set on Admin → Settings → Member limits. A
+  gift above it is refused with `Giving::onlineGiftTooLargeWords()`, which names the ceiling. Pledges are
+  still exempt — their amount is forced from the pledge row regardless of what was POSTed (#1083).
 - **Server-built descriptions** — `description` is no longer read from
   `$_POST` at all; it's built from the already-validated category name
   (`'Giving — {name}'`) or project title (`'Pledge — {title}'`, truncated
@@ -24525,3 +24526,22 @@ over HTTP; S the source rules; Z the tidy-up.
   (network addresses, the activity log and map answers all default to 365): section Q of `erasure-pages-selftest.php`
   now sets 200 and 45 and drives each reachable state; "could not be read" is not reachable over HTTP and is asked of the class.
 - Nothing empties a living member's Gift Aid declaration address (only `GdprEraser` writes NULL into it, after an erasure): #1077.
+
+
+### Member limits: rota swap requests and the online gift ceiling (#989, #992; D-171, D-172)
+
+- `Portal\Core\MemberLimits` is the ONE list of the three Member-limits settings and the ONE answer to whether the
+  general editor may touch them (`lockedInGeneralEditor()`, asked on change, add, delete and drawing). The rules stay
+  in `RotaSwaps` and `Giving`. `SettingLimit::storedAtLevel()` / `saveAtLevel()` are the one read of a single level's
+  row and the one locked save (installation row read live `FOR UPDATE` inside the transaction).
+- `RotaSwaps::request()` judges both limits under two row locks (the asker's `tblUsers` row, then the duty's row, always
+  in that order); each is pinned by a two-process race (S16-S17 one duty; S34-S35 two duties at 9 of 10). A plain read
+  in place of either lock fixes the snapshot early (S17 red).
+- **Do not use `setTime(0, 0)` for "the start of a day"**: where the clocks go back to exactly midnight it picks the
+  SECOND midnight (Atlantic/Azores 25 Oct 2026; America/Havana every November). `RotaSwaps::dayStartUtcFor()` takes the
+  earliest instant whose local reading is that date from the zone's own transitions; an independent sweep of 3,494,712
+  zone-days (2020-2035) found no mismatch. `setTime(0, 0)` is wrong on 35 of 8,675 change days. Elsewhere: #1082.
+- The installation's gift figure is a plain number of EACH organisation's own currency, not converted: the portal has no
+  exchange rates (#993, waiting on the owner). A pledge paid online has no ceiling (#1083).
+- `currency-selftest.php`'s server runs with `opcache.enable=0`: with it on, a file planted mid-run was not re-read for two
+  seconds and every new plant passed. Measured.

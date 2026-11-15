@@ -81,6 +81,15 @@
  *      be listed and one on its yesterday must not -- on both Duty Roster
  *      lists and on Manage Rota. The old `CURDATE()` gets one of those wrong
  *      at every hour of the day.
+ *   S  THE LIMITS ON ASKING (#989, D-171): a member's requests in one day
+ *      and open requests waiting for one duty, each at the organisation's
+ *      own level and capped by the installation's; told BEFORE typing, refused
+ *      with words after; nobody e-mailed for a refused one; another
+ *      organisation's figure and requests never counted here; 0 not "no
+ *      limit"; two open requests at once (two processes, a scratch trigger
+ *      slowing the first insert): exactly one made; and the Member limits
+ *      page at both levels, as an administrator of this organisation only and
+ *      as a global one
  *   P  THE PLANTS: each fault put into the COPY of the code (count them
  *      from the list in section P — no number is written here, because one
  *      already went stale here), each of which must turn the check that
@@ -135,7 +144,7 @@ $failed = 0;
 $state  = ['proc' => null, 'child' => null, 'workers' => [], 'hold' => null, 'db' => null, 'settings' => [], 'mailRows' => null, 'siteZone' => null];
 
 /** The scratch triggers sections U and V create, dropped by the clean-up whatever happens. */
-const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapMoveTrg', 'zzRotaSwapCanTrg'];
+const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapMoveTrg', 'zzRotaSwapCanTrg', 'zzRotaSwapAskSlowTrg'];
 
 function refuse(string $why): never
 {
@@ -355,6 +364,20 @@ register_shutdown_function(static function () use (&$state, &$removePeople): voi
                 echo "  ! could not put the organisation's time zone back\n";
             }
         }
+        // Section S writes this organisation's OWN rows for the two limits;
+        // they are put back exactly as they were found.
+        if (is_array($state['ownLimitRows'] ?? null) === true) {
+            try {
+                foreach ($state['ownLimitRows'] as $key => $was) {
+                    q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$key, (int) $state['ownLimitSite']]);
+                    if ($was !== null) {
+                        q("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)", 'isss', [(int) $state['ownLimitSite'], $key, $was, $was]);
+                    }
+                }
+            } catch (Throwable $e) {
+                echo "  ! could not put back this organisation's own swap limits\n";
+            }
+        }
         if (is_callable($removePeople) === true) {
             $removePeople();
         }
@@ -455,6 +478,28 @@ file_put_contents($argv[5], (string) $mysqli->thread_id);
 // Open requests allowed: the setting is the handler's to read, and these
 // sections are about the lock and the transaction, not that setting.
 echo json_encode(\Portal\Core\RotaSwaps::respond($mysqli, (int) $argv[2], (int) $argv[3], (int) $argv[4], 'accept', '', true));
+WORKER);
+
+// The worker for section S's race: the REAL RotaSwaps::request(), from the
+// COPY, in its own process, for an OPEN request. The limits are handed to it
+// as the installation's layer, which is what SettingLimit reads; nothing else
+// of start-up is needed.
+file_put_contents($child . $sep . 'askworker.php', <<<'WORKER'
+<?php
+// Written by tools/rota-swaps-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+// argv: the copy's _core folder, the site, the duty, the asker, the message, the thread-id file.
+define('PORTAL_ROOT', dirname($argv[1]));
+foreach (['App', 'Site', 'InstallationSettings', 'SettingLimit', 'RotaSwaps'] as $class) {
+    require_once $argv[1] . DIRECTORY_SEPARATOR . $class . '.php';
+}
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli((string) getenv('W_HOST'), (string) getenv('W_USER'), (string) getenv('W_PASS'), (string) getenv('W_NAME'), (int) getenv('W_PORT'));
+$mysqli->set_charset('utf8mb4');
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => \Portal\Core\Site::ZONE_MARK_VALUE]], (int) $argv[2]);
+\Portal\Core\InstallationSettings::remember(['rota' => ['swap' => ['maxOpenPerDuty' => '1', 'maxRequestsPerDay' => '100']]]);
+file_put_contents($argv[6], (string) $mysqli->thread_id);
+echo json_encode(\Portal\Core\RotaSwaps::request($mysqli, (int) $argv[2], (int) $argv[3], (int) $argv[4], 0, $argv[5]));
 WORKER);
 
 // ── The web server ──────────────────────────────────────────────────────────
@@ -570,6 +615,7 @@ $removePeople = static function () use ($mark): void {
     foreach (q("SELECT `siteID` FROM `tblSites` WHERE `siteKey` = 'selftest-rotaswaps-b'") as $b) {
         try {
             q('DELETE FROM `tblUserSites` WHERE `siteID` = ?', 'i', [(int) $b['siteID']]);
+            q('DELETE FROM `tblSettings` WHERE `siteID` = ?', 'i', [(int) $b['siteID']]);
             q('DELETE FROM `tblSites` WHERE `siteID` = ?', 'i', [(int) $b['siteID']]);
         } catch (Throwable $e) {
             echo "  ! could not remove the second organisation (" . $e->getMessage() . ")\n";
@@ -614,6 +660,11 @@ q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [$people['gone
 $makePerson('noaddr', 'Gus Noaddress', null, false);
 $makePerson('otherorg', 'Hal Otherorg', $siteB);
 // A member whose name cannot be read (section W's "another member" branch).
+// Section S: an administrator of THIS organisation only, and a global one.
+$makePerson('orgadmin', 'Jo Orgadmin');
+q('UPDATE `tblUserSites` SET `isSiteAdmin` = 1 WHERE `userID` = ? AND `siteID` = ?', 'ii', [$people['orgadmin']['id'], $siteId]);
+$makePerson('rootadmin', 'Kit Rootadmin');
+q('UPDATE `tblUsers` SET `isAdmin` = 1, `isRootAdmin` = 1 WHERE `userID` = ?', 'i', [$people['rootadmin']['id']]);
 $makePerson('noname', 'Ivy Noname');
 q('UPDATE `tblUsers` SET `fullName` = NULL WHERE `userID` = ?', 'i', [$people['noname']['id']]);
 
@@ -657,7 +708,7 @@ $signIn = static function (string $who) use (&$people, $password, $child): void 
         refuse("signing in as {$who} did not answer a redirect (HTTP {$in['status']})");
     }
 };
-foreach (['asker', 'asked', 'third', 'off', 'noname'] as $who) {
+foreach (['asker', 'asked', 'third', 'off', 'noname', 'orgadmin', 'rootadmin'] as $who) {
     $signIn($who);
 }
 
@@ -681,14 +732,22 @@ $roster = static function (string $who): array {
  * real form. Answers the new request's number (0 when none was made), the
  * handler's answer and the page's message.
  */
-$ask = static function (string $asker, array $slot, int $target, string $message = '') use ($token): array {
+$ask = static function (string $asker, array $slot, int $target, string $message = '', bool $countToday = false) use ($token, &$people): array {
+    // 🚧 The per-day limit (#989, D-171) would stop this run's askers after
+    //    ten requests, and every section before Z makes many more. So, unless
+    //    a section is testing the limit itself (`$countToday`), the asker's
+    //    earlier requests are moved to two days ago first: only
+    //    `createdAtUtc` changes, which nothing but the limit reads.
+    if ($countToday === false) {
+        q('UPDATE `tblRotaSwapRequest` SET `createdAtUtc` = UTC_TIMESTAMP() - INTERVAL 2 DAY WHERE `requestedByID` = ?', 'i', [$people[$asker]['id']]);
+    }
     $before = (int) (q('SELECT COALESCE(MAX(`swapID`), 0) AS `m` FROM `tblRotaSwapRequest` WHERE `slotID` = ?', 'i', [$slot['id']])[0]['m'] ?? 0);
     $path   = '/rota/swap?slot=' . $slot['id'];
     $res    = http($asker, 'POST', $path, ['csrf_token' => $token($asker, $path), 'targetUserID' => (string) $target, 'requestMessage' => $message]);
     $after  = (int) (q('SELECT COALESCE(MAX(`swapID`), 0) AS `m` FROM `tblRotaSwapRequest` WHERE `slotID` = ?', 'i', [$slot['id']])[0]['m'] ?? 0);
     $shown  = preg_match('#<div class="alert alert-[a-z]+">(.*?)</div>#s', $res['body'], $m) === 1 ? html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8') : '';
 
-    return ['swapId' => $after > $before ? $after : 0, 'status' => $res['status'], 'location' => $res['location'], 'shown' => $shown];
+    return ['swapId' => $after > $before ? $after : 0, 'status' => $res['status'], 'location' => $res['location'], 'shown' => $shown, 'body' => $res['body']];
 };
 
 /** `$who` gives `$action` to request `$swapId`, through the real handler. Answers the message the Duty Roster then shows. */
@@ -1472,6 +1531,545 @@ $scnOrgDate = static function () use (&$zoneRoles, &$people, $siteId, $run, $mak
 };
 
 // =============================================================================
+// Section S's scenarios: the limits on asking (#989; the owner — D-171).
+// =============================================================================
+$limitKeys = ['rota.swap.maxOpenPerDuty', 'rota.swap.maxRequestsPerDay'];
+// This organisation's own rows for the two limits, as found, so the clean-up
+// puts them back; the installation's are remembered by setting().
+$state['ownLimitSite'] = $siteId;
+$state['ownLimitRows'] = [];
+foreach ($limitKeys as $key) {
+    $r = q('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$key, $siteId]);
+    $state['ownLimitRows'][$key] = $r === [] ? null : (string) $r[0]['settingValue'];
+    setting($key, $key === 'rota.swap.maxRequestsPerDay' ? '10' : '1');
+}
+/** Set one organisation's OWN figure for a limit (null removes it). */
+$ownLimit = static function (string $key, ?string $value, int $site): void {
+    q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$key, $site]);
+    if ($value !== null) {
+        q("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)", 'isss', [$site, $key, $value, $value]);
+    }
+};
+/** Every e-mail the portal tried to send to one person. */
+$mailsTo = static fn (string $who): int => count(q('SELECT `emailLogID` FROM `tblEmailLog` WHERE `toRecipients` = ?', 's', [$people[$who]['email']]));
+/** Move every request `$who` has made out of "today". */
+$ageOut  = static fn (string $who): array => q('UPDATE `tblRotaSwapRequest` SET `createdAtUtc` = UTC_TIMESTAMP() - INTERVAL 2 DAY WHERE `requestedByID` = ?', 'i', [$people[$who]['id']]);
+$limitsBack = static function () use ($ownLimit, $siteId, $siteB): void {
+    setting('rota.swap.maxRequestsPerDay', '10');
+    setting('rota.swap.maxOpenPerDuty', '1');
+    foreach (['rota.swap.maxRequestsPerDay', 'rota.swap.maxOpenPerDuty'] as $key) {
+        $ownLimit($key, null, $siteId);
+        $ownLimit($key, null, $siteB);
+    }
+};
+
+/**
+ * S1-S7: the per-day limit, at the organisation's own level, through the real
+ * page. A request two days old, and one this member made today in ANOTHER
+ * organisation, must not count; the other organisation's own figure (1) must
+ * not reach this one.
+ */
+$scnPerDay = static function () use ($newSlot, $ask, $mailsTo, $ageOut, $ownLimit, $limitsBack, $siteId, $siteB, $A, $B): array {
+    $limitsBack();
+    $ownLimit('rota.swap.maxRequestsPerDay', '3', $siteId);
+    $ownLimit('rota.swap.maxRequestsPerDay', '1', $siteB);
+    $ageOut('asker');
+    // Today, but in the OTHER organisation: a duty there, asked by A.
+    q('INSERT INTO `tblRotaRoleType` (`siteID`, `name`) VALUES (?, ?)', 'is', [$siteB, 'Selftest swap duty B ' . bin2hex(random_bytes(3))]);
+    $roleB = (int) $GLOBALS['db']->insert_id;
+    $slotB = $newSlot($A, '', 0, $siteB, $roleB);
+    q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`, `createdAtUtc`) VALUES (?, ?, NULL, 'Other organisation today', UTC_TIMESTAMP())", 'ii', [$slotB['id'], $A]);
+    $made = [];
+    for ($i = 0; $i < 3; $i++) {
+        $made[] = $ask('asker', $newSlot($A), $B, 'Per-day ' . $i, true)['swapId'] > 0;
+    }
+    $fourth  = $newSlot($A);
+    $page    = http('asker', 'GET', '/rota/swap?slot=' . $fourth['id']);
+    $mailsB  = $mailsTo('asked');
+    $logged  = (int) (q("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'RotaSwapLimitReached'", 'i', [$A])[0]['n'] ?? 0);
+    // Round 2, finding 5: words that would break out of the textarea if
+    // printed raw, and every character htmlspecialchars() must change.
+    $refused = $ask('asker', $fourth, $B, "Per-day 4 Typed </textarea><b>x</b> \"&'", true);
+    $limitsBack();
+    $pageText = html_entity_decode($page['body'], ENT_QUOTES, 'UTF-8');
+
+    return [
+        'threeMade' => $made === [true, true, true],
+        'pageSays'  => str_contains($page['body'], 'data-rota-swap-limit="per-day"') && str_contains($pageText, 'You have made 3 swap requests today, and this organisation allows 3 a day, so you cannot send another today.'),
+        'noForm'    => str_contains($page['body'], 'name="requestMessage"') === false,
+        'refused'   => $refused['swapId'] === 0 && str_contains($refused['shown'], 'You have made 3 swap requests today, and this organisation allows 3 a day, so this one was not sent. You can ask again tomorrow.'),
+        'keptTyped' => str_contains($refused['body'], 'data-rota-swap-kept="1"') && str_contains($refused['body'], '>Per-day 4 Typed &lt;/textarea&gt;&lt;b&gt;x&lt;/b&gt; &quot;&amp;&#039;</textarea>')
+            && str_contains($refused['body'], '<b>x</b>') === false && str_contains($refused['body'], 'name="requestMessage"') === false,
+        'noMail'    => $mailsTo('asked') === $mailsB,
+        'recorded'  => (int) (q("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'RotaSwapLimitReached'", 'i', [$A])[0]['n'] ?? 0) === $logged + 1,
+        'detail'    => json_encode([$made, $refused['swapId'], $refused['shown']]),
+    ];
+};
+
+/** S8-S9: the installation's figure caps the organisation's, and 0 written by hand lets nobody ask. */
+$scnInstCaps = static function () use ($newSlot, $ask, $ageOut, $ownLimit, $limitsBack, $siteId, $A, $B): array {
+    $limitsBack();
+    setting('rota.swap.maxRequestsPerDay', '2');
+    $ownLimit('rota.swap.maxRequestsPerDay', '5', $siteId);   // above the installation's, written by hand
+    $ageOut('asker');
+    $made = [];
+    for ($i = 0; $i < 3; $i++) {
+        $made[] = $ask('asker', $newSlot($A), $B, 'Capped ' . $i, true)['swapId'] > 0;
+    }
+    $ownLimit('rota.swap.maxRequestsPerDay', null, $siteId);
+    setting('rota.swap.maxRequestsPerDay', '0');              // 0 is not "no limit": nobody may ask
+    $ageOut('asker');
+    $atZero = $ask('asker', $newSlot($A), $B, 'At zero', true)['swapId'];
+    $limitsBack();
+
+    return ['capped' => $made === [true, true, false], 'zero' => $atZero === 0, 'detail' => json_encode([$made, $atZero])];
+};
+
+/** S10-S15: one open request per duty. */
+$scnOpenPerDuty = static function () use ($newSlot, $ask, $answer, $mailsTo, $ownLimit, $limitsBack, $siteId, $A, $B, &$people): array {
+    $limitsBack();
+    $slot   = $newSlot($A);
+    // Round 2, finding 4: a request left by somebody who held this duty
+    // BEFORE (the third person), still waiting. It is theirs, not the
+    // asker's, and must not count against the asker.
+    q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`, `createdAtUtc`) VALUES (?, ?, NULL, 'A previous holder\'s open request', UTC_TIMESTAMP())", 'ii', [$slot['id'], $people['third']['id']]);
+    $first  = $ask('asker', $slot, 0, 'Open once');
+    $mailsC = $mailsTo('third');
+    $second = $ask('asker', $slot, 0, "Open twice Typed </textarea><b>x</b> \"&'");
+    $noMail = $mailsTo('third') === $mailsC;
+    $page   = http('asker', 'GET', '/rota/swap?slot=' . $slot['id']);
+    $named  = $ask('asker', $slot, $B, 'Named, same duty');
+    $answer('asker', $first['swapId'], 'withdraw');
+    $again  = $ask('asker', $slot, 0, 'Open again after withdrawing');
+    // The organisation's own 2 is held to the installation's 1 …
+    $ownLimit('rota.swap.maxOpenPerDuty', '2', $siteId);
+    $heldToOne = $ask('asker', $slot, 0, 'A second, held to the installation\'s one');
+    // … and obeyed once the installation allows 3.
+    setting('rota.swap.maxOpenPerDuty', '3');
+    $twoAllowed = $ask('asker', $slot, 0, 'A second, with two allowed');
+    $thirdOfTwo = $ask('asker', $slot, 0, 'A third, with two allowed');
+    $limitsBack();
+
+    return [
+        'firstMade'     => $first['swapId'] > 0,
+        'formKeeps'     => str_contains($second['body'], 'placeholder="Reason / details…">Open twice Typed &lt;/textarea&gt;&lt;b&gt;x&lt;/b&gt; &quot;&amp;&#039;</textarea>') && str_contains($second['body'], '<b>x</b>') === false,
+        'secondRefused' => $second['swapId'] === 0 && str_contains($second['shown'], 'You have 1 open request waiting for this duty, and this organisation allows 1 at a time, so another was not posted'),
+        'noMail'        => $noMail,
+        'pageSays'      => str_contains($page['body'], 'data-rota-swap-limit="open-per-duty"') && str_contains($page['body'], '<option value="0"') === false && str_contains($page['body'], 'name="requestMessage"'),
+        'namedOk'       => $named['swapId'] > 0,
+        'afterWithdraw' => $again['swapId'] > 0,
+        'twoAllowed'    => $heldToOne['swapId'] === 0 && $twoAllowed['swapId'] > 0 && $thirdOfTwo['swapId'] === 0,
+        'detail'        => json_encode([$first['swapId'], $second['swapId'], $second['shown'], $named['swapId'], $again['swapId'], $twoAllowed['swapId']]),
+    ];
+};
+
+/**
+ * S16-S17: two open requests for one duty at the same moment, each through the
+ * REAL request() in its own process. A scratch trigger makes the first one's
+ * INSERT sleep, so the second really arrives while the first is part-way; both
+ * states are asked of the database. Exactly one may be made.
+ */
+$scnAskRace = static function () use ($newSlot, $ageOut, $child, $copyCore, $siteId, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $workerIs, $finishWorker, $A, &$state): array {
+    $ageOut('asker');
+    $slot = $newSlot($A);
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapAskSlowTrg`');
+    $GLOBALS['db']->query("CREATE TRIGGER `zzRotaSwapAskSlowTrg` BEFORE INSERT ON `tblRotaSwapRequest` FOR EACH ROW BEGIN IF NEW.`requestMessage` = 'S-slow' THEN DO SLEEP(2); END IF; END");
+    $start = static function (string $message) use ($child, $copyCore, $siteId, $slot, $A, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, &$state): array {
+        $tidFile = $child . DIRECTORY_SEPARATOR . 'askworker-tid-' . bin2hex(random_bytes(3));
+        $proc    = proc_open(
+            [PHP_BINARY, $child . DIRECTORY_SEPARATOR . 'askworker.php', rtrim($copyCore, DIRECTORY_SEPARATOR), (string) $siteId, (string) $slot['id'], (string) $A, $message, $tidFile],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $child . DIRECTORY_SEPARATOR . 'worker.log', 'a']],
+            $pipes,
+            $child,
+            ['W_HOST' => $dbHost, 'W_USER' => $dbUser, 'W_PASS' => $dbPass, 'W_NAME' => $dbName, 'W_PORT' => (string) $dbPort, 'PATH' => (string) getenv('PATH')]
+        );
+        $state['workers'][] = $proc;
+
+        return ['proc' => $proc, 'pipe' => $pipes[1], 'tidFile' => $tidFile];
+    };
+    $first       = $start('S-slow');
+    $firstInside = $workerIs($first, 'User sleep');
+    $second      = $start('S-second');
+    $secondWaits = $workerIs($second, 'LOCK WAIT');
+    $a1 = $finishWorker($first);
+    $a2 = $finishWorker($second);
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapAskSlowTrg`');
+    $waiting = (int) (q("SELECT COUNT(*) AS `n` FROM `tblRotaSwapRequest` WHERE `slotID` = ? AND `targetUserID` IS NULL AND `status` = 'pending'", 'i', [$slot['id']])[0]['n'] ?? 0);
+
+    return [
+        'premise' => $firstInside && $secondWaits,
+        'oneMade' => (int) ($a1['swapID'] ?? 0) > 0 && (int) ($a2['swapID'] ?? 0) === 0 && ($a2['reason'] ?? '') === 'over-open-per-duty' && $waiting === 1,
+        'detail'  => 'first: ' . trim($a1['raw']) . '; second: ' . trim($a2['raw']) . '; waiting ' . $waiting
+            . '; first inside its insert: ' . var_export($firstInside, true) . '; second waiting: ' . var_export($secondWaits, true),
+    ];
+};
+
+/** S18-S23: Admin, Settings, Member limits, at both levels, for the swap limits. */
+$scnLimitPage = static function () use ($limitsBack, $siteId, &$people): array {
+    $limitsBack();
+    setting('rota.swap.maxRequestsPerDay', '2');
+    $key  = 'rota.swap.maxRequestsPerDay';
+    $own  = static fn (): ?string => ($r = q('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$key, $siteId])) === [] ? null : (string) $r[0]['settingValue'];
+    $inst = static fn (): ?string => ($r = q('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key])) === [] ? null : (string) $r[0]['settingValue'];
+    $post = static function (string $who, string $scope, string $value): string {
+        $page = http($who, 'GET', '/admin/settings/member-limits');
+        preg_match('/name="csrf_token" value="([^"]+)"/', $page['body'], $m);
+        http($who, 'POST', '/admin/settings/member-limits/save', ['csrf_token' => html_entity_decode($m[1] ?? '', ENT_QUOTES, 'UTF-8'), 'scope' => $scope, 'limit' => 'per-day', 'value' => $value]);
+
+        return html_entity_decode(http($who, 'GET', '/admin/settings/member-limits')['body'], ENT_QUOTES, 'UTF-8');
+    };
+    $refusals = static fn (): int => (int) (q("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'MemberLimitSaveRefused'", 'i', [$people['orgadmin']['id']])[0]['n'] ?? 0);
+    $view    = http('orgadmin', 'GET', '/admin/settings/member-limits');
+    $member  = http('asker', 'GET', '/admin/settings/member-limits');
+    $above   = $post('orgadmin', 'site', '5');
+    $aboveOk = $own() === null && str_contains($above, 'This installation allows at most 2, so that was not saved.');
+    $zero    = $post('orgadmin', 'site', '0');
+    $zeroOk  = $own() === null && str_contains($zero, 'The least this can be is 1: it cannot be switched off. Nothing was saved.');
+    $post('orgadmin', 'site', '1');
+    $savedOk = $own() === '1';
+    $before  = $refusals();
+    $post('orgadmin', 'global', '50');
+    $globalRefused = $inst() === '2' && $refusals() === $before + 1;
+    $rootZero  = $post('rootadmin', 'global', '0');
+    $zeroKept  = $inst() === '2';
+    $rootHuge  = $post('rootadmin', 'global', '101');
+    $hardMaxOk = $inst() === '2' && str_contains($rootHuge, 'That number is larger than this portal will store.');
+    $post('rootadmin', 'global', '20');
+    $instOk    = $inst() === '20' && $zeroKept && str_contains($rootZero, 'it cannot be switched off');
+    $limitsBack();
+
+    return [
+        'page'   => $view['status'] === 200 && str_contains($view['body'], 'data-member-limit="per-day"') && $member['status'] === 403,
+        'above'  => $aboveOk, 'zero' => $zeroOk, 'saved' => $savedOk, 'globalRefused' => $globalRefused,
+        'inst'   => $instOk && $hardMaxOk,
+        'detail' => var_export([$view['status'], $member['status'], $own(), $inst()], true),
+    ];
+};
+
+/**
+ * Round 1 of the independent check, finding 2: every limit sentence prints the
+ * count AND the limit, each as itself. Pinned by PRINTING the real method's
+ * output from the COPY (so a plant there reaches it), in its own process, and
+ * comparing it with the whole sentence each state must read. The day-boundary
+ * rule (`dayStartUtcFor()`) is asked in the same process at FIXED moments: both
+ * clock-change days of Europe/London, the two change days of America/Santiago
+ * (whose spring change happens AT midnight), and a zone ahead of and one behind
+ * UTC — the cases "now" cannot be made to reach.
+ */
+$scnWords = static function () use ($child, $copyCore): array {
+    $script = $child . DIRECTORY_SEPARATOR . 'words.php';
+    file_put_contents($script, '<?php declare(strict_types=1); require ' . var_export($copyCore . 'RotaSwaps.php', true) . ";\n"
+        . 'use Portal\Core\RotaSwaps as R; $w = static fn (string $r, int $l, int $m, bool $b): string => R::overLimitWords($r, $l, $m, $b);' . "\n"
+        . '$d = static fn (string $z, string $t): string => R::dayStartUtcFor($z, new DateTimeImmutable($t));' . "\n"
+        . 'echo json_encode(['
+        . '"D1" => $w(R::OVER_PER_DAY, 10, 10, false), "D2" => $w(R::OVER_PER_DAY, 5, 8, true), "D3" => $w(R::OVER_PER_DAY, 0, 0, true),'
+        . '"D4" => $w(R::OVER_PER_DAY, 0, 3, false), "D5" => $w(R::OVER_PER_DAY, 1, 1, false),'
+        . '"O1" => $w(R::OVER_OPEN_PER_DUTY, 1, 1, true), "O2" => $w(R::OVER_OPEN_PER_DUTY, 2, 3, false), "O3" => $w(R::OVER_OPEN_PER_DUTY, 0, 0, true),'
+        . '"L1" => $d("Europe/London", "2026-03-29 12:00:00 UTC"), "L2" => $d("Europe/London", "2026-10-25 12:00:00 UTC"),'
+        . '"C1" => $d("America/Santiago", "2026-09-06 15:00:00 UTC"), "C2" => $d("America/Santiago", "2026-04-05 15:00:00 UTC"),'
+        . '"A1" => $d("Pacific/Auckland", "2026-11-15 00:30:00 UTC"), "B1" => $d("America/Los_Angeles", "2026-11-15 07:30:00 UTC"),'
+        . '"Z1" => $d("Atlantic/Azores", "2026-10-25 12:00:00 UTC"), "H1" => $d("America/Havana", "2026-11-01 15:00:00 UTC"),'
+        . "]);\n");
+    $out  = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' 2>&1');
+    $said = json_decode($out, true);
+    $said = is_array($said) === true ? $said : [];
+    $tail = ' You can ask again tomorrow. If this duty needs covering sooner, ask whoever manages the rota to move it for you.';
+    $open = ': everybody it would go to has already been offered this duty. You can ask one named person instead, or withdraw a waiting request from your Duty Roster page and post a new one.';
+    $want = [
+        'D1' => 'You have made 10 swap requests today, and this organisation allows 10 a day, so this one was not sent.' . $tail,
+        'D2' => 'You have made 8 swap requests today, and this organisation allows 5 a day, so you cannot send another today.' . $tail,
+        'D3' => 'This organisation is not taking rota swap requests at the moment, so you cannot send one. If this duty needs covering, ask whoever manages the rota to move it for you.',
+        'D4' => 'This organisation is not taking rota swap requests at the moment, so this one was not sent. If this duty needs covering, ask whoever manages the rota to move it for you.',
+        'D5' => 'You have made 1 swap request today, and this organisation allows 1 a day, so this one was not sent.' . $tail,
+        'O1' => 'You have 1 open request waiting for this duty, and this organisation allows 1 at a time, so another cannot be posted' . $open,
+        'O2' => 'You have 3 open requests waiting for this duty, and this organisation allows 2 at a time, so another was not posted' . $open,
+        'O3' => 'Open swap requests cannot be posted here at the moment, so the open option is not offered. You can ask one named person instead.',
+        // The day's first moment on that zone's clock, in UTC.
+        'L1' => '2026-03-29 00:00:00',   // the spring change is at 01:00, so the day starts on GMT
+        'L2' => '2026-10-24 23:00:00',   // the autumn change is at 02:00, so the day starts on BST
+        'C1' => '2026-09-06 04:00:00',   // midnight is SKIPPED: the day starts at 01:00 (-03)
+        'C2' => '2026-04-05 04:00:00',   // the clocks went back at midnight: 00:00 (-04)
+        'A1' => '2026-11-14 11:00:00',   // ahead of UTC (+13): the local day began the UTC day before
+        'B1' => '2026-11-14 08:00:00',   // behind UTC (-8)
+        // Round 2: the clocks go back to EXACTLY midnight, so midnight happens
+        // twice; the day began at the FIRST one. setTime(0, 0) picks the second.
+        'Z1' => '2026-10-25 00:00:00',   // Atlantic/Azores: 01:00 +00 -> 00:00 -01
+        'H1' => '2026-11-01 04:00:00',   // America/Havana: 01:00 -04 -> 00:00 -05
+    ];
+    $wrong = [];
+    foreach ($want as $k => $v) {
+        if (($said[$k] ?? null) !== $v) {
+            $wrong[] = $k . ' said ' . var_export($said[$k] ?? null, true);
+        }
+    }
+    // 🌍 And EVERY zone PHP knows: for each local date beside each clock change
+    //    from 2020 to 2030, the rule's answer against an independent search
+    //    for the first instant on a quarter-hour grid whose local reading
+    //    falls on that date (every offset and change in that range is on that
+    //    grid). The old setTime(0, 0) rule is counted too, so the sweep is shown
+    //    able to see the fault it exists for.
+    $sweepScript = $child . DIRECTORY_SEPARATOR . 'daysweep.php';
+    file_put_contents($sweepScript, <<<'SWEEP'
+<?php
+declare(strict_types=1);
+require $argv[1];
+$checked = 0; $wrong = []; $oldWrong = 0;
+$from = gmmktime(0, 0, 0, 1, 1, 2020); $to = gmmktime(0, 0, 0, 1, 1, 2031);
+foreach (DateTimeZone::listIdentifiers() as $zone) {
+    $tz = new DateTimeZone($zone);
+    $tr = $tz->getTransitions($from, $to);
+    if ($tr === false || count($tr) < 2) { continue; }
+    $local = static fn (int $ts): string => (new DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('Y-m-d');
+    $dates = [];
+    foreach (array_slice($tr, 1) as $c) {
+        foreach ([-86400, -1, 0, 86400] as $d) { $dates[$local((int) $c['ts'] + $d)] = true; }
+    }
+    foreach (array_keys($dates) as $date) {
+        $m = (new DateTimeImmutable($date . ' 00:00:00', new DateTimeZone('UTC')))->getTimestamp();
+        $truth = null;
+        for ($ts = $m - 30 * 3600; $ts <= $m + 30 * 3600; $ts += 900) {
+            if ($local($ts) === $date) { $truth = $ts; break; }
+        }
+        $at   = new DateTimeImmutable('@' . ($truth + 6 * 3600));
+        $want = gmdate('Y-m-d H:i:s', $truth);
+        $checked++;
+        if (\Portal\Core\RotaSwaps::dayStartUtcFor($zone, $at) !== $want) { $wrong[] = $zone . ' ' . $date; }
+        if ($at->setTimezone($tz)->setTime(0, 0)->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s') !== $want) { $oldWrong++; }
+    }
+}
+echo json_encode(['checked' => $checked, 'wrong' => $wrong, 'oldWrong' => $oldWrong]);
+SWEEP);
+    $sweep = json_decode((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($sweepScript) . ' ' . escapeshellarg($copyCore . 'RotaSwaps.php') . ' 2>&1'), true);
+    $sweep = is_array($sweep) === true ? $sweep : ['checked' => 0, 'wrong' => ['(the sweep did not run)'], 'oldWrong' => 0];
+    if ((int) $sweep['checked'] < 8000 || $sweep['wrong'] !== [] || (int) $sweep['oldWrong'] < 1) {
+        $wrong[] = 'SWEEP: ' . (int) $sweep['checked'] . ' zone-days checked (8,000 or more expected), wrong: ' . implode(', ', array_slice($sweep['wrong'], 0, 8))
+            . '; the old rule wrong on ' . (int) $sweep['oldWrong'] . ' (1 or more expected, or the sweep cannot see the fault)';
+    }
+    $sweepWords = (int) $sweep['checked'] . ' zone-days, the old rule wrong on ' . (int) $sweep['oldWrong'];
+    $words = array_filter($wrong, static fn (string $w): bool => in_array($w[0], ['D', 'O'], true));
+    $days  = array_filter($wrong, static fn (string $w): bool => in_array($w[0], ['D', 'O'], true) === false);
+
+    return ['words' => $words === [], 'days' => $days === [], 'sweep' => $sweepWords, 'detail' => $wrong === [] ? '' : implode(' | ', $wrong) . ($said === [] ? ' (raw: ' . $out . ')' : '')];
+};
+
+/**
+ * The day's count over HTTP in a zone AHEAD of UTC and one BEHIND it: a request
+ * made one minute before the organisation's midnight is yesterday's and is NOT
+ * counted; one a minute after is today's and IS. A rolling 24 hours, or the UTC
+ * day, counts the first or misses the second. (The one moment this cannot
+ * separate a rolling 24 hours: the last minute of the local day. The fixed
+ * moments in $scnWords close that.)
+ */
+$scnDayBoundary = static function (string $zone) use ($newSlot, $ageOut, $limitsBack, $siteId, $A): array {
+    $limitsBack();
+    $ageOut('asker');
+    $zoneWas = (string) (q('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?', 'i', [$siteId])[0]['timezone'] ?? '');
+    $GLOBALS['state']['siteZone'] ??= [$siteId, $zoneWas];
+    $left = -1;
+    try {
+        q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$zone, $siteId]);
+        $midnight = (new DateTimeImmutable('now', new DateTimeZone($zone)))->setTime(0, 0)->setTimezone(new DateTimeZone('UTC'));
+        $slot     = $newSlot($A);
+        foreach (['-1 minute' => 'Yesterday 23:59', '+1 minute' => 'Today 00:01'] as $shift => $msg) {
+            q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`, `status`, `createdAtUtc`) VALUES (?, ?, NULL, ?, 'cancelled', ?)",
+                'iiss', [$slot['id'], $A, $msg, $midnight->modify($shift)->format('Y-m-d H:i:s')]);
+        }
+        $page = http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id']);
+        $left = preg_match('/data-rota-swap-left="(\d+)"/', $page['body'], $m) === 1 ? (int) $m[1] : -1;
+    } finally {
+        q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$zoneWas, $siteId]);
+        $ageOut('asker');
+    }
+
+    return ['ok' => $left === 9, 'detail' => $zone . ': the page says ' . $left . ' left of 10 (9 expected: one counted, one not)'];
+};
+
+/** The count above a LOWERED limit, over HTTP: 3 made under 5, then 2 allowed. */
+$scnLowered = static function () use ($newSlot, $ask, $ageOut, $ownLimit, $limitsBack, $siteId, $A, $B): array {
+    $limitsBack();
+    $ownLimit('rota.swap.maxRequestsPerDay', '5', $siteId);
+    $ageOut('asker');
+    for ($i = 0; $i < 3; $i++) {
+        $ask('asker', $newSlot($A), $B, 'Before lowering ' . $i, true);
+    }
+    $ownLimit('rota.swap.maxRequestsPerDay', '2', $siteId);
+    $page = html_entity_decode(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body'], ENT_QUOTES, 'UTF-8');
+    $limitsBack();
+
+    return ['ok' => str_contains($page, 'You have made 3 swap requests today, and this organisation allows 2 a day, so you cannot send another today.'), 'detail' => ''];
+};
+
+/**
+ * Round 1, finding 3a: the save reads the installation's figure LIVE and LOCKED.
+ * This test holds the installation's row, lowers it to 2 inside its own open
+ * transaction, and the REAL SettingLimit::saveAtLevel() — in its own process,
+ * from the copy — saves an organisation figure of 30. It must WAIT for the row
+ * (asked of the database), then see the 2 and refuse. Without the lock it reads
+ * the 50 that was committed, does not wait, and stores 30 above the ceiling.
+ */
+$scnSaveLock = static function () use ($child, $copyCore, $siteId, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $workerIs, $finishWorker, $ownLimit, $limitsBack, &$state): array {
+    $limitsBack();
+    setting('rota.swap.maxRequestsPerDay', '50');
+    $script = $child . DIRECTORY_SEPARATOR . 'limitworker.php';
+    file_put_contents($script, '<?php declare(strict_types=1); require ' . var_export($copyCore . 'SettingLimit.php', true) . ";\n"
+        . 'mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);' . "\n"
+        . '$db = new mysqli((string) getenv("W_HOST"), (string) getenv("W_USER"), (string) getenv("W_PASS"), (string) getenv("W_NAME"), (int) getenv("W_PORT"));' . "\n"
+        . 'file_put_contents($argv[2], (string) $db->thread_id);' . "\n"
+        . 'echo json_encode(\Portal\Core\SettingLimit::saveAtLevel($db, (int) $argv[1], "rota.swap.maxRequestsPerDay", 30, 10, 1, 100));' . "\n");
+    $hold = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $hold->query('SET SESSION innodb_lock_wait_timeout = 30');
+    $state['hold'] = $hold;
+    $hold->begin_transaction();
+    $hold->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'rota.swap.maxRequestsPerDay' AND `siteID` IS NULL FOR UPDATE")->fetch_all();
+    $hold->query("UPDATE `tblSettings` SET `settingValue` = '2' WHERE `settingKey` = 'rota.swap.maxRequestsPerDay' AND `siteID` IS NULL");
+    $tidFile = $child . DIRECTORY_SEPARATOR . 'limitworker-tid-' . bin2hex(random_bytes(3));
+    $proc    = proc_open([PHP_BINARY, $script, (string) $siteId, $tidFile],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $child . DIRECTORY_SEPARATOR . 'worker.log', 'a']],
+        $pipes, $child,
+        ['W_HOST' => $dbHost, 'W_USER' => $dbUser, 'W_PASS' => $dbPass, 'W_NAME' => $dbName, 'W_PORT' => (string) $dbPort, 'PATH' => (string) getenv('PATH')]);
+    $state['workers'][] = $proc;
+    $worker  = ['proc' => $proc, 'pipe' => $pipes[1], 'tidFile' => $tidFile];
+    $waiting = $workerIs($worker, 'LOCK WAIT');
+    $hold->commit();
+    $hold->close();
+    $state['hold'] = null;
+    $answer = $finishWorker($worker);
+    $own    = q("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'rota.swap.maxRequestsPerDay' AND `siteID` = ?", 'i', [$siteId]);
+    $limitsBack();
+
+    return [
+        'premise' => $waiting,
+        'refused' => ($answer['saved'] ?? true) === false && ($answer['reason'] ?? '') === 'above-installation' && (int) ($answer['allowed'] ?? 0) === 2 && $own === [],
+        'detail'  => 'waited: ' . var_export($waiting, true) . '; the save said ' . trim((string) $answer['raw']) . '; own row ' . json_encode($own),
+    ];
+};
+
+/** Round 1, finding 3c and 3d: the organisation's box, and a post with no box at all. */
+$scnPageFields = static function () use ($ownLimit, $limitsBack, $siteId): array {
+    $limitsBack();
+    setting('rota.swap.maxRequestsPerDay', '2');
+    $box = static function (): ?string {
+        $body = http('orgadmin', 'GET', '/admin/settings/member-limits')['body'];
+
+        return preg_match('/id="site-per-day" name="value"\s+value="([^"]*)"/', $body, $m) === 1 ? $m[1] : null;
+    };
+    $emptyWhenNone = $box() === '';
+    $ownLimit('rota.swap.maxRequestsPerDay', '1', $siteId);
+    $ownShown = $box() === '1';
+    // A post carrying NO value field (a disabled box is not submitted): the row must survive.
+    $page = http('orgadmin', 'GET', '/admin/settings/member-limits');
+    preg_match('/name="csrf_token" value="([^"]+)"/', $page['body'], $m);
+    http('orgadmin', 'POST', '/admin/settings/member-limits/save', ['csrf_token' => html_entity_decode($m[1] ?? '', ENT_QUOTES, 'UTF-8'), 'scope' => 'site', 'limit' => 'per-day']);
+    $after = html_entity_decode(http('orgadmin', 'GET', '/admin/settings/member-limits')['body'], ENT_QUOTES, 'UTF-8');
+    $kept  = q("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'rota.swap.maxRequestsPerDay' AND `siteID` = ?", 'i', [$siteId]);
+    $limitsBack();
+
+    return [
+        'box'     => $emptyWhenNone && $ownShown,
+        'missing' => ($kept[0]['settingValue'] ?? null) === '1' && str_contains($after, 'The form did not include a number, so nothing was changed.'),
+        'detail'  => var_export([$emptyWhenNone, $ownShown, $kept], true),
+    ];
+};
+
+/**
+ * Round 2 of the independent check, finding 3: the ASKER's lock is what keeps
+ * the DAILY count honest, and it was pinned by nothing (S16-S17 race one duty,
+ * where the duty's lock does the work). Here two open requests for two
+ * DIFFERENT duties are posted at once, each through the REAL request() in its
+ * own process, with the member already at 9 of 10 today (the worker's limits:
+ * the built-in 10 a day, held to its installation layer of 100). A scratch
+ * trigger slows the first insert; the second must WAIT for the asker's row
+ * (asked of the database) and then be refused by the day's limit.
+ */
+$scnDayRace = static function () use ($newSlot, $ageOut, $child, $copyCore, $siteId, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $workerIs, $finishWorker, $A, &$state): array {
+    $ageOut('asker');
+    $filler = $newSlot($A);
+    for ($i = 0; $i < 9; $i++) {
+        q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`, `status`, `createdAtUtc`) VALUES (?, ?, NULL, 'Nine today', 'cancelled', UTC_TIMESTAMP())", 'ii', [$filler['id'], $A]);
+    }
+    $slots = [$newSlot($A), $newSlot($A)];
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapAskSlowTrg`');
+    $GLOBALS['db']->query("CREATE TRIGGER `zzRotaSwapAskSlowTrg` BEFORE INSERT ON `tblRotaSwapRequest` FOR EACH ROW BEGIN IF NEW.`requestMessage` = 'S-slow' THEN DO SLEEP(2); END IF; END");
+    $start = static function (int $slotId, string $message) use ($child, $copyCore, $siteId, $A, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, &$state): array {
+        $tidFile = $child . DIRECTORY_SEPARATOR . 'dayworker-tid-' . bin2hex(random_bytes(3));
+        $proc    = proc_open(
+            [PHP_BINARY, $child . DIRECTORY_SEPARATOR . 'askworker.php', rtrim($copyCore, DIRECTORY_SEPARATOR), (string) $siteId, (string) $slotId, (string) $A, $message, $tidFile],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $child . DIRECTORY_SEPARATOR . 'worker.log', 'a']],
+            $pipes,
+            $child,
+            ['W_HOST' => $dbHost, 'W_USER' => $dbUser, 'W_PASS' => $dbPass, 'W_NAME' => $dbName, 'W_PORT' => (string) $dbPort, 'PATH' => (string) getenv('PATH')]
+        );
+        $state['workers'][] = $proc;
+
+        return ['proc' => $proc, 'pipe' => $pipes[1], 'tidFile' => $tidFile];
+    };
+    $first       = $start($slots[0]['id'], 'S-slow');
+    $firstInside = $workerIs($first, 'User sleep');
+    $second      = $start($slots[1]['id'], 'S-second duty');
+    $secondWaits = $workerIs($second, 'LOCK WAIT');
+    $a1 = $finishWorker($first);
+    $a2 = $finishWorker($second);
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapAskSlowTrg`');
+    $made = (int) (q("SELECT COUNT(*) AS `n` FROM `tblRotaSwapRequest` WHERE `slotID` IN (?, ?)", 'ii', [$slots[0]['id'], $slots[1]['id']])[0]['n'] ?? 0);
+    $ageOut('asker');
+
+    return [
+        'premise' => $firstInside && $secondWaits,
+        'oneMade' => (int) ($a1['swapID'] ?? 0) > 0 && (int) ($a2['swapID'] ?? 0) === 0 && ($a2['reason'] ?? '') === 'over-per-day'
+            && (int) ($a2['made'] ?? 0) === 10 && (int) ($a2['limit'] ?? 0) === 10 && $made === 1,
+        'detail'  => 'first: ' . trim($a1['raw']) . '; second: ' . trim($a2['raw']) . '; requests on the two duties: ' . $made
+            . '; first inside its insert: ' . var_export($firstInside, true) . '; second waiting: ' . var_export($secondWaits, true),
+    ];
+};
+
+
+/**
+ * Round 3 of the independent check: no member-facing text on the swap page
+ * promises an e-mail (D-141; the page's own header). The page is rendered in
+ * each state a member meets — plenty left, one left, an open request already
+ * waiting, the day's limit reached, a refused post — and its visible text is
+ * searched for a promise of delivery. The "how many left" paragraph is also
+ * pinned word for word, singular and plural.
+ */
+$scnNoPromise = static function () use ($newSlot, $ask, $ageOut, $limitsBack, $A, $B): array {
+    $limitsBack();
+    $ageOut('asker');
+    $text = static fn (string $html): string => trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) preg_replace('#<(script|style)\b.*?</\1>#s', '', $html)), ENT_QUOTES, 'UTF-8')));
+    $pages = [];
+    $pages['ten left'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $openSlot = $newSlot($A);
+    $ask('asker', $openSlot, 0, 'Open, to fill the duty', true);
+    $pages['open waiting'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $openSlot['id'])['body']);
+    for ($i = 0; $i < 8; $i++) {
+        $ask('asker', $newSlot($A), $B, 'Filling the day ' . $i, true);
+    }
+    $pages['one left'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $ask('asker', $newSlot($A), $B, 'The tenth', true);
+    $pages['day full'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $pages['refused post'] = $text($ask('asker', $newSlot($A), $B, 'The eleventh', true)['body']);
+    $ageOut('asker');
+    $limitsBack();
+    // A promise of delivery: "is/are/will be e-mailed|emailed|notified|sent",
+    // "goes to every member", "they will receive". The page's own honest
+    // sentence ("whether or not anybody is e-mailed") is the one allowed form.
+    $promises = [];
+    foreach ($pages as $state => $words) {
+        $scan = str_replace('whether or not anybody is e-mailed', '', $words);
+        if (preg_match('/\b(is|are|will be|gets?|get) (e-?mailed|notified|sent an e-?mail)\b|goes to every member|will receive/i', $scan, $m) === 1) {
+            $promises[] = $state . ': "' . $m[0] . '"';
+        }
+    }
+    $tail = ' Each request counts towards this, whether or not anybody is e-mailed about it.';
+
+    return [
+        'none'   => $promises === [] && count($pages) === 5,
+        'words'  => str_contains($pages['ten left'], 'You can make 10 more swap requests today.' . $tail)
+            && str_contains($pages['one left'], 'You can make 1 more swap request today.' . $tail),
+        'detail' => $promises === [] ? 'no promise found' : implode('; ', $promises),
+    ];
+};
+
+// =============================================================================
 section('A  asking');
 // =============================================================================
 $slotA = $newSlot($A);
@@ -1772,6 +2370,65 @@ check('Y6 the administrators\' Manage Rota list does the same: today\'s duty lis
 check('Y7 …yesterday\'s not', $y['manageNoYesterday'], $y['detail']);
 
 // =============================================================================
+section('S  the limits on asking (#989, D-171)');
+// =============================================================================
+$s = $scnPerDay();
+check('S1 with this organisation\'s own figure at 3, three requests are made (one made today in ANOTHER organisation, and older ones, are not counted)', $s['threeMade'], $s['detail']);
+check('S2 the swap page then says so BEFORE anything is typed, with what the limit is', $s['pageSays'], $s['detail']);
+check('S3 …and draws no form, because nothing typed into it could be sent', $s['noForm'], $s['detail']);
+check('S4 a fourth post is refused with words saying what to do (ask again tomorrow, or ask whoever manages the rota)', $s['refused'], $s['detail']);
+check('S5 …nobody is e-mailed for it', $s['noMail'], $s['detail']);
+check('S6 …and it is recorded in the activity log', $s['recorded'], $s['detail']);
+check('S7 the other organisation\'s own figure (1) did not reach this one (S1 made three)', $s['threeMade'], $s['detail']);
+$c = $scnInstCaps();
+check('S8 the installation\'s figure (2) caps an organisation\'s own figure above it (5, written by hand): the third request is refused', $c['capped'], $c['detail']);
+check('S9 0 written straight into the database is NOT "no limit": nobody may ask', $c['zero'], $c['detail']);
+$o = $scnOpenPerDuty();
+check('S10 an open request is posted, although a PREVIOUS holder of the duty still has one waiting (only the asker\'s own count)', $o['firstMade'], $o['detail']);
+check('S10b a post refused by the per-duty limit draws the form again holding the member\'s words, escaped (no stray element)', $o['formKeeps'], $o['detail']);
+check('S11 a second open request for the same duty, by the same member, is refused with words saying what to do instead', $o['secondRefused'], $o['detail']);
+check('S12 …and nobody is e-mailed for it', $o['noMail'], $o['detail']);
+check('S13 the swap page then offers no open option, says why, and still offers a named person', $o['pageSays'] && $o['namedOk'], $o['detail']);
+check('S14 once the waiting request is withdrawn, an open request may be posted again', $o['afterWithdraw'], $o['detail']);
+check('S15 this organisation\'s own figure of 2 is held to the installation\'s 1; once the installation allows 3, a second open request is allowed and a third is not', $o['twoAllowed'], $o['detail']);
+$r = $scnAskRace();
+check('S16 (the premise) the first ask was inside its insert and the second was WAITING for it — asked of the database', $r['premise'], $r['detail']);
+check('S17 exactly one of two simultaneous open requests for one duty was made; the other was refused by the limit', $r['oneMade'], $r['detail']);
+$l = $scnLimitPage();
+check('S18 Member limits opens for an administrator of this organisation, and not for a member', $l['page'], $l['detail']);
+check('S19 the page REFUSES an organisation figure above the installation\'s and stores nothing', $l['above'], $l['detail']);
+check('S20 0 is refused: the limit cannot be switched off (D-171 rules out "no limit")', $l['zero'], $l['detail']);
+check('S21 a figure within the installation\'s is stored as this organisation\'s own', $l['saved'], $l['detail']);
+check('S22 an administrator of this organisation only cannot change the installation\'s figure, and the refusal is recorded', $l['globalRefused'], $l['detail']);
+check('S23 a global administrator: 0 and a number above the hard maximum are refused at the installation\'s level, and 20 is stored', $l['inst'], $l['detail']);
+
+// Round 1 of the independent check: the words, the day, the save's lock, the page's fields.
+$w = $scnWords();
+check('S24 every limit sentence prints the count AND the limit, as the real method says them: at the limit, above a LOWERED limit, at 0, and for one request (printed from the code, compared whole)', $w['words'], $w['detail']);
+check('S25 the organisation\'s day begins at its first moment: both London change days, Santiago\'s two midnight changes (one SKIPS midnight), Azores and Havana (midnight happens TWICE), ahead of and behind UTC, and every zone\'s change days 2020-2030 (' . $w['sweep'] . ')', $w['days'], $w['detail']);
+$dbA = $scnDayBoundary('Pacific/Auckland');
+check('S26 in a zone AHEAD of UTC, a request a minute before the organisation\'s midnight is not counted today and one a minute after is', $dbA['ok'], $dbA['detail']);
+$dbB = $scnDayBoundary('America/Los_Angeles');
+check('S27 …and the same in a zone BEHIND UTC', $dbB['ok'], $dbB['detail']);
+$lo = $scnLowered();
+check('S28 with the limit lowered below what the member already made (3 made, 2 allowed), the page says both numbers truthfully', $lo['ok'], $lo['detail']);
+check('S29 a post refused at the day\'s limit (no form is drawn) shows what the member typed, read-only and escaped, to copy', $s['keptTyped'], $s['detail']);
+$sl = $scnSaveLock();
+check('S30 (the premise) the real save, in its own process, WAITED for the installation\'s row this test held while lowering it', $sl['premise'], $sl['detail']);
+check('S31 …and then saw the lowered figure and REFUSED the organisation\'s 30, storing nothing', $sl['refused'], $sl['detail']);
+$pf = $scnPageFields();
+check('S32 the organisation\'s box is filled from its OWN row only: empty while it has none (the installation\'s 2 is not put in it), its own figure when it has one (#674)', $pf['box'], $pf['detail']);
+check('S33 a post that carries no value at all leaves the organisation\'s own figure in place and says so (#677: ask whether the field ARRIVED)', $pf['missing'], $pf['detail']);
+
+$dr = $scnDayRace();
+check('S34 (the premise) two posts for two DIFFERENT duties at 9 of 10 today: the second WAITED for the asker\'s row while the first was inside its insert', $dr['premise'], $dr['detail']);
+check('S35 …and exactly ONE request was made; the other was refused by the day\'s limit, counting 10 made of 10', $dr['oneMade'], $dr['detail']);
+
+$np = $scnNoPromise();
+check('S36 the swap page, rendered as a member meets it (10 left, 1 left, an open request waiting, the day full, a refused post), promises nobody an e-mail', $np['none'], $np['detail']);
+check('S37 …and says how many are left, and that each counts whether or not anybody is e-mailed, word for word, plural and singular', $np['words'], $np['detail']);
+
+// =============================================================================
 section('P  the plants: each fault must turn its check red');
 // =============================================================================
 // Each plant names the file in the COPY of web/ it edits, the exact text it
@@ -1919,6 +2576,102 @@ $plants  = [
         ['$fromDate = RotaSwaps::today($siteId);', "\$fromDate = (string) \$db->query('SELECT CURDATE() AS `d`')->fetch_assoc()['d'];"],
         static fn (): bool => ($r = $scnOrgDate())['premise'] && $r['manageToday'] && $r['manageNoYesterday'],
     ],
+    // #989, D-171: each limit guard taken out.
+    'P36 the per-day limit no longer asked' => ['_core/RotaSwaps.php',
+        ["if (\$facts['sentToday'] >= \$limits['perDay']) {", 'if (false) {'],
+        static fn (): bool => ($r = $scnPerDay())['refused'] && $r['pageSays'],
+    ],
+    'P37 the open-per-duty limit no longer asked' => ['_core/RotaSwaps.php',
+        ["if (\$open === true && \$facts['openWaiting'] >= \$limits['openPerDuty']) {", 'if (false) {'],
+        static fn (): bool => $scnOpenPerDuty()['secondRefused'],
+    ],
+    'P38 the two locks in request() removed' => ['_core/RotaSwaps.php',
+        ["WHERE `userID` = ? FOR UPDATE'", "WHERE `userID` = ?'", "WHERE `slotID` = ? FOR UPDATE'", "WHERE `slotID` = ?'"],
+        static fn (): bool => ($r = $scnAskRace())['premise'] && $r['oneMade'],
+    ],
+    'P39 the day\'s count no longer kept to this organisation' => ['_core/RotaSwaps.php',
+        ["ON `s`.`slotID` = `w`.`slotID` AND `s`.`siteID` = ? '", "ON `s`.`slotID` = `w`.`slotID` AND ? > 0 '"],
+        static fn (): bool => $scnPerDay()['threeMade'],
+    ],
+    'P40 the per-day reader ignoring the installation (the organisation\'s own figure wins)' => ['_core/RotaSwaps.php',
+        ["'perDay'      => SettingLimit::effective(self::PER_DAY_KEY, self::PER_DAY_DEFAULT, self::PER_DAY_HARD_MAX),", "'perDay'      => (int) (App::settings('rota.swap.maxRequestsPerDay') ?? self::PER_DAY_DEFAULT),"],
+        static fn (): bool => $scnInstCaps()['capped'],
+    ],
+    'P41 the swap page no longer asks before drawing the form' => ['_apps/rota/swap.php',
+        ["\$dayFull    = RotaSwaps::whyOverLimits(false, \$limitFacts, \$limits) === RotaSwaps::OVER_PER_DAY;", '$dayFull    = false;'],
+        static fn (): bool => ($r = $scnPerDay())['pageSays'] && $r['noForm'],
+    ],
+    'P42 the request\'s UTC moment no longer written' => ['_core/RotaSwaps.php',
+        ['VALUES (?, ?, ?, ?, UTC_TIMESTAMP())', 'VALUES (?, ?, ?, ?, NULL)'],
+        static fn (): bool => $scnPerDay()['refused'],
+    ],
+    // Round 1 of the independent check: each guard it planted with the suite green.
+    'P43 the sentence printing the LIMIT as the number made (the first version\'s fault)' => ['_core/RotaSwaps.php',
+        ["\$plural(\$made, 'swap request', 'swap requests')", "\$plural(\$limit, 'swap request', 'swap requests')"],
+        static fn (): bool => $scnWords()['words'],
+    ],
+    'P44 the organisation\'s day turned into a rolling 24 hours' => ['_core/RotaSwaps.php',
+        ["        \$tz   = new \\DateTimeZone(\$zone);\n", "        return \$now->setTimezone(new \\DateTimeZone('UTC'))->modify('-24 hours')->format('Y-m-d H:i:s');\n        \$tz   = new \\DateTimeZone(\$zone);\n"],
+        static fn (): bool => $scnWords()['days'],
+    ],
+    'P45 the organisation\'s day turned into the UTC day' => ['_core/RotaSwaps.php',
+        ["        \$tz   = new \\DateTimeZone(\$zone);\n", "        \$tz   = new \\DateTimeZone('UTC');\n"],
+        static fn (): bool => $scnDayBoundary('America/Los_Angeles')['ok'] && $scnWords()['days'],
+    ],
+    'P46 the save no longer LOCKS the installation\'s row (no FOR UPDATE)' => ['_core/SettingLimit.php',
+        ["WHERE `settingKey` = ? AND `siteID` IS NULL FOR UPDATE');", "WHERE `settingKey` = ? AND `siteID` IS NULL');"],
+        static fn (): bool => ($r = $scnSaveLock())['premise'] && $r['refused'],
+    ],
+    'P47 the organisation\'s box filled from the installation\'s row (#674)' => ['_apps/admin/settings/member-limits/index.php',
+        ["\$own     = \\Portal\\Core\\SettingLimit::storedAtLevel(\$mysqli, \$limit['key'], \$siteId);", "\$own     = \\Portal\\Core\\SettingLimit::storedAtLevel(\$mysqli, \$limit['key'], null);"],
+        static fn (): bool => $scnPageFields()['box'],
+    ],
+    'P48 a missing value field read as empty, deleting the organisation\'s row (#677)' => ['_apps/admin/settings/member-limits/save.php',
+        ["if (array_key_exists('value', \$_POST) === false || is_string(\$_POST['value']) === false) {", "if (is_string(\$_POST['value'] ?? '') === false) {",
+         "\$typed    = trim((string) \$_POST['value']);", "\$typed    = trim((string) (\$_POST['value'] ?? ''));"],
+        static fn (): bool => $scnPageFields()['missing'],
+    ],
+    'P49 the typed words not shown back at the day\'s limit' => ['_apps/rota/swap.php',
+        ["<?php if (\$keptMessage !== ''): ?>\n                <?php /* A post refused", "<?php if (false): ?>\n                <?php /* A post refused"],
+        static fn (): bool => $scnPerDay()['keptTyped'],
+    ],
+    // Round 2 of the independent check.
+    'P50 the day\'s start back to setTime(0, 0) (picks the SECOND midnight)' => ['_core/RotaSwaps.php',
+        ["        \$changes  = \$tz->getTransitions(\$from, \$to);\n        if (\$changes === false || \$changes === []) {", "        \$changes  = false;\n        if (true) {\n            return \$now->setTimezone(\$tz)->setTime(0, 0)->setTimezone(new \\DateTimeZone('UTC'))->format('Y-m-d H:i:s');\n        }\n        if (\$changes === false || \$changes === []) {"],
+        static fn (): bool => $scnWords()['days'],
+    ],
+    'P51 the asker\'s lock taken out of request() (only the duty\'s left)' => ['_core/RotaSwaps.php',
+        ["                    ['SELECT `userID` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE', \$askerId],\n", ''],
+        // The OUTCOME alone, so red means "both were made", never only "the
+        // second did not wait"; the detail is printed (once planted, once put
+        // back) so the reason is seen.
+        static function () use ($scnDayRace): bool {
+            $r = $scnDayRace();
+            echo '      (the two-duty race, planted then put back: ' . $r['detail'] . ")\n";
+
+            return $r['oneMade'];
+        },
+    ],
+    'P52 the asker\'s lock turned into a PLAIN read (the snapshot is fixed before the locks are waited for)' => ['_core/RotaSwaps.php',
+        ["WHERE `userID` = ? FOR UPDATE'", "WHERE `userID` = ?'"],
+        static fn (): bool => $scnAskRace()['oneMade'],
+    ],
+    'P53 the per-duty count no longer only the asker\'s own' => ['_core/RotaSwaps.php',
+        ["WHERE `slotID` = ? AND `requestedByID` = ? AND `targetUserID` IS NULL", "WHERE `slotID` = ? AND ? > 0 AND `targetUserID` IS NULL"],
+        static fn (): bool => $scnOpenPerDuty()['firstMade'],
+    ],
+    'P54 the typed words shown back at the day\'s limit WITHOUT escaping' => ['_apps/rota/swap.php',
+        ["readonly data-rota-swap-kept=\"1\"><?php echo htmlspecialchars(\$keptMessage, ENT_QUOTES, 'UTF-8'); ?>", "readonly data-rota-swap-kept=\"1\"><?php echo \$keptMessage; ?>"],
+        static fn (): bool => $scnPerDay()['keptTyped'],
+    ],
+    'P55 the typed words put back in the form WITHOUT escaping' => ['_apps/rota/swap.php',
+        ["placeholder=\"Reason / details…\"><?php echo htmlspecialchars(\$keptMessage, ENT_QUOTES, 'UTF-8'); ?>", "placeholder=\"Reason / details…\"><?php echo \$keptMessage; ?>"],
+        static fn (): bool => $scnOpenPerDuty()['formKeeps'],
+    ],
+    'P56 the "how many left" sentence back to promising an e-mail (round 3\'s finding)' => ['_apps/rota/swap.php',
+        ['today. Each request counts towards this, whether or not anybody is e-mailed about it.</p>', 'today. Each one is e-mailed, and an open request goes to every member who has these e-mails switched on.</p>'],
+        static fn (): bool => $scnNoPromise()['none'],
+    ],
 ];
 foreach ($plants as $name => [$file, $edits, $guard]) {
     $path     = $copyWeb . str_replace('/', $sep, $file);
@@ -1946,7 +2699,8 @@ foreach ($plants as $name => [$file, $edits, $guard]) {
     check($name . ' — and green again once put back', $guard() === true);
 }
 $untouched = true;
-foreach (['_core/RotaSwaps.php', '_apps/rota/swap.php', '_apps/rota/swap-respond.php', '_apps/rota/index.php', '_apps/rota/manage.php'] as $file) {
+foreach (['_core/RotaSwaps.php', '_core/SettingLimit.php', '_apps/rota/swap.php', '_apps/rota/swap-respond.php', '_apps/rota/index.php', '_apps/rota/manage.php',
+    '_apps/admin/settings/member-limits/index.php', '_apps/admin/settings/member-limits/save.php'] as $file) {
     $rel = str_replace('/', $sep, $file);
     if ((string) file_get_contents($copyWeb . $rel) !== (string) file_get_contents($repo . $sep . 'web' . $sep . $rel)) {
         $untouched = false;

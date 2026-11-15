@@ -28,6 +28,21 @@
  *   - answers a successful post with a REDIRECT, so pressing Refresh cannot
  *     send the same request (and the same e-mail) twice.
  *
+ * THE LIMITS (#989; the owner, 12 November 2026 — D-171). A member may make
+ * only so many requests in a day, and may have only so many OPEN requests
+ * waiting for one duty (one, by default: an open request reaches every member
+ * with the switch on). The page asks BEFORE drawing the form, so a member at
+ * a limit is told what it is and what they can do instead, rather than typing
+ * a message only to have it refused. `RotaSwaps::request()` asks again under
+ * its locks; that answer is the one that counts. A refused post keeps what the
+ * member typed: back in the form when the form is still drawn (the per-duty
+ * limit), and — at the day's limit, where no form is drawn because nothing
+ * typed could be sent — shown read-only beneath the message, to copy. Every
+ * limit sentence prints the count made AND the limit, each as itself
+ * (`RotaSwaps::overLimitWords()`). A commit whose reply was lost says "we could not confirm",
+ * never "not sent", because pressing Send again is how everybody came to be
+ * e-mailed twice.
+ *
  * The confirmation never promises an e-mail — for a named person OR an open
  * request: whether one is sent depends on each person's own choices and on
  * the mail route, and whether it arrives is not something the portal can
@@ -90,6 +105,12 @@ if (strcmp((string) $slot['slotDate'], RotaSwaps::today($siteId)) < 0) {
 $flash         = '';
 $flashType     = 'info';
 $allowOpenSwap = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') === '1';
+// What the member typed and chose, kept when a post is refused so they do not
+// have to type it again (D-171: "a user friendly process", #989).
+$keptMessage = '';
+$keptTarget  = -1;
+// Which limit a refused post met, so the page does not say it twice.
+$flashLimit  = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
@@ -101,6 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // whyNotTarget() refuses.
         $targetUserID = (int) (is_string($_POST['targetUserID'] ?? null) === true ? $_POST['targetUserID'] : -1);
         $message      = is_string($_POST['requestMessage'] ?? null) === true ? $_POST['requestMessage'] : '';
+        $keptMessage  = mb_substr($message, 0, 500, 'UTF-8');
+        $keptTarget   = $targetUserID;
         try {
             $whyNot = RotaSwaps::whyNotTarget($db, $siteId, $userId, $targetUserID, $allowOpenSwap);
         } catch (\Throwable $e) {
@@ -111,14 +134,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flash     = RotaSwaps::refusalWords($whyNot);
             $flashType = 'warning';
         } else {
-            $swapId = 0;
-            try {
-                $swapId = RotaSwaps::request($db, $slotId, $userId, $targetUserID, $message);
-            } catch (\Throwable $e) {
+            // 🚧 The limits (D-171) are judged inside request(), under its
+            //    locks; it never throws.
+            $made   = RotaSwaps::request($db, $siteId, $slotId, $userId, $targetUserID, $message);
+            $swapId = $made['swapID'];
+            if ($made['reason'] === RotaSwaps::OVER_PER_DAY || $made['reason'] === RotaSwaps::OVER_OPEN_PER_DUTY) {
+                // Recorded as numbers only: who asked is the record's own
+                // person, and the typed message is never logged.
+                Logger::activity('RotaSwapLimitReached', 'Rota swap request refused: limit reached (' . $made['reason'] . ', duty #' . $slotId . ')');
+                // The count and the limit request() judged on, under its locks.
+                $flash      = RotaSwaps::overLimitWords($made['reason'], $made['limit'], $made['made']);
+                $flashType  = 'warning';
+                $flashLimit = $made['reason'];
+            } elseif ($made['reason'] === RotaSwaps::UNKNOWN) {
+                // The commit's reply was lost: the request MAY be saved, so the
+                // member is sent to look before asking again — pressing Send
+                // twice is how everybody came to be e-mailed twice (#989).
+                Logger::errorPlatform('Rota', 'Warning', 'SWAP_REQUEST', 'A rota swap request could not be confirmed as saved', '');
+                $flash     = 'We could not confirm that your swap request was saved. Please look at your Duty Roster page before asking again: if it is listed there, it was sent.';
+                $flashType = 'danger';
+            } elseif ($swapId <= 0) {
                 // The fault's own words are not logged: they can quote a value.
                 Logger::errorPlatform('Rota', 'Warning', 'SWAP_REQUEST', 'A rota swap request could not be saved', '');
-            }
-            if ($swapId <= 0) {
                 $flash     = 'The swap request could not be saved just now. Please try again.';
                 $flashType = 'danger';
             } else {
@@ -155,6 +192,26 @@ if ($uStmt !== false) {
     $uStmt->close();
 }
 
+// 🚧 WHERE THE MEMBER STANDS AGAINST THE LIMITS (D-171), asked before the form
+//    is drawn so they are told before typing anything. These counts are not
+//    locked — request() asks again under its locks, and that answer is the one
+//    that counts. When they cannot be read the form is drawn as usual and the
+//    save decides.
+$limits  = RotaSwaps::limits();
+$limitFacts = ['openWaiting' => 0, 'sentToday' => 0];
+$dayFull = false;
+$openFull = false;
+$leftToday = null;
+try {
+    $limitFacts = RotaSwaps::limitFacts($db, $siteId, $slotId, $userId);
+    $dayFull    = RotaSwaps::whyOverLimits(false, $limitFacts, $limits) === RotaSwaps::OVER_PER_DAY;
+    $openFull   = $dayFull === false && RotaSwaps::whyOverLimits(true, $limitFacts, $limits) === RotaSwaps::OVER_OPEN_PER_DUTY;
+    $leftToday  = max(0, $limits['perDay'] - $limitFacts['sentToday']);
+} catch (\Throwable $e) {
+    // Unread counts: say nothing about them rather than guess.
+}
+$offerOpen = $allowOpenSwap === true && $openFull === false;
+
 $pageTitle   = 'Request Swap';
 $pageSection = 'rota';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => Site::url('rota'), 'Request Swap' => ''];
@@ -171,27 +228,53 @@ $csrf = Auth::csrfToken();
 <div class="card">
     <div class="card-body">
         <p>Duty: <strong><?php echo htmlspecialchars((string) $slot['roleName'], ENT_QUOTES, 'UTF-8'); ?></strong> on <?php echo htmlspecialchars(RotaSwaps::dateWords((string) $slot['slotDate']), ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php if ($dayFull === true): ?>
+            <?php /* 🚧 The day's limit is reached: no form at all, because nothing
+                     typed into it could be sent, and the member is told what
+                     they can do instead (D-171). */ ?>
+            <?php if ($flashLimit !== RotaSwaps::OVER_PER_DAY): ?>
+            <p data-rota-swap-limit="per-day"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_PER_DAY, $limits['perDay'], $limitFacts['sentToday'], true), ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php endif; ?>
+            <?php if ($keptMessage !== ''): ?>
+                <?php /* A post refused at the day's limit: there is no form to put the
+                         words back into, so they are shown to copy, not lost. */ ?>
+                <label class="form-label small" for="swap-kept">What you typed, so you can copy it</label>
+                <textarea id="swap-kept" class="form-control form-control-sm mb-2" rows="3" readonly data-rota-swap-kept="1"><?php echo htmlspecialchars($keptMessage, ENT_QUOTES, 'UTF-8'); ?></textarea>
+            <?php endif; ?>
+            <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Back to the Duty Roster</a>
+        <?php else: ?>
         <p class="small text-muted">The person you ask sees the request on their Duty Roster page and can accept or decline it there. Your request does not move the duty unless somebody accepts.</p>
+        <?php if ($leftToday !== null): ?>
+            <?php /* Says only what is known (round 3 of the independent check): it used
+                     to say "Each one is e-mailed", which is untrue when the person asked
+                     has these e-mails off, has no usable address, or the mail route fails
+                     (RotaSwaps::whyNotTold()). No page promises an e-mail (D-141). */ ?>
+            <p class="small text-muted" data-rota-swap-left="<?php echo (int) $leftToday; ?>">You can make <?php echo (int) $leftToday; ?> more swap request<?php echo $leftToday === 1 ? '' : 's'; ?> today. Each request counts towards this, whether or not anybody is e-mailed about it.</p>
+        <?php endif; ?>
+        <?php if ($openFull === true && $allowOpenSwap === true && $flashLimit !== RotaSwaps::OVER_OPEN_PER_DUTY): ?>
+            <p class="small" data-rota-swap-limit="open-per-duty"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_OPEN_PER_DUTY, $limits['openPerDuty'], $limitFacts['openWaiting'], true), ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php endif; ?>
         <form method="post" action="<?php echo htmlspecialchars(Site::url('rota/swap') . '?slot=' . $slotId, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="mb-2">
                 <label class="form-label small" for="swap-target">Send to</label>
                 <select name="targetUserID" id="swap-target" class="form-select form-select-sm">
-                    <?php if ($allowOpenSwap === true): ?>
-                        <option value="0">Open swap — anyone can cover</option>
+                    <?php if ($offerOpen === true): ?>
+                        <option value="0"<?php echo $keptTarget === 0 ? ' selected' : ''; ?>>Open swap — anyone can cover</option>
                     <?php endif; ?>
                     <?php foreach ($users as $u): ?>
-                        <option value="<?php echo (int) $u['userID']; ?>"><?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?></option>
+                        <option value="<?php echo (int) $u['userID']; ?>"<?php echo $keptTarget === (int) $u['userID'] ? ' selected' : ''; ?>><?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
             <div class="mb-2">
                 <label class="form-label small" for="swap-message">Message (optional)</label>
-                <textarea name="requestMessage" id="swap-message" class="form-control form-control-sm" rows="3" maxlength="500" placeholder="Reason / details…"></textarea>
+                <textarea name="requestMessage" id="swap-message" class="form-control form-control-sm" rows="3" maxlength="500" placeholder="Reason / details…"><?php echo htmlspecialchars($keptMessage, ENT_QUOTES, 'UTF-8'); ?></textarea>
             </div>
             <button type="submit" class="btn btn-primary btn-sm">Send swap request</button>
             <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Cancel</a>
         </form>
+        <?php endif; ?>
     </div>
 </div>
 
