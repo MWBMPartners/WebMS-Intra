@@ -1529,6 +1529,7 @@ foreach ($calDataDoc->querySelectorAll('.portal-data-list > .row') as $row) {
 }
 $firstCase = is_array($calCases) === true ? ($calCases[0] ?? []) : [];
 $visitKeys = array_map(static fn (array $v): array => array_keys($v), (array) ($firstCase['visits'] ?? []));
+$visitDays = array_map(static fn (array $v) => $v['day'] ?? null, (array) ($firstCase['visits'] ?? []));
 ok('B4d A MEMBER\'S OWN CARE CASE IS IN HER DATA COPY, AS THE OWNER DECIDED: Cal\'s real download holds her one case with its organisation, her name as typed on it, category, summary and status, and each of its two visits as a day and a kind only; never who opened it (by name or number), its number, the visiting workers or their notes; and My data counts the same one case and two visits (#1015, D-184)',
     is_array($calCases) === true && count($calCases) === 1
     && array_keys($firstCase) === ['organisation', 'yourNameOnTheCase', 'category', 'summary', 'status', 'openedAtServerTime', 'closedAtAsStored', 'visits']
@@ -1536,6 +1537,8 @@ ok('B4d A MEMBER\'S OWN CARE CASE IS IN HER DATA COPY, AS THE OWNER DECIDED: Cal
     && ($firstCase['summary'] ?? '') === 'Cal is recovering from an operation.'
     && ($firstCase['yourNameOnTheCase'] ?? '') === 'Cal As-Typed' && str_contains($calCopyRaw, 'Ada Opener-Name') === false
     && $visitKeys === [['day', 'kind'], ['day', 'kind']]
+    // The day is a bare date: with the full date and time handed over the key names would be the same.
+    && count($visitDays) === 2 && count(array_filter($visitDays, static fn ($d): bool => is_string($d) === true && preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $d) === 1)) === 2
     && str_contains($calCopyRaw, 'Visited Cal at home') === false && str_contains($calCopyRaw, 'Ada rang Cal') === false
     && str_contains($calCopyRaw, 'Ada Earlier-Name') === false && str_contains($calCopyRaw, 'openedBy') === false
     && str_contains($calCopyRaw, '"caseID"') === false
