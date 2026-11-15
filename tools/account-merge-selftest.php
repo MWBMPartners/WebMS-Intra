@@ -319,7 +319,11 @@ foreach (q($db, 'SELECT `TABLE_NAME` AS t, `COLUMN_NAME` AS c, `DATA_TYPE` AS dt
     . 'ORDER BY `TABLE_NAME`, `ORDINAL_POSITION`') as $r) {
     $columnsOf[$r['t']][] = $r;
 }
-$family = 1000;
+// ⚠️ A RANDOM START, NOT A FIXED ONE. A fixed start made every run's made-up
+//    values the same, so a second run on the same database collided with the
+//    first run's rows in unique keys and D1 went red on correct code. Found by
+//    the planted-fault runs, which reuse one database.
+$family = random_int(1000000, 900000000);
 $value = static function (array $col, int $fam): mixed {
     switch ((string) $col['dt']) {
         case 'int': case 'bigint': case 'mediumint': return $fam;
