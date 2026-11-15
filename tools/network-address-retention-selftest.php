@@ -10,22 +10,36 @@
  * period that applies to it, and NOTHING ELSE:
  *
  *   A  two organisations with different figures, an address inside and
- *      outside each period in every one of the nine places, the rows that
- *      belong to an account (password resets, trusted devices) and a change-
- *      history row with no organisation following the installation's figure;
- *      the count shown first equals what is then emptied; every RECORD stays,
- *      with its other columns as they were; an access key never used keeps
- *      its address; a second run empties nothing;
+ *      outside each period in every one of the seven places, the rows that
+ *      belong to an account (password resets, trusted devices) following the
+ *      installation's figure; the count shown first equals what is then
+ *      emptied; an access key never used keeps its address; a second run
+ *      empties nothing; and, in EVERY scenario, every row of every table the
+ *      clear-out could reach is compared WHOLE before and after — every
+ *      column but the address, which the fixture fills (nullable ones too,
+ *      or emptying one would change nothing), with each column the database
+ *      re-stamps on an update (ON UPDATE CURRENT_TIMESTAMP) set years back
+ *      first, or a re-stamp in the same second would compare equal (#1019
+ *      round 3: the first version of this test passed with a sweep that also
+ *      emptied a change-history entry's contents, and with a trusted device's
+ *      "last seen" re-stamped to the night of the clear-out);
+ *   A2 the change histories (tblAuditTrail, tblAssetAudit) and Gift Aid
+ *      declarations keep their addresses however old (D-187, D-189): their
+ *      rows are in that whole-row comparison, address included;
  *   B  an organisation's own "keep for ever" under an installation of "keep
  *      for ever" is obeyed, and the same choice under an installation of 30
  *      days is held to 30;
- *   C  an installation of "keep for ever": the account rows and the rows with
- *      no organisation keep their addresses, while an organisation that chose
- *      a number of days is still cleared after it;
+ *   C  an installation of "keep for ever": the account rows keep their
+ *      addresses, while an organisation that chose a number of days is still
+ *      cleared after it;
  *   D  an organisation's own figure ABOVE the installation's (only SQL or a
  *      restore can store one) is held to the installation's;
  *   E  the class names its OWN setting all the way down (late static binding):
- *      saving the network-address figure never touches the activity log's.
+ *      saving the network-address figure never touches the activity log's;
+ *   F  every column of a place's table that the database re-stamps on an
+ *      update is in that place's `hold` list, read from information_schema of
+ *      the loaded install script — so a column added later fails here even
+ *      before anybody writes a fixture for it.
  *
  * THEN EACH GUARD IS PLANTED OUT OF A COPY and the scenario that depends on it
  * must go red, and must be green on the real files first (#709: a plant that
@@ -53,7 +67,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const NA_EXPECTED_CHECKS = 17;
+const NA_EXPECTED_CHECKS = 22; // 17 in round 2; round 3 added scenario F and plants P10-P14 and dropped P3 (D-187 left it nothing to match).
 
 $naDbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($naDbName, 'selftest_') === false) {
@@ -109,7 +123,9 @@ function na_insert(mysqli $db, string $table, array $given): int
     if (isset($shapes[$table]) === false) {
         $stmt = $db->prepare(
             'SELECT `COLUMN_NAME`, `DATA_TYPE`, `COLUMN_TYPE`, `CHARACTER_MAXIMUM_LENGTH` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() '
-            . 'AND `TABLE_NAME` = ? AND `IS_NULLABLE` = \'NO\' AND `COLUMN_DEFAULT` IS NULL AND `EXTRA` NOT LIKE \'%auto_increment%\' '
+            // Round 3: nullable columns are filled too, so that a statement
+            // emptying one can be SEEN by the whole-row comparison.
+            . 'AND `TABLE_NAME` = ? AND (`IS_NULLABLE` = \'YES\' OR `COLUMN_DEFAULT` IS NULL) AND `EXTRA` NOT LIKE \'%auto_increment%\' '
             . 'AND `GENERATION_EXPRESSION` = \'\''
         );
         $stmt->bind_param('s', $table);
@@ -124,7 +140,9 @@ function na_insert(mysqli $db, string $table, array $given): int
         }
         $type = strtolower((string) $col['DATA_TYPE']);
         $given[$name] = match (true) {
-            in_array($type, ['int', 'tinyint', 'smallint', 'bigint', 'mediumint', 'decimal'], true) => 1,
+            in_array($type, ['int', 'tinyint', 'smallint', 'bigint', 'mediumint', 'decimal', 'float', 'double', 'year'], true) => 1,
+            $type === 'time' => '10:00:00',
+            $type === 'set' => trim(explode(',', substr((string) $col['COLUMN_TYPE'], 4))[0], "')"),
             in_array($type, ['datetime', 'timestamp'], true) => '2026-01-01 00:00:00',
             $type === 'date' => '2026-01-01',
             $type === 'enum' => trim(explode(',', substr((string) $col['COLUMN_TYPE'], 5))[0], "')"),
@@ -203,13 +221,19 @@ function na_world(mysqli $db): array
         'tblLiveChatMessages' => ['senderIP',    'createdAt',  'messageID',  'own'],
         'tblFormResponses'    => ['submitterIP', 'createdAt',  'responseID', 'own'],
         'tblRecordingPlay'    => ['ipHash',      'playedAt',   'playID',     'recording'],
-        'tblAuditTrail'       => ['ipAddress',   'createdAt',  'auditID',    'own'],
-        'tblAssetAudit'       => ['ipHash',      'createdAt',  'auditID',    'own'],
+    ];
+    // 🚫 Places the clear-out must NEVER empty, however old the address: the
+    //    change histories (D-187) and Gift Aid declarations (D-189).
+    //    table => [address column, date column, key column]
+    $untouched = [
+        'tblAuditTrail'         => ['ipAddress',  'createdAt',  'auditID'],
+        'tblAssetAudit'         => ['ipHash',     'createdAt',  'auditID'],
+        'tblGiftAidDeclaration' => ['acceptedIP', 'acceptedAt', 'declarationID'],
     ];
     $db->query('SET FOREIGN_KEY_CHECKS = 0');
     $db->query("INSERT INTO `tblSites` (`siteID`, `siteName`, `siteKey`) VALUES (2, 'Second organisation', 'second') "
         . 'ON DUPLICATE KEY UPDATE `siteName` = VALUES(`siteName`)');
-    foreach (array_keys($places) as $table) {
+    foreach (array_merge(array_keys($places), array_keys($untouched)) as $table) {
         $db->query('DELETE FROM `' . $table . '`');
     }
     $db->query('DELETE FROM `tblRecording`');
@@ -234,17 +258,85 @@ function na_world(mysqli $db): array
             }
         }
     }
-    // 🏛️ Change history with NO organisation: follows the installation.
-    foreach ([20, 40] as $age) {
-        $rows['tblAuditTrail|none|' . $age] = ['table' => 'tblAuditTrail', 'column' => 'ipAddress', 'key' => 'auditID',
-            'id' => na_insert($db, 'tblAuditTrail', ['siteID' => null, 'ipAddress' => 'addr-none-' . $age, 'createdAt' => '@ago:' . $age])];
+    // 🏛️ The places that keep their address for ever: old rows at both
+    //    organisations, and a change-history entry with no organisation.
+    foreach ($untouched as $t => [$column, $dated, $key]) {
+        foreach ($t === 'tblAuditTrail' ? [1, 2, null] : [1, 2] as $site) {
+            $rows[$t . '|untouched|' . ($site ?? 'none')] = ['table' => $t, 'column' => $column, 'key' => $key,
+                'id' => na_insert($db, $t, [$column => 'addr-kept-' . $t . '-' . ($site ?? 'none'), $dated => '@ago:4000', 'siteID' => $site])];
+        }
     }
     // 🔑 An access key never used: no `lastUsedAt`, so its address is not "old".
     $rows['tblApiKeys|never-used'] = ['table' => 'tblApiKeys', 'column' => 'lastUsedIP', 'key' => 'keyID',
         'id' => na_insert($db, 'tblApiKeys', ['siteID' => 1, 'lastUsedIP' => 'addr-unused', 'lastUsedAt' => null, 'createdAt' => '@ago:400'])];
+
+    // ⏪ Every column the database re-stamps on an update, set years back, so
+    //    a re-stamp by the clear-out is visible even when it runs in the same
+    //    second as the fixture was written.
+    foreach (na_tables() as $t => $address) {
+        foreach (na_on_update_columns($db, $t) as $col) {
+            $db->query('UPDATE `' . $t . '` SET `' . $col . "` = '2020-01-02 03:04:05'");
+        }
+    }
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
+    $GLOBALS['naBefore'] = na_fingerprint($db);
 
     return $rows;
+}
+
+/**
+ * The tables whose rows are compared whole, and the one column of each the
+ * clear-out may change (null = none may change). The test's OWN list, like
+ * na_world()'s, never read from the code under test.
+ *
+ * @return array<string, ?string>
+ */
+function na_tables(): array
+{
+    return [
+        'tblPasswordResets' => 'createdIP', 'tblTrustedDevices' => 'createdIP', 'tblPrayerRequests' => 'submitterIP',
+        'tblApiKeys' => 'lastUsedIP', 'tblLiveChatMessages' => 'senderIP', 'tblFormResponses' => 'submitterIP',
+        'tblRecordingPlay' => 'ipHash', 'tblRecording' => null,
+        'tblAuditTrail' => null, 'tblAssetAudit' => null, 'tblGiftAidDeclaration' => null,
+    ];
+}
+
+/** @return list<string> The columns of `$table` the database re-stamps on any update. */
+function na_on_update_columns(mysqli $db, string $table): array
+{
+    $stmt = $db->prepare(
+        'SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ? '
+        . 'AND `EXTRA` LIKE \'%on update%\' ORDER BY `COLUMN_NAME`'
+    );
+    $stmt->bind_param('s', $table);
+    $stmt->execute();
+    $out = array_map(static fn (array $r): string => (string) $r['COLUMN_NAME'], $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+    $stmt->close();
+
+    return $out;
+}
+
+/**
+ * 🔎 Every row of every table in na_tables(), every column but the one the
+ *    clear-out may change, as one fingerprint per table.
+ *
+ * @return array<string, string>
+ */
+function na_fingerprint(mysqli $db): array
+{
+    $out = [];
+    foreach (na_tables() as $t => $address) {
+        $rows = $db->query('SELECT * FROM `' . $t . '` ORDER BY 1')->fetch_all(MYSQLI_ASSOC);
+        foreach ($rows as &$row) {
+            if ($address !== null) {
+                unset($row[$address]);
+            }
+        }
+        unset($row);
+        $out[$t] = count($rows) . ':' . hash('sha256', json_encode($rows));
+    }
+
+    return $out;
 }
 
 /** Which labelled rows still hold their address, and whether every row is still there. */
@@ -275,7 +367,7 @@ function na_expected(array $rows, int $site1, int $site2, int $installation): ar
     $keep = [];
     foreach (array_keys($rows) as $label) {
         $parts = explode('|', $label);
-        if (($parts[1] ?? '') === 'never-used') {
+        if (in_array($parts[1] ?? '', ['never-used', 'untouched'], true)) {
             $keep[] = $label;
             continue;
         }
@@ -302,9 +394,14 @@ function na_scenario(mysqli $db, string $name): array
         $state  = na_state($db, $rows);
         $expect = na_expected($rows, $s1, $s2, $inst);
         $should = count($rows) - count($expect);
-        $ok     = $state['held'] === $expect && $state['gone'] === [] && $counted === $should && $emptied === $should;
+        // 🔎 Every other column of every row, as it was (round 3).
+        $after   = na_fingerprint($db);
+        $changed = array_keys(array_diff_assoc($after, $GLOBALS['naBefore']));
+        $ok     = $state['held'] === $expect && $state['gone'] === [] && $counted === $should && $emptied === $should
+            && $changed === [];
 
         return ['ok' => $ok, 'detail' => json_encode(['counted' => $counted, 'emptied' => $emptied, 'should' => $should,
+            'tables-with-other-columns-changed' => $changed,
             'kept-but-should-not' => array_values(array_diff($state['held'], $expect)),
             'emptied-but-should-not' => array_values(array_diff($expect, $state['held'])), 'rows-gone' => $state['gone']])];
     };
@@ -344,7 +441,7 @@ function na_scenario(mysqli $db, string $name): array
             return $judge($rows, 30, 30, 30, address_sweep(false), address_sweep(true));
 
         case 'installation-never':
-            // Account rows and rows with no organisation keep theirs; organisation 1's 10 still applies.
+            // Account rows keep theirs; organisation 1's 10 still applies.
             $rows = na_world($db);
             na_set($db, null, '0');
             na_set($db, 1, '10');
@@ -374,6 +471,23 @@ function na_scenario(mysqli $db, string $name): array
             return ['ok' => $saved['outcome'] === 'stored' && $before === $after && $mine === '45'
                     && $refuse['outcome'] === 'refused' && str_contains($refuse['message'], 'Keep for ever'),
                 'detail' => json_encode([$saved, $before, $after, $mine, $refuse])];
+
+        case 'holds-every-on-update-column':
+            // Every re-stamped column of every place's table is held, and the
+            // premise: there IS at least one, or the check proves nothing.
+            $wrong = [];
+            $found = 0;
+            foreach ($NA::PLACES as $place) {
+                $real = na_on_update_columns($db, $place['table']);
+                $held = $place['hold'];
+                sort($held);
+                $found += count($real);
+                if ($real !== $held) {
+                    $wrong[] = $place['table'] . ': re-stamped ' . json_encode($real) . ', held ' . json_encode($held);
+                }
+            }
+
+            return ['ok' => $wrong === [] && $found > 0, 'detail' => 'found ' . $found . '; ' . implode('; ', $wrong)];
     }
 
     return ['ok' => false, 'detail' => 'no such scenario'];
@@ -405,12 +519,13 @@ $naWeb = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web';
 
 echo "A-E. The real files\n";
 $naScenarios = [
-    'two-organisations'      => 'A two organisations (installation 30, own 10, the other following): exactly the addresses past each period are emptied, the count matches, every record stays, a never-used key keeps its address, a second run empties nothing',
+    'two-organisations'      => 'A two organisations (installation 30, own 10, the other following): exactly the addresses past each period are emptied, the count matches, every other column of every row is as it was (re-stamped dates included), the change histories and Gift Aid declarations keep their addresses (D-187, D-189), a never-used key keeps its address, a second run empties nothing',
     'own-never-under-never'  => 'B1 an organisation\'s own "keep for ever" under an installation of "keep for ever" is obeyed',
     'own-never-under-days'   => 'B2 the same choice under an installation of 30 days is held to 30',
-    'installation-never'     => 'C under an installation of "keep for ever", account rows and rows with no organisation keep theirs; an organisation\'s own 10 still applies',
+    'installation-never'     => 'C under an installation of "keep for ever", account rows keep theirs; an organisation\'s own 10 still applies',
     'own-above-installation' => 'D an organisation\'s own figure above the installation\'s (SQL or a restore) is held to the installation\'s',
     'own-key-only'           => 'E saving the network-address figure writes its own setting, never the activity log\'s, and refuses "Keep for ever" under a number of days in its own words',
+    'holds-every-on-update-column' => 'F every column a place\'s table re-stamps on an update (read from the loaded install script) is in that place\'s hold list, and there is at least one',
 ];
 foreach ($naScenarios as $scenario => $label) {
     $answer = $naRun($scenario, $naWeb);
@@ -425,7 +540,8 @@ $naPlant = static function (string $relPath, string $from, string $to, string $s
     foreach (['_core', '_apps' . $sep . 'cron'] as $dir) {
         mkdir($copy . $sep . $dir, 0700, true);
     }
-    foreach (['InstallationSettings', 'App', 'SettingLimit', 'RetentionPeriod', 'ActivityLogRetention', 'NetworkAddressRetention'] as $class) {
+    // GeocodeCacheRetention since #1037: the sweep loads it beside the others.
+    foreach (['InstallationSettings', 'App', 'SettingLimit', 'RetentionPeriod', 'ActivityLogRetention', 'NetworkAddressRetention', 'GeocodeCacheRetention'] as $class) {
         copy($naWeb . $sep . '_core' . $sep . $class . '.php', $copy . $sep . '_core' . $sep . $class . '.php');
     }
     copy($naWeb . $sep . '_apps' . $sep . 'cron' . $sep . '_retention-sweep.php', $copy . $sep . '_apps' . $sep . 'cron' . $sep . '_retention-sweep.php');
@@ -468,15 +584,16 @@ $naPlants = [
     ['P2 the installation\'s "keep for ever" skip taken out for account rows', '_apps/cron/_retention-sweep.php',
         "            if (\$installationDays !== NetworkAddressRetention::NEVER) {\n                \$run(\$head . \$old, 'i', [\$installationDays]);",
         "            if (true) {\n                \$run(\$head . \$old, 'i', [\$installationDays]);", 'installation-never'],
-    ['P3 the installation\'s "keep for ever" skip taken out for rows with no organisation', '_apps/cron/_retention-sweep.php',
-        "        if (\$installationDays !== NetworkAddressRetention::NEVER) {\n            \$run(\$head . \$siteCol . ' IS NULL",
-        "        if (true) {\n            \$run(\$head . \$siteCol . ' IS NULL", 'installation-never'],
+    // (P3, the installation's "keep for ever" skip for rows with NO
+    //    organisation, was dropped in round 3: only tblAuditTrail allowed an
+    //    empty organisation, and it left the places under D-187, so that
+    //    statement now matches no row and a plant of it could not go red.)
     ['P4 the organisation scoping loosened (one organisation\'s figure reaching the other\'s rows)', '_apps/cron/_retention-sweep.php',
         "\$siteCol . ' = ? AND '", "\$siteCol . ' >= ? AND '", 'two-organisations'],
     ['P5 the age test turned round', '_apps/cron/_retention-sweep.php',
         "\$place['dated'] . '` < DATE_SUB", "\$place['dated'] . '` > DATE_SUB", 'two-organisations'],
     ['P6 the recording play\'s organisation join dropped (plays swept as if they had none)', '_core/NetworkAddressRetention.php',
-        "'site' => 'siteID', 'via' => ['tblRecording', 'recordingID']]", "'site' => null,     'via' => null]", 'two-organisations'],
+        "'site' => 'siteID', 'via' => ['tblRecording', 'recordingID'], 'hold' => []]", "'site' => null,     'via' => null, 'hold' => []]", 'two-organisations'],
     ['P7 the reader\'s cap taken out (an organisation\'s own figure obeyed above the installation\'s)', '_core/RetentionPeriod.php',
         "        return SettingLimit::cappedForSite((int) \$text, static::KEY, static::DEFAULT_DAYS, self::HARD_MAX_DAYS, true);",
         "        return (int) \$text;", 'own-above-installation'],
@@ -485,6 +602,18 @@ $naPlants = [
         "        \$key = \\Portal\\Core\\ActivityLogRetention::KEY;\n        // The installation's row keeps the built-in figure", 'own-key-only'],
     ['P9 the "never emptied" check dropped (rows without an address, or never-used keys, counted)', '_apps/cron/_retention-sweep.php',
         "'` IS NOT NULL AND `t`.`'", "'` <=> `t`.`' . \$place['column'] . '` AND `t`.`'", 'two-organisations'],
+    // 🔒 Round 3: the clear-out must change NOTHING but the address.
+    ['P10 a prayer request\'s re-stamped date no longer held (the database stamps it with the night of the clear-out)', '_core/NetworkAddressRetention.php',
+        "'via' => null, 'hold' => ['updatedAt']]", "'via' => null, 'hold' => []]", 'two-organisations'],
+    ['P11 a trusted device\'s "last seen" no longer held: the hold list no longer names every re-stamped column', '_core/NetworkAddressRetention.php',
+        "'via' => null, 'hold' => ['lastSeenAt']]", "'via' => null, 'hold' => []]", 'holds-every-on-update-column'],
+    ['P12 the hold loop taken out of the statement', '_apps/cron/_retention-sweep.php',
+        "        foreach (\$place['hold'] as \$held) {", "        foreach ([] as \$held) {", 'two-organisations'],
+    ['P13 the statement also emptying another column (a chat message\'s flag reason)', '_apps/cron/_retention-sweep.php',
+        "        \$set = '`t`.`' . \$place['column'] . '` = NULL';",
+        "        \$set = '`t`.`' . \$place['column'] . '` = NULL' . (\$place['table'] === 'tblLiveChatMessages' ? ', `t`.`flagReason` = NULL' : '');", 'two-organisations'],
+    ['P14 a change history put back on the clear-out\'s list (D-187)', '_core/NetworkAddressRetention.php',
+        "        // 🚫 NOT tblAuditTrail.ipAddress", "        ['table' => 'tblAuditTrail', 'column' => 'ipAddress', 'dated' => 'createdAt', 'site' => 'siteID', 'via' => null, 'hold' => []],\n        // 🚫 NOT tblAuditTrail.ipAddress", 'two-organisations'],
 ];
 foreach ($naPlants as [$label, $file, $from, $to, $scenario]) {
     [$applied, $stillOk] = $naPlant($file, $from, $to, $scenario);

@@ -6,10 +6,16 @@
 # yet", and a sentence saying that must have its column here. So the privacy pages can never claim a limit
 # that does not exist, and this list empties as each period is built.
 #
-# #1019 round 2 built the network-address period (NetworkAddressRetention, `privacy.networkAddressDays`) for the
-# seven places that had none and for both change histories, so they left this list. What is left waits on its
-# OWN decision, not on #1019: the record of privacy-notice choices follows the privacy data-retention setting
-# (D-166), and #934 builds that clear-out.
+# #1019 round 2 built the network-address period (NetworkAddressRetention, `privacy.networkAddressDays`, D-188) for
+# the seven places that had none, so they left this list. The two change histories never need to be here: the
+# owner keeps their addresses for ever (D-187), and their sentences say so rather than "no time limit yet".
+#
+# What is left (round 3) waits on its OWN decision or build, not on the network-address period:
+#   - the record of privacy-notice choices follows the privacy data-retention setting (D-166); #934 builds it;
+#   - a Gift Aid declaration's address goes with the declaration (D-189), and nothing yet ends a LIVING member's
+#     declaration: only an erasure starts its keep-until clock;
+#   - the two rate-limit tables are tidied only when a later request of the same kind arrives, which is no
+#     period at all on a quiet portal (#1019 round 3 found their sentences claiming otherwise by omission).
 #
 # Nothing may be ADDED here as a way past the check: a new column that keeps an address needs its period
 # decided and built with it. `--strict` fails while this list holds anything.
@@ -17,3 +23,6 @@
 # FORM: one `table.column` per line, then `#` and what it is waiting for.
 
 tblConsentLog.ipAddress          # #934 builds the clear-out, on D-166's setting (privacy.dataRetentionDays)
+tblGiftAidDeclaration.acceptedIP # D-189: kept with the declaration; no keep-until date for a living member's declaration
+tblApiRateLimits.bucket          # tidied only by a later request of the same kind (RateLimiter); no period of its own
+tblLiveRateLimits.senderFingerprint # tidied only as later chat messages are sent (LiveChat); no period of its own

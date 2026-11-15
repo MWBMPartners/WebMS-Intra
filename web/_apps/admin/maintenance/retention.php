@@ -535,9 +535,10 @@ $narInstNever = $narInstDays === NetworkAddressRetention::NEVER;
 $narExplained = 'A network address (IP address) is kept on some records for security, to look into misuse and for '
     . 'support. In the places that have no other limit &mdash; password-reset requests, devices trusted for two-step '
     . 'sign-in, prayer requests, an access key&rsquo;s last use, live-chat messages, answers to public forms, '
-    . 'recording plays and both change histories &mdash; the nightly clear-out empties the address once it is older '
-    . 'than the figure below, if that scheduled job has been set up. <strong>The records themselves are kept</strong>; '
-    . 'only the address goes. &ldquo;Keep for ever&rdquo; keeps the addresses, where this installation allows it.';
+    . 'and recording plays &mdash; the nightly clear-out empties the address once it is older than the figure below, '
+    . 'if that scheduled job has been set up. <strong>The records themselves are kept</strong>, exactly as they were; '
+    . 'only the address goes. &ldquo;Keep for ever&rdquo; keeps the addresses, where this installation allows it. '
+    . 'The change history keeps the addresses it recorded for ever, whatever this figure is.';
 
 /**
  * The organisation's own form, drawn in ONE place for both views of this page:
@@ -961,8 +962,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-lg-6">
                         <h3 class="h6">For every organisation on this installation</h3>
                         <p class="small text-muted">
-                            Password-reset requests, trusted devices and change-history entries that belong to no
-                            organisation follow this figure, and it is the most any organisation may choose. A figure
+                            Password-reset requests and trusted devices, which belong to an account rather than an
+                            organisation, follow this figure, and it is the most any organisation may choose. A figure
                             shorter than one an organisation has already chosen for itself is refused and those
                             organisations are named.
                         </p>

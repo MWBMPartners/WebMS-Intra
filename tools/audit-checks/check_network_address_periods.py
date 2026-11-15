@@ -343,6 +343,17 @@ def self_test() -> int:
         ('a place on the clear-out\'s list the schema does not have',
          schema, catalogue, pending, places.replace(chat_place, "['table' => 'tblLiveChatMessages', 'column' => 'senderIPX',", 1),
          {'PERIOD'}),
+        # #1019 round 3 (D-187): the change histories keep their addresses for
+        # ever. Putting one back on the clear-out's list, or making its
+        # sentence claim the period, must each go red.
+        ('a change history put back on the clear-out\'s list (D-187)',
+         schema, catalogue, pending,
+         places.replace("    ];\n", "        ['table' => 'tblAuditTrail', 'column' => 'ipAddress', 'dated' => 'createdAt', 'site' => 'siteID', 'via' => null, 'hold' => []],\n    ];\n", 1),
+         {'PERIOD'}),
+        ('a change history\'s sentence claiming the network-address period (D-187)',
+         schema, catalogue.replace("The change history, with '\n                . 'the address it recorded, is kept for ever: nothing clears it.",
+                                   "The address follows '\n                . 'the period for network addresses.", 1),
+         pending, places, {'PERIOD'}),
         # Must stay green.
         ('a country worked out from an address (`ipCountry`, must stay green)', schema + country_column, catalogue, pending, places, set()),
         ('an address column only inside an SQL comment (must stay green)', schema + commented_column, catalogue, pending, places, set()),

@@ -3332,7 +3332,7 @@ ok('K12 BOTH HOLDS AT ONCE: Pat\'s gift and declaration are shown as kept; Reque
 //    not computed by the code under test (#647). ──
 $gLead  = 'tblGivingEntry retain: these gifts will keep your name, and any home address held for you is kept with them. At Selftest erasure A: '
     . '1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, ';
-$dLead  = 'tblGiftAidDeclaration retain: your tax declarations stay, with your name kept beside them; only the network address each was made from is removed now. At Selftest erasure A: '
+$dLead  = 'tblGiftAidDeclaration retain: your tax declarations stay unchanged, with your name kept beside them. At Selftest erasure A: '
     . '1 declaration, as the evidence for tax relief claimed on your gifts, ';
 $patLost = 'tblGivingEntry anonymise: these gifts keep their amount, date and method and will lose your name, because no tax declaration or '
     . 'giving statement of yours covers their date, and Selftest erasure A keeps the giver\'s name only on gifts one covers';
@@ -6311,12 +6311,13 @@ $q1019Observe = static function () use ($jar, $q1019Visitor, $q1019Expected): ar
     return $wrong;
 };
 $q1019Words = $q1019Expected();
-ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, one saying no time limit is set yet (the consent record, #934) and nine saying they follow the period for network addresses (#1019 round 2)',
+ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, four saying no time limit is set yet (the consent record, #934; a Gift Aid declaration\'s, D-189; the two rate-limit tables), seven saying they follow the period for network addresses (D-188), and the two change histories saying nothing clears them (D-187)',
     count($q1019Words) >= 18
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Prayer requests keep the network address'))) === 1
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Equipment label scans keep a scrambled form'))) === 1
-    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 1
-    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'the period for network addresses'))) === 9,
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 4
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'the period for network addresses'))) === 7
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'with the address it recorded, is kept for ever: nothing clears it'))) === 2,
     count($q1019Words) . ' sentences');
 $q1019First = $q1019Observe();
 ok('Q2 the Privacy & Data Protection page and the privacy policy, for a visitor and a member at one organisation and an administrator at another, each show ONE "Network addresses" section listing exactly the catalogue\'s sentences, in order, under the period they follow (#1019, D-178)',

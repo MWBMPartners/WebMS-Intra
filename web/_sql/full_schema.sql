@@ -8106,7 +8106,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetAudit` (
     `actorType`    ENUM('user','system','public','kiosk') NOT NULL DEFAULT 'user',
     `actorUserID`  INT      DEFAULT NULL COMMENT 'No FK by design — see table comment',
     `apiKeyID`     INT      DEFAULT NULL COMMENT 'tblApiKeys.keyID when the change arrived via bearer API key — no FK by design',
-    `ipHash`       CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the network address each change came from, written on EVERY row by AssetRegister::audit(), signed-in changes included. Emptied after privacy.networkAddressDays and by an erasure of the actor (#1019, D-164, D-178; migration 295)',
+    `ipHash`       CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the network address each change came from, written on EVERY row by AssetRegister::audit(), signed-in changes included. Kept for ever with the entry (D-187); emptied by an erasure of the actor (#1019, D-164; migration 295)',
     `createdAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`auditID`),
     KEY `idx_astaud_asset_created` (`assetID`, `createdAt`),

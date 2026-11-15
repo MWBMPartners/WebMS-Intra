@@ -791,24 +791,38 @@ return [
         //    The erasure's audit trail records each of these as kept on
         //    purpose, with this reason. tools/gdpr-coverage-selftest.php and
         //    tools/gdpr-eraser-selftest.php both fail if it is ever set back.
+        //    #1019 round 3: the last clause named two of the five columns the
+        //    clearing empties (GdprEraser::clearKeptGivingIdentity() empties
+        //    the address, postcode, network address, signature and notes).
         'reason'   => 'A tax declaration is the organisation\'s evidence for tax relief it has claimed on a donor\'s '
-                    . 'gifts. Kept unchanged, with the donor\'s name and home address held beside it, until the '
-                    . 'organisation\'s keep-until date; its address and notes are then emptied',
+                    . 'gifts. Kept unchanged at the erasure, with the donor\'s name and home address held beside it, '
+                    . 'until the organisation\'s keep-until date; its address, postcode, network address, signature '
+                    . 'and notes are then emptied',
         'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
         'columns'  => ['donorID', 'address', 'postcode', 'notes', 'acceptedIP'],
             'notEmptiedHere' => [
-            // 🌐 #1019 (D-178): it said the address was kept as part of the
-            //    evidence and "HMRC requires it". The tax office asks for the
-            //    declaration, not the address it was typed from, so an erasure
-            //    now empties it at once (GdprEraser::eraseGiftAidDeclarationAddresses()).
-            'acceptedIP' => 'Emptied elsewhere, on purpose: GdprEraser::eraseGiftAidDeclarationAddresses() empties '
-                . 'the network address on every declaration of the person\'s, at every organisation, while the '
-                . '\'retain\' instruction keeps the declaration itself unchanged otherwise (#1019, D-178)',
+            // 🌐 D-189 (the owner, 15 November 2026): the address is part of
+            //    the declaration, so an erasure does NOT empty it; it goes with
+            //    the declaration's other details at the keep-until date. Round 2
+            //    of #1019 had an erasure step empty it at once; that step was
+            //    removed in round 3. This used to say "HMRC requires it",
+            //    which was never the reason: the decision is.
+            'acceptedIP' => 'Kept as part of the declaration (D-189): an erasure does not empty it. It is emptied with '
+                . 'the declaration\'s address, postcode, signature and notes at the organisation\'s keep-until date, '
+                . 'by GdprEraser::clearKeptGivingIdentity()',
         ],
         'addressKept' => [
-            'acceptedIP' => 'Tax declarations keep the network address each was made from. An erasure empties it at once, and '
-                . 'otherwise it is emptied, with your home address, at this organisation\'s keep-until date for giving '
-                . 'records; the declaration itself is kept as the organisation\'s evidence for tax relief.',
+            // 🌐 D-189: the sentence is true for a member who is never erased as
+            //    well. NOTHING empties a living member's declaration (the only
+            //    statements writing NULL into it are in GdprEraser, both after
+            //    an erasure), so it says so and the column is on the pending
+            //    list of check_network_address_periods.py.
+            'acceptedIP' => 'Tax declarations keep the network address each was made from, as part of the declaration. '
+                . 'No time limit is set yet while you keep your account: the declaration, with that address and your '
+                . 'home address, is kept for as long as the organisation keeps it. If you ask to be erased, the '
+                . 'declaration is kept as the organisation\'s evidence for tax relief, and its network address is '
+                . 'emptied with your home address at this organisation\'s keep-until date for giving records, not '
+                . 'before.',
         ],
     ],
     'tblGivingEntry' => [
@@ -1454,10 +1468,11 @@ return [
                 . 'property',
         ],
         'addressKept' => [
+            // 🌐 D-187, as tblAuditTrail.ipAddress: kept for ever with the entry.
             'ipHash' => 'The equipment register\'s change history keeps a scrambled form of the network address each change '
-                . 'came from, which this installation can still match against an address. The history itself is kept '
-                . 'for ever, but the address follows the period for network addresses; an erasure removes it sooner '
-                . 'from the changes you made.',
+                . 'came from, which this installation can still match against an address. The change history, with '
+                . 'the address it recorded, is kept for ever: nothing clears it. An erasure removes the address from '
+                . 'the changes you made.',
         ],
     ],
     'tblAssetScanLog' => [
@@ -1798,8 +1813,12 @@ return [
                 . 'of machine-readable text, so it carries the same contents',
         ],
         'addressKept' => [
-            'ipAddress' => 'The change history keeps the network address each change came from. The history itself is kept for '
-                . 'ever, but the address follows the period for network addresses; an erasure removes it sooner from '
+            // 🌐 D-187: the address stays with the entry for ever. Round 2 of
+            //    #1019 had it follow the network-address period; the owner
+            //    chose "Leave change-history addresses for ever" (D-116 holds
+            //    in full), so NetworkAddressRetention::PLACES does not list it.
+            'ipAddress' => 'The change history keeps the network address each change came from. The change history, with '
+                . 'the address it recorded, is kept for ever: nothing clears it. An erasure removes the address from '
                 . 'the changes you made.',
         ],
     ],
@@ -2906,8 +2925,8 @@ return [
         'columns'  => ['bucket'],
         'addressKept' => [
             'bucket' => 'Limits on repeated attempts (signing in, resetting a password, sending a form) can keep a '
-                . 'one-way fingerprint of the network address. They are tidied away only when a later attempt '
-                . 'of the same kind happens, so one can stay for a long time. Nothing links them to an account, '
+                . 'one-way fingerprint of the network address. No time limit is set yet: they are tidied away only '
+                . 'when a later attempt of the same kind happens, so one can stay for a long time. Nothing links them to an account, '
                 . 'so an erasure cannot find them.',
         ],
     ],
@@ -2938,8 +2957,8 @@ return [
         'columns'  => ['senderFingerprint', 'sessionToken'],
         'addressKept' => [
             'senderFingerprint' => 'Limits that stop the live-stream chat being flooded keep a one-way fingerprint of the '
-                . 'network address. They are tidied away as later messages are sent, so one can stay longer '
-                . 'while the chat is quiet. Nothing links them to an account, so an erasure cannot find them.',
+                . 'network address. No time limit is set yet: they are tidied away only as later messages are '
+                . 'sent, so one can stay for a long time while the chat is quiet. Nothing links them to an account, so an erasure cannot find them.',
         ],
     ],
     'tblTranscript' => [

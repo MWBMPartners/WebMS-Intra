@@ -38,7 +38,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 ALTER TABLE `tblAssetAudit`
-    MODIFY COLUMN `ipHash` CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the network address each change came from, written on EVERY row by AssetRegister::audit(), signed-in changes included. Emptied after privacy.networkAddressDays and by an erasure of the actor (#1019, D-164, D-178; migration 295)';
+    MODIFY COLUMN `ipHash` CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the network address each change came from, written on EVERY row by AssetRegister::audit(), signed-in changes included. Kept for ever with the entry (D-187); emptied by an erasure of the actor (#1019, D-164; migration 295)';
 
 ALTER TABLE `tblRecordingPlay`
     MODIFY COLUMN `ipHash` CHAR(64) DEFAULT NULL COMMENT 'Salted fingerprint of the network address a play came from, made by AddressFingerprint::of() since #1019 (before that an UNSALTED SHA-256 of the raw address). Emptied after privacy.networkAddressDays (D-178; migration 295)';

@@ -370,9 +370,11 @@ function log_sweep(string $which, bool $reallyDelete): int
  *    every place `NetworkAddressRetention::PLACES` lists (#1019, D-178).
  *
  * NOT A DELETE. Every record stays; only the address column is set to NULL —
- * a change-history entry is kept for ever (D-116), a prayer request or a chat
- * message is the organisation's record, and the address is the only part of
- * them D-178 gives a period. So this figure is never added to `totalDeleted`.
+ * a prayer request or a chat message is the organisation's record, and the
+ * address is the only part of them D-178 gives a period. So this figure is
+ * never added to `totalDeleted`. AND NOTHING ELSE CHANGES: a column the
+ * database would re-stamp on the update is written back to itself (each
+ * place's `hold`). The change histories are not here at all (D-187).
  *
  * ONE FUNCTION FOR BOTH, as `log_sweep()` is: the count an administrator is
  * shown before confirming and the statement that then runs are built here, from
@@ -380,8 +382,9 @@ function log_sweep(string $which, bool $reallyDelete): int
  *
  * WHOSE PERIOD. A place with an organisation (its own `siteID`, or its parent's
  * through `via`) is swept one organisation at a time by that organisation's
- * figure; a row whose organisation column is EMPTY (only `tblAuditTrail` allows
- * one) by the installation's; a place belonging to an account rather than an
+ * figure; a row whose organisation column is EMPTY by the installation's (no
+ * place listed today allows one: `tblAuditTrail` did, and left the list under
+ * D-187, so that statement now matches nothing); a place belonging to an account rather than an
  * organisation (password resets, trusted devices) by the installation's. A
  * figure of "never" runs no statement at all, so the count and the change agree.
  *
@@ -432,8 +435,16 @@ function address_sweep(bool $reallyEmpty): int
         } elseif ($place['site'] !== null) {
             $siteCol = '`t`.`' . $place['site'] . '`';
         }
+        // 🔒 Empty the address and NOTHING ELSE: a column the database
+        //    re-stamps on any change (ON UPDATE CURRENT_TIMESTAMP) is set to
+        //    itself, the way GdprEraser and migrations 210/211 write
+        //    `updatedAt = updatedAt` (#1019 round 3).
+        $set = '`t`.`' . $place['column'] . '` = NULL';
+        foreach ($place['hold'] as $held) {
+            $set .= ', `t`.`' . $held . '` = `t`.`' . $held . '`';
+        }
         $head = $reallyEmpty === true
-            ? 'UPDATE ' . $from . ' SET `t`.`' . $place['column'] . '` = NULL WHERE '
+            ? 'UPDATE ' . $from . ' SET ' . $set . ' WHERE '
             : 'SELECT COUNT(*) AS `cnt` FROM ' . $from . ' WHERE ';
         $old  = '`t`.`' . $place['column'] . '` IS NOT NULL AND `t`.`' . $place['dated'] . '` < DATE_SUB(NOW(), INTERVAL ? DAY)';
 

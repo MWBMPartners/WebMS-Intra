@@ -12,25 +12,39 @@
  *
  * WHY IT EXISTS (#1019; the owner's decision D-178, 12 November 2026). The
  * portal keeps addresses for security, misuse and support, and handles them as
- * personal data: every place that keeps one has a SET keeping period. Nine
+ * personal data: every place that keeps one has a SET keeping period. Seven
  * places had none — password-reset requests, devices trusted for two-step
  * sign-in, prayer requests, an access key's last-used address, live-chat
- * messages, answers to public forms, recording plays, and the two change
- * histories (`tblAuditTrail`, `tblAssetAudit`). The owner chose ONE setting
- * for all of them, a year by default to match the activity log, with the
- * activity log's rules (D-117 to D-119): `RetentionPeriod` holds those rules
- * and this class names the setting, the words and the places.
+ * messages, answers to public forms and recording plays. The owner chose ONE
+ * setting for all of them, a year by default (D-188), with the activity log's
+ * rules (D-117 to D-119): `RetentionPeriod` holds those rules and this class
+ * names the setting, the words and the places.
  *
- * WHAT THE CLEAR-OUT DOES: it EMPTIES the address and KEEPS every record. A
- * change-history entry is kept for ever (D-116) — only its address goes. A
- * prayer request, a chat message, a form answer stays exactly as it was.
+ * WHAT THE CLEAR-OUT DOES: it EMPTIES the address and changes NOTHING ELSE.
+ * A prayer request, a chat message, a form answer stays exactly as it was —
+ * including a column the database would otherwise re-stamp on any change
+ * (`ON UPDATE CURRENT_TIMESTAMP`): each place names those in `hold`, and the
+ * clear-out writes them back to themselves. Without that, a trusted device
+ * last seen in August read as seen on the night of the clear-out, a false
+ * security fact in the member's own data copy (#1019 round 3, measured).
  *
- * WHAT IT DOES NOT COVER, on purpose: places that already have a period
- * (the activity log, error records, scan records, found-equipment reports,
- * check-ins at the door, rate limits), Gift Aid declarations (emptied at the
- * organisation's keep-until date for giving records, and by an erasure), and
- * the record of privacy-notice choices (`tblConsentLog`), which follows the
- * privacy data-retention setting under D-166 once #934 builds its clear-out.
+ * WHAT IT DOES NOT COVER, on purpose:
+ *   - places that have a period of their own: the activity log, error
+ *     records, scan records, found-equipment reports, check-ins at the door;
+ *   - THE TWO CHANGE HISTORIES (`tblAuditTrail.ipAddress`,
+ *     `tblAssetAudit.ipHash`): the owner keeps their addresses for ever, with
+ *     the entry (D-187, keeping D-116 whole). Round 2 listed them; round 3
+ *     took them out. An erasure still empties them on the person's own
+ *     changes (GdprEraser, D-164);
+ *   - a Gift Aid declaration's address, which is part of the declaration
+ *     (D-189) and goes with its other details at the keep-until date — which
+ *     only an erasure starts; nothing ends a living member's declaration;
+ *   - the two rate-limit tables, which are tidied only when a later request
+ *     of the same kind arrives, so they have NO period (they are on
+ *     tools/audit-checks/network_address_period_pending.txt, as is the
+ *     declaration's address);
+ *   - the record of privacy-notice choices (`tblConsentLog`), which follows
+ *     the privacy data-retention setting under D-166 once #934 builds it.
  *
  * THE DATE EACH PLACE IS MEASURED FROM is the moment the address was written:
  * the row's creation for most, the play for a recording play, and the last
@@ -81,7 +95,15 @@ final class NetworkAddressRetention extends RetentionPeriod
      * `dated` is the column the address's age is measured from. `site` is the
      * column naming the organisation, or null where a row belongs to an
      * account rather than an organisation. `via` names a parent table to join
-     * for the organisation, as [table, key column shared by both].
+     * for the organisation, as [table, key column shared by both]. `hold` is
+     * every column of the table the database re-stamps on ANY update (`ON
+     * UPDATE CURRENT_TIMESTAMP`), which the clear-out sets to itself so that
+     * emptying the address changes nothing else. It is the WHOLE set, read
+     * from a loaded install script (information_schema, `EXTRA LIKE '%on
+     * update%'`, 15 November 2026: exactly the two below);
+     * tools/network-address-retention-selftest.php fails when a table here
+     * gains one that `hold` does not name, and compares every other column of
+     * every row before and after the clear-out.
      *
      * Every name here is a literal in this file and never comes from a
      * request, which is what makes it safe to put into a statement; each is
@@ -89,18 +111,18 @@ final class NetworkAddressRetention extends RetentionPeriod
      * reads this list: a column on it must have a catalogue sentence naming
      * this period, and a sentence naming the period must have its column here.
      *
-     * @var list<array{table: string, column: string, dated: string, site: ?string, via: ?array{0: string, 1: string}}>
+     * @var list<array{table: string, column: string, dated: string, site: ?string, via: ?array{0: string, 1: string}, hold: list<string>}>
      */
     public const PLACES = [
-        ['table' => 'tblPasswordResets',   'column' => 'createdIP',   'dated' => 'createdAt',  'site' => null,     'via' => null],
-        ['table' => 'tblTrustedDevices',   'column' => 'createdIP',   'dated' => 'createdAt',  'site' => null,     'via' => null],
-        ['table' => 'tblPrayerRequests',   'column' => 'submitterIP', 'dated' => 'createdAt',  'site' => 'siteID', 'via' => null],
-        ['table' => 'tblApiKeys',          'column' => 'lastUsedIP',  'dated' => 'lastUsedAt', 'site' => 'siteID', 'via' => null],
-        ['table' => 'tblLiveChatMessages', 'column' => 'senderIP',    'dated' => 'createdAt',  'site' => 'siteID', 'via' => null],
-        ['table' => 'tblFormResponses',    'column' => 'submitterIP', 'dated' => 'createdAt',  'site' => 'siteID', 'via' => null],
-        ['table' => 'tblRecordingPlay',    'column' => 'ipHash',      'dated' => 'playedAt',   'site' => 'siteID', 'via' => ['tblRecording', 'recordingID']],
-        ['table' => 'tblAuditTrail',       'column' => 'ipAddress',   'dated' => 'createdAt',  'site' => 'siteID', 'via' => null],
-        ['table' => 'tblAssetAudit',       'column' => 'ipHash',      'dated' => 'createdAt',  'site' => 'siteID', 'via' => null],
+        ['table' => 'tblPasswordResets',   'column' => 'createdIP',   'dated' => 'createdAt',  'site' => null,     'via' => null, 'hold' => []],
+        ['table' => 'tblTrustedDevices',   'column' => 'createdIP',   'dated' => 'createdAt',  'site' => null,     'via' => null, 'hold' => ['lastSeenAt']],
+        ['table' => 'tblPrayerRequests',   'column' => 'submitterIP', 'dated' => 'createdAt',  'site' => 'siteID', 'via' => null, 'hold' => ['updatedAt']],
+        ['table' => 'tblApiKeys',          'column' => 'lastUsedIP',  'dated' => 'lastUsedAt', 'site' => 'siteID', 'via' => null, 'hold' => []],
+        ['table' => 'tblLiveChatMessages', 'column' => 'senderIP',    'dated' => 'createdAt',  'site' => 'siteID', 'via' => null, 'hold' => []],
+        ['table' => 'tblFormResponses',    'column' => 'submitterIP', 'dated' => 'createdAt',  'site' => 'siteID', 'via' => null, 'hold' => []],
+        ['table' => 'tblRecordingPlay',    'column' => 'ipHash',      'dated' => 'playedAt',   'site' => 'siteID', 'via' => ['tblRecording', 'recordingID'], 'hold' => []],
+        // 🚫 NOT tblAuditTrail.ipAddress nor tblAssetAudit.ipHash: the change
+        //    histories keep their addresses for ever (D-187).
     ];
 
     /**
