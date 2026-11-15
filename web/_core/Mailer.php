@@ -165,6 +165,40 @@ class Mailer
     private static ?int $firstTriedAt = null;
 
     /**
+     * 📝 The send-log lines the Microsoft 365 and Google routes write while the
+     * mail JOB is handing them one message (#1051). Null at every other time.
+     *
+     * WHY. Those two routes write their own send-log line, and they write it
+     * BEFORE the queue has decided what becomes of the message. Until #1051 a
+     * failure was written as 'failed' - which the `status` column defines as
+     * "it did not go and is not being tried again" - although the queue then
+     * usually kept the message and tried it again. An administrator reading
+     * the send log was told a message had been given up on when it was still
+     * waiting.
+     *
+     * HOW. While this list exists, logSend() writes a route's failure as
+     * 'queued' ("kept, and will be tried again": the message is still the
+     * queue's at that moment, so that is true) and remembers the line's number
+     * here. deliverQueued() hands the numbers to the queue with its answer,
+     * and logQueueAttempt() settles each line to what the queue then decided:
+     * 'queued' again, 'held', or 'failed' when it was given up on - and
+     * 'failed' when the message went in the end by another route (the
+     * fallback), because THAT attempt is not tried again.
+     *
+     * Why provisional 'queued' and not 'failed': if the run dies between the
+     * route's line and the queue's decision, the row is later found and held
+     * (MailQueue::recoverDeadClaims()), with its own 'held' line. Read in
+     * order, "queued, then held" is true; "failed, then held" is not.
+     *
+     * The send log's existing five statuses already say all of this, so no
+     * new status and no schema change was needed: the fault was that the
+     * routes wrote the wrong one of them, not that the right one was missing.
+     *
+     * @var list<int>|null
+     */
+    private static ?array $routeLines = null;
+
+    /**
      * 🏷️ The names of real HTML elements, for looksLikeHtml() (#971).
      *
      * Every element of the HTML Living Standard (https://html.spec.whatwg.org/
@@ -653,10 +687,39 @@ class Mailer
             return self::afterSmtp($answer, $message);
         }
 
-        $sent = $route === self::ROUTE_GOOGLE
-            ? MailerGoogle::send($recipients, $subj, $htmlBody, $files, $message['logSite'])
-            // 📧 Default: Microsoft Graph (MS365)
-            : self::sendViaGraph($recipients, $subj, $htmlBody, $files, $message['logSite']);
+        try {
+            $sent = $route === self::ROUTE_GOOGLE
+                ? MailerGoogle::send($recipients, $subj, $htmlBody, $files, $message['logSite'])
+                // 📧 Default: Microsoft Graph (MS365)
+                : self::sendViaGraph($recipients, $subj, $htmlBody, $files, $message['logSite']);
+        } catch (\Throwable $e) {
+            // 📝 A THROW LEAVES ONE LINE TOO (#1051). These two routes throw
+            //    when a setting is missing or their sign-in fails, and they
+            //    throw BEFORE writing a line of their own (each writes its line
+            //    only once it has an answer to the send itself). Until #1051
+            //    the exception left here and nothing reached the send log, so
+            //    a page that sent at once and met a broken sign-in left no
+            //    record that it had tried. The queue never had the fault:
+            //    deliverQueued() catches the same throw and the queue writes
+            //    the line. 'failed' is true here: a page's send is not kept.
+            //    The exception's text names the setting or the sign-in
+            //    service's refusal, never the message (the same words the
+            //    queue's line has always carried). It is still thrown, as it
+            //    always was: what a page does about it is the page's business.
+            //    A route that is NOT SET UP (a setting missing) also throws here;
+            //    lastOutcome() then keeps saying 'not-set-up', as it was set
+            //    above, and the line says so too, as SMTP's does. Only a route
+            //    that was set up and still failed is 'not-sent'.
+            if ($setUp === true) {
+                self::$lastOutcome = self::OUTCOME_NOT_SENT;
+            }
+            self::logSend(
+                $route, '', implode(', ', $recipients), $subj, 0, 'failed', null, $setUp === true ? 'route-unusable' : 'not-set-up',
+                'Not sent: ' . self::ROUTES[$route] . ' could not be used. ' . $e->getMessage(), $message['logSite']
+            );
+
+            throw $e;
+        }
         self::$lastOutcome = $sent === true ? self::OUTCOME_SENT : self::OUTCOME_NOT_SENT;
 
         return $sent;
@@ -911,7 +974,54 @@ class Mailer
             // refusal quotes it). An erasure empties such lines by the name
             // 'SMTP' given here: GdprEraser::MAIL_ERROR_PLATFORMS. If this
             // name changes, or a new route writes its own, change that list.
-            Logger::errorPlatform('SMTP', 'Error', (string) $answer['reason'], 'Mail send fail', (string) $answer['words']);
+            // 🏢 Under the MESSAGE's organisation, the same one as its send-log
+            //    line just above (#1053): see errorRowFor().
+            self::errorRowFor($siteId, 'SMTP', (string) $answer['reason'], 'Mail send fail', (string) $answer['words']);
+        }
+    }
+
+    /**
+     * 🏢 A mail route's line on the Errors page, recorded under the
+     * organisation the MESSAGE is for: the ONE rule for every mail route's
+     * error row (#1053), the same organisation as the message's send-log line.
+     *
+     * WHY. Since #1039 a message a caller names for another organisation (a
+     * scheduled job walking several) is kept, and recorded in the send log,
+     * under THAT organisation; and since #1006 the mail job records a waiting
+     * message under its queue row's organisation (queueRowSite()). The error
+     * rows did not follow: Logger::errorPlatform() stamps Site::id(), the
+     * REQUEST's organisation. So one organisation's administrators could read
+     * an error about another organisation's message, and that organisation's
+     * administrators could not.
+     *
+     * `$siteId` is exactly what the send-log line was given (logSend()'s last
+     * argument): false means "this request's", which is what errorPlatform()
+     * has always used, so nothing changes for a message sent for the request's
+     * own organisation; an int or null is the message's own, null meaning "no
+     * organisation" - recorded as such, never guessed.
+     *
+     * Public because MailerGoogle records its own error rows (it is the route
+     * class for Google) and must follow the same rule.
+     *
+     * @param int|false|null $siteId The message's organisation, as logSend() takes it.
+     */
+    public static function errorRowFor(int|false|null $siteId, string $platform, string $code, string $title, string $detail = ''): void
+    {
+        // 🛑 Recording an error can SEND MAIL (an alert to the administrators,
+        //    through this class). That message is not the one the mail job is
+        //    handing over, so its send-log line must not join $routeLines and
+        //    be re-statused by the queue (#1051). The list is set aside while
+        //    the error is recorded, and put back however that ends.
+        $collecting       = self::$routeLines;
+        self::$routeLines = null;
+        try {
+            if ($siteId === false) {
+                Logger::errorPlatform($platform, 'Error', $code, $title, $detail);
+            } else {
+                Logger::errorPlatformForSite($siteId, $platform, 'Error', $code, $title, $detail);
+            }
+        } finally {
+            self::$routeLines = $collecting;
         }
     }
 
@@ -979,17 +1089,28 @@ class Mailer
             //    the message was for had no record of sending it. SMTP never
             //    had the fault: logQueueAttempt() writes its line, and has
             //    always passed the row's organisation.
-            $site = self::queueRowSite($row);
+            //    📝 And every line they write is remembered (#1051), so the
+            //    queue can settle its status once it has decided what the
+            //    message now is: see $routeLines and logQueueAttempt().
+            $site             = self::queueRowSite($row);
+            self::$routeLines = [];
             $sent = $route === self::ROUTE_GOOGLE
                 ? MailerGoogle::send($to, (string) $row['subject'], $html, $files, $site)
                 : self::sendViaGraph($to, (string) $row['subject'], $html, $files, $site);
         } catch (\Throwable $e) {
-            // These routes throw when a setting is missing. The exception's
-            // text names the setting, never the message.
+            // These routes throw when a setting is missing or their sign-in
+            // fails, always BEFORE writing a line of their own (the Google
+            // fallback inside sendViaGraph() is caught there, and writes its
+            // own line: #1051). So the queue writes this attempt's ONE line.
+            // The exception's text names the setting, never the message.
             $sent                 = false;
             $answer['ownLog']     = false;
             $answer['routeFault'] = true;
+            $answer['reason']     = 'route-unusable';
             $answer['words']      = 'Not sent: ' . self::ROUTES[$route] . ' could not be used. ' . $e->getMessage();
+        } finally {
+            $answer['routeLines'] = self::$routeLines ?? [];
+            self::$routeLines     = null;
         }
         if ($sent === true) {
             return ['sent' => true, 'outcome' => self::OUTCOME_SENT, 'reason' => '', 'next' => MailRoutes::NEXT_SENT, 'words' => 'The mail service accepted the message.'] + $answer;
@@ -1012,7 +1133,12 @@ class Mailer
     public static function logQueueAttempt(array $row, array $answer, string $status): void
     {
         if (($answer['ownLog'] ?? false) === true) {
-            return; // Microsoft 365 and Google wrote their own line, under the row's organisation (#1006)
+            // Microsoft 365 and Google wrote their own line, under the row's
+            // organisation (#1006). What is left is its STATUS (#1051): see
+            // settleRouteLines().
+            self::settleRouteLines((array) ($answer['routeLines'] ?? []), $status);
+
+            return;
         }
         $to     = array_map('trim', explode(',', (string) $row['toRecipients']));
         $siteId = self::queueRowSite($row);
@@ -1041,6 +1167,45 @@ class Mailer
             self::route(), '', (string) $row['toRecipients'], (string) $row['subject'], (int) ($row['attachmentCount'] ?? 0), $status, null, $code, $words,
             self::queueRowSite($row)
         );
+    }
+
+    /**
+     * 📝 Give the lines a route wrote during one of the job's attempts the
+     * status the queue then decided (#1051; see $routeLines for why).
+     *
+     * Only lines that were not 'sent' are touched: a line saying a mail
+     * service accepted the message is true whatever happens next. A failure
+     * line becomes what the message now is - 'queued' (tried again later),
+     * 'held' or 'failed' (given up on) - except when the message went after
+     * all, by the fallback: then that failed attempt is not tried again, so
+     * 'failed' is the truth for it.
+     *
+     * Fail-soft, like logSend(): the send has happened by now, and a fault
+     * here must not take the run down. The lines then keep 'queued', which is
+     * what the message was when they were written.
+     *
+     * @param list<int> $lineIds The send-log lines the route wrote (emailLogID).
+     * @param string    $status  What the queue decided: 'sent', 'queued', 'held' or 'failed'.
+     */
+    private static function settleRouteLines(array $lineIds, string $status): void
+    {
+        $lineIds = array_values(array_filter(array_map('intval', $lineIds), static fn (int $id): bool => $id > 0));
+        if ($lineIds === []) {
+            return;
+        }
+        $settled = $status === 'sent' ? 'failed' : $status;
+        if (in_array($settled, ['queued', 'held', 'failed'], true) === false) {
+            return;
+        }
+        try {
+            $marks = implode(',', array_fill(0, count($lineIds), '?'));
+            $stmt  = App::db()->prepare('UPDATE `tblEmailLog` SET `status` = ? WHERE `emailLogID` IN (' . $marks . ") AND `status` <> 'sent'");
+            $stmt->bind_param('s' . str_repeat('i', count($lineIds)), $settled, ...$lineIds);
+            $stmt->execute();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('Mailer::settleRouteLines() failed: ' . $e->getMessage());
+        }
     }
 
     /**
@@ -1354,10 +1519,13 @@ class Mailer
      * @param bool $quiet True when only asking WHETHER there is a sender
      *                    (sendingRoute() does): rule 2 then writes no error
      *                    record. A real send leaves it false.
+     * @param int|false|null $forSiteId The organisation rule 2's error record
+     *        goes under: the message's (#1053), as logSend() takes it; false
+     *        for the request's.
      *
      * @return array{mailbox: string, address: string, name: string, isShared: bool}|null
      */
-    private static function effectiveSender(bool $quiet = false): ?array
+    private static function effectiveSender(bool $quiet = false, int|false|null $forSiteId = false): ?array
     {
         global $SETTINGS;
 
@@ -1377,9 +1545,13 @@ class Mailer
             //    fall back to the legacy address so portal mail keeps
             //    flowing while an admin fixes the setting.
             if ($quiet === false) {
-                Logger::errorPlatform(
+                // Through errorRowFor() so an alert it sends is never taken
+                // for the message being handed over (#1051), and under the
+                // message's organisation when the caller names one (#1053);
+                // `false`, the default, is the request's, as it always was.
+                self::errorRowFor(
+                    $forSiteId,
                     'Graph',
-                    'Error',
                     'BAD_SHARED_MAILBOX',
                     'mail.ms365.sharedMailbox is not a valid email address — falling back to mail.defaultFromAddress',
                     $shared
@@ -1418,7 +1590,7 @@ class Mailer
     {
         global $SETTINGS;
 
-        $sender = self::effectiveSender();
+        $sender = self::effectiveSender(false, $forSiteId);
         if ($sender === null) {
             throw new RuntimeException('From address missing');
         }
@@ -1461,13 +1633,13 @@ class Mailer
 
         $url = 'https://graph.microsoft.com/v1.0/users/' . urlencode($sender['mailbox']) . '/sendMail';
 
-        $result = self::graphSendRequest($url, $payload);
+        $result = self::graphSendRequest($url, $payload, $forSiteId);
 
         // 🔁 401 — token expired/revoked mid-cache-window: clear the
         //    static cache and retry ONCE with a freshly acquired token.
         if ($result['code'] === 401) {
             self::$token = '';
-            $result = self::graphSendRequest($url, $payload);
+            $result = self::graphSendRequest($url, $payload, $forSiteId);
         }
 
         // 🔁 429 — throttled. Only retry when Graph's own Retry-After is
@@ -1478,7 +1650,7 @@ class Mailer
             $retryAfter = (int) ($result['headers']['retry-after'] ?? 0);
             if ($retryAfter > 0 && $retryAfter <= 5) {
                 sleep($retryAfter);
-                $result = self::graphSendRequest($url, $payload);
+                $result = self::graphSendRequest($url, $payload, $forSiteId);
             }
         }
 
@@ -1495,8 +1667,24 @@ class Mailer
         $errData    = json_decode((string) $result['body'], true);
         $errCode    = (string) ($errData['error']['code'] ?? '');
         $errMessage = (string) ($errData['error']['message'] ?? (string) $result['body']);
+        if ($result['body'] === '' && $result['curlErrno'] !== 0) {
+            // 🌐 NO ANSWER AT ALL (#1050): the connection failed, timed out or
+            //    was dropped, so there is no body for Graph's own error code.
+            //    Until #1050 graphSendRequest() threw libcurl's reason away
+            //    and this line said only that the message failed, never why.
+            //    The reason recorded is libcurl's FIXED description of its
+            //    error number (curl_strerror()), not curl_error(): the fixed
+            //    text is one sentence per number, chosen by libcurl, so it
+            //    cannot quote the message, a recipient's address or a proxy
+            //    setting, whatever the failure was. "Could not resolve host"
+            //    without the name is still enough for an administrator to
+            //    know where to look, and the number finds the rest.
+            $errCode    = 'CURL_FAIL';
+            $errMessage = 'No answer from Microsoft 365: ' . (string) curl_strerror($result['curlErrno']) . ' (curl error ' . $result['curlErrno'] . ').';
+        }
 
-        Logger::errorPlatform('Graph', 'Error', (string) $result['code'], 'Mail send fail', $errCode . ': ' . $errMessage);
+        // 🏢 Under the message's organisation (#1053): see errorRowFor().
+        self::errorRowFor($forSiteId, 'Graph', (string) $result['code'], 'Mail send fail', $errCode . ': ' . $errMessage);
         self::logSend($providerLabel, $sender['address'], $toRecipients, $subj, $attachmentCount, 'failed', $result['code'] > 0 ? $result['code'] : null, $errCode, $errMessage, $forSiteId);
 
         // 🪂 Optional opt-in fallback (default OFF — a silent failover
@@ -1509,7 +1697,22 @@ class Mailer
                     return MailerGoogle::send($to, $subj, $html, $files, $forSiteId);
                 }
             } catch (\Throwable $e) {
-                Logger::errorPlatform('Graph', 'Error', 'FALLBACK_FAIL', 'Google fallback failed', $e->getMessage());
+                // 📝 GOOGLE WAS TRIED, SO GOOGLE GETS ITS LINE (#1051).
+                //    MailerGoogle::send() throws before it writes anything (a
+                //    missing setting, or a sign-in that failed or got no
+                //    answer), and until #1051 this catch wrote only the Errors
+                //    page row: the send log held Microsoft's failure and
+                //    nothing about the fallback, while the queue's own words
+                //    ("Its own line in the send log says why") pointed at it.
+                //    One line per route tried, never none and never two:
+                //    Google wrote nothing before the throw, so this is its one.
+                //    The exception's words name a setting or the sign-in
+                //    service's refusal, never the message.
+                self::errorRowFor($forSiteId, 'Graph', 'FALLBACK_FAIL', 'Google fallback failed', $e->getMessage());
+                self::logSend(
+                    self::ROUTE_GOOGLE, (string) ($SETTINGS['mail']['google']['delegateUser'] ?? ''), $toRecipients, $subj, 0, 'failed', null, 'FALLBACK_FAIL',
+                    'Not sent through the fallback, Google: it could not be used. ' . $e->getMessage(), $forSiteId
+                );
             }
         }
 
@@ -1521,17 +1724,22 @@ class Mailer
      * caller can implement the 401/429 retry policy without duplicating
      * the cURL plumbing.
      *
-     * @return array{code: int, body: string, headers: array<string, string>}
+     * `curlErrno` is libcurl's error number when no answer came back at all
+     * (0 otherwise, and 0 for curl_init() failing, which has no number), so
+     * the caller can say WHY in the send log (#1050). `$forSiteId` is the
+     * message's organisation, for the one error record written here (#1053).
+     *
+     * @return array{code: int, body: string, headers: array<string, string>, curlErrno: int}
      */
-    private static function graphSendRequest(string $url, array $payload): array
+    private static function graphSendRequest(string $url, array $payload, int|false|null $forSiteId = false): array
     {
         $token   = self::accessToken();
         $headers = [];
 
         $ch = curl_init($url);
         if ($ch === false) {
-            Logger::errorPlatform('Graph', 'Error', 'CURL_INIT', 'curl_init() failed for sendMail', '');
-            return ['code' => 0, 'body' => '', 'headers' => []];
+            self::errorRowFor($forSiteId, 'Graph', 'CURL_INIT', 'curl_init() failed for sendMail', ''); // the message's organisation (#1053), through errorRowFor() for its alert's sake (#1051)
+            return ['code' => 0, 'body' => '', 'headers' => [], 'curlErrno' => 0];
         }
 
         curl_setopt_array($ch, [
@@ -1561,10 +1769,10 @@ class Mailer
         $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 
         if ($body === false) {
-            return ['code' => $code, 'body' => '', 'headers' => $headers];
+            return ['code' => $code, 'body' => '', 'headers' => $headers, 'curlErrno' => curl_errno($ch)];
         }
 
-        return ['code' => $code, 'body' => (string) $body, 'headers' => $headers];
+        return ['code' => $code, 'body' => (string) $body, 'headers' => $headers, 'curlErrno' => 0];
     }
 
     /**
@@ -1595,7 +1803,9 @@ class Mailer
      * 'failed' there are, since migration 216, 'queued' (kept, and will be
      * tried again), 'held' (kept, waiting for a person or for the route to be
      * put right) and 'expired' (its use-by moment passed). Only 'sent' counts
-     * toward the hourly limit.
+     * toward the hourly limit. While the mail job is handing a message to
+     * Microsoft 365 or Google, a 'failed' given here is written as 'queued'
+     * and settled afterwards by the queue (#1051): see $routeLines.
      *
      * `$forSiteId` is the organisation the message is FOR when that is not
      * the organisation of this request: the mail queue's job, which has no
@@ -1615,6 +1825,16 @@ class Mailer
         int|false|null $forSiteId = false
     ): void {
         global $SETTINGS;
+
+        // 📝 While the mail job is handing a message to a route that writes
+        //    its own line (#1051), a failure is written as what the message
+        //    IS at that moment - still the queue's, 'queued' - and the line is
+        //    remembered so logQueueAttempt() can settle it to what the queue
+        //    then decides. See $routeLines. At every other time nothing here
+        //    changes.
+        if (self::$routeLines !== null && $status === 'failed') {
+            $status = 'queued';
+        }
 
         try {
             $db     = App::db();
@@ -1647,6 +1867,9 @@ class Mailer
                 $stmt->bind_param('issssisiss' . ($withNewColumns === true ? 'i' : ''), ...$values);
                 $stmt->execute();
                 $stmt->close();
+                if (self::$routeLines !== null) {
+                    self::$routeLines[] = (int) $db->insert_id; // #1051: see $routeLines
+                }
             };
             try {
                 $write(true);

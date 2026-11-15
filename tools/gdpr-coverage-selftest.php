@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 108; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 111; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -94,6 +94,11 @@ const EXPECTED_CHECKS = 108; // 81 before the #709 fix round added section 8d; r
                             // suggestion details are reached by a request for their
                             // address, that request can never reach an account, and
                             // its kind is one column the page decides by. 108.
+                            // #1018 and #813 added sections 25 and 26: no reason a
+                            // member reads names a column, and every one-row-per-
+                            // member setting is in their data copy. 110.
+                            // #970 added one: the giving outlook and the keep
+                            // step read one list of organisations. 111.
 
 $failures = 0;
 $passes   = 0;
@@ -2310,7 +2315,7 @@ check(
 // The kept-names table is asked for before anything else, for everybody.
 $keepStep = $method($eraserCode, 'keepGivingRecords');
 $probeAt  = strpos($keepStep, "\$db->query('SELECT 1 FROM tblGivingKeptDonors LIMIT 0')");
-$sitesAt  = strpos($keepStep, "'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '");
+$sitesAt  = strpos($keepStep, "self::GIVING_SITES_SQL . ' ORDER BY siteID'"); // #970: the one list of organisations
 check(
     'the giving step asks for the kept-names table before anything else, donor or not, and a missing table is answered with "run the database upgrade"',
     $probeAt !== false && $sitesAt !== false && $probeAt < $sitesAt && str_contains($keepStep, '(int) $e->getCode() === 1146')
@@ -2320,6 +2325,17 @@ check(
     && substr_count($keepStep, 'return $changed;') === 1
     && strpos($keepStep, 'return $changed;') > strpos($keepStep, 'self::unnameCountEnvelopes('),
     'keepGivingRecords() must probe tblGivingKeptDonors first and must not return early for a person with no giving records'
+);
+// #970 item 2: what My data and Request erasure predict, and what the keep
+// step does, read ONE list of organisations - the statements included. The
+// outlook held its own copy without them.
+$outlookStep = $method($eraserCode, 'givingOutlook');
+check(
+    'the giving outlook and the keep step read the same list of organisations, giving statements included (#970)',
+    str_contains($outlookStep, 'self::GIVING_SITES_SQL') === true
+    && gc_find('/private const GIVING_SITES_SQL = [^;]*tblGivingEntry[^;]*tblGiftAidDeclaration[^;]*tblGivingStatementLog[^;]*tblCountEnvelopes[^;]*;/s', $eraserCode) === 1
+    && substr_count($eraserCode, 'FROM tblGivingStatementLog WHERE donorID = ?') === 1,
+    'givingOutlook() must build its list from GIVING_SITES_SQL, which must name gifts, declarations, statements and envelopes'
 );
 $decide = $method($retentionCode, 'stateFor');
 check(
@@ -3503,6 +3519,161 @@ check(
     'a request\'s kind is one column, declared alike in the install script and migration 286, and the erasure page decides by it - never by an empty account number (#964)',
     $kindFaults === [],
     implode('; ', $kindFaults)
+);
+
+// -----------------------------------------------------------------------------
+// 25. A REASON A MEMBER READS NAMES NO COLUMN (#1018). Request erasure and My
+//     data print each instruction's `reason` beside the member's own records.
+//     Several said "only who handled it (`grantedByID`) is detached" or
+//     "userID nulled" - a database column's name, which a member cannot be
+//     expected to understand (D-001, plain English). The column stays in the
+//     instruction's `userCol` and in code comments; the words say what happens.
+//
+//     WHICH INSTRUCTIONS: every one inventory() can count for a person - a
+//     non-empty `userCol`, or a parent match (`subjectVia`). One with neither
+//     is never counted, so never shown (its reason is read in the erasure
+//     report by an administrator).
+//
+//     WHAT COUNTS AS A COLUMN NAME: a word in backticks, a table name
+//     (`tbl` and a capital), or a word written in the database's camel case
+//     (a small letter, then a capital: `userID`, `ipHash`). Ordinary English
+//     has none of those.
+//
+//     WHAT IT CANNOT SEE: the rows inventory() writes for itself - the giving
+//     rows and the person's own erasure requests - because their words are
+//     built from the database at run time; tools/erasure-pages-selftest.php
+//     reads those on the real pages. And jargon that is not a column name
+//     ("authorship attribution detached") passes: no rule can judge that.
+// -----------------------------------------------------------------------------
+$namedColumns = [];
+foreach ($instructions as $instruction) {
+    $shown = (string) ($instruction['userCol'] ?? '') !== ''
+        || (isset($instruction['subjectVia']) === true && is_array($instruction['subjectVia']) === true);
+    if ($shown === false) {
+        continue;
+    }
+    $reason = (string) ($instruction['reason'] ?? '');
+    if (gc_find('/`|\btbl[A-Z]|\b[a-z]+[A-Z][A-Za-z0-9]*\b/', $reason, $hit) === 1) {
+        $namedColumns[] = $instruction['table'] . '.' . $instruction['userCol'] . ' says "' . $hit[0] . '"';
+    }
+}
+check(
+    'no reason a member is shown on Request erasure or My data names a database column or table (#1018)',
+    $namedColumns === [] && count($instructions) > 100,
+    $namedColumns === [] ? 'premise: 100 instructions or fewer, so this check looked at almost nothing' : implode('; ', $namedColumns)
+);
+
+// -----------------------------------------------------------------------------
+// 26. EVERY "ONE ROW PER MEMBER" SETTING IS IN THE MEMBER'S OWN DATA COPY
+//     (#813). A member's choice to have content translated
+//     (`tblUserTranslationPref`) was erased with them but never handed over in
+//     their download (`account/data-export`), so the copy of what the portal
+//     holds about them was incomplete - and nothing would have noticed the
+//     next table of the kind being left out too.
+//
+//     THE KIND IS FOUND FROM THE INSTALL SCRIPT, NEVER FROM A LIST TYPED HERE
+//     (#706's lesson: a hand-written list is somebody's memory). A table is
+//     of this kind when the written list says to ERASE it with the person, and
+//     the install script gives it a PRIMARY or UNIQUE key that contains
+//     `userID` and nothing else that names a record - its other parts, if
+//     any, are `siteID` or a plain name such as a service's key. Such a table
+//     holds at most one row per member (per organisation, per setting): that
+//     member's own setting. Measured on 13 November 2026 the rule found
+//     eight; five were missing from the copy, all now handed over without
+//     their secrets.
+//
+//     WHAT IT CANNOT SEE, said plainly: a key added later by `ALTER TABLE`
+//     (it reads CREATE TABLE only), a per-member table keyed some other way,
+//     and EVERY OTHER kind of record about the person - the much wider gap
+//     between what is erased and what is handed over is its own issue, #1063.
+//     It asks that a $fetchUserRows() entry's own SQL
+//     hands the table's rows over (outer FROM or a JOIN, sub-selects taken
+//     out); it does not judge which columns. outside-services-selftest.php
+//     E07b and E07c fetch the real page for that.
+// -----------------------------------------------------------------------------
+$exportCode  = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/data-export.php'));
+// #813 check round 2: "the page mentions the table" was not enough -
+// `tblUserSites` passed only because a sub-select inside ANOTHER entry named
+// it, while the member's memberships were handed over nowhere. So what counts
+// is a table whose ROWS a payload entry hands over: the SQL given to
+// $fetchUserRows(), its string pieces joined, every bracketed sub-select taken
+// out, and then the table named after the outer FROM or a JOIN.
+$handedOver = [];
+$at         = 0;
+while (($start = strpos($exportCode, '$fetchUserRows(', $at)) !== false) {
+    $open  = $start + strlen('$fetchUserRows');
+    $depth = 0;
+    $end   = $open;
+    for ($i = $open, $n = strlen($exportCode); $i < $n; $i++) {
+        $c = $exportCode[$i];
+        if ($c === '\'' || $c === '"') {
+            // Step over a string literal whole, so a bracket inside SQL text
+            // does not count.
+            for ($i++; $i < $n && $exportCode[$i] !== $c; $i++) {
+                if ($exportCode[$i] === '\\') {
+                    $i++;
+                }
+            }
+            continue;
+        }
+        if ($c === '(') {
+            $depth++;
+        } elseif ($c === ')' && --$depth === 0) {
+            $end = $i;
+            break;
+        }
+    }
+    $call = substr($exportCode, $open, $end - $open + 1);
+    $at   = $end + 1;
+    gc_findAll("/'((?:[^'\\\\]|\\\\.)*)'|\"((?:[^\"\\\\]|\\\\.)*)\"/", $call, $pieces, PREG_SET_ORDER);
+    $sql = '';
+    foreach ($pieces as $piece) {
+        $sql .= ($piece[2] ?? '') !== '' ? $piece[2] : $piece[1];
+    }
+    do {
+        $before = $sql;
+        $sql    = (string) preg_replace('/\(\s*SELECT[^()]*\)/i', ' ', $sql);
+    } while ($sql !== $before);
+    gc_findAll('/\b(?:FROM|JOIN)\s+`?(tbl\w+)`?/i', $sql, $named);
+    foreach ($named[1] as $name) {
+        $handedOver[$name] = true;
+    }
+}
+$ownSettings = [];
+$copyFaults  = [];
+if (count($handedOver) < 20) {
+    $copyFaults[] = 'premise: fewer than 20 tables found handed over by $fetchUserRows(), so the page is not being read as it should';
+}
+gc_findAll('/CREATE TABLE IF NOT EXISTS `(\w+)` \((.*?)\n\)/s', $schemaText, $created, PREG_SET_ORDER);
+foreach ($created as [, $table, $body]) {
+    if ((string) ($catalogue[$table]['decision'] ?? '') !== 'erase') {
+        continue;
+    }
+    gc_findAll('/(?:PRIMARY KEY|UNIQUE KEY `\w+`)\s*\(([^)]*)\)/', $body, $keys);
+    foreach ($keys[1] as $keyColumns) {
+        $parts  = array_map(static fn (string $part): string => trim($part, " `\t"), explode(',', $keyColumns));
+        $others = array_diff($parts, ['userID', 'siteID']);
+        if (in_array('userID', $parts, true) === false || preg_grep('/ID\z/', $others) !== []) {
+            continue;
+        }
+        $ownSettings[] = $table;
+        if (isset($handedOver[$table]) === false) {
+            $copyFaults[] = $table . ' (one row per member, erased with them) has no rows handed over by account/data-export';
+        }
+        break;
+    }
+}
+// Premise: the rule must still find the tables that started this, or a change
+// to the install script's layout could make it find nothing and pass.
+foreach (['tblUserTranslationPref', 'tblUserOutsideServicePref', 'tblUserSmsPreference'] as $known) {
+    if (in_array($known, $ownSettings, true) === false) {
+        $copyFaults[] = 'premise: the rule no longer finds ' . $known . ', so it is not reading the install script as it should';
+    }
+}
+check(
+    'every table holding one member\'s own setting, erased with them, is also handed over in their own data copy (#813)',
+    $copyFaults === [],
+    implode('; ', $copyFaults)
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

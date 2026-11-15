@@ -233,7 +233,8 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 247; // MERGED (p982-land): both sides grew from 223,
+const EXPECTED_CHECKS = 252; // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5.
+                             // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
                             // #982 round 12 added M13q (the Offboard page's
@@ -649,6 +650,7 @@ function removeWorld(): void
     q('DELETE FROM tblRoles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE a FROM tblErasureAudit a JOIN tblErasureRequest r ON r.requestID = a.requestID WHERE r.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblErasureRequest WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblInvitation WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]); // #1018
     q('DELETE FROM tblVisitorContact WHERE contactID = ?', 'i', [NOTE]);
     q('DELETE FROM tblVisitor WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblCareAccessLog WHERE caseID = ?', 'i', [CASE_ID]);
@@ -1130,7 +1132,9 @@ q("UPDATE tblUsers SET displayBio = 'I run the welcome team.', calendarToken = '
 q("INSERT INTO tblGiftAidDeclaration (declarationID, siteID, donorID, address, postcode, validFrom) VALUES (?, ?, ?, '1 Made-up Road', 'ZZ1 1ZZ', '2025-04-06')", 'iii', [GIFTAID, ORG_A, CAL]);
 q("INSERT INTO tblVisitor (visitorID, siteID, fullName, assignedToID, createdByID, notes) VALUES (?, ?, 'Vera Visitor', ?, ?, 'Came with her sister.')", 'iiii', [VISITOR, ORG_A, MEL, ADM]);
 q("INSERT INTO tblVisitorContact (contactID, visitorID, contactedByID, method, summary) VALUES (?, ?, ?, 'call', 'Rang Vera; she will come on Sunday.')", 'iii', [NOTE, VISITOR, MEL]);
-q("INSERT INTO tblCareCase (caseID, siteID, personUserID, summary, openedByID) VALUES (?, ?, ?, 'Cal is recovering from an operation.', ?)", 'iiii', [CASE_ID, ORG_A, CAL, ADM]);
+// #1015 check round 3: the case carries the OPENER's name and the person's
+// name as typed, each a different marked string, so B4d can tell them apart.
+q("INSERT INTO tblCareCase (caseID, siteID, personUserID, personName, summary, openedByID, openedByName) VALUES (?, ?, ?, 'Cal As-Typed', 'Cal is recovering from an operation.', ?, 'Ada Opener-Name')", 'iiii', [CASE_ID, ORG_A, CAL, ADM]);
 // #703 (D-016): a visit carries its visitor's NAME as well as number, as
 // `care/visit-save.php` writes it - which section F drives for real. So does a
 // DBS check Mel recorded, as `admin/safeguarding/dbs-save.php` writes it.
@@ -1146,6 +1150,10 @@ q("INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, cl
 q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments) VALUES (?, ?, 'Approved', 'Receipts all present.')", 'ii', [CLAIM, MEL]);
 q("INSERT INTO tblResource (resourceID, siteID, name, category, isActive) VALUES (?, ?, 'Selftest erasure hall', 'room', 1)", 'ii', [ROOM, ORG_A]);
 q("INSERT INTO tblResourceBooking (bookingID, resourceID, bookedByID, startAt, endAt, purpose, status) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 3 DAY), DATE_ADD(NOW(), INTERVAL 75 HOUR), 'Welcome team supper', 'pending')", 'iii', [BOOKING, ROOM, MEL]);
+// #1018: an invitation Mel sent, so her Request erasure page carries a row
+// whose reason used to print a column's name ("only who handled it
+// (`createdByID`) is detached").
+q("INSERT INTO tblInvitation (siteID, email, tokenHash, expiresAt, createdByID) VALUES (?, 'invitee.erasure@selftest.invalid', ?, DATE_ADD(NOW(), INTERVAL 7 DAY), ?)", 'isi', [ORG_A, str_repeat('e', 64), MEL]);
 // Requests that are already in some state when the run begins.
 $seed = static function (int $id, int $site, int $user, string $status, ?int $minutesAgo): void {
     q(
@@ -1458,6 +1466,84 @@ ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking ro
     $askBookingPinned === true && str_contains($askBookingRow, 'the booking is kept so the room') === true
     && str_contains($askBookingRow, 'Any notes typed on the booking are kept unless the person handling your request decides they should be removed') === true && $developerSeen === [],
     mb_substr($askBookingRow, 0, 500) . ' | seen: ' . json_encode($developerSeen));
+
+// 🧑 #1018: the REASON beside each row is read by the member, and several
+//    printed a database column's name - "only who handled it (`createdByID`)
+//    is detached", "userID nulled". Mel sent an invitation, so her Request
+//    erasure page has such a row: it is found exactly once and pinned AS
+//    RENDERED, and it must say in words what happens. Then every reason on
+//    Mel's and Cal's Request erasure and My data pages is read, and none may
+//    hold a word in backticks, a table name or a camel-case column name. The
+//    rows are counted, so a page that drew none cannot pass.
+$askInvitationRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblInvitation') {
+            $rows[] = $li;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$askInvitationPinned = renderedPin('request erasure tblInvitation', $askInvitationRow);
+$reasonsRead   = 0;
+$reasonColumns = [];
+$calAskHtml    = (string) req($jar['cal'], 'GET', '/account/erasure-request')['body'];
+foreach (['Mel, Request erasure' => [$melAskHtml, 'li > span.text-muted'], 'Cal, Request erasure' => [$calAskHtml, 'li > span.text-muted'],
+    'Mel, My data' => [$melDataHtml, '.portal-data-list > .row > .col-md-5'], 'Cal, My data' => [$calDataHtml, '.portal-data-list > .row > .col-md-5']] as $pageName => [$html, $selector]) {
+    $doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    foreach ($doc->querySelectorAll($selector) as $reasonNode) {
+        $reasonsRead++;
+        if (preg_match('/`|\btbl[A-Z]|\b[a-z]+[A-Z][A-Za-z0-9]*\b/', (string) $reasonNode->textContent, $hit) === 1) {
+            $reasonColumns[] = $pageName . ': "' . $hit[0] . '"';
+        }
+    }
+}
+ok('B4c NO REASON A MEMBER READS NAMES A DATABASE COLUMN: Mel\'s invitation row is found exactly once and as pinned, and says in words that only the link to her is removed; and of every reason on Mel\'s and Cal\'s Request erasure and My data pages (at least ten read) none holds a word in backticks, a table name or a column name (#1018)',
+    $askInvitationPinned === true
+    && str_contains($askInvitationRow, 'only the link to you, as the person who made it, is removed') === true
+    && $reasonsRead >= 10 && $reasonColumns === [],
+    'read ' . $reasonsRead . '; columns: ' . json_encode($reasonColumns) . ' | ' . mb_substr($askInvitationRow, 0, 400));
+
+// 💛 #1015 (the owner's decision D-184): Cal's own pastoral care case is in
+//    her full data copy - the organisation, her name as typed, category,
+//    summary, status, opened and closed, and for each visit only its day and
+//    kind - and NOT who opened it, the case number, the visiting workers or
+//    their notes. Read from the REAL download, and its numbers must equal what
+//    Cal's My data page counts for the same records. Two visits are on her case
+//    (Mel's and Ada's), each with notes naming her, so the "no notes" half has
+//    something to find.
+$calCopyRaw = (string) req($jar['cal'], 'GET', '/account/data-export')['body'];
+$calCopy    = json_decode($calCopyRaw, true);
+$calCases   = is_array($calCopy) === true ? ($calCopy['data']['careCasesAboutYou'] ?? null) : null;
+$careCounts = ['tblCareCase' => 0, 'tblCareVisit' => 0];
+$calDataDoc = \Dom\HTMLDocument::createFromString($calDataHtml, LIBXML_NOERROR);
+foreach ($calDataDoc->querySelectorAll('.portal-data-list > .row') as $row) {
+    $code  = $row->querySelector('code');
+    $count = $row->querySelector('.col-md-1 strong');
+    $name  = $code === null ? '' : trim((string) $code->textContent);
+    if (isset($careCounts[$name]) === true && $count !== null) {
+        $careCounts[$name] += (int) trim((string) $count->textContent);
+    }
+}
+$firstCase = is_array($calCases) === true ? ($calCases[0] ?? []) : [];
+$visitKeys = array_map(static fn (array $v): array => array_keys($v), (array) ($firstCase['visits'] ?? []));
+$visitDays = array_map(static fn (array $v) => $v['day'] ?? null, (array) ($firstCase['visits'] ?? []));
+ok('B4d A MEMBER\'S OWN CARE CASE IS IN HER DATA COPY, AS THE OWNER DECIDED: Cal\'s real download holds her one case with its organisation, her name as typed on it, category, summary and status, and each of its two visits as a day and a kind only; never who opened it (by name or number), its number, the visiting workers or their notes; and My data counts the same one case and two visits (#1015, D-184)',
+    is_array($calCases) === true && count($calCases) === 1
+    && array_keys($firstCase) === ['organisation', 'yourNameOnTheCase', 'category', 'summary', 'status', 'openedAtServerTime', 'closedAtAsStored', 'visits']
+    && ($firstCase['organisation'] ?? '') === 'Selftest erasure A'
+    && ($firstCase['summary'] ?? '') === 'Cal is recovering from an operation.'
+    && ($firstCase['yourNameOnTheCase'] ?? '') === 'Cal As-Typed' && str_contains($calCopyRaw, 'Ada Opener-Name') === false
+    && $visitKeys === [['day', 'kind'], ['day', 'kind']]
+    // The day is a bare date: with the full date and time handed over the key names would be the same.
+    && count($visitDays) === 2 && count(array_filter($visitDays, static fn ($d): bool => is_string($d) === true && preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $d) === 1)) === 2
+    && str_contains($calCopyRaw, 'Visited Cal at home') === false && str_contains($calCopyRaw, 'Ada rang Cal') === false
+    && str_contains($calCopyRaw, 'Ada Earlier-Name') === false && str_contains($calCopyRaw, 'openedBy') === false
+    && str_contains($calCopyRaw, '"caseID"') === false
+    && $careCounts === ['tblCareCase' => count($calCases), 'tblCareVisit' => count((array) ($firstCase['visits'] ?? []))],
+    'My data: ' . json_encode($careCounts) . ' | copy: ' . json_encode($calCases));
 
 // 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
 //    erasure's words bare, so a record still held read "deleted" and an
@@ -5510,8 +5596,19 @@ foreach (['wil' => WIL, 'nell' => NELL] as $who => $id) {
 // exact comparison of every entry, O2, is what pins it.)
 $o929Secrets = ['P929 Cared-For Person', 'P929 secret summary', 'bereavement', 'P929 SECRET NOTE', 'P929 Child Name', 'P929 Grandparent',
     '929929', 'P929 Checked Person', 'P929-REF-SECRET', 'enhanced-barred', 'P929 dbs note', 'P929 B Person', 'P929 B summary', 'P929 B note',
-    'P929 C Person', 'P929 C summary', 'Selftest erasure C', 'Selftest erasure B',
+    'P929 C Person', 'P929 C summary', 'Selftest erasure B',
     (string) O_CASE_A, (string) O_VISIT_A, (string) O_CHILD, (string) O_CHECKIN, (string) O_DBS, (string) O_CASE_B, (string) O_VISIT_B, (string) O_CASE_C, (string) CHK];
+// 🏢 D-151, AND ONLY D-151 (the coordinator's ruling, #1018 check round 3).
+//    D-151 says a record carrying the worker's name, in an organisation he
+//    cannot open, is COUNTED and not listed - so C's NAME must not appear in
+//    anything that lists those records: the My data page, its JSON and the
+//    copy's `recordsCarryingYourName`. It does NOT forbid C's name anywhere in
+//    the copy: Wil is still a member of C, and his OWN membership row names
+//    the organisation he belongs to, as his roles, groups and departments do
+//    (#813 check round 2 had withheld it to satisfy the wider version of this
+//    test, which was reading D-151 too broadly). B stays forbidden
+//    everywhere: Wil belongs to B in no way at all.
+$o929ListOnlySecrets = ['Selftest erasure C'];
 $o929Premise = one(
     'SELECT (SELECT COUNT(*) FROM `tblCareCase` WHERE `caseID` = ? AND `personName` = \'P929 Cared-For Person\' AND `openedByID` = ?) '
     . '+ (SELECT COUNT(*) FROM `tblCareVisit` WHERE `visitID` = ? AND `notes` LIKE \'P929 SECRET NOTE%\' AND `visitedByID` = ?) '
@@ -5666,7 +5763,7 @@ $o929Edit = static function (string $rel, string $from, string $to, callable $ru
  * Every rename is also put back by putSectionOBack(), at the start of a run
  * and in cleanup(), because a `finally` does not run when a signal ends it.
  */
-$o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o929PageView, $o929Secrets, $o929Edit, $db): array {
+$o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o929PageView, $o929Secrets, $o929ListOnlySecrets, $o929Edit, $db): array {
     $wrong = [];
     $all   = ['dbs-check-recorded', 'care-case-opened', 'care-visit', 'child-checked-in', 'child-checked-out'];
     $wil   = $o929Fetch('wil');
@@ -5695,6 +5792,29 @@ $o929Observe = static function () use ($o929Fetch, $o929Answer, $o929Matches, $o
                 break 2;
             }
         }
+    }
+    foreach ($o929ListOnlySecrets as $secret) {
+        foreach ([$wil['page']['body'], $wil['json']['body'], (string) json_encode($wil['copy'], JSON_UNESCAPED_UNICODE)] as $listing) {
+            if (str_contains($listing, $secret) === true) {
+                $wrong[] = 'other person leaked';
+                break 2;
+            }
+        }
+    }
+    // ...and the other half of the same ruling: Wil's OWN membership of the
+    // switched-off organisation C is in his full data copy WITH C's name, as
+    // every other membership row names its organisation (#813, #1018 check
+    // round 3). Without this the narrowing above could be undone - the name
+    // withheld again - with every check green, because withholding is the
+    // quiet direction.
+    $ownC = [];
+    foreach ((array) (json_decode($wil['export']['body'], true)['data']['organisationMemberships'] ?? []) as $membership) {
+        if ((int) ($membership['siteID'] ?? 0) === ORG_C) {
+            $ownC[] = $membership;
+        }
+    }
+    if (count($ownC) !== 1 || ($ownC[0]['siteName'] ?? null) !== 'Selftest erasure C') {
+        $wrong[] = 'own membership not named';
     }
     $empty = $o929Answer([], 0, []);
     if ($nell['ok'] === false || $nell['mine'] !== $empty || $nell['copy'] !== $empty || $o929PageView($nell['page']['body']) !== null) {
@@ -5751,8 +5871,10 @@ ok('O4 the full data copy (account/data-export) hands over the same answer as My
     $o929Is('wil export list wrong'), implode('; ', $o929First));
 ok('O5 the My data PAGE draws the same five rows, and its "about" and "not listed" sentences exactly (#929)',
     $o929Is('wil page list wrong'), implode('; ', $o929First));
-ok('O6 nothing from the records reaches Wil beyond kind, day and organisation - no cared-for person\'s or child\'s name, no notes, no case summary or category, no pickup name, no badge code, no DBS reference, type or subject, no time of day, no record number, and not even the NAME of an organisation he cannot open - anywhere in the page, the My data JSON or the full data copy (#929, D-142, D-151)',
+ok('O6 nothing from the records reaches Wil beyond kind, day and organisation - no cared-for person\'s or child\'s name, no notes, no case summary or category, no pickup name, no badge code, no DBS reference, type or subject, no time of day, no record number, and not even the NAME of an organisation he does not belong to - anywhere in the page, the My data JSON or the full data copy - nor, in anything that lists these records, the name of the switched-off organisation he still belongs to (#929, D-142, D-151)',
     $o929Is('other person leaked'), implode('; ', $o929First));
+ok('O6b ...while Wil\'s OWN membership of that switched-off organisation is in his full data copy with its name, as every membership of his is (#813, D-151 read narrowly)',
+    $o929Is('own membership not named'), implode('; ', $o929First));
 ok('O7 Nell, who made none of these records, is handed an empty list in both downloads and sees no such card on her page (#929)',
     $o929Is('nell sees something'), implode('; ', $o929First));
 ok('O8 DRIVEN: when one kind cannot be read (a real database error, not "no such table"), that kind is named as unread in both downloads, nothing of it is listed or counted, and the page says "could not be read" in exactly its words (#929)',
@@ -5779,6 +5901,13 @@ $o929Plants = [
         ], 'other person leaked'],
     'O13 ANOTHER organisation\'s records listed (the own-organisations test switched off)' => [
         '_core/GdprEraser.php', ['if ($own !== null && $siteId !== null && isset($own[$siteId]) === false) {' => 'if (false) {'], 'wil list wrong'],
+    // #1018 check round 3: O6 narrowed to D-151 must still go red when ONLY
+    // the switched-off organisation C's record is listed instead of counted
+    // (B's stays counted, so B's name cannot be what turns it red).
+    'O13b the switched-off organisation C\'s record LISTED instead of counted (D-151), alone' => [
+        '_core/GdprEraser.php', ['if ($own !== null && $siteId !== null && isset($own[$siteId]) === false) {' => 'if ($own !== null && $siteId !== null && isset($own[$siteId]) === false && $siteId !== ' . ORG_C . ') {'], 'other person leaked'],
+    'O6c the name of a switched-off organisation withheld from the member\'s OWN membership again (the round-2 reading of D-151)' => [
+        '_apps/auth/account/data-export.php', ["'SELECT us.`siteID`, s.`siteName`, " => "'SELECT us.`siteID`, CASE WHEN s.`isActive` = 1 THEN s.`siteName` ELSE NULL END AS `siteName`, "], 'own membership not named'],
     'O14 a record TYPE missing (no check-out is ever found)' => [
         '_core/GdprEraser.php', ["WHERE k.`checkedOutByID` = ?'," => "WHERE k.`checkedOutByID` = ? AND 1 = 0',"], 'wil list wrong'],
     'O15 the full data copy no longer asks for the list' => [

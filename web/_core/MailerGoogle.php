@@ -102,14 +102,19 @@ class MailerGoogle
         //    so a message kept in the queue and tried through Google could be
         //    tried again and finally given up on with nothing in the send log
         //    about any of those tries. A THROW is different and stays so: it
-        //    ends here with no line, and deliverQueued()'s catch turns
-        //    `ownLog` off so the queue writes the line instead. Either way,
-        //    one line per attempt - never none, never two.
+        //    ends here with no line, and whoever called writes it instead
+        //    (#1051): deliverQueued()'s catch turns `ownLog` off so the queue
+        //    writes it; Mailer::send() writes it for a page sending at once;
+        //    and Mailer::sendViaGraph() writes it when Google is Microsoft
+        //    365's fallback. Either way, one line per attempt - never none,
+        //    never two. (Inside the mail job a failure line is written as
+        //    'queued' and settled once the queue has decided: see
+        //    Mailer::$routeLines.)
         $recipients = implode(', ', $to);
 
         $ch = curl_init($url);
         if ($ch === false) {
-            Logger::errorPlatform('Gmail', 'Error', 'CURL_INIT', 'curl_init() failed for Gmail send', '');
+            Mailer::errorRowFor($forSiteId, 'Gmail', 'CURL_INIT', 'curl_init() failed for Gmail send', ''); // the message's organisation (#1053)
             Mailer::logSend('google', $delegateUser, $recipients, $subj, $attachmentCount, 'failed', null, 'CURL_INIT', 'The portal could not start a connection to Google (curl_init() failed).', $forSiteId);
             return false;
         }
@@ -138,7 +143,7 @@ class MailerGoogle
             // 🌐 No answer at all: the network, a proxy, or Google hung up.
             //    curl's own words are about the connection (a host name, a
             //    proxy, a time limit), not the message's recipients or body.
-            Logger::errorPlatform('Gmail', 'Error', 'CURL_FAIL', 'Gmail API cURL error: ' . $err, '');
+            Mailer::errorRowFor($forSiteId, 'Gmail', 'CURL_FAIL', 'Gmail API cURL error: ' . $err, ''); // the message's organisation (#1053)
             Mailer::logSend('google', $delegateUser, $recipients, $subj, $attachmentCount, 'failed', $code > 0 ? $code : null, 'CURL_FAIL', 'No answer from Google: ' . $err, $forSiteId);
             return false;
         }
@@ -148,7 +153,7 @@ class MailerGoogle
             return true;
         }
 
-        Logger::errorPlatform('Gmail', 'Error', (string) $code, 'Gmail send failed', (string) $resp);
+        Mailer::errorRowFor($forSiteId, 'Gmail', (string) $code, 'Gmail send failed', (string) $resp); // the message's organisation (#1053)
         Mailer::logSend('google', $delegateUser, $recipients, $subj, $attachmentCount, 'failed', $code, '', mb_substr((string) $resp, 0, 500), $forSiteId);
         return false;
     }

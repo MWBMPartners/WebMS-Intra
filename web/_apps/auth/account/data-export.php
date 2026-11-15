@@ -62,6 +62,18 @@
  *                          your address: the subject, when, and what became
  *                          of it — #592)
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
+ *   tblUserSites          (the organisations you belong to, with your
+ *                          administrator flags, whether active, and when you
+ *                          joined — #813)
+ *   tblUserTranslationPref (your choice to have content translated — #813)
+ *   tblUserSmsPreference  (your text-message settings, without the one-time
+ *                          verification code — #813)
+ *   tblNewsletterSubscription (whether you receive each organisation's
+ *                          newsletter, without the unsubscribe code — #813)
+ *   tblZoomAccount        (a Zoom account you connected, without its sign-in
+ *                          keys — #813)
+ *   tblAssetKioskPins     (whether you have an equipment kiosk PIN, never the
+ *                          PIN — #813)
  *   tblCareVisit, tblCareCase, tblDbsChecks, tblKidCheckins (only a LIST of
  *                          the records that carry your name as the worker who
  *                          made them: kind, day and organisation, never the
@@ -69,6 +81,11 @@
  *   tblDbsChecks          (the DBS checks recorded FOR you: type, certificate
  *                          reference, dates, status and notes, never who
  *                          recorded them — #1012)
+ *   tblCareCase, tblCareVisit (the pastoral care cases ABOUT you: organisation,
+ *                          your name as typed, category, summary, status,
+ *                          opened and closed; each visit's day and kind only.
+ *                          Never who opened it, its number, the visiting
+ *                          worker or the visit notes — #1015, D-184)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -229,6 +246,61 @@ $payload = [
         //    with the GdprEraser instruction added alongside it.
         'outsideServiceChoices' => $fetchUserRows(
             'SELECT `serviceKey`, `choice`, `updatedAt` FROM `tblUserOutsideServicePref` WHERE `userID` = ?'
+        ),
+        // 🏢 #813 check round 2 — the organisations you belong to: whether
+        //    you are an administrator there, whether the membership is
+        //    active, and when you joined. The erasure deletes these rows, and
+        //    the copy only ever named the table inside another entry's
+        //    sub-select, so they were handed over nowhere. Each row NAMES its
+        //    organisation, whatever state that organisation is in: it is the
+        //    member's OWN membership, as their roles, groups and departments
+        //    above name theirs. (A draft withheld the name of a switched-off
+        //    organisation, reading D-151 as "never name an organisation the
+        //    person cannot open". D-151 is narrower: it is about a worker's
+        //    records about OTHER people in an organisation they have left -
+        //    those are counted, not listed. The coordinator's ruling, #1018
+        //    check round 3.)
+        'organisationMemberships' => $fetchUserRows(
+            'SELECT us.`siteID`, s.`siteName`, us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt` '
+            . 'FROM `tblUserSites` us LEFT JOIN `tblSites` s ON s.`siteID` = us.`siteID` WHERE us.`userID` = ? ORDER BY us.`siteID`'
+        ),
+        // 🌐 #813 — your own choice to have the organisation's words
+        //    translated for you (D-049, #485). It is a choice about you, kept
+        //    until you are erased, and was missing from this copy. The next
+        //    four are the same kind of record - one row per member (and per
+        //    organisation), holding that member's own setting - found missing
+        //    by the check #813 asked for (section 26 of
+        //    tools/gdpr-coverage-selftest.php), which finds such tables from
+        //    the install script's own keys rather than from a list typed here.
+        'translationChoice' => $fetchUserRows(
+            'SELECT `autoTranslate`, `updatedAt` FROM `tblUserTranslationPref` WHERE `userID` = ?'
+        ),
+        // 📱 Your text-message settings. The verification code and when it
+        //    runs out are left out: they are a one-time secret, not a fact
+        //    about you, and handing one over would let anybody holding this
+        //    file finish a verification in your name.
+        'textMessageSettings' => $fetchUserRows(
+            'SELECT `siteID`, `phoneNumber`, `isVerified`, `categories`, `updatedAt` FROM `tblUserSmsPreference` WHERE `userID` = ?'
+        ),
+        // 📰 Whether you receive each organisation's newsletter. The
+        //    unsubscribe code is left out: it is a key that works without
+        //    signing in.
+        'newsletterChoices' => $fetchUserRows(
+            'SELECT `siteID`, `optedIn`, `updatedAt` FROM `tblNewsletterSubscription` WHERE `userID` = ?'
+        ),
+        // 🎥 A Zoom account you connected. The two sign-in keys Zoom gave the
+        //    portal are left out (they are encrypted secrets, and a working
+        //    key in a downloaded file is a key anybody holding it can use);
+        //    what is handed over is which Zoom account it is and what it was
+        //    allowed to do.
+        'zoomAccounts' => $fetchUserRows(
+            'SELECT `siteID`, `zoomUserId`, `zoomAccountEmail`, `scopes`, `createdAt`, `updatedAt` FROM `tblZoomAccount` WHERE `userID` = ?'
+        ),
+        // 🔢 Whether you have a PIN for the equipment kiosk, and when it was
+        //    last used. The PIN itself is stored only scrambled and is never
+        //    handed over.
+        'equipmentKioskPins' => $fetchUserRows(
+            'SELECT `siteID`, `isActive`, `createdAt`, `lastUsedAt` FROM `tblAssetKioskPins` WHERE `userID` = ?'
         ),
         // 🏷️ Roles (#516) — export↔erasure parity with the GdprEraser
         // catalogue entries added alongside this block. `grantedByID` is
@@ -631,6 +703,15 @@ $payload = [
         //    list just above, which is the checks this person RECORDED for
         //    somebody else.
         'dbsChecksAboutYou' => GdprEraser::dbsChecksAboutYou($userId),
+        // 💛 #1015 (the owner's decision D-184): the pastoral care cases ABOUT
+        //    this person. My data counted them and this copy never handed them
+        //    over. Asked of GdprEraser::careCasesAboutYou(), the ONE place
+        //    they are read, which My data's counts ask too. Each case: the
+        //    organisation, the person's name as typed, category, summary,
+        //    status, opened and closed; each visit: its day and kind only.
+        //    Never who opened the case, its number, the visiting worker or the
+        //    visit notes (D-184 rules those out).
+        'careCasesAboutYou' => GdprEraser::careCasesAboutYou($userId),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields
