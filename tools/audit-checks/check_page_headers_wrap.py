@@ -44,9 +44,10 @@ WHAT IT FAILS ON
        spacing are ignored; anything else is a change).
     2. A page's <h1> sits inside a header-shaped flex row (one that spreads
        its children apart, `justify-content-between`) that is its
-       great-grandparent or further up -- the rule cannot reach that row, so
-       neither it nor its button group may wrap. This is reported EVEN WHEN a
-       flex box nearer the <h1> is in reach: an icon-and-title block
+       great-grandparent or further up, and that row does not wrap of its
+       own accord. The rule cannot reach such a row, so unless the row says
+       so itself nothing lets it wrap. This is reported EVEN WHEN a flex box
+       nearer the <h1> is in reach: an icon-and-title block
        (`<div class="d-flex"><i></i><div><h1></h1><p></p></div></div>`)
        inside the spread row wraps itself and nothing else, and the spread
        row still runs off the screen (round 2 of the check measured one 207px
@@ -54,6 +55,21 @@ WHAT IT FAILS ON
        CENTRES one card (the sign-in pages' `justify-content-center
        min-vh-100`) is not a header and is not reported: one child has
        nothing to wrap.
+       Such a row that DOES wrap of its own accord -- class `flex-wrap` or
+       `flex-wrap-reverse`, or a style setting `flex-wrap`/`flex-flow` to a
+       wrap value, and no `flex-nowrap`/`flex-sm-nowrap` -- is accepted
+       (that is how #833 fixed its four pages). The first version of this
+       refusal reported it anyway, saying the row "cannot wrap", which was
+       untrue. What is still out of the rule's reach in that row is its
+       button groups: the rule wraps a `d-flex` group only inside a row it
+       reaches. So:
+    2a. A `d-flex` row that is a direct child of such a self-wrapping row,
+       does not hold the <h1>, and does not wrap of its own accord, is
+       reported: its buttons stay on one line whatever the screen. One or
+       two buttons in it may well fit, but nothing here can tell how many
+       will, so the group is held to what the rule would have given it.
+       The whole row is what is handed to the browser test, so it is drawn
+       and measured whole.
     3. A flex box the rule does reach (the <h1>'s parent or grandparent)
        cannot wrap after all:
        * it says `flex-nowrap` -- Bootstrap's `!important` wins over the rule
@@ -153,6 +169,7 @@ def style(attrs: str) -> str:
 
 
 WRAPS = {"wrap", "wrap-reverse"}
+STOPS = {"flex-nowrap", "flex-sm-nowrap"}
 
 
 def style_stops_wrap(st: str) -> str | None:
@@ -175,6 +192,55 @@ def style_stops_wrap(st: str) -> str | None:
         if prop == "flex-flow" and words != [] and WRAPS.isdisjoint(words):
             return f"flex-flow \"{' '.join(words)}\" names no wrap value, so flex-wrap goes back to nowrap"
     return None
+
+
+def style_wraps(st: str) -> bool:
+    """True when a style attribute names a wrap value in a flex-wrap or
+    flex-flow declaration. Used only after style_stops_wrap() has found no
+    declaration taking the wrap away, so it need not ask which came last."""
+    for decl in st.split(";"):
+        if ":" not in decl:
+            continue
+        prop, value = decl.split(":", 1)
+        words = value.lower().replace("!important", " ").split()
+        if prop.strip().lower() in ("flex-wrap", "flex-flow") and WRAPS.isdisjoint(words) is False:
+            return True
+    return False
+
+
+def wraps_itself(attrs: str) -> bool:
+    """A flex box that wraps on a phone without the shared rule's help: it
+    says `flex-wrap`/`flex-wrap-reverse` or a style wrap value, and nothing
+    on it says not to (a `flex-nowrap` class is `!important` and wins over a
+    style; `flex-sm-nowrap` stops it from 576 to 767px; any style
+    declaration that is not a wrap value is taken as stopping it, as
+    style_stops_wrap() judges it for the boxes in reach)."""
+    cls = classes(attrs)
+    st = style(attrs)
+    if STOPS.isdisjoint(cls) is False or style_stops_wrap(st) is not None:
+        return False
+    return "flex-wrap" in cls or "flex-wrap-reverse" in cls or style_wraps(st)
+
+
+def direct_children(text: str, start: int, end: int) -> list[tuple[str, str, int]]:
+    """The elements directly inside the element opened at `start`, as
+    (name, attrs, offset), counted the same way scan_text() counts."""
+    stack: list[str] = []
+    out = []
+    for m in TAG.finditer(text, start, end):
+        close, name, attrs = m.group(1), m.group(2).lower(), m.group(3)
+        if close:
+            for i in range(len(stack) - 1, -1, -1):
+                if stack[i] == name:
+                    del stack[i:]
+                    break
+            continue
+        if len(stack) == 1:
+            out.append((name, attrs, m.start()))
+        if name in VOID or attrs.rstrip().endswith("/"):
+            continue
+        stack.append(name)
+    return out
 
 
 def is_row(cls: set[str]) -> bool:
@@ -252,17 +318,39 @@ def scan_text(rel: str, src: str):
             # spread row hid it: the rule wrapped the block, the spread row
             # and its buttons stayed on one line, and the header was 207px
             # too wide at 320px with this check green (round 2 of the check).
-            # A far spread row is a fault whatever sits nearer.
+            # A far spread row is a fault whatever sits nearer -- unless it
+            # wraps of its own accord. Round 2 refused that too, with the
+            # message "so this row cannot wrap", which was untrue of a row
+            # saying flex-wrap (the #833 fix): drawn, such a row fits with one
+            # or two buttons. What really stays out of the rule's reach there
+            # is the row's button groups, so those are judged instead.
             far = [(lvl, el) for lvl, el in flex
                    if lvl > 2 and is_row(classes(el[1])) and "justify-content-between" in classes(el[1])]
-            if far != []:
-                findings.append(
-                    f"{where}  the <h1> is {far[0][0]} levels inside a flex row "
-                    f"(class=\"{' '.join(sorted(classes(far[0][1][1])))}\"); the shared "
-                    "phone rule reaches only a parent or grandparent, so this row cannot wrap")
-            if near == []:
+            accepted = []
+            for lvl, el in far:
+                row_cls = " ".join(sorted(classes(el[1])))
+                if wraps_itself(el[1]) is False:
+                    findings.append(
+                        f"{where}  the <h1> is {lvl} levels inside a flex row (class=\"{row_cls}\"); the "
+                        "shared phone rule reaches only a parent or grandparent, so its title block is out "
+                        "of the rule's reach and the row does not wrap itself -- add flex-wrap to the row")
+                    continue
+                accepted.append((lvl, el))
+                on_path = stack[len(stack) - lvl + 1][2]  # the row's child that holds the <h1>
+                for cname, cattrs, cpos in direct_children(text, el[2], element_end(text, el[2], el[0])):
+                    if cpos == on_path or is_row(classes(cattrs)) is False or wraps_itself(cattrs) is True:
+                        continue
+                    findings.append(
+                        f"{where}  the row around the <h1> wraps itself, but a group in it "
+                        f"(class=\"{' '.join(sorted(classes(cattrs)))}\") is out of the shared phone "
+                        "rule's reach and does not wrap itself, so its buttons stay on one line "
+                        "-- add flex-wrap to the group")
+            if near == [] and accepted == []:
                 continue
-            header_lvl, header_el = near[-1]  # the outermost within reach is the header row
+            # The header drawn by the browser test is the outermost row this
+            # check accepts: a self-wrapping far row if there is one, so it is
+            # measured whole, otherwise the outermost flex box within reach.
+            header_lvl, header_el = accepted[-1] if accepted != [] else near[-1]
             for lvl, el in near:
                 cls = classes(el[1])
                 if "flex-nowrap" in cls:
@@ -286,7 +374,7 @@ def scan_text(rel: str, src: str):
                 "where": where,
                 "rowClass": " ".join(sorted(hcls)),
                 "isRow": is_row(hcls),
-                "wrapsOnItsOwn": "flex-wrap" in hcls,
+                "wrapsOnItsOwn": wraps_itself(header_el[1]),
                 "markup": sample_markup(src[start:end]),
             })
         if name in VOID or attrs.rstrip().endswith("/"):
@@ -318,7 +406,9 @@ def scan_all():
 def self_test() -> int:
     """Planted faults must be reported; correct shapes must not be."""
     cases = [
-        # (name, source, findings expected, headers expected)
+        # (name, source, findings expected, headers expected[, words every
+        # finding must contain -- so a refusal that comes back for the right
+        # reason with an untrue message, as round 2's did, fails too])
         ("a title beside buttons, no flex-wrap (the #848 shape, now reached)",
          '<div class="d-flex justify-content-between"><h1>T</h1><div class="d-flex gap-2"><a>B</a></div></div>', 0, 1),
         ("a title block with a subtitle, one level down",
@@ -360,15 +450,48 @@ def self_test() -> int:
          '<div class="d-flex" style="color: red; flex-wrap: initial !important"><h1>T</h1><a>B</a></div>', 1, 1),
         ("PLANT: the row says flex-sm-nowrap",
          '<div class="d-flex flex-sm-nowrap justify-content-between"><h1>T</h1><a>B</a></div>', 1, 1),
+        ("the round-3 checker's own markup: a spread row three levels up saying flex-wrap, buttons directly in it",
+         '<div class="d-flex flex-wrap justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><a class="btn">B</a></div>', 0, 1),
+        ("a spread row three levels up that says flex-wrap itself, its button group too (#833's fix)",
+         '<div class="d-flex flex-wrap justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><div class="d-flex flex-wrap"><a class="btn">B</a></div></div>', 0, 1),
+        ("a spread row three levels up that wraps by its style, buttons directly in it",
+         '<div class="d-flex justify-content-between" style="flex-flow: row wrap"><div class="d-flex"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><a class="btn">B</a><a class="btn">C</a></div>', 0, 1),
+        ("PLANT: the same row without flex-wrap is refused (the row does not wrap itself)",
+         '<div class="d-flex justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><a class="btn">B</a></div>', 1, 1,
+         "the row does not wrap itself -- add flex-wrap to the row"),
+        ("PLANT: the row says flex-wrap but its button group does not, out of the rule's reach",
+         '<div class="d-flex flex-wrap justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><div class="d-flex gap-2"><a class="btn">B</a></div></div>', 1, 1,
+         "is out of the shared phone rule's reach and does not wrap itself"),
+        ("PLANT: flex-wrap on the row undone by flex-sm-nowrap",
+         '<div class="d-flex flex-wrap flex-sm-nowrap justify-content-between"><div class="d-flex"><i></i>'
+         '<div><h1>T</h1></div></div><a class="btn">B</a></div>', 1, 1),
+        ("PLANT: a style wrap taken away again by a later flex-flow",
+         '<div class="d-flex justify-content-between" style="flex-wrap: wrap; flex-flow: row"><div class="d-flex"><i></i>'
+         '<div><h1>T</h1></div></div><a class="btn">B</a></div>', 1, 1),
         ("PHP inside the row is not mistaken for a tag",
          '<div class="d-flex <?php echo $x; ?>"><h1><?= $t ?></h1><?php if ($a): ?><a>B</a><?php endif; ?></div>', 0, 1),
     ]
     bad = 0
-    for name, src, want_f, want_h in cases:
+    for name, src, want_f, want_h, *words in cases:
         h, f = scan_text("fixture.php", src)
-        ok = len(f) == want_f and len(h) == want_h
+        ok = len(f) == want_f and len(h) == want_h and all(w in item for w in words for item in f)
         bad += 0 if ok else 1
         print(("  ok   " if ok else "  FAIL ") + f"{name}  (findings {len(f)}/{want_f}, headers {len(h)}/{want_h})")
+    # The browser test draws whatever the check hands it, so an accepted
+    # self-wrapping row far from the <h1> must be handed over WHOLE. Drawing
+    # only the icon-and-title block inside it is how round 2's browser test
+    # stayed green over a header 207px too wide.
+    whole = ('<div class="d-flex flex-wrap justify-content-between"><div class="d-flex"><i></i>'
+             '<div><h1>T</h1></div></div><a class="btn">B</a></div>')
+    h, _ = scan_text("fixture.php", whole)
+    ok = len(h) == 1 and h[0]["markup"] == whole and h[0]["wrapsOnItsOwn"] is True
+    bad += 0 if ok else 1
+    print(("  ok   " if ok else "  FAIL ") + "an accepted far row is handed to the browser test whole")
     css_cases = [
         ("the pinned rule, with comments and other spacing", "/* x */\n@media (max-width: 767.98px)  {\n"
          " .d-flex:not(.flex-column):has(> h1, > * > h1) {\n  flex-wrap: wrap;\n  gap: 0.5rem;\n }\n"
@@ -383,7 +506,7 @@ def self_test() -> int:
         ok = rule_present(css) is want
         bad += 0 if ok else 1
         print(("  ok   " if ok else "  FAIL ") + name)
-    total = len(cases) + len(css_cases)
+    total = len(cases) + 1 + len(css_cases)
     if bad == 0:
         print(f"OK: self-test, all {total} cases judged as expected.")
         return 0
@@ -409,8 +532,9 @@ def main() -> int:
         for item in findings:
             print("  " + item)
         print("Keep the page's <h1> a child or grandchild of its flex row (an icon goes inside the <h1>,")
-        print("not in a d-flex block of its own), with no flex-nowrap or flex-sm-nowrap, and keep")
-        print("the rule in portal.css. tools/page-headers-wrap-selftest.mjs measures it in a browser.")
+        print("not in a d-flex block of its own), with no flex-nowrap or flex-sm-nowrap -- or give a row")
+        print("further out flex-wrap of its own, and its button groups too -- and keep the rule in")
+        print("portal.css. tools/page-headers-wrap-selftest.mjs measures it in a browser.")
         return 1
     own = sum(1 for h in headers if h["isRow"] and h["wrapsOnItsOwn"] is False)
     print(f"OK: {len(headers)} page headers found, every one inside the reach of the shared phone rule;")

@@ -206,7 +206,7 @@ const PREMISE = `
     };
 `;
 
-/* 🧪 THREE MADE-UP HEADERS, ONE FOR EACH SHAPE THE RULE CLAIMS TO REACH.
+/* 🧪 FIVE MADE-UP HEADERS, ONE FOR EACH SHAPE THE AUDIT CHECK ACCEPTS.
    Why they exist: with the rule taken out, only nine real headers overflowed
    at 320px, and every one was a title DIRECTLY in the row — so narrowing the
    rule to `:has(> h1)` (dropping the title-and-subtitle shape) left every
@@ -215,28 +215,36 @@ const PREMISE = `
    fit: one-word button labels (a `.btn` breaks at spaces, so a label with a
    space would just fold), and a long one-word title.
      S1  the <h1> is the row's child, buttons in a `d-flex` group
-     S2  the <h1> is in a title block one level down, buttons directly in
-         the row — only the row wrapping can save it
+     S2  the <h1> is in a title block one level down (so the row is its
+         grandparent), buttons directly in the row — only the row wrapping
+         can save it
      S3  a `flex-column flex-md-row` header whose button group is too wide
          for a phone on its own — only the group wrapping can save it
-     S4  an icon beside a title-and-subtitle block: the <h1> is a
-         great-grandchild of the spread row, written the way the audit check
-         accepts it (the icon inside the <h1>, so the row is the grandparent)
+     S4  an icon beside a title and a subtitle, written the way the audit
+         check asks for it: the icon INSIDE the <h1>, so the <h1> sits in a
+         title block one level down and the row is its grandparent, as in S2
+         but with a button group as well
+     S5  an icon in a `d-flex` block of its own, so the <h1> is a
+         great-grandchild of the row and out of the rule's reach — the shape
+         the check accepts only when the row AND its button group say
+         `flex-wrap` themselves (the #833 fix). The rule still reaches the
+         inner icon-and-title block (its <h1> is that block's grandchild),
+         but the row and the buttons wrap only because they say so. If it
+         fits, the check is right to accept the shape.
    Each is ALSO drawn as a CONTROL with `flex-nowrap` on every flex box, and
    the control must overflow: a fixture narrow enough to fit without
    wrapping would prove nothing, and this is how that is known not to be
    the case rather than assumed.
 
    ONE MORE, DRAWN WHOLE, THAT MUST *NOT* FIT: the shape the audit check
-   REFUSES (round 2 of its check). The icon and the title block sit in their
-   own `d-flex`, so the <h1> is a great-grandchild of the spread row. The
-   rule wraps that inner block and nothing else; the spread row and its
-   buttons stay on one line. The first version of the check passed it, and
-   this test was green too, because it drew only the inner block (the
-   outermost flex box within the rule's reach) — the row that overflows was
-   never drawn. Drawn whole it must overflow with the rule in place: if it
-   ever fits, the rule has been widened and the check's refusal is crying
-   wolf, so both should be looked at together. */
+   REFUSES (round 2 of its check). It is S5 without `flex-wrap` on the row or
+   the group. The rule wraps the inner icon-and-title block and nothing else;
+   the spread row and its buttons stay on one line. The first version of the
+   check passed it, and this test was green too, because it drew only the
+   inner block (the outermost flex box within the rule's reach) — the row
+   that overflows was never drawn. Drawn whole it must overflow with the
+   rule in place: if it ever fits, the rule has been widened and the check's
+   refusal is crying wolf, so both should be looked at together. */
 const BUTTONS = ['Download', 'Statistics', 'Reconcile', 'Duplicate', 'Archive']
     .map((w) => `<a class="btn btn-outline-primary"><i class="fa-solid fa-gear me-1"></i>${w}</a>`).join('');
 const SYNTHETIC = [
@@ -256,6 +264,11 @@ const SYNTHETIC = [
      `<div class="d-flex justify-content-between align-items-center mb-4">
         <div><h1 class="mb-1"><i class="fa-solid fa-users me-2"></i>Reconciliation</h1><p class="text-muted mb-0">Every gift.</p></div>
         <div class="d-flex gap-2">${BUTTONS}</div></div>`],
+    ['synthetic S5 (icon in its own d-flex block, the row and its group say flex-wrap)',
+     `<div class="d-flex flex-wrap justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center"><i class="fa-solid fa-users fa-2x me-3"></i>
+          <div><h1 class="mb-1">Reconciliation</h1><p class="text-muted mb-0">Every gift.</p></div></div>
+        <div class="d-flex flex-wrap gap-2">${BUTTONS}</div></div>`],
 ];
 const REFUSED = [
     ['refused shape (icon-and-title d-flex block, <h1> three levels inside the spread row)',
