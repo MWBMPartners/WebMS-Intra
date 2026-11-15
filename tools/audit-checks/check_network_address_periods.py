@@ -25,6 +25,13 @@ So this check fails on:
   SHORT     a sentence too short to tell a member anything, or one that does
             not say "network address" (a member must be able to tell what it
             is about);
+  PERIOD    (#1019 round 2) a column the nightly clear-out empties on the
+            network-address period (`NetworkAddressRetention::PLACES`) whose
+            sentence does not say it follows "the period for network
+            addresses", or a sentence that says so for a column the clear-out
+            does NOT empty, or a place on that list the schema does not have.
+            Both ways, so the privacy pages cannot claim the period for a
+            column nothing clears, nor leave out one that is cleared;
   PENDING   a column whose sentence says "No time limit is set yet" that is not
             on `network_address_period_pending.txt`, or a column on that list
             whose sentence does NOT say so, or a listed column with no
@@ -48,8 +55,9 @@ one would pass unseen. An address inside free text (an error's detail, a
 request's headers). And whether a sentence is TRUE - that is checked by a
 person against the code that clears the column (#706's rule).
 
-HOW IT READS THE CATALOGUE: it asks PHP to load the real file and print its
-`addressKept` keys as JSON, because a bracket-counting parser over that file
+HOW IT READS THE CATALOGUE AND THE PLACES: it asks PHP to load the real files
+and print the catalogue's `addressKept` keys and `NetworkAddressRetention::PLACES`
+as JSON, because a bracket-counting parser over that file
 has already been broken by a comment once (#706 round 1). No PHP, or a file
 that does not load: REFUSED, never "nothing wrong".
 
@@ -65,7 +73,7 @@ something could not be read.
 @author    MWBM Partners Ltd (t/a MWservices)
 @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
 @license   All Rights Reserved
-@version   1.0.0
+@version   1.1.0
 -----------------------------------------------------------------------------
 """
 from __future__ import annotations
@@ -82,8 +90,12 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SCHEMA = os.path.join(REPO, 'web', '_sql', 'full_schema.sql')
 CATALOGUE = os.path.join(REPO, 'web', '_core', 'personal-data-catalogue.php')
 PENDING = os.path.join(REPO, 'tools', 'audit-checks', 'network_address_period_pending.txt')
+PLACES = os.path.join(REPO, 'web', '_core', 'NetworkAddressRetention.php')
 
 NO_LIMIT = 'No time limit is set yet'
+# The words a sentence uses to say it follows the network-address period; the
+# privacy pages print that period, for the reader's organisation, above the list.
+FOLLOWS_PERIOD = 'the period for network addresses'
 MIN_WORDS_LENGTH = 60
 
 # Loads the catalogue named by `$argv[1]` and prints table => {column: words}.
@@ -98,6 +110,17 @@ PHP_DUMP = (
     '  }'
     '}'
     'echo json_encode((object) $o);'
+)
+
+
+# Loads the class file named by `$argv[1]` and prints its PLACES as [table, column] pairs.
+PHP_PLACES = (
+    'require $argv[1];'
+    '$p = \\Portal\\Core\\NetworkAddressRetention::PLACES;'
+    'if (!is_array($p) || $p === []) { fwrite(STDERR, "PLACES is empty"); exit(2); }'
+    '$o = [];'
+    'foreach ($p as $one) { $o[] = [(string) $one["table"], (string) $one["column"]]; }'
+    'echo json_encode($o);'
 )
 
 
@@ -154,6 +177,20 @@ def catalogue_sentences(path: str) -> dict[str, dict[str, str]]:
     return found
 
 
+def cleared_places(path: str) -> set[tuple[str, str]]:
+    """(table, column) for every place the network-address clear-out empties."""
+    php = shutil.which('php')
+    if php is None:
+        raise Unreadable('there is no `php` on this machine, so the clear-out\'s list cannot be loaded')
+    done = subprocess.run([php, '-r', PHP_PLACES, path], capture_output=True, text=True, timeout=120, check=False)
+    if done.returncode != 0:
+        raise Unreadable('PHP could not load NetworkAddressRetention::PLACES: ' + (done.stderr or done.stdout).strip()[:400])
+    try:
+        return {(t, c) for t, c in json.loads(done.stdout)}
+    except (json.JSONDecodeError, ValueError, TypeError) as problem:
+        raise Unreadable('NetworkAddressRetention::PLACES did not come back as pairs: ' + str(problem)) from problem
+
+
 def pending_columns(path: str) -> set[tuple[str, str]]:
     if not os.path.isfile(path):
         raise Unreadable('the pending list ' + path + ' is not there')
@@ -170,11 +207,12 @@ def pending_columns(path: str) -> set[tuple[str, str]]:
     return out
 
 
-def problems(schema: str, catalogue: str, pending: str) -> list[str]:
+def problems(schema: str, catalogue: str, pending: str, places: str = PLACES) -> list[str]:
     """What is wrong, in words (empty when all is well). Raises Unreadable."""
     tables = schema_columns(schema)
     sentences = catalogue_sentences(catalogue)
     waiting = pending_columns(pending)
+    cleared = cleared_places(places)
     out: list[str] = []
 
     shaped = {(t, c) for t, cols in tables.items() for c in cols if is_address_shaped(c)}
@@ -202,6 +240,18 @@ def problems(schema: str, catalogue: str, pending: str) -> list[str]:
             out.append(f'PENDING: {table}.{column} is on network_address_period_pending.txt, but its sentence does '
                        f'not say "{NO_LIMIT}". If a period is built now, take it off the list; if not, the privacy '
                        f'pages must not imply one.')
+    for table, column in sorted(cleared):
+        if column not in tables.get(table, set()):
+            out.append(f'PERIOD: NetworkAddressRetention::PLACES names {table}.{column}, which the install script does '
+                       f'not have, so the nightly clear-out would fail on it.')
+        elif FOLLOWS_PERIOD not in sentences.get(table, {}).get(column, ''):
+            out.append(f'PERIOD: the nightly clear-out empties {table}.{column} after the network-address period, but '
+                       f'its sentence does not say it follows "{FOLLOWS_PERIOD}", so the privacy pages do not tell a '
+                       f'member how long it is kept.')
+    for table, column in sorted(named):
+        if FOLLOWS_PERIOD in sentences[table][column] and (table, column) not in cleared:
+            out.append(f'PERIOD: the sentence for {table}.{column} says it follows "{FOLLOWS_PERIOD}", but '
+                       f'NetworkAddressRetention::PLACES does not list it, so nothing empties it on that period.')
     for table, column in sorted(waiting - named):
         out.append(f'PENDING: {table}.{column} is on network_address_period_pending.txt and has no `addressKept` '
                    f'sentence at all.')
@@ -239,13 +289,20 @@ def self_test() -> int:
         catalogue = handle.read()
     with open(PENDING, encoding='utf-8') as handle:
         pending = handle.read()
+    with open(PLACES, encoding='utf-8') as handle:
+        places = handle.read()
+    with open(os.path.join(os.path.dirname(PLACES), 'RetentionPeriod.php'), encoding='utf-8') as handle:
+        base = handle.read()
 
-    def outcome(s: str, c: str, p: str) -> set[str]:
+    def outcome(s: str, c: str, p: str, pl: str = places) -> set[str]:
         with tempfile.TemporaryDirectory(prefix='check-network-address-') as folder:
-            paths = [os.path.join(folder, n) for n in ('schema.sql', 'catalogue.php', 'pending.txt')]
-            for path, text in zip(paths, (s, c, p)):
+            paths = [os.path.join(folder, n) for n in ('schema.sql', 'catalogue.php', 'pending.txt', 'NetworkAddressRetention.php')]
+            for path, text in zip(paths, (s, c, p, pl)):
                 with open(path, 'w', encoding='utf-8') as handle:
                     handle.write(text)
+            # The class loads its base class from beside itself.
+            with open(os.path.join(folder, 'RetentionPeriod.php'), 'w', encoding='utf-8') as handle:
+                handle.write(base)
             try:
                 return {line.split(':', 1)[0] for line in problems(*paths)}
             except Unreadable:
@@ -256,42 +313,52 @@ def self_test() -> int:
     added_column = '\nALTER TABLE `tblUsers` ADD COLUMN `lastSeenIP` VARCHAR(45) DEFAULT NULL;\n'
     country_column = '\nALTER TABLE `tblUsers` ADD COLUMN `ipCountry` CHAR(2) DEFAULT NULL;\n'
     commented_column = '\n-- ALTER TABLE `tblUsers` ADD COLUMN `oldIP` VARCHAR(45) DEFAULT NULL;\n'
-    prayer_words = "'submitterIP' => 'Prayer requests keep the network address each was sent from. No time limit is set yet. '"
+    consent_words = "choice was made from. No time limit is set yet: a choice made while signed in is kept until "
+    chat_place = "['table' => 'tblLiveChatMessages', 'column' => 'senderIP',"
     cases = [
-        ('the real files', schema, catalogue, pending, set()),
-        ('a new table with an `ipAddress` column', schema + new_table, catalogue, pending, {'MISSING'}),
-        ('a column added by ALTER TABLE (`lastSeenIP`)', schema + added_column, catalogue, pending, {'MISSING'}),
-        ('a scrambled address column (`ipHash`) taken out of the catalogue',
+        ('the real files', schema, catalogue, pending, places, set()),
+        ('a new table with an `ipAddress` column', schema + new_table, catalogue, pending, places, {'MISSING'}),
+        ('a column added by ALTER TABLE (`lastSeenIP`)', schema + added_column, catalogue, pending, places, {'MISSING'}),
+        ('a scrambled address column (`ipHash`) taken out of the catalogue (and so off the period too)',
          schema, catalogue.replace("'addressKept' => [\n            'ipHash' => 'Plays of a recording", "'addressKeptX' => [\n            'ipHash' => 'Plays of a recording", 1),
-         pending.replace('tblRecordingPlay.ipHash', '', 1), {'MISSING'}),
+         pending, places, {'MISSING', 'PERIOD'}),
         ('a sentence for a column the schema does not have',
-         schema, catalogue.replace("'visitorIP' => 'Error records keep", "'visitorIPX' => 'Error records keep", 1), pending,
+         schema, catalogue.replace("'visitorIP' => 'Error records keep", "'visitorIPX' => 'Error records keep", 1), pending, places,
          {'MISSING', 'STALE'}),
         ('a sentence cut short (it still says there is no limit, so only SHORT)', schema,
-         re.sub(r"'submitterIP' => 'Prayer requests.*?',\n", "'submitterIP' => 'Kept. " + NO_LIMIT + ".',\n", catalogue, count=1, flags=re.S),
-         pending, {'SHORT'}),
+         re.sub(r"'ipAddress' => 'The record of your choices.*?',\n", "'ipAddress' => 'Kept. " + NO_LIMIT + ".',\n", catalogue, count=1, flags=re.S),
+         pending, places, {'SHORT'}),
         ('a column taken off the pending list while its sentence says there is no limit',
-         schema, catalogue, pending.replace('tblPrayerRequests.submitterIP', '', 1), {'PENDING'}),
+         schema, catalogue, pending.replace('tblConsentLog.ipAddress', '', 1), places, {'PENDING'}),
         ('a pending column whose sentence stops saying there is no limit',
-         schema, catalogue.replace(prayer_words, "'submitterIP' => 'Prayer requests keep the network address each was sent from. A time limit applies. '", 1),
-         pending, {'PENDING'}),
-        ('a pending line that is not table.column', schema, catalogue, pending + '\nnot a column\n', {'REFUSED'}),
+         schema, catalogue.replace(consent_words, "choice was made from. A time limit applies: a choice made while signed in is kept until ", 1),
+         pending, places, {'PENDING'}),
+        ('a pending line that is not table.column', schema, catalogue, pending + '\nnot a column\n', places, {'REFUSED'}),
+        # #1019 round 2: the sentences and the clear-out's list, both ways.
+        ('a place the clear-out empties whose sentence stops naming the period',
+         schema, catalogue.replace("The address follows the period for network addresses; the message itself is kept.",
+                                   "The address is kept with the message.", 1), pending, places, {'PERIOD'}),
+        ('a place taken off the clear-out\'s list while its sentence still names the period',
+         schema, catalogue, pending, re.sub(re.escape(chat_place) + r"[^\n]*\n", '', places, count=1), {'PERIOD'}),
+        ('a place on the clear-out\'s list the schema does not have',
+         schema, catalogue, pending, places.replace(chat_place, "['table' => 'tblLiveChatMessages', 'column' => 'senderIPX',", 1),
+         {'PERIOD'}),
         # Must stay green.
-        ('a country worked out from an address (`ipCountry`, must stay green)', schema + country_column, catalogue, pending, set()),
-        ('an address column only inside an SQL comment (must stay green)', schema + commented_column, catalogue, pending, set()),
+        ('a country worked out from an address (`ipCountry`, must stay green)', schema + country_column, catalogue, pending, places, set()),
+        ('an address column only inside an SQL comment (must stay green)', schema + commented_column, catalogue, pending, places, set()),
     ]
     failed = 0
-    for label, s, c, p, expected in cases:
-        if (s, c, p) == (schema, catalogue, pending) and expected:
+    for label, s, c, p, pl, expected in cases:
+        if (s, c, p, pl) == (schema, catalogue, pending, places) and expected:
             print(f'FAIL - {label}: the planted change did not apply, so it tests nothing')
             failed += 1
             continue
-        got = outcome(s, c, p)
+        got = outcome(s, c, p, pl)
         verdict = 'PASS' if got == expected else 'FAIL'
         failed += verdict == 'FAIL'
         print(f'{verdict} - {label}: expected {sorted(expected) or "nothing wrong"}, got {sorted(got) or "nothing wrong"}')
     total = len(cases)
-    green = sum(1 for case in cases if not case[4])
+    green = sum(1 for case in cases if not case[5])
     print(f'{total - failed} of {total} self-test cases passed ({total - green} caught or refused, {green} must stay green).')
     return 1 if failed else 0
 

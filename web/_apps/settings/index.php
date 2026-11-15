@@ -390,6 +390,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: ' . Site::url('settings'));
             exit();
         }
+        // 🌐 #1019: the same refusal for how long network addresses are kept.
+        if ($lockedKey !== null && \Portal\Core\NetworkAddressRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is how long network addresses are kept and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\NetworkAddressRetention::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
 
         if ($lockedKey !== null && \Portal\Core\TranscriptRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
@@ -812,7 +824,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    Admin, Maintenance, Retention — an organisation's figure by
                                     //    its own administrator (D-118), the installation's by a global
                                     //    administrator.
-                                    $activityLogLocked = \Portal\Core\ActivityLogRetention::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🌐 #1019: and how long network addresses are kept, on the same page
+                                    //    and under the same rules (NetworkAddressRetention, D-178).
+                                    $activityLogLocked = \Portal\Core\ActivityLogRetention::lockedInGeneralEditor((string) $row['settingKey'])
+                                        || \Portal\Core\NetworkAddressRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
                                     // #493 P3: WHICH page — the copied-in rule's or Admin, Public website — is
                                     // asked of the ONE place that decides it, never written here.

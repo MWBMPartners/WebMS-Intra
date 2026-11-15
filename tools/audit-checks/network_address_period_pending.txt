@@ -6,16 +6,14 @@
 # yet", and a sentence saying that must have its column here. So the privacy pages can never claim a limit
 # that does not exist, and this list empties as each period is built.
 #
+# #1019 round 2 built the network-address period (NetworkAddressRetention, `privacy.networkAddressDays`) for the
+# seven places that had none and for both change histories, so they left this list. What is left waits on its
+# OWN decision, not on #1019: the record of privacy-notice choices follows the privacy data-retention setting
+# (D-166), and #934 builds that clear-out.
+#
 # Nothing may be ADDED here as a way past the check: a new column that keeps an address needs its period
 # decided and built with it. `--strict` fails while this list holds anything.
 #
 # FORM: one `table.column` per line, then `#` and what it is waiting for.
 
 tblConsentLog.ipAddress          # #934 builds the clear-out, on D-166's setting (privacy.dataRetentionDays)
-tblPasswordResets.createdIP      # #1019: the owner's figure (no row is ever deleted on a timer)
-tblTrustedDevices.createdIP      # #1019: the owner's figure (an expired or removed device's row is kept)
-tblPrayerRequests.submitterIP    # #1019: the owner's figure (nothing deletes a prayer request)
-tblApiKeys.lastUsedIP            # #1019: the owner's figure (a revoked key's row is kept)
-tblLiveChatMessages.senderIP     # #1019: the owner's figure (nothing clears chat messages on a timer)
-tblFormResponses.submitterIP     # #1019: the owner's figure (an answer is deleted only by hand)
-tblRecordingPlay.ipHash          # #1019: the owner's figure (nothing clears plays on a timer)

@@ -1341,6 +1341,18 @@ function ge_snapshot(): array
  *
  * @return string[] One line per row that changed and should not have.
  */
+/**
+ * 🌐 #1019 (D-178): an erasure empties the network address on the person's
+ *    own tax declarations, so those rows change (that column only, checked
+ *    column by column where each declaration is named). Allowed by key here.
+ */
+function ge_allowOwnDeclarations(array &$allowed, int $person): void
+{
+    foreach (ge_q('SELECT declarationID FROM tblGiftAidDeclaration WHERE donorID = ?', 'i', [$person]) as $row) {
+        $allowed[ge_keyText('tblGiftAidDeclaration', ['declarationID' => (int) $row['declarationID']])] = true;
+    }
+}
+
 function ge_unexpectedChanges(array $before, array $after, array $allowed): array
 {
     $problems = [];
@@ -2169,6 +2181,14 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
                     }
                     continue;
                 }
+                // 🌐 #1019 (D-178): a kept tax declaration loses the network
+                //    address it was made from, and nothing else.
+                if ($table === 'tblGiftAidDeclaration' && $name === 'acceptedIP') {
+                    if ($value !== null) {
+                        $problems[] = $label . ': the network address it was made from is still there';
+                    }
+                    continue;
+                }
                 if (in_array($name, $onUpdate, true) === false && $value !== $was[$name]) {
                     $problems[] = $label . ': kept row changed in `' . $name . '`';
                 }
@@ -2341,6 +2361,8 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     $expected[] = ['GivingStatementPdfFiles', ['delete']];
     $expected[] = ['tblGivingStatementLog', ['anonymise']];
     $expected[] = ['ProfileImageFiles', ['delete'], '1 file(s)'];
+    // 🌐 #1019: the tax declarations' network address (a step of its own).
+    $expected[] = ['tblGiftAidDeclaration', ['anonymise', 'none']];
     $expected[] = ['tblErasureRequest', [$lastAction]];
 
     if (count($lines) !== count($expected)) {
@@ -2538,8 +2560,9 @@ ge_ok('it reports no failed step, and the number of steps it ran',
     // CHANGED by roll-out package A2b: + 5 became + 6 (the giving-records step).
     // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step).
     // CHANGED by #707: + 7 became + 8 (the change-history step).
-    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 8,
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 8) . ')');
+    // CHANGED by #1019: + 8 became + 9 (the tax declarations' network address).
+    $resultA['failed'] === 0 && $resultA['changed'] === true && $resultA['steps'] === $instructionCount + 9,
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 9) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -2673,8 +2696,9 @@ ge_ok('exactly one line per instruction, each for the right table, with the righ
 ge_ok('the number of lines is the instructions, the Demo Data step, the giving-records lines (' . $givingCountA
     // CHANGED by mail package M3: four dedicated lines became five (the mail queue's).
     // CHANGED by #707: five became six (the change history about the person).
-    . ', one per organisation), the six dedicated lines and the closing line',
-    count($auditA) === $instructionCount + 8 + $givingCountA && $givingCountA >= 3,
+    // CHANGED by #1019: six became seven (the tax declarations' network address).
+    . ', one per organisation), the seven dedicated lines and the closing line',
+    count($auditA) === $instructionCount + 9 + $givingCountA && $givingCountA >= 3,
     count($auditA) . ' lines for ' . $instructionCount . ' instructions and ' . $givingCountA . ' organisations');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 // CHANGED by roll-out package A2b, in two ways. The giving-records step
@@ -3034,13 +3058,15 @@ ge_ok('a PAYMENT the person entered against somebody else\'s expense claim is ke
     json_encode($now['payment']));
 // CHANGED by roll-out package A2b: a name typed by hand on the gift
 // (`donorName`) now goes with the donor's number. It used to stay.
-ge_ok('the person\'s own PLEDGE is deleted; the gift given towards it is kept with its amount, date and campaign, and loses the donor (number and typed name) and the pledge link; their Gift Aid declaration is unchanged',
+ge_ok('the person\'s own PLEDGE is deleted; the gift given towards it is kept with its amount, date and campaign, and loses the donor (number and typed name) and the pledge link; their Gift Aid declaration is unchanged but for the network address it was made from (#1019)',
     $now['pledge'] === null && ge_same($was['giftToPledge'], $now['giftToPledge'], ['donorID', 'donorName', 'pledgeID']) === true
     && $now['giftToPledge']['donorID'] === null && $now['giftToPledge']['donorName'] === null && $was['giftToPledge']['donorName'] !== null
     && $now['giftToPledge']['pledgeID'] === null
     && $now['giftToPledge']['amountPence'] === $was['giftToPledge']['amountPence']
     && $now['giftToPledge']['campaignID'] === $was['giftToPledge']['campaignID']
-    && $now['giftAidOfPerson'] !== null && $now['giftAidOfPerson'] === $was['giftAidOfPerson'],
+    // #1019: unchanged but for the network address it was made from, which goes.
+    && $now['giftAidOfPerson'] !== null && ge_same($was['giftAidOfPerson'], $now['giftAidOfPerson'], ['acceptedIP']) === true
+    && $was['giftAidOfPerson']['acceptedIP'] !== null && $now['giftAidOfPerson']['acceptedIP'] === null,
     json_encode([$now['pledge'], $now['giftToPledge'], $now['giftAidOfPerson']]));
 ge_ok('ZOOM: the person\'s own connection and the meeting made through it are gone; a meeting they made through somebody else\'s connection is kept, and that connection is untouched',
     $now['zoomOfPerson'] === null && $now['meetingViaPerson'] === null && $now['zoomOfC'] === $was['zoomOfC']
@@ -3065,6 +3091,7 @@ ge_ok('the erasure added exactly one kept-donor row for each organisation that k
     && count(array_filter($keptRowsA, static fn (array $r): bool => $r['fullName'] === 'Pat Erased' && $r['clearedAt'] === null)) === count($keptRowsA)
     && array_map(static fn (array $r): string => 'organisation #' . $r['siteID'], $keptRowsA) === array_column($keepingSitesA, 2),
     json_encode($keptRowsA));
+ge_allowOwnDeclarations($worldA['allowed'], P_A);
 $unexpectedA  = ge_unexpectedChanges($printsBeforeA, $printsAfterA, $worldA['allowed']);
 ge_ok('every row of every table that is not the person\'s own is byte-for-byte unchanged (' . count($printsAfterA) . ' rows compared)',
     $unexpectedA === [], implode('; ', array_slice($unexpectedA, 0, 10)));
@@ -3405,15 +3432,28 @@ $giftAidLine = array_values(array_filter($auditA, static fn (array $l): bool => 
 // Kingdom's tax office. The product is used in any country, so it must NOT
 // name one any more, nor a number of years; it points at the giving-records
 // line, which carries the organisation's own date.
-ge_ok('tblGiftAidDeclaration: the declaration is kept, not one column changed, and the audit trail says it was kept on purpose, without naming one country\'s tax office or a number of years',
-    $giftAid !== null && $giftAid['action'] === 'retain' && $beforeRowsA[$giftAid['n']] !== null
-    && ge_row($giftAid['ref']) === $beforeRowsA[$giftAid['n']]
-    && count($giftAidLine) === 1 && $giftAidLine[0]['action'] === 'retain'
-    && str_contains((string) $giftAidLine[0]['details'], 'kept on purpose')
-    && str_contains((string) $giftAidLine[0]['details'], 'keep-until date')
-    && str_contains((string) $giftAidLine[0]['details'], 'GivingRecords')
-    && preg_match('/HMRC|six years|6 years/i', (string) $giftAidLine[0]['details']) !== 1,
-    json_encode([$giftAid['action'] ?? 'no instruction', $giftAid === null ? null : ge_row($giftAid['ref']), $giftAidLine]));
+// #1019 (D-178): the declaration is still KEPT, with every column as it was
+// EXCEPT the network address it was made from, which a step of its own
+// (GdprEraser::eraseGiftAidDeclarationAddresses()) empties and records on a
+// second line. The fixture fills that column, and that is checked first, so
+// "it is empty afterwards" cannot pass on a column that never held anything.
+$giftAidKept   = array_values(array_filter($giftAidLine, static fn (array $l): bool => $l['action'] === 'retain'));
+$giftAidEmpty  = array_values(array_filter($giftAidLine, static fn (array $l): bool => $l['action'] === 'anonymise'));
+$giftAidBefore = $giftAid === null ? null : $beforeRowsA[$giftAid['n']];
+$giftAidNow    = $giftAid === null ? null : ge_row($giftAid['ref']);
+$withoutIp     = static fn (?array $row): ?array => $row === null ? null : array_diff_key($row, ['acceptedIP' => true]);
+ge_ok('tblGiftAidDeclaration: the declaration is kept, not one column changed but the network address it was made from, and the audit trail says it was kept on purpose, without naming one country\'s tax office or a number of years',
+    $giftAid !== null && $giftAid['action'] === 'retain' && $giftAidBefore !== null
+    && ($giftAidBefore['acceptedIP'] ?? null) !== null
+    && is_array($giftAidNow) === true && array_key_exists('acceptedIP', $giftAidNow) === true && $giftAidNow['acceptedIP'] === null
+    && $withoutIp($giftAidNow) === $withoutIp($giftAidBefore)
+    && count($giftAidKept) === 1 && count($giftAidEmpty) === 1 && count($giftAidLine) === 2
+    && str_contains((string) $giftAidKept[0]['details'], 'kept on purpose')
+    && str_contains((string) $giftAidKept[0]['details'], 'keep-until date')
+    && str_contains((string) $giftAidKept[0]['details'], 'GivingRecords')
+    && str_contains((string) $giftAidEmpty[0]['details'], 'network address')
+    && preg_match('/HMRC|six years|6 years/i', (string) $giftAidKept[0]['details']) !== 1,
+    json_encode([$giftAid['action'] ?? 'no instruction', $giftAidBefore, $giftAidNow, $giftAidLine]));
 $statement = ge_find($worldA, 'tblGivingStatementLog', 'donorID');
 $statementNow = $statement === null ? null : ge_row($statement['ref']);
 $statementWas = $statement === null ? null : $beforeRowsA[$statement['n']];
@@ -3462,7 +3502,8 @@ $resultB1 = ge_execute(REQ_B, P_B);
 ge_ok('the run still ends without an exception, and reports exactly one failed step',
     // CHANGED by mail package M3: + 6 became + 7 (the mail queue's step), here and four lines down.
     // CHANGED by #707: + 7 became + 8 (the change-history step).
-    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 8,
+    // CHANGED by #1019: + 8 became + 9, here and four lines down.
+    is_array($resultB1) === true && $resultB1['failed'] === 1 && $resultB1['steps'] === $instructionCount + 9,
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -3475,7 +3516,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 8) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 9) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -3523,7 +3564,8 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // (And one line for the counted envelopes, which is why "- 1" below.)
     // CHANGED by mail package M3: + 5 became + 6 (the mail queue's line).
     // CHANGED by #707: + 6 became + 7 (the change-history step's line).
-    count($auditB2) === $instructionCount + 7 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
+    // CHANGED by #1019: + 7 became + 8 (the tax declarations' address line).
+    count($auditB2) === $instructionCount + 8 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed'
     && count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'already dealt with by an earlier run')
@@ -3532,13 +3574,14 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // The expected count printed here said "+ 6" after #707 made the check
     // "+ 7", so a failure here printed a wrong expectation. It prints the
     // number the check really asks for, and the "not overwritten" count.
-    count($auditB2) . ' lines, expected ' . ($instructionCount + 7 + $givingCountB2) . '; "already dealt with ... nothing was overwritten" lines: '
+    count($auditB2) . ' lines, expected ' . ($instructionCount + 8 + $givingCountB2) . '; "already dealt with ... nothing was overwritten" lines: '
     . count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'nothing was overwritten'))) . ', expected ' . ($givingCountB2 - 1));
 $lateNow = ge_row($lateLog);
 ge_ok('the second run still found the person\'s address: the message logged between the runs is scrubbed',
     $lateNow !== null && $lateNow['toRecipients'] === '[erased]', json_encode($lateNow));
 ge_ok('the audit trail of both runs together still verifies', GdprEraser::verifyAuditChain(REQ_B) === true);
+ge_allowOwnDeclarations($worldB['allowed'], P_B);
 $unexpectedB = ge_unexpectedChanges($printsBeforeB, ge_snapshot(), $worldB['allowed']);
 ge_ok('across both runs, nothing that was not the person\'s own changed anywhere in the database',
     $unexpectedB === [], implode('; ', array_slice($unexpectedB, 0, 10)));
@@ -4225,8 +4268,9 @@ ge_ok('THE NAME IS REALLY KEPT: the account is emptied, and the kept row holds t
     && $keptG1['postcode'] === 'KT1 2AB' && $keptG1['scope'] === 'receipted' && $keptG1['lastGiftDate'] === $ago(100)
     && (int) $keptG1['keptGiftCount'] === 2 && (int) $keptG1['erasureRequestID'] === REQ_H && $keptG1['clearedAt'] === null
     && $keptG1['createdAt'] !== null, json_encode([$accountH, $keptG1]));
-ge_ok('THE DECLARATION KEEPS THE FULL ADDRESS: not one column of it changed, and it still points at the donor\'s account',
-    $hNow['declaration'] === $hWas['declaration'] && $hNow['declaration']['address'] === '12 Kept Lane, Keptown'
+ge_ok('THE DECLARATION KEEPS THE FULL ADDRESS: not one column of it changed but the network address it was made from (#1019), and it still points at the donor\'s account',
+    ge_same($hWas['declaration'], $hNow['declaration'], ['acceptedIP']) === true && $hWas['declaration']['acceptedIP'] !== null
+    && $hNow['declaration']['acceptedIP'] === null && $hNow['declaration']['address'] === '12 Kept Lane, Keptown'
     && $hNow['declaration']['postcode'] === 'KT1 2AB' && (int) $hNow['declaration']['donorID'] === P_H, json_encode($hNow['declaration']));
 $claimed = ge_q(
     'SELECT e.entryID, d.declarationID, k.fullName FROM tblGivingEntry e '
@@ -4347,6 +4391,7 @@ $allowedH[ge_keyText($hGiftAfterDeclaration['table'], $hGiftAfterDeclaration['ke
 foreach ([$keptG1, $keptG2] as $keptRow) {
     $allowedH[ge_keyText('tblGivingKeptDonors', ['keptDonorID' => (int) ($keptRow['keptDonorID'] ?? 0)])] = true;
 }
+ge_allowOwnDeclarations($allowedH, P_H);
 $unexpectedH = ge_unexpectedChanges($printsBeforeH, ge_snapshot(), $allowedH);
 ge_ok('ANOTHER DONOR is untouched, and so is everything else: across the whole database only the erased donor\'s account, request, two un-kept gifts, statement record and envelope changed, and only their two kept rows were added',
     $unexpectedH === [] && array_map('ge_row', $k) === $kWas && is_file($issuedK['file']) === true
@@ -4587,7 +4632,8 @@ ge_ok('THE NAME, THE ADDRESS AND THE LINK GO TOGETHER: the kept row is emptied a
     && ge_same($hBeforeClear['declaration'], $hCleared['declaration'], ['address', 'postcode', 'acceptedIP', 'signaturePath', 'notes']) === true
     && $hCleared['declaration']['address'] === null && $hCleared['declaration']['postcode'] === null && $hCleared['declaration']['acceptedIP'] === null
     && $hCleared['declaration']['signaturePath'] === null && $hCleared['declaration']['notes'] === null
-    && $hBeforeClear['declaration']['acceptedIP'] !== null && $hCleared['declaration']['validFrom'] === '2001-01-01',
+    // #1019: the network address went at the erasure itself, before this clearing.
+    && $hBeforeClear['declaration']['acceptedIP'] === null && $hCleared['declaration']['validFrom'] === '2001-01-01',
     json_encode([$keptNow, $hCleared['giftTwo'], $hCleared['declaration']]));
 ge_ok('...and THE KEPT STATEMENT FILES go with them, the one the donor made for themselves included: deleted from disk, and the record no longer points at a file; the record itself, its totals and its period stay',
     is_file($issuedH['file']) === false && is_file($ownAllKeptH) === false && is_file($noPeriodH) === false

@@ -1385,6 +1385,22 @@ jobs:
           docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_alret < web/_sql/full_schema.sql > /dev/null
           php tools/activity-log-retention-selftest.php
 
+      # 🌐 #1019 (D-178): how long a network address is kept. Drives the real
+      #    nightly clear-out (`address_sweep()`) against two organisations with
+      #    an address inside and outside each period in all nine places, and
+      #    plants each guard out of a COPY: its scenario must turn red, and a
+      #    plant that only crashes the copy is not counted as red. It builds its
+      #    OWN database here. REFUSES rather than skipping.
+      - name: "Network addresses emptied after their period (#1019)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_netaddr
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_netaddr"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_netaddr < web/_sql/full_schema.sql > /dev/null
+          php tools/network-address-retention-selftest.php
+
       # 🌐 #493 P1 (D-057, D-077, D-078, D-080, D-081): "Show on the public
       #    website" for events. Drives the Manage Events form, the events API
       #    (a key and a session), the public submission form, the countdown

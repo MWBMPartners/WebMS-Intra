@@ -10,11 +10,13 @@
 
 declare(strict_types=1);
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Markdown;
+use Portal\Core\RateLimiter;
 use Portal\Core\Recordings;
 use Portal\Core\Site;
 use Portal\Core\Transcription;
@@ -47,7 +49,15 @@ if ($rec === null) {
 $playKey = 'rec_play_' . $id;
 if (isset($_SESSION[$playKey]) === false) {
     $userId = (int) ($_SESSION['user_id'] ?? 0);
-    $ipHash = hash('sha256', (string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+    // 🔒 #1019: a SALTED fingerprint, from the ONE place that makes one
+    //    (AddressFingerprint, #712), of the address RateLimiter decides the
+    //    request came from. This was `hash('sha256', REMOTE_ADDR)` — unsalted,
+    //    so an IPv4 address could be walked back from the stored value in
+    //    minutes. No address at all is stored as nothing (NULL), not as the
+    //    fingerprint of an empty string. Older rows keep their old values
+    //    until the network-address clear-out empties them (migration 295).
+    $ipHash = AddressFingerprint::of(RateLimiter::clientIp());
+    $ipHash = $ipHash === '' ? null : $ipHash;
     $pStmt = $db->prepare('INSERT INTO tblRecordingPlay (recordingID, userID, ipHash) VALUES (?, ?, ?)');
     if ($pStmt !== false) {
         $uidOrNull = $userId > 0 ? $userId : null;

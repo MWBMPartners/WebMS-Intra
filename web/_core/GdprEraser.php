@@ -422,7 +422,9 @@ class GdprEraser
             //    asking to be forgotten destroyed the organisation's evidence
             //    for tax it had already reclaimed on their gifts.
             //
-            //    Not one column of a declaration changes at erasure. HOW LONG
+            //    Not one column of a declaration changes at erasure, except
+            //    the network address it was made from, which
+            //    eraseGiftAidDeclarationAddresses() empties (#1019, D-178). HOW LONG
             //    it is kept is the organisation's own setting (roll-out
             //    package A2b): this comment and the reason below used to say
             //    "six years" and name the United Kingdom's tax office, as if
@@ -438,7 +440,7 @@ class GdprEraser
             //    row goes on pointing at an account with no name on it - which
             //    is not anonymous where the person's name is kept beside the
             //    same number elsewhere (D-113, #703).
-            ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a tax declaration is the organisation\'s evidence for tax relief claimed on a donor\'s gifts. Kept unchanged, with the donor\'s giving records, until the organisation\'s keep-until date; see the "GivingRecords" line of this report'],
+            ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a tax declaration is the organisation\'s evidence for tax relief claimed on a donor\'s gifts. Kept, with the donor\'s giving records, until the organisation\'s keep-until date; see the "GivingRecords" line of this report. Only the network address it was made from is emptied now (a separate line of this report)'],
             // The person's own connection to Zoom: their Zoom account's number
             // and the keys that let the portal act as them. Deleted.
             //
@@ -2342,6 +2344,11 @@ class GdprEraser
             // 🖼️ The person's photo: the image file, and the two columns on
             //    the account that say where it is.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseProfileImages($requestId, $userId));
+            // 🌐 #1019 (D-178): the network address each of the person's tax
+            //    declarations was made from. The declaration itself is KEPT
+            //    (the 'retain' instruction above, roll-out decision 8); only
+            //    the address goes, at every organisation.
+            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseGiftAidDeclarationAddresses($requestId, $userId));
             // ⏳ Giving records that were ALREADY past their keep-until date
             //    when this run met them. Cleared here, after the walk,
             //    because the routine that clears refuses until the account
@@ -6951,7 +6958,7 @@ class GdprEraser
                     'gift'     => 'these gifts will keep your name, and any home address held for you is kept with them. ',
                     'envelope' => 'offering envelopes in a count that is not closed yet: when it is closed each becomes a gift that keeps '
                         . 'your name, and any home address held for you is kept with it. ',
-                    default    => 'your tax declarations stay unchanged, with your name kept beside them. ',
+                    default    => 'your tax declarations stay, with your name kept beside them; only the network address each was made from is removed now. ',
                 } . implode(' ', $parts),
             ];
         }
@@ -8975,6 +8982,71 @@ class GdprEraser
             'the change history: ' . $emptied . ' row(s) about this person\'s account or memberships had their '
             . 'before-and-after values emptied. Who made each change, when, and which record it was remain, '
             . 'so the trail still shows that the account was changed'
+        );
+
+        return self::STEP_CHANGED;
+    }
+
+    /**
+     * 🌐 Empty the network address each of the person's tax declarations was
+     *    made from (#1019, under the owner's decision D-178).
+     *
+     * The declaration is KEPT — every other column, at every organisation — as
+     * roll-out decision 8 requires: it is the organisation's evidence for tax
+     * relief already claimed (`tblGiftAidDeclaration`'s 'retain' instruction,
+     * which still writes its "kept on purpose" line). The ADDRESS it was made
+     * from is not part of that evidence the tax office asks for, and D-178
+     * says an erasure reaches the addresses on a person's own records, so it
+     * goes now rather than at the organisation's keep-until date.
+     *
+     * WHY A STEP OF ITS OWN and not a `nullCols` on that instruction: a
+     * 'retain' instruction changes nothing by design (processEntry() handles
+     * it first and returns), and `tools/gdpr-coverage-selftest.php` pins the
+     * table to exactly one 'retain' instruction, so the decision to keep the
+     * declaration cannot be weakened by the same edit.
+     *
+     * Matched by `donorID`, the declarer's own account, never an actor column.
+     * Re-running is safe: the WHERE asks for a row that still holds an address.
+     *
+     * @return string One of STEP_CHANGED, STEP_UNCHANGED or STEP_FAILED.
+     */
+    private static function eraseGiftAidDeclarationAddresses(int $requestId, int $userId): string
+    {
+        $db = App::db();
+        try {
+            $stmt = $db->prepare(
+                'UPDATE `tblGiftAidDeclaration` SET `acceptedIP` = NULL WHERE `donorID` = ? AND `acceptedIP` IS NOT NULL'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('prepare');
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $emptied = (int) $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Never the fault's own words: they can quote the value being emptied.
+            self::logAudit($db, $requestId, 'failed', 'tblGiftAidDeclaration', null, 'the network address the '
+                . 'person\'s tax declarations were made from could not be emptied. The rows are unchanged, so '
+                . 'running the request again will find them.');
+
+            return self::STEP_FAILED;
+        }
+
+        if ($emptied === 0) {
+            self::logAudit($db, $requestId, 'none', 'tblGiftAidDeclaration', null, 'no tax declaration of this '
+                . 'person\'s holds the network address it was made from');
+
+            return self::STEP_UNCHANGED;
+        }
+        self::logAudit(
+            $db,
+            $requestId,
+            'anonymise',
+            'tblGiftAidDeclaration',
+            (string) $emptied . ' row(s)',
+            'tax declarations: the network address ' . $emptied . ' declaration(s) were made from was emptied. '
+            . 'Each declaration is otherwise kept as it was, as the organisation\'s evidence for tax relief'
         );
 
         return self::STEP_CHANGED;

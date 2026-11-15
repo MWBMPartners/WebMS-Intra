@@ -189,6 +189,12 @@ declare(strict_types=1);
  *             yet", and the column must be on that check's pending list,
  *             network_address_period_pending.txt; the check fails both ways,
  *             so the words and the list cannot disagree.
+ *             A column the nightly clear-out empties on the network-address
+ *             period (Portal\Core\NetworkAddressRetention::PLACES, #1019
+ *             round 2) must say it follows "the period for network
+ *             addresses" - the privacy pages print that period, for the
+ *             reader's organisation, above the list - and only such a column
+ *             may say so; the same check fails both ways.
  */
 return [
     // =========================================================================
@@ -759,9 +765,9 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['submitterID', 'submitterIP'],
         'addressKept' => [
-            'submitterIP' => 'Answers to forms sent through a public link keep the network address each was sent from. No '
-                . 'time limit is set yet: an answer is kept until the organisation deletes it. They are not '
-                . 'linked to an account, so an erasure cannot find them.',
+            'submitterIP' => 'Answers to forms sent through a public link keep the network address each was sent from. The address'
+                . ' follows the period for network addresses; the answer itself is kept until the organisation deletes '
+                . 'it. They are not linked to an account, so an erasure cannot find them.',
         ],
     ],
     'tblGiftAidDeclaration' => [
@@ -791,14 +797,18 @@ return [
         'period'   => 'set by each organisation, in years after the end of the financial year of the donor\'s last kept gift: Admin, Settings, Giving records',
         'columns'  => ['donorID', 'address', 'postcode', 'notes', 'acceptedIP'],
             'notEmptiedHere' => [
-            'acceptedIP' => 'The network address the declaration was made from, kept as part of the evidence that '
-                . 'it was made. The whole declaration is kept because HMRC requires it, and the address '
-                . 'is part of what makes it stand up',
+            // 🌐 #1019 (D-178): it said the address was kept as part of the
+            //    evidence and "HMRC requires it". The tax office asks for the
+            //    declaration, not the address it was typed from, so an erasure
+            //    now empties it at once (GdprEraser::eraseGiftAidDeclarationAddresses()).
+            'acceptedIP' => 'Emptied elsewhere, on purpose: GdprEraser::eraseGiftAidDeclarationAddresses() empties '
+                . 'the network address on every declaration of the person\'s, at every organisation, while the '
+                . '\'retain\' instruction keeps the declaration itself unchanged otherwise (#1019, D-178)',
         ],
         'addressKept' => [
-            'acceptedIP' => 'Tax declarations keep the network address each was made from, as part of the declaration. It '
-                . 'is emptied, with your home address, at this organisation\'s keep-until date for giving '
-                . 'records; an erasure does not remove it before then.',
+            'acceptedIP' => 'Tax declarations keep the network address each was made from. An erasure empties it at once, and '
+                . 'otherwise it is emptied, with your home address, at this organisation\'s keep-until date for giving '
+                . 'records; the declaration itself is kept as the organisation\'s evidence for tax relief.',
         ],
     ],
     'tblGivingEntry' => [
@@ -895,9 +905,9 @@ return [
             'senderIP' => 'PERSONAL, AND UNREACHABLE, for the same reason as displayName: the address belongs to whoever sent the message, who has no account, and the only account column on the row is the moderator\'s. Its own schema comment says it is kept for moderation audit.',
         ],
         'addressKept' => [
-            'senderIP' => 'Live-stream chat messages keep the network address each was sent from, so misuse can be '
-                . 'moderated. No time limit is set yet. They are sent without signing in, so an erasure cannot '
-                . 'find them.',
+            'senderIP' => 'Live-stream chat messages keep the network address each was sent from, so misuse can be moderated. '
+                . 'The address follows the period for network addresses; the message itself is kept. They are sent '
+                . 'without signing in, so an erasure cannot find them.',
         ],
     ],
     'tblLocalAccounts' => [
@@ -977,8 +987,10 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'createdIP'],
         'addressKept' => [
-            'createdIP' => 'Password-reset requests keep the network address each was asked for from. No time limit is '
-                . 'set yet: a request is kept, even once used or expired, until your account is erased.',
+            'createdIP' => 'Password-reset requests keep the network address each was asked for from. The address follows the '
+                . 'period for network addresses set for the whole portal, because a request belongs to your account '
+                . 'rather than to one organisation; the request itself is kept until your account is erased, which '
+                . 'deletes it.',
         ],
     ],
     'tblPathwayEnrolments' => [
@@ -1035,10 +1047,10 @@ return [
         //    tools/gdpr-coverage-selftest.php fails if the two lists differ).
         //    A request sent with no e-mail address cannot be found at all.
         'addressKept' => [
-            'submitterIP' => 'Prayer requests keep the network address each was sent from. No time limit is set yet. '
-                . 'Erasing your account removes it from the requests you sent from your account; a request sent '
-                . 'through the anonymous form loses it only when you ask the organisation, by the e-mail '
-                . 'address you gave with it.',
+            'submitterIP' => 'Prayer requests keep the network address each was sent from. The address follows the period for '
+                . 'network addresses; the request itself is kept. Erasing your account removes it sooner from the '
+                . 'requests you sent from your account; a request sent through the anonymous form loses it sooner only '
+                . 'when you ask the organisation, by the e-mail address you gave with it.',
         ],
     ],
     'tblProjectPledge' => [
@@ -1061,9 +1073,9 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'ipHash'],
         'addressKept' => [
-            'ipHash' => 'Plays of a recording keep a scrambled form of the network address each play came from, which '
-                . 'can be matched against an address. No time limit is set yet; an erasure deletes the plays '
-                . 'you made while signed in.',
+            'ipHash' => 'Plays of a recording keep a scrambled form of the network address each play came from, which this '
+                . 'installation can still match against an address. It follows the period for network addresses; an '
+                . 'erasure deletes the plays you made while signed in.',
         ],
     ],
     'tblResourceBooking' => [
@@ -1289,9 +1301,10 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'createdIP'],
         'addressKept' => [
-            'createdIP' => 'Devices you chose to trust for two-step sign-in keep the network address each was trusted '
-                . 'from. No time limit is set yet: the record is kept, even once it has expired or been '
-                . 'removed, until your account is erased.',
+            'createdIP' => 'Devices you chose to trust for two-step sign-in keep the network address each was trusted from. The '
+                . 'address follows the period for network addresses set for the whole portal, because a device belongs '
+                . 'to your account rather than to one organisation; the record itself is kept, even once it has expired'
+                . ' or been removed, until your account is erased, which deletes it.',
         ],
     ],
     'tblUserDepts' => [
@@ -1441,9 +1454,10 @@ return [
                 . 'property',
         ],
         'addressKept' => [
-            'ipHash' => 'The equipment register\'s change history keeps a scrambled form of the network address '
-                . 'each change came from, which this installation can still match against an address. It is '
-                . 'kept for ever, as the change history is; an erasure removes it from the changes you made.',
+            'ipHash' => 'The equipment register\'s change history keeps a scrambled form of the network address each change '
+                . 'came from, which this installation can still match against an address. The history itself is kept '
+                . 'for ever, but the address follows the period for network addresses; an erasure removes it sooner '
+                . 'from the changes you made.',
         ],
     ],
     'tblAssetScanLog' => [
@@ -1703,9 +1717,9 @@ return [
                 . 'person, and the record is what makes a stolen key noticeable',
         ],
         'addressKept' => [
-            'lastUsedIP' => 'Access keys that let other programs use the portal keep the network address each key was '
-                . 'last used from, replaced every time it is used. No time limit is set yet: it is kept while '
-                . 'the key\'s record exists.',
+            'lastUsedIP' => 'Access keys that let other programs use the portal keep the network address each key was last used '
+                . 'from, replaced every time it is used. The address follows the period for network addresses, counted '
+                . 'from the key\'s last use; the key\'s record itself is kept.',
         ],
     ],
     'tblAssetKioskTokens' => [
@@ -1784,8 +1798,9 @@ return [
                 . 'of machine-readable text, so it carries the same contents',
         ],
         'addressKept' => [
-            'ipAddress' => 'The change history keeps the network address each change came from. It is kept for ever, as '
-                . 'the change history is; an erasure removes it from the changes you made.',
+            'ipAddress' => 'The change history keeps the network address each change came from. The history itself is kept for '
+                . 'ever, but the address follows the period for network addresses; an erasure removes it sooner from '
+                . 'the changes you made.',
         ],
     ],
     'tblErrors' => [

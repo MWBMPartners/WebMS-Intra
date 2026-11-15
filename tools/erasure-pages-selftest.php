@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 258; // #1019 added section Q's six: 252 + 6.
+const EXPECTED_CHECKS = 259; // #1019 added section Q's six: 252 + 6; round 2 added plant Q5b.
                              // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5.
                              // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
@@ -3332,7 +3332,7 @@ ok('K12 BOTH HOLDS AT ONCE: Pat\'s gift and declaration are shown as kept; Reque
 //    not computed by the code under test (#647). ──
 $gLead  = 'tblGivingEntry retain: these gifts will keep your name, and any home address held for you is kept with them. At Selftest erasure A: '
     . '1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, ';
-$dLead  = 'tblGiftAidDeclaration retain: your tax declarations stay unchanged, with your name kept beside them. At Selftest erasure A: '
+$dLead  = 'tblGiftAidDeclaration retain: your tax declarations stay, with your name kept beside them; only the network address each was made from is removed now. At Selftest erasure A: '
     . '1 declaration, as the evidence for tax relief claimed on your gifts, ';
 $patLost = 'tblGivingEntry anonymise: these gifts keep their amount, date and method and will lose your name, because no tax declaration or '
     . 'giving statement of yours covers their date, and Selftest erasure A keeps the giver\'s name only on gifts one covers';
@@ -6299,26 +6299,35 @@ $q1019Observe = static function () use ($jar, $q1019Visitor, $q1019Expected): ar
             if ($listed !== $expected) {
                 $wrong[] = $path . ' for ' . $label . ': lists ' . count($listed) . ' places, the catalogue holds ' . count($expected);
             }
+            // ⏳ #1019 round 2: the period the places say they follow, stated
+            //    above the list for this organisation (a year by default).
+            $period = $doc->querySelector('[data-network-address-retention="days"]');
+            if ($period === null || str_contains((string) preg_replace('/\s+/', ' ', (string) $period->textContent), 'once it is 365 days old') === false) {
+                $wrong[] = $path . ' for ' . $label . ': does not state the network-address period (a year)';
+            }
         }
     }
 
     return $wrong;
 };
 $q1019Words = $q1019Expected();
-ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, and eight saying no time limit is set yet',
+ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, one saying no time limit is set yet (the consent record, #934) and nine saying they follow the period for network addresses (#1019 round 2)',
     count($q1019Words) >= 18
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Prayer requests keep the network address'))) === 1
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Equipment label scans keep a scrambled form'))) === 1
-    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 8,
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 1
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'the period for network addresses'))) === 9,
     count($q1019Words) . ' sentences');
 $q1019First = $q1019Observe();
-ok('Q2 the Privacy & Data Protection page and the privacy policy, for a visitor and a member at one organisation and an administrator at another, each show ONE "Network addresses" section listing exactly the catalogue\'s sentences, in order (#1019, D-178)',
+ok('Q2 the Privacy & Data Protection page and the privacy policy, for a visitor and a member at one organisation and an administrator at another, each show ONE "Network addresses" section listing exactly the catalogue\'s sentences, in order, under the period they follow (#1019, D-178)',
     $q1019First === [], implode('; ', $q1019First));
 $q1019Plants = [
     'Q3 the template listing only the first place' => [
         '_core/templates/network-addresses.php', ['foreach ($networkAddressPlaces as $networkAddressPlace):' => 'foreach (array_slice($networkAddressPlaces, 0, 1) as $networkAddressPlace):']],
     'Q4 the privacy policy no longer drawing the section' => [
         '_apps/privacy/policy.php', ["<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>" => '']],
+    'Q5b the period paragraph no longer drawn above the list (#1019 round 2)' => [
+        '_core/templates/network-addresses.php', ['<p data-network-address-retention=' => '<p data-planted-out=']],
     'Q5 the list unreadable (the page must say so, never show an empty list)' => [
         '_core/NetworkAddresses.php', ['$places = [];' => 'return [];']],
 ];
