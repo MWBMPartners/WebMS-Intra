@@ -42,10 +42,21 @@
  *
  *   U  the judge itself, without HTTP: the three reasons, both boxes empty,
  *      and the shapes `coordinateNumber()` accepts.
- *   A–H  the eight pages, as listed in the output.
+ *   A–H  the eight pages, as listed in the output. Each refused post is also
+ *      required to leave EVERY table in the database with the rows it had
+ *      (X2b): "Nothing was saved." is a claim about the whole database.
+ *   B4 the venue form can create a new LANDLORD as well as a venue, and used
+ *      to do so ABOVE its refusals, so a refused venue left a landlord row
+ *      (and each retry another). Every refusal the page makes is posted with a
+ *      landlord name filled in, and must write nothing at all (round 2).
+ *   M  Venues::saveVenue() and AssetRegister::saveLocation() ask the judge a
+ *      second time; no page reaches that ask, so it is called directly, in a
+ *      separate process loading the COPY's classes.
  *   Z  plants, in the COPY: each page's refusal switched off in turn (eight),
- *      and then the judge itself made to find nothing. Each must turn that
- *      page's refusal check red, and each file is put back byte for byte.
+ *      and then the judge itself made to find nothing; the landlord's creation
+ *      moved back above the refusals; the new "no venue name" refusal switched
+ *      off; and each model-layer ask switched off. Each must turn its check
+ *      red, and each file is put back byte for byte.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - A browser stops most of this before the request is sent: the boxes are
@@ -225,6 +236,8 @@ $tidy = static function () use (&$state): void {
         'DELETE FROM `tblEvents` WHERE `eventName` LIKE ?',
         'DELETE FROM `tblVenueUsageTypes` WHERE `venueID` IN (SELECT `venueID` FROM `tblVenues` WHERE `venueName` LIKE ?)',
         'DELETE FROM `tblVenues` WHERE `venueName` LIKE ?',
+        // The venue form's "new landlord" (#1030 round 2), after the venues that name one.
+        'DELETE FROM `tblAssetOrgs` WHERE `orgName` LIKE ?',
         'DELETE FROM `tblAssetLocations` WHERE `locationName` LIKE ?',
         'DELETE FROM `tblResource` WHERE `name` LIKE ?',
     ];
@@ -512,6 +525,44 @@ $postAndRead = static function (string $to, array $fields) use ($http): array {
     return ['status' => $answer['status'], 'text' => (string) preg_replace('/\s+/', ' ', $text)];
 };
 
+/**
+ * How many rows EVERY table in the database holds (#1030, round 2). A refusal
+ * that says "Nothing was saved." must leave every one of them as it was: the
+ * venue page used to create a new LANDLORD (tblAssetOrgs) above its refusals,
+ * so a refused venue still wrote a row, and a check that counted only the
+ * venue table could not see it. Asking every table, rather than a list of the
+ * tables each page "can" write, is what makes the check reach a write nobody
+ * thought of. It cannot see a row CHANGED in place; the edit sections compare
+ * the row being edited for that.
+ *
+ * @return array<string,int>
+ */
+$tableCounts = static function () use ($db): array {
+    $counts = [];
+    $names  = $db->query(
+        "SELECT `TABLE_NAME` AS `t` FROM `information_schema`.`TABLES` "
+        . "WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_TYPE` = 'BASE TABLE' ORDER BY `TABLE_NAME`"
+    )->fetch_all(MYSQLI_ASSOC);
+    foreach ($names as $row) {
+        // A table name read from the server, never from a request.
+        $table          = (string) $row['t'];
+        $counts[$table] = (int) $db->query('SELECT COUNT(*) FROM `' . str_replace('`', '``', $table) . '`')->fetch_row()[0];
+    }
+
+    return $counts;
+};
+/** The tables whose row count differs between two snapshots, as "table a -> b". @return list<string> */
+$countsMoved = static function (array $before, array $after): array {
+    $moved = [];
+    foreach ($after + $before as $table => $ignored) {
+        if (($before[$table] ?? -1) !== ($after[$table] ?? -1)) {
+            $moved[] = $table . ' ' . ($before[$table] ?? 'none') . ' -> ' . ($after[$table] ?? 'none');
+        }
+    }
+
+    return $moved;
+};
+
 /** The refusal's words for a word in the latitude box, as the one judge builds them. */
 $wordRefusal = (string) GeoLocation::positionRefusal('north', '-0.1278');
 $says = static fn (array $read): bool => str_contains($read['text'], $wordRefusal) === true;
@@ -535,18 +586,22 @@ $section = static function (
     array $extra,
     callable $state1,
     bool $isEdit
-) use ($formAt, $postAndRead, $says, $wordRefusal): void {
+) use ($formAt, $postAndRead, $says, $wordRefusal, $tableCounts, $countsMoved): void {
     echo "\n{$code}. {$title}\n";
     $form = $formAt($formUrl, $latBox, $extra);
     check("{$code}0 premise: the page draws the form, with both position boxes ({$latBox}, {$lngBox})",
         $form['status'] === 200 && $form['found'] === true && array_key_exists($lngBox, $form['fields']) === true,
         'status ' . $form['status'] . ', fields: ' . implode(', ', array_keys($form['fields'])));
     $before = $state1();
+    $counts = $tableCounts();
     $bad    = $postAndRead($postTo, array_merge($form['fields'], [$latBox => 'north', $lngBox => '-0.1278']));
+    $moved  = $countsMoved($counts, $tableCounts());
     check("{$code}1 a WORD in the latitude box is REFUSED, and the page the person lands on says why: \"{$wordRefusal}\"",
         $says($bad), 'status ' . $bad['status'] . '; page text: ' . mb_substr($bad['text'], 0, 300));
     check("{$code}2 ...and nothing was saved" . ($isEdit === true ? ' — the stored position included, which the old code WIPED' : ''),
         $state1() === $before, 'before ' . json_encode($before) . ', after ' . json_encode($state1()));
+    check("{$code}2b ...and no table in the whole database gained or lost a row",
+        $moved === [], 'moved: ' . implode('; ', $moved));
 };
 
 // =============================================================================
@@ -618,6 +673,50 @@ $venueId = (int) ($venue['venueID'] ?? 0);
 $venueRow = static fn (): ?array => one('SELECT `venueName`, `latitude`, `longitude` FROM `tblVenues` WHERE `venueID` = ?', 'i', [$venueId]);
 $section('B', 'Venues: editing one that has a position', '/venues/manage?edit=' . $venueId, '/venues/venue-save', 'latitude', 'longitude',
     ['venueName' => PR_MARK . ' venue renamed'], $venueRow, true);
+
+// ---- B4. Venues: a refused venue must not leave a NEW LANDLORD behind -------
+// The form can create a landlord as well as a venue. That used to happen ABOVE
+// every refusal, so each refused post added a landlord row (measured 0 -> 1).
+// Every refusal the page makes is posted here with a landlord name filled in.
+echo "\nB4. Venues: every refusal, with a NEW landlord's name filled in, writes nothing at all\n";
+$landlordName = PR_MARK . ' landlord';
+$orgCount = static fn (): int => (int) (one('SELECT COUNT(*) AS `n` FROM `tblAssetOrgs` WHERE `orgName` = ?', 's', [$landlordName])['n'] ?? -1);
+/**
+ * Post the venue form with a landlord name and $change; say whether $words are
+ * on the page the person lands on, and which tables gained or lost a row.
+ *
+ * @param array<string,string> $change
+ * @return array{said: bool, moved: list<string>, text: string}
+ */
+$landlordCase = static function (array $change, string $words) use ($formAt, $postAndRead, $tableCounts, $countsMoved, $landlordName): array {
+    $form   = $formAt('/venues/manage', 'latitude', ['venueName' => PR_MARK . ' venue L', 'countryCode' => 'GB', 'landlord_orgName' => $landlordName]);
+    $counts = $tableCounts();
+    $read   = $postAndRead('/venues/venue-save', array_merge($form['fields'], $change));
+
+    return ['said' => str_contains($read['text'], $words), 'moved' => $countsMoved($counts, $tableCounts()), 'text' => $read['text']];
+};
+$landlordCases = [
+    'B4a' => ['a word in the latitude box', ['latitude' => 'north', 'longitude' => '-0.1278'], $wordRefusal],
+    'B4b' => ['a what3words address that is not one', ['what3words' => 'not a three word address'], 'That does not look like a what3words address'],
+    'B4c' => ['a country that is not a two-letter code', ['countryCode' => 'Ireland'], 'give its country as a two-letter code'],
+    'B4d' => ['a time zone the portal does not know', ['timezone' => 'Mars/Olympus_Mons'], 'is not one this portal knows'],
+    'B4e' => ['no venue name', ['venueName' => ''], 'a venue name is required'],
+    'B4f' => ['an edit of a venue this organisation does not have', ['venueID' => '987654321'], 'That venue could not be found'],
+];
+foreach ($landlordCases as $label => [$what, $change, $words]) {
+    $r = $landlordCase($change, $words);
+    check("{$label} {$what}: refused with its own words, and NO table gained a row — the landlord included",
+        $r['said'] === true && $r['moved'] === [] && $orgCount() === 0,
+        'said: ' . var_export($r['said'], true) . '; moved: ' . implode('; ', $r['moved']) . '; page: ' . mb_substr($r['text'], 0, 200));
+}
+$form = $formAt('/venues/manage', 'latitude', ['venueName' => PR_MARK . ' venue L', 'countryCode' => 'GB', 'landlord_orgName' => $landlordName]);
+$postAndRead('/venues/venue-save', $form['fields']);
+$withLandlord = one('SELECT v.`venueID`, o.`orgName` FROM `tblVenues` v LEFT JOIN `tblAssetOrgs` o ON o.`orgID` = v.`landlordOrgID` WHERE v.`venueName` = ?', 's', [PR_MARK . ' venue L']);
+check('B5 control: the same form with nothing wrong IS saved, the venue naming the new landlord, and exactly one landlord made',
+    $withLandlord !== null && $withLandlord['orgName'] === $landlordName && $orgCount() === 1, json_encode($withLandlord) . ', landlords: ' . $orgCount());
+q('DELETE FROM `tblVenueUsageTypes` WHERE `venueID` IN (SELECT `venueID` FROM `tblVenues` WHERE `venueName` = ?)', 's', [PR_MARK . ' venue L']);
+q('DELETE FROM `tblVenues` WHERE `venueName` = ?', 's', [PR_MARK . ' venue L']);
+q('DELETE FROM `tblAssetOrgs` WHERE `orgName` = ?', 's', [$landlordName]);
 
 // ---- C. Resources (adding only: the page has no edit) ----------------------
 $resCount = static fn (string $name): int => (int) (one('SELECT COUNT(*) AS `n` FROM `tblResource` WHERE `name` = ?', 's', [$name])['n'] ?? -1);
@@ -701,6 +800,100 @@ $section('H', 'Small groups: editing a home that has a position', $homeUrl . '&p
     ['placeLabel' => PR_MARK . ' home renamed'], $homeRow, true);
 
 // =============================================================================
+// M. The model layer's own second refusal, asked directly
+// =============================================================================
+// Venues::saveVenue() and AssetRegister::saveLocation() ask the judge AGAIN, so
+// no other caller can drop a typed position or wipe a stored one. The pages
+// above never reach that second ask (each refuses first), so it is called here
+// directly -- in a separate PHP process that loads the COPY's classes, so a
+// plant in section Z changes what runs.
+echo "\nM. Venues::saveVenue() and AssetRegister::saveLocation() refuse a typed position they cannot use\n";
+file_put_contents($child . $sep . 'model-call.php', <<<'PROBE'
+<?php
+// Written by tools/position-refusal-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+$web = __DIR__ . DIRECTORY_SEPARATOR . 'web';
+define('PORTAL_ROOT', $web);
+define('PORTAL_CORE', $web . DIRECTORY_SEPARATOR . '_core');
+define('PORTAL_APPS', $web . DIRECTORY_SEPARATOR . '_apps');
+define('PORTAL_WEBROOT', $web . DIRECTORY_SEPARATOR . 'public_html');
+spl_autoload_register(static function (string $class) use ($web): void {
+    if (str_starts_with($class, 'Portal\\Core\\') === true) {
+        $file = $web . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . substr($class, 12) . '.php';
+        if (is_file($file) === true) {
+            require $file;
+        }
+    }
+});
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli((string) getenv('PR_DB_HOST'), (string) getenv('PR_DB_USER'), (string) getenv('PR_DB_PASS'), (string) getenv('PR_DB_NAME'), (int) getenv('PR_DB_PORT'));
+$mysqli->set_charset('utf8mb4');
+$GLOBALS['mysqli'] = $mysqli;
+$a = json_decode((string) ($argv[1] ?? ''), true);
+$r = $a['what'] === 'venue'
+    ? \Portal\Core\Venues::saveVenue((int) $a['site'], (int) $a['id'], $a['data'], (int) $a['user'])
+    : \Portal\Core\AssetRegister::saveLocation((int) $a['site'], (int) $a['id'], $a['data'], (int) $a['user']);
+echo json_encode(['returned' => $r]);
+PROBE);
+/**
+ * Call one of the two methods in its own process; answer what it returned (or
+ * null and the output, when it did not run) and which tables moved.
+ *
+ * @param array<string,string> $data
+ * @return array{returned: ?int, moved: list<string>, out: string}
+ */
+$modelCall = static function (string $what, int $id, array $data) use ($child, $sep, $siteId, $tableCounts, $countsMoved, $dbHost, $dbUser, $dbPass, $dbName, $dbPort): array {
+    $env = getenv();
+    $env['PR_DB_HOST'] = $dbHost;
+    $env['PR_DB_USER'] = $dbUser;
+    $env['PR_DB_PASS'] = $dbPass;
+    $env['PR_DB_NAME'] = $dbName;
+    $env['PR_DB_PORT'] = (string) $dbPort;
+    $counts = $tableCounts();
+    $proc   = proc_open(
+        [PHP_BINARY, '-d', 'display_errors=stderr', $child . $sep . 'model-call.php',
+            json_encode(['what' => $what, 'site' => $siteId, 'id' => $id, 'data' => $data, 'user' => PR_ADMIN])],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        $child,
+        $env
+    );
+    $out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($proc);
+    $answer = json_decode(trim((string) preg_replace('/^.*?(\{"returned".*\})\s*$/s', '$1', $out)), true);
+
+    return ['returned' => is_array($answer) === true ? (int) $answer['returned'] : null, 'moved' => $countsMoved($counts, $tableCounts()), 'out' => $out];
+};
+$venueBad = ['venueName' => PR_MARK . ' model venue', 'countryCode' => 'GB', 'latitude' => 'north', 'longitude' => '-0.1278', 'what3words' => ''];
+$locBad   = ['locationName' => PR_MARK . ' model location', 'latitude' => 'north', 'longitude' => '-0.1278'];
+$modelCases = [
+    'M1' => ['saveVenue(), adding a venue', 'venue', 0, $venueBad, null],
+    'M2' => ['saveVenue(), editing the venue that has a position', 'venue', $venueId, ['venueName' => PR_MARK . ' venue renamed'] + $venueBad, $venueRow],
+    'M3' => ['saveLocation(), adding a location', 'location', 0, $locBad, null],
+    'M4' => ['saveLocation(), editing the location that has a position', 'location', $locId, ['locationName' => PR_MARK . ' location renamed'] + $locBad, $locRow],
+];
+foreach ($modelCases as $label => [$what, $kind, $id, $data, $rowOf]) {
+    $rowBefore = $rowOf !== null ? $rowOf() : null;
+    $r = $modelCall($kind, $id, $data);
+    check("{$label} {$what} with a WORD in the latitude: answers 0, and nothing was written"
+        . ($rowOf !== null ? ' — the stored position kept' : ''),
+        $r['returned'] === 0 && $r['moved'] === [] && ($rowOf === null || $rowOf() === $rowBefore),
+        'returned ' . var_export($r['returned'], true) . '; moved: ' . implode('; ', $r['moved']) . '; output: ' . mb_substr($r['out'], 0, 300));
+}
+$control = $modelCall('location', 0, ['latitude' => '51.5074', 'longitude' => '-0.1278'] + $locBad);
+check('M5 control: the same saveLocation() call with a usable position DOES save (so a 0 above is a refusal, and the call really ran)',
+    ($control['returned'] ?? 0) > 0 && one('SELECT `locationID` FROM `tblAssetLocations` WHERE `locationName` = ?', 's', [PR_MARK . ' model location']) !== null,
+    'returned ' . var_export($control['returned'], true) . '; output: ' . mb_substr($control['out'], 0, 300));
+q('DELETE FROM `tblAssetLocations` WHERE `locationName` = ?', 's', [PR_MARK . ' model location']);
+$controlV = $modelCall('venue', 0, ['latitude' => '51.5074', 'longitude' => '-0.1278'] + $venueBad);
+check('M6 control: the same saveVenue() call with a usable position DOES save',
+    ($controlV['returned'] ?? 0) > 0, 'returned ' . var_export($controlV['returned'], true) . '; output: ' . mb_substr($controlV['out'], 0, 300));
+q('DELETE FROM `tblVenueUsageTypes` WHERE `venueID` IN (SELECT `venueID` FROM `tblVenues` WHERE `venueName` = ?)', 's', [PR_MARK . ' model venue']);
+q('DELETE FROM `tblVenues` WHERE `venueName` = ?', 's', [PR_MARK . ' model venue']);
+
+// =============================================================================
 // Z. Plants, in the copy
 // =============================================================================
 echo "\nZ. Plants: each refusal switched off in the COPY, and the check must see it\n";
@@ -759,8 +952,87 @@ foreach ($plants as [$code, $what, $file, [$from, $to], $formUrl, $postTo, $latB
             : ($r['said'] === true ? 'the refusal was still on the page, so this plant changed nothing the check can see' : 'the file was not put back'));
 }
 
+/**
+ * A plant of any shape: $transform turns the file's text into the planted text
+ * (null = it could not be applied); $scenario runs with it in place; the file
+ * is then put back and confirmed byte for byte.
+ *
+ * @return array{applied: bool, result: mixed, restored: bool}
+ */
+$plantRun = static function (string $file, callable $transform, callable $scenario) use ($child, $sep): array {
+    $path    = $child . $sep . 'web' . $sep . str_replace('/', $sep, $file);
+    $before  = (string) file_get_contents($path);
+    $planted = $transform($before);
+    if (is_string($planted) === false || $planted === $before) {
+        return ['applied' => false, 'result' => null, 'restored' => true];
+    }
+    file_put_contents($path, $planted);
+    clearstatcache(true, $path);
+    try {
+        $result = $scenario();
+    } finally {
+        file_put_contents($path, $before);
+        clearstatcache(true, $path);
+    }
+
+    return ['applied' => true, 'result' => $result, 'restored' => (string) file_get_contents($path) === $before];
+};
+$swapOnce = static fn (string $from, string $to): callable => static fn (string $text): ?string
+    => substr_count($text, $from) === 1 ? str_replace($from, $to, $text) : null;
+$landlordRed = static function (array $r) use ($orgCount): bool {
+    // Red means: the landlord check of B4 would fail -- a row moved.
+    $red = ($r['moved'] ?? []) !== [] || $orgCount() !== 0;
+    q('DELETE FROM `tblAssetOrgs` WHERE `orgName` = ?', 's', [PR_MARK . ' landlord']);
+    q('DELETE FROM `tblVenueUsageTypes` WHERE `venueID` IN (SELECT `venueID` FROM `tblVenues` WHERE `venueName` = ?)', 's', [PR_MARK . ' venue L']);
+    q('DELETE FROM `tblVenues` WHERE `venueName` = ?', 's', [PR_MARK . ' venue L']);
+
+    return $red;
+};
+// Z12: the landlord's creation moved back UP, above every refusal, where it was.
+$moveUp = static function (string $text): ?string {
+    $start = strpos($text, '    // ✍️ THE FIRST WRITE.');
+    $end   = strpos($text, "    \$savedId = Venues::saveVenue(");
+    $to    = strpos($text, '    // 📍 #456 Chunk A — pre-validate');
+    if ($start === false || $end === false || $to === false || $to > $start) {
+        return null;
+    }
+    $block = substr($text, $start, $end - $start);
+    $text  = substr($text, 0, $start) . substr($text, $end);
+
+    return substr($text, 0, $to) . $block . substr($text, $to);
+};
+$plants2 = [
+    ['Z12', 'the landlord created ABOVE the refusals again (B4a must see a landlord row)', '_apps/venues/venue-save.php', $moveUp,
+        static fn (): array => $landlordCase(['latitude' => 'north', 'longitude' => '-0.1278'], $wordRefusal)],
+    ['Z13', 'the new "no venue name" refusal switched off (B4e must see a landlord row)', '_apps/venues/venue-save.php',
+        $swapOnce("    if (trim(\$data['venueName']) === '') {", "    if (false && trim(\$data['venueName']) === '') {"),
+        static fn (): array => $landlordCase(['venueName' => ''], 'a venue name is required')],
+];
+foreach ($plants2 as [$code, $what, $file, $transform, $scenario]) {
+    $r = $plantRun($file, $transform, $scenario);
+    check("{$code} plant, {$what}: the check goes RED, and the file is put back byte for byte",
+        $r['applied'] === true && $landlordRed($r['result'] ?? []) === true && $r['restored'] === true,
+        $r['applied'] === false ? 'NOT APPLIED in ' . $file : ($r['restored'] === false ? 'the file was not put back' : 'nothing moved, so this plant changed nothing the check can see'));
+}
+// Z14, Z15: the model layer's second ask switched off; M1 and M3 must go red.
+$plants3 = [
+    ['Z14', 'Venues::saveVenue()\'s own refusal', '_core/Venues.php', 'venue', $venueBad, PR_MARK . ' model venue'],
+    ['Z15', 'AssetRegister::saveLocation()\'s own refusal', '_core/AssetRegister.php', 'location', $locBad, PR_MARK . ' model location'],
+];
+$guard = "        if (GeoLocation::typedPositionProblem(\$data['latitude'] ?? null, \$data['longitude'] ?? null) !== '') {";
+foreach ($plants3 as [$code, $what, $file, $kind, $data, $name]) {
+    $r = $plantRun($file, $swapOnce($guard, str_replace('if (', 'if (false && ', $guard)), static fn (): array => $modelCall($kind, 0, $data));
+    $red = $r['applied'] === true && (($r['result']['returned'] ?? 0) !== 0 || ($r['result']['moved'] ?? []) !== []);
+    q('DELETE FROM `tblVenueUsageTypes` WHERE `venueID` IN (SELECT `venueID` FROM `tblVenues` WHERE `venueName` = ?)', 's', [$name]);
+    q('DELETE FROM `tblVenues` WHERE `venueName` = ?', 's', [$name]);
+    q('DELETE FROM `tblAssetLocations` WHERE `locationName` = ?', 's', [$name]);
+    check("{$code} plant, {$what} switched off: the direct call's check goes RED (it saved), and the file is put back byte for byte",
+        $red === true && $r['restored'] === true,
+        $r['applied'] === false ? 'NOT APPLIED in ' . $file : 'returned ' . var_export($r['result']['returned'] ?? null, true));
+}
+
 // ── Summary ─────────────────────────────────────────────────────────────────
-$expected = 2 + 14 * 3 + 8 + count($plants);
+$expected = 2 + 14 * 4 + 8 + count($landlordCases) + 1 + count($modelCases) + 2 + count($plants) + count($plants2) + count($plants3);
 printf("\n%d passed, %d failed, %d ran of %d expected\n", $passed, $failed, $passed + $failed, $expected);
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
 if (trim($log) !== '') {

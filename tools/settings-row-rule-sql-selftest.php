@@ -46,8 +46,11 @@
  *   - It runs the rule on the names below. A look-alike nobody has thought of
  *     is caught only if the rule is right, which is what this tests for the
  *     ones listed in `SettingsRowRule::isSafeName()`'s own note.
- *   - It does not create the race itself (two requests, a row renamed in
- *     between). It runs the very statement that race would reach.
+ *   - It does not create the race itself (a row renamed between the save's
+ *     read and its write), and its statements are typed HERE, so it cannot
+ *     see the call taken out of settings/save.php. Check R8 of
+ *     tools/settings-locks-selftest.php makes that race against the real save,
+ *     and its plant P14 takes the call out (#1048, round 2).
  *   - The plants change the TEXT this file is handed, in memory. A plant in the
  *     source file itself was run by hand when this was written (#1048's
  *     commit message records it); a test cannot safely edit the repository.
@@ -420,6 +423,6 @@ if ($passed + $failed !== $expected) {
     echo "The number of checks is not the number expected, so a block was skipped or ran twice.\n";
     exit(1);
 }
-echo "It runs the rule's real text on a temporary copy of tblSettings; it does not\n";
-echo "create the race (two requests, a row renamed in between) that would reach it.\n";
+echo "It runs the rule's real text on a temporary copy of tblSettings, in statements\n";
+echo "typed here; R8 of tools/settings-locks-selftest.php drives the real save's own.\n";
 exit($failed === 0 ? 0 : 1);
