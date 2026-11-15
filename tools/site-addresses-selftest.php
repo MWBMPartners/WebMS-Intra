@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 126; // + S16b, S17b, S26b-S26m, S27b-S27e (#910)
-const EXPECTED_NO_CRAWL = 116;
+const EXPECTED_FULL     = 128; // + S16b, S17b, S26b-S26m, S27b-S27e, S33, N10b (#910)
+const EXPECTED_NO_CRAWL = 118;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1238,6 +1238,10 @@ if ($only === []) {
     ok('S30 from the default organisation\'s sign-in page, an address with B\'s part is refused', sentTo($jarOne, '', B . '/account') === '/', 'sent to ' . sentTo($jarOne, '', B . '/account'));
     ok('S31 and with B\'s part in capitals, which the database reads as the same organisation', sentTo($jarOne, '', '/' . strtoupper(KEY_B) . '/account') === '/', 'sent to ' . sentTo($jarOne, '', '/' . strtoupper(KEY_B) . '/account'));
     ok('S32 control: from there, a plain address of the default organisation is kept', sentTo($jarOne, '', '/account?tab=1') === '/account?tab=1', 'sent to ' . sentTo($jarOne, '', '/account?tab=1'));
+    // #910 round 6: an address beginning with an ENCODED "/" is relative to a
+    // browser, which sends "/<the page's folder>/%2Fx/account:0" — a path the
+    // server cannot read. The judge used to ask only the decoded form.
+    ok('S33 from the default organisation, "%2Fx/account:0" (an encoded "/" first, relative to a browser) is refused', sentTo($jarOne, '', '%2Fx/account:0') === '/', 'sent to ' . sentTo($jarOne, '', '%2Fx/account:0'));
 
     $out = req($jarMember, 'GET', B . '/logout');
     ok('S33 signing out of B ends on B\'s front page in all three ways: the script, the fallback without scripts, and the link',
@@ -1434,6 +1438,9 @@ if ($only === []) {
     setWay(false, 'session');
     $jarSingle = signIn('u1', '', '', '?redirect=%2Faccount%3Ftab%3D2');
     ok('N10 one organisation only: back to the address asked for after signing in, and nowhere else for another site', $lastSignIn['location'] === '/account?tab=2' && sentTo($jarSingle, '', 'https://outside.selftest.invalid/') === '/', said($lastSignIn));
+    ok('N10b one organisation only (#910 round 6): "%2Fx/account:0" and "/account:0" are refused, "/account:0?y=1" is kept',
+        sentTo($jarSingle, '', '%2Fx/account:0') === '/' && sentTo($jarSingle, '', '/account:0') === '/' && sentTo($jarSingle, '', '/account:0?y=1') === '/account:0?y=1',
+        'sent to ' . sentTo($jarSingle, '', '%2Fx/account:0') . ' / ' . sentTo($jarSingle, '', '/account:0') . ' / ' . sentTo($jarSingle, '', '/account:0?y=1'));
     $page = req($jarSingle, 'GET', '/');
     preg_match('#<nav class="navbar.*?</nav>#s', $page['body'], $menuSingle);
     $plainMenu = addressesIn($menuSingle[0] ?? '');

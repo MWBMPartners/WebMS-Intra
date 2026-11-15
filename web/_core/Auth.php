@@ -1894,10 +1894,10 @@ class Auth
      * `redirect` back to such a page and the language switch's return. The
      * owner decided the judge looks only at the part before the first "/",
      * "?" or "#". For an address this judge can accept, that part is EMPTY:
-     * the rule "must begin with a single /" below is checked on the decoded
-     * address, and decoding changes only "%" codes, so the address as sent
-     * (which is what is handed back) can then begin only with "/" or a "%"
-     * code — and a scheme must begin with a letter. That rule is what now
+     * the rule "must begin with a single /" below is checked on the address
+     * AS SENT and once decoded (round 6: as sent too), so nothing stands
+     * before the first "/" in either — and a scheme must begin with a letter
+     * and stand before it. That rule is what now
      * keeps `javascript:`, `data:` and every other scheme out. So there is no separate scheme test
      * any more — one that could never fire would only look like protection.
      * If the leading-"/" rule is ever loosened, the scheme question comes back
@@ -2021,10 +2021,24 @@ class Auth
         // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
         $decoded = rawurldecode($url);
 
-        // 🚫 Must start with a single forward slash (relative path). This is
-        //    also the scheme rule (#910, D-161): a scheme can only stand before
-        //    the first "/", "?" or "#", and here nothing stands before it.
-        if (str_starts_with($decoded, '/') === false) {
+        // 🚫 Must start with a single forward slash (relative path), AS SENT
+        //    and once decoded. This is also the scheme rule (#910, D-161): a
+        //    scheme can only stand before the first "/", "?" or "#", and here
+        //    nothing stands before it.
+        //
+        //    AS SENT TOO (round 6 of #910's check). Only the decoded form was
+        //    asked, so "%2Fx/a:0" was accepted: decoded it begins with "/",
+        //    but a browser does not decode it first — it reads "%2Fx/a:0" as
+        //    RELATIVE to the page it is on and sends "/payments/%2Fx/a:0",
+        //    which is not the address the rules below judged. With a raw "/"
+        //    first, what they judge is what a browser sends. A raw tab, line
+        //    break or space in front (which a browser would strip) is refused
+        //    here too, since it is not a "/"; "%252F" decodes only to "%2F" and
+        //    is refused by the decoded half; "/%2F…" decodes to "//" and is
+        //    refused next.
+        //    Nothing the portal builds writes a come-back address beginning
+        //    with an encoded "/".
+        if (str_starts_with($url, '/') === false || str_starts_with($decoded, '/') === false) {
             return $fallback;
         }
 
@@ -2093,7 +2107,10 @@ class Auth
         //    through Site::pathOfRequest(), the same rule the server uses, so
         //    the two cannot drift. A time in the QUERY is unaffected
         //    ("/calendar?from=2026-06-01T10:30" reads as "/calendar"). This is
-        //    refused in every set-up: with one organisation such an address is
+        //    refused in every set-up (truly so only since round 6, when the
+        //    address as sent was required to begin with "/" as well; before,
+        //    "%2Fx/a:0" was judged as "/a:0" while a browser sent something
+        //    else): with one organisation such an address is
         //    answered as the front page, which is not where it says it goes,
         //    and no page the portal draws has such a path.
         //

@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 284; // counted from the run; rounds 2-5 of #910 added hostile cases over seven loops
+const EXPECTED = 301; // counted from the run; rounds 2-5 of #910 added hostile cases over seven loops
 
 function refuse(string $why): never
 {
@@ -648,6 +648,10 @@ function hostile(string $prefix, ?string $other): array
         'a path holding a time, "2026-06-01T10:30"' => $prefix . '/2026-06-01T10:30',
         'a path "a:0/p"'                         => $prefix . '/a:0/p',
         'a path "a:0" with a fragment (a browser does not send the fragment)' => $prefix . '/a:0#x',
+        // #910 round 6: an ENCODED "/" first. Decoded it begins with "/", but a
+        // browser reads it as RELATIVE and sends something else entirely.
+        'an encoded "/" first ("%2Fx/a:0")'      => '%2Fx/a:0',
+        'an encoded "/" first, small letters ("%2fx/a:0")' => '%2fx/a:0',
         // #910 round 5: a "." part. Harmless inside one organisation ("/./x" is
         // "/x"), refused anyway because an address that says one place and goes
         // to another is never one the portal writes; with one organisation only
@@ -874,6 +878,58 @@ $got = req($jarF, 'GET', '/people?q=x%09y&lang=cy');
 ok('F10 one organisation: a query holding an encoded tab comes back to the same page', $got['status'] === 302 && $got['location'] === '/people?q=x%09y', said($got));
 $got = req($jarF, 'GET', '/%5Coutside.example?lang=cy');
 ok('F11 one organisation: an ENCODED backslash in the path is still refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
+
+// =============================================================================
+// G. The three readers of a request's path share ONE rule (#910 round 6)
+// =============================================================================
+// Site::detectFromPath(), Router::extractPath() and Auth::safeRedirectUrl() must
+// all read a path through Site::pathOfRequest(), or the judge can accept an
+// address the server reads differently (round 5's regression). Read with PHP's
+// own tokeniser, comments dropped, each method's body only: the call must be
+// there and no parse_url() of its own.
+head('G. One rule for reading a request\'s path');
+$methodCode = static function (string $file, string $method): string {
+    $tokens = token_get_all((string) file_get_contents($file));
+    $code = ''; $depth = 0; $inside = false; $seenName = false; $started = false;
+    foreach ($tokens as $i => $t) {
+        $text = is_array($t) ? $t[1] : $t;
+        if (is_array($t) && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+            continue;
+        }
+        if ($inside === false) {
+            if (is_array($t) && $t[0] === T_STRING && $t[1] === $method) {
+                $prev = $tokens[$i - 2] ?? null;
+                $seenName = is_array($prev) && $prev[0] === T_FUNCTION;
+            }
+            if ($seenName === true && $text === '{') {
+                $inside = true; $depth = 1; $started = true;
+            }
+            continue;
+        }
+        if ($text === '{' || (is_array($t) && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) {
+            $depth++;
+        } elseif ($text === '}') {
+            $depth--;
+            if ($depth === 0) {
+                break;
+            }
+        }
+        $code .= $text;
+    }
+
+    return $started === true ? $code : '';
+};
+$core = $repo . $sep . 'web' . $sep . '_core' . $sep;
+foreach ([
+    'G01 Site::detectFromPath()'   => [$core . 'Site.php', 'detectFromPath', 'self::pathOfRequest('],
+    'G02 Router::extractPath()'    => [$core . 'Router.php', 'extractPath', 'Site::pathOfRequest('],
+    'G03 Auth::safeRedirectUrl()'  => [$core . 'Auth.php', 'safeRedirectUrl', 'Site::pathOfRequest('],
+] as $label => [$file, $method, $call]) {
+    $body = $methodCode($file, $method);
+    ok($label . ' reads the path through Site::pathOfRequest() and has no parse_url() of its own',
+        $body !== '' && str_contains($body, $call) === true && str_contains($body, 'parse_url(') === false,
+        $body === '' ? 'method not found' : 'call ' . var_export(str_contains($body, $call), true) . ', own parse_url ' . var_export(str_contains($body, 'parse_url('), true));
+}
 
 // =============================================================================
 head('Summary');
