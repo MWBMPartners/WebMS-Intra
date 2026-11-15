@@ -516,6 +516,152 @@ final class SettingLimit
     }
 
     /**
+     * 🔍 What ONE level has stored for a key, exactly — null when that level
+     *    has no row.
+     *
+     * `$siteId` null asks the installation's own row; a number asks that
+     * organisation's own row and NEVER falls back to the installation's. A
+     * box filled from a fallback shows a number the organisation never chose,
+     * and one press of Save makes it its own (#674, #677). Answers the text as
+     * stored; what it MEANS is for `oneLimit()` and the caller.
+     *
+     * Written here once (#989, #992) because `TranscriptRetention::ownDays()`
+     * and the repeats page each carry their own copy, and a third and fourth
+     * copy is how the copies come to disagree.
+     *
+     * @param \mysqli  $db     An open connection.
+     * @param string   $dotKey The setting, dotted.
+     * @param int|null $siteId The organisation, or null for the installation.
+     *
+     * @return string|null
+     */
+    public static function storedAtLevel(\mysqli $db, string $dotKey, ?int $siteId): ?string
+    {
+        if ($siteId === null) {
+            $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1');
+            $stmt->bind_param('s', $dotKey);
+        } else {
+            $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ? LIMIT 1');
+            $stmt->bind_param('si', $dotKey, $siteId);
+        }
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row === null ? null : (string) ($row['settingValue'] ?? '');
+    }
+
+    /**
+     * 💾 Store or refuse ONE level's figure for a limit, judged under a lock.
+     *
+     * THE ORGANISATION'S figure is judged against the installation's row read
+     * LIVE and locked (`FOR UPDATE`) inside the transaction that writes, for
+     * #687's measured reason: a gate that compares against the request's
+     * settings snapshot let two ordinary overlapping saves store a figure
+     * above the ceiling. The transaction is opened FIRST, because a lock
+     * outside one is decoration (#697). Anybody saving the installation's
+     * figure takes the same row lock, so the two wait for each other.
+     *
+     * THE INSTALLATION'S figure is held only to `$min` and the hard maximum.
+     * Lowering it below what an organisation has stored is allowed: every
+     * reader takes the smaller of the two (`effective()`, `cappedForSite()`),
+     * so the organisation is held to it without its stored figure changing —
+     * the same as the repeating-events page.
+     *
+     * `$value` null DELETES the organisation's own row ("follow the
+     * installation"). It is refused for the installation's row, whose absence
+     * would silently mean the built-in default. The caller must have
+     * established the field really ARRIVED before passing null (#677).
+     *
+     * It REFUSES, never clamps, and answers why. Recording the refusal is the
+     * caller's, because only the caller knows what the number was for.
+     *
+     * @param \mysqli  $db            An open connection, NOT already in a transaction.
+     * @param int|null $siteId        The organisation, or null for the installation.
+     * @param string   $dotKey        The setting, dotted.
+     * @param int|null $value         The figure to store, or null to follow the installation.
+     * @param int      $default       The built-in default.
+     * @param int      $min           The least that may be stored (1 where 0 has no meaning).
+     * @param int      $hardMax       The most this may ever be.
+     * @param bool     $zeroIsLargest True when 0 means "for ever" / "no limit".
+     *
+     * @return array{saved:bool, reason:string, allowed:int}
+     *         `reason` is '' when saved, otherwise 'below-min', 'above-hard-max',
+     *         'above-installation', 'not-at-installation' or 'database'.
+     *         `allowed` is the ceiling the save was judged against, for the words.
+     */
+    public static function saveAtLevel(\mysqli $db, ?int $siteId, string $dotKey, ?int $value, int $default, int $min, int $hardMax, bool $zeroIsLargest = false): array
+    {
+        if ($value === null && $siteId === null) {
+            return ['saved' => false, 'reason' => 'not-at-installation', 'allowed' => $hardMax];
+        }
+        if ($value !== null && $value < $min && ($zeroIsLargest === false || $value !== 0)) {
+            return ['saved' => false, 'reason' => 'below-min', 'allowed' => $hardMax];
+        }
+        if ($value !== null && $value > $hardMax) {
+            return ['saved' => false, 'reason' => 'above-hard-max', 'allowed' => $hardMax];
+        }
+
+        $allowed = $hardMax;
+        $db->begin_transaction();
+        try {
+            // 🔒 The installation's row, live and locked, on EVERY save: it is
+            //    what serialises an organisation's save against a change to
+            //    the ceiling.
+            $lock = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL FOR UPDATE');
+            $lock->bind_param('s', $dotKey);
+            $lock->execute();
+            $row = $lock->get_result()->fetch_assoc();
+            $lock->close();
+            $ceilingStored = $row === null ? null : (string) ($row['settingValue'] ?? '');
+
+            if ($siteId !== null && $value !== null) {
+                $allowed = self::ceilingFrom($ceilingStored, $default, $hardMax, $zeroIsLargest);
+                $reason  = self::whyNotAllowedFor($value, $ceilingStored, $default, $hardMax, $zeroIsLargest);
+                if ($reason !== '') {
+                    $db->rollback();
+
+                    return ['saved' => false, 'reason' => $reason, 'allowed' => $allowed];
+                }
+            }
+
+            if ($value === null) {
+                $del = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
+                $del->bind_param('si', $dotKey, $siteId);
+                $del->execute();
+                $del->close();
+            } else {
+                // The installation's row (siteID NULL) matches the unique key
+                // on (settingKey, siteScope), migration 187; an organisation's
+                // matches (settingKey, siteID) normally.
+                $text = (string) $value;
+                $ins  = $db->prepare(
+                    'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`, `updatedAt`) '
+                    . 'VALUES (?, ?, ?, ?, 0, NOW()) '
+                    . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`), `updatedAt` = NOW()'
+                );
+                $defaultText = (string) $default;
+                $ins->bind_param('isss', $siteId, $dotKey, $text, $defaultText);
+                $ins->execute();
+                $ins->close();
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+                // The connection has gone; the server discards the transaction.
+            }
+            // The fault's own words are not logged: they can quote a value.
+            error_log('[WebMS-Intra] SettingLimit: a limit (' . $dotKey . ') could not be saved.');
+
+            return ['saved' => false, 'reason' => 'database', 'allowed' => $allowed];
+        }
+
+        return ['saved' => true, 'reason' => '', 'allowed' => $allowed];
+    }
+
+    /**
      * ⚙️ One dotted key out of a settings array, which the loader nests.
      *
      * `assign_setting()` in bootstrap.php turns 'a.b.c' into

@@ -395,6 +395,10 @@ $state['proc'] = proc_open(
         '-d', 'session.save_path=' . $child . $sep . 'sessions',
         '-d', 'error_log=' . $child . $sep . 'php-errors.log',
         '-d', 'log_errors=1', '-d', 'display_errors=0', '-d', 'max_execution_time=120',
+        // Section O plants faults into the copy mid-run. With opcache on (it is
+        // for the built-in server whatever opcache.enable_cli says) a changed
+        // file is not re-read for two seconds, and every plant passed: measured.
+        '-d', 'opcache.enable=0',
         '-S', '127.0.0.1:' . $port,
         '-t', $child . $sep . 'web' . $sep . 'public_html',
         $child . $sep . 'router.php',
@@ -539,7 +543,7 @@ $removeAll = static function () use ($db, &$made, $site): void {
     run($db, "DELETE FROM `tblErrors` WHERE `errorTitle` = 'Currency selftest marker'");
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
 };
-$touched = "'org.currency', 'org.address.countryCode', 'giving.enabled', 'payments.enabled', 'payments.provider', 'translation.enabled', 'transcription.enabled', 'sms.enabled', 'ai_assist.enabled'";
+$touched = "'org.currency', 'org.address.countryCode', 'giving.enabled', 'payments.enabled', 'payments.provider', 'translation.enabled', 'transcription.enabled', 'sms.enabled', 'ai_assist.enabled', 'giving.online.maxGift'";
 $settingsBefore = rows($db, "SELECT * FROM `tblSettings` WHERE `settingKey` IN ({$touched})");
 register_shutdown_function(static function () use ($db, $removeAll, $settingsBefore, $touched): void {
     try {
@@ -2188,6 +2192,151 @@ check('N19 the in-app help (/help/admin) says what the card does, in the sentenc
     $helpPage['status'] === 200 && $helpText !== '' && $helpMissing === [],
     'HTTP ' . $helpPage['status'] . '; missing: ' . implode(' | ', $helpMissing));
 check('N20 ...and no longer says the installation\'s values were fixed "when it was installed"', str_contains((string) $helpText, 'chosen for the whole installation when it was installed') === false);
+
+// =============================================================================
+// O. The largest online gift is a limit at two levels (#992, D-172)
+// =============================================================================
+// It was a fixed 10,000.00 in every currency. Driven through the REAL
+// checkout (the provider here is one this release refuses, so a payment row
+// written means the gift got PAST the ceiling, and nothing leaves this
+// machine) and the REAL Member limits page, as the global administrator and as
+// an administrator of this organisation only. Each guard is then planted out
+// of the COPY of web/ and must turn its check red.
+head('Section O — the largest online gift is a limit, installation capping organisation (#992)');
+$giftKey = \Portal\Core\Giving::ONLINE_GIFT_MAX_KEY;
+$setting('org.currency', 'EUR', $site);
+$setting($giftKey, '1000000', null);
+run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL', 's', [$giftKey]);
+// A second organisation, whose own figure must never reach this one.
+run($db, "INSERT INTO `tblSites` (`siteKey`, `siteName`, `timezone`, `isActive`) VALUES ('selftest-currency-gift-b', 'Selftest currency gift B', 'UTC', 1)");
+$siteGiftB = (int) $db->insert_id;
+/** Give `$amount` online to this run's category: did a payment row get written (= past the ceiling), and what did the giver read? */
+$give = static function (string $amount) use ($db, $http, $freshToken, $category): array {
+    $before = (int) (rows($db, 'SELECT COALESCE(MAX(`paymentID`), 0) AS `m` FROM `tblPayment`')[0]['m']);
+    $http('POST', '/payments/checkout', ['csrf_token' => $freshToken('/giving/give'), 'amount' => $amount, 'purpose' => 'giving', 'purposeRef' => (string) $category, 'return_to' => '/giving/give']);
+    $rows = rows($db, 'SELECT `amountPence` FROM `tblPayment` WHERE `paymentID` > ?', 'i', [$before]);
+    $page = html_entity_decode((string) $http('GET', '/giving/give')['body'], ENT_QUOTES, 'UTF-8');
+
+    return ['past' => count($rows) === 1, 'said' => $page];
+};
+$ownGift = static fn (int $level): ?string => ($r = rows($db, 'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', [$giftKey, $level])) === [] ? null : (string) $r[0]['settingValue'];
+$instGift = static fn (): ?string => ($r = rows($db, 'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$giftKey])) === [] ? null : (string) $r[0]['settingValue'];
+/** One post to the Member limits page; answers the message the page then shows. */
+$saveLimit = static function (callable $as, string $scope, string $value): string {
+    $page = $as('GET', '/admin/settings/member-limits');
+    preg_match('/name="csrf_token" value="([^"]+)"/', (string) $page['body'], $m);
+    $as('POST', '/admin/settings/member-limits/save', ['csrf_token' => html_entity_decode($m[1] ?? '', ENT_QUOTES, 'UTF-8'), 'scope' => $scope, 'limit' => 'online-gift', 'value' => $value]);
+
+    return html_entity_decode((string) $as('GET', '/admin/settings/member-limits')['body'], ENT_QUOTES, 'UTF-8');
+};
+
+/** O1-O4: the checkout follows the limit in force. */
+$scnCeiling = static function () use ($give, $setting, $giftKey, $site, $siteGiftB, $db): array {
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL', 's', [$giftKey]);
+    $setting($giftKey, '1000000', null);
+    $setting($giftKey, '100', $siteGiftB);                   // the OTHER organisation's own figure: 1.00
+    $atDefault  = $give('10000.00');
+    $overDefault = $give('10000.01');
+    $setting($giftKey, '500000', null);                       // installation: 5,000.00
+    $overInst = $give('6000.00');
+    $atInst   = $give('5000.00');
+    $setting($giftKey, '300000', $site);                      // this organisation: 3,000.00, lower
+    $overOwn  = $give('4000.00');
+    $setting($giftKey, '900000', $site);                      // this organisation's figure ABOVE the installation's (written by hand)
+    $overOwnAbove = $give('6000.00');
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL', 's', [$giftKey]);
+    $setting($giftKey, '1000000', null);
+
+    return [
+        'default'   => $atDefault['past'] === true && $overDefault['past'] === false
+            && str_contains($overDefault['said'], 'The most that can be given online here in one gift is €10,000.00. For a larger gift, please contact the office. Nothing was charged.'),
+        'otherOrg'  => $atDefault['past'] === true,
+        'inst'      => $overInst['past'] === false && $atInst['past'] === true && str_contains($overInst['said'], '€5,000.00'),
+        'ownLower'  => $overOwn['past'] === false && str_contains($overOwn['said'], '€3,000.00'),
+        'ownAbove'  => $overOwnAbove['past'] === false && str_contains($overOwnAbove['said'], '€5,000.00'),
+        'detail'    => json_encode([$atDefault['past'], $overDefault['past'], $overInst['past'], $atInst['past'], $overOwn['past'], $overOwnAbove['past']]),
+    ];
+};
+/** O5-O9: the Member limits page, at both levels. */
+$scnPage = static function () use ($http, $httpOrg, $saveLimit, $setting, $giftKey, $site, $db, $ownGift, $instGift): array {
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL', 's', [$giftKey]);
+    $setting($giftKey, '500000', null);
+    $above   = $saveLimit($httpOrg, 'site', '9000.00');
+    $aboveOk = $ownGift($site) === null && str_contains($above, 'This installation allows at most €5,000.00, so that was not saved.');
+    $zero    = $saveLimit($httpOrg, 'site', '0');
+    $zeroOk  = $ownGift($site) === null && str_contains($zero, 'The least this can be is €1.00: it cannot be switched off. Nothing was saved.');
+    $saveLimit($httpOrg, 'site', '2000.00');
+    $savedOk = $ownGift($site) === '200000';
+    $saveLimit($httpOrg, 'site', '');
+    $clearedOk = $ownGift($site) === null;
+    $refusedBefore = (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'MemberLimitSaveRefused'", 'i', [CU_ORGADMIN])[0]['n'] ?? 0);
+    $saveLimit($httpOrg, 'global', '20000.00');
+    $globalRefused = $instGift() === '500000'
+        && (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `userID` = ? AND `activityType` = 'MemberLimitSaveRefused'", 'i', [CU_ORGADMIN])[0]['n'] ?? 0) === $refusedBefore + 1;
+    $instZero = $saveLimit($http, 'global', '0');
+    $instZeroOk = $instGift() === '500000' && str_contains($instZero, 'it cannot be switched off');
+    $saveLimit($http, 'global', '20000.00');
+    $instSaved = $instGift() === '2000000';
+    $setting($giftKey, '1000000', null);
+
+    return ['above' => $aboveOk, 'zero' => $zeroOk, 'saved' => $savedOk, 'cleared' => $clearedOk, 'globalRefused' => $globalRefused,
+        'instZero' => $instZeroOk, 'instSaved' => $instSaved,
+        'detail' => var_export([$ownGift($site), $instGift()], true)];
+};
+$o = $scnCeiling();
+check('O1 by default the online form takes up to €10,000.00 and refuses €10,000.01 before any payment row, saying what the most is', $o['default'], $o['detail']);
+check('O1b another organisation\'s own figure (1.00) does not reach this one', $o['otherOrg'], $o['detail']);
+check('O2 the installation\'s figure is the ceiling where the organisation has chosen none (5,000.00: 6,000.00 refused, 5,000.00 taken)', $o['inst'], $o['detail']);
+check('O3 an organisation\'s own LOWER figure is obeyed (3,000.00)', $o['ownLower'], $o['detail']);
+check('O4 an organisation\'s own figure ABOVE the installation\'s, written by hand, is held to the installation\'s', $o['ownAbove'], $o['detail']);
+$p = $scnPage();
+check('O5 the page REFUSES an organisation figure above the installation\'s, says the most, and stores nothing', $p['above'], $p['detail']);
+check('O6 0 is refused at the organisation\'s level: the ceiling cannot be switched off (D-172)', $p['zero'], $p['detail']);
+check('O7 a figure within the installation\'s is stored for this organisation, in hundredths (2,000.00 -> 200000), and an empty box removes it again', $p['saved'] && $p['cleared'], $p['detail']);
+check('O8 an administrator of this organisation only cannot change the installation\'s figure, and the refusal is recorded', $p['globalRefused'], $p['detail']);
+check('O9 the global administrator: 0 refused at the installation\'s level too, and 20,000.00 stored there', $p['instZero'] && $p['instSaved'], $p['detail']);
+
+// The plants: each guard taken out of the COPY of web/ must turn its check red,
+// and the file is put back byte for byte.
+$copyWeb = $child . $sep . 'web' . $sep;
+$giftPlants = [
+    'O10 the checkout\'s ceiling test removed' => ['_apps/payments/checkout.php', ['if ($amountPence > $ceiling) {', 'if (false) {'],
+        static fn (): bool => $scnCeiling()['default']],
+    'O11 the reader ignoring the installation (an organisation\'s own figure wins)' => ['_core/Giving.php',
+        ['return SettingLimit::effective(self::ONLINE_GIFT_MAX_KEY, self::ONLINE_GIFT_MAX_DEFAULT, self::ONLINE_GIFT_MAX_HARD_MAX);', "return (int) (App::settings('giving.online.maxGift') ?? self::ONLINE_GIFT_MAX_DEFAULT);"],
+        static fn (): bool => $scnCeiling()['ownAbove']],
+    'O12 the save no longer judges an organisation against the installation' => ['_core/SettingLimit.php', ['if ($siteId !== null && $value !== null) {', 'if (false) {'],
+        static fn (): bool => $scnPage()['above']],
+    'O13 the save no longer refuses below the least (0 accepted)' => ['_core/SettingLimit.php', ['if ($value !== null && $value < $min && ', 'if (false && '],
+        static fn (): bool => $scnPage()['zero']],
+    'O14 the global-administrator gate on the installation\'s figure removed' => ['_apps/admin/settings/member-limits/save.php', ["if (\$scope === 'global' && App::isRootAdmin() === false) {", 'if (false) {'],
+        static fn (): bool => $scnPage()['globalRefused']],
+];
+foreach ($giftPlants as $name => [$file, $edit, $guard]) {
+    $path     = $copyWeb . str_replace('/', $sep, $file);
+    $original = (string) file_get_contents($path);
+    $applied  = substr_count($original, $edit[0]) === 1;
+    check($name . ' — applied to the copy (found exactly once)', $applied);
+    if ($applied === false) {
+        continue;
+    }
+    file_put_contents($path, str_replace($edit[0], $edit[1], $original));
+    try {
+        $whilePlanted = $guard();
+    } finally {
+        file_put_contents($path, $original);
+    }
+    check($name . ' — CAUGHT: its check goes red', $whilePlanted === false);
+    check($name . ' — and green again once put back', $guard() === true);
+}
+$giftUntouched = true;
+foreach (['_apps/payments/checkout.php', '_core/Giving.php', '_core/SettingLimit.php', '_apps/admin/settings/member-limits/save.php'] as $file) {
+    $rel = str_replace('/', $sep, $file);
+    $giftUntouched = $giftUntouched && (string) file_get_contents($copyWeb . $rel) === (string) file_get_contents($repo . $sep . 'web' . $sep . $rel);
+}
+check('O15 every planted file in the copy is byte for byte what the repository holds afterwards', $giftUntouched);
+run($db, 'DELETE FROM `tblSettings` WHERE `siteID` = ?', 'i', [$siteGiftB]);
+run($db, 'DELETE FROM `tblSites` WHERE `siteID` = ?', 'i', [$siteGiftB]);
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

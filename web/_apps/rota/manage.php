@@ -95,6 +95,8 @@ $csrf = Auth::csrfToken();
     </div>
     <div>
         <a href="<?php echo htmlspecialchars(Site::url('rota/role-types'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Role types</a>
+        <?php /* The swap request limits (#989, D-171) live on the shared Member limits page. */ ?>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/settings/member-limits'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Swap request limits</a>
         <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Roster</a>
     </div>
 </div>
