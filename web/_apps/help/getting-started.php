@@ -124,7 +124,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="portal-card p-4 mb-4" id="first-time">
     <h2 class="h4 mb-3"><i class="fa-solid fa-wand-magic-sparkles me-2 text-primary"></i>First-Time Setup</h2>
 
-    <p>There is no manual setup required. When you sign in for the first time using Microsoft 365, the portal automatically creates your account using information from your Microsoft profile:</p>
+    <p>There is usually no manual setup required. When you sign in for the first time using Microsoft 365, the portal creates your account using information from your Microsoft profile:</p>
+    <?php /* #1042, D-185: whether a first Microsoft or Google sign-in may make an account is a setting (Admin, Integrations). It starts as "allow", so the sentence above stays true unless somebody chooses otherwise, and this note says what a person sees when they have. */ ?>
+    <p>Whoever runs your portal or your organisation can switch this off. If they have, the sign-in page says that no account matches your sign-in: ask an administrator to invite you.</p>
 
     <ul class="list-group list-group-flush mb-3">
         <li class="list-group-item"><i class="fa-solid fa-user me-2 text-primary"></i><strong>Display name</strong> -- pulled from your Microsoft 365 profile</li>

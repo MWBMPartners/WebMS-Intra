@@ -113,6 +113,13 @@ $flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
 $flashType = (string) ($_SESSION['flash_type'] ?? '');
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+// ❌ #1042 round 3: why a Microsoft or Google sign-in started from THIS page
+//    just failed. The person is signed in, so the callback sends them back
+//    here (this page left its own address as the come-back, below) rather
+//    than to the sign-in page, which would pass a signed-in browser straight
+//    on before saying anything. `Auth::takeSignInProblem()` is the ONE reader.
+$signInProblem = Auth::takeSignInProblem();
+
 // 🔙 Where a sign-in should bring them back to. Written only when a sign-in is
 //    what is being asked for, so that merely reading any other state of this
 //    page leaves nothing behind.
@@ -139,6 +146,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i> Back to Account
     </a>
 </div>
+
+<?php if ($signInProblem !== ''): ?>
+    <div class="alert alert-danger" role="alert" aria-live="assertive" id="sign-in-problem">
+        <?php echo htmlspecialchars($signInProblem, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
 
 <?php if ($flashMsg !== ''): ?>
     <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>" role="alert">

@@ -166,6 +166,14 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
 
+      # 🔑 Whether a Microsoft or Google sign-in may make a new account
+      #    (#1042, D-185): the two rules two-step-selftest.php cannot reach
+      #    (nothing stored means allow; an unrecognised value means refuse).
+      #    Needs no database and no server.
+      - name: Sign-in new-account rule self-test (#1042)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/sso-new-accounts-selftest.php
+
       # 🎨 Readable colours worked out from an organisation's own colour, over
       #    353 colours in both themes (D-091). Needs no database and no server.
       #    Its browser half (what a browser really applies) is in pr-security.yml.
