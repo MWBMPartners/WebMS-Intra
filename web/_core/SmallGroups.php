@@ -394,6 +394,429 @@ final class SmallGroups
     }
 
     /**
+     * 🗑️ The SET clause that empties a listed home and takes it off the list.
+     * THE ONE COPY: `small-groups/place-save.php`'s Remove and
+     * `releaseHomesOf()` below both write it, so "removed by a leader" and
+     * "removed because its host left" leave the row in the same state.
+     *
+     * Everything that says where the home is, who typed it and who agreed goes;
+     * the row stays, switched off, so a past meeting held there still points at
+     * something and reads "a place no longer recorded" (D-126: removing deletes
+     * the address at once).
+     */
+    public const EMPTIED_HOME_SET = '`placeLabel` = NULL, `addressLine1` = NULL, `addressLine2` = NULL, '
+        . '`city` = NULL, `region` = NULL, `postcode` = NULL, `countryCode` = NULL, `latitude` = NULL, '
+        . '`longitude` = NULL, `what3words` = NULL, `placeEnteredByID` = NULL, `hostUserID` = NULL, '
+        . '`placeMapAgreed` = 0, `notAHome` = 0, `isActive` = 0';
+
+    /**
+     * 🗑️ The SET clause that empties a group's USUAL meeting place when it was
+     * the departing host's home. Every part of the place goes except the
+     * country, exactly what a leader's "clear every part … and save" leaves
+     * (`placeIsEmpty()` does not count the country, and the usual place's
+     * country column is NOT NULL, `''` meaning none). The group itself stays.
+     */
+    private const EMPTIED_USUAL_PLACE_SET = '`addressLine1` = NULL, `addressLine2` = NULL, `city` = NULL, '
+        . '`region` = NULL, `postcode` = NULL, `latitude` = NULL, `longitude` = NULL, `what3words` = NULL, '
+        . '`placeEnteredByID` = NULL, `hostUserID` = NULL, `placeMapAgreed` = 0, `notAHome` = 0';
+
+    /**
+     * 🚪 THE ONE PLACE a membership of a small group ENDS (#952; the owner,
+     * 12 November 2026 — D-168). A member leaving on their own
+     * (`small-groups/join.php`, "leave") and a leader removing them
+     * (`small-groups/member-save.php`, "remove") both come here.
+     *
+     * D-168: when a host leaves, their home STOPS BEING the group's meeting
+     * place straight away, and the group's leaders are told to choose a new
+     * place; it rules OUT keeping a former host's home until somebody removes
+     * it. Before #952 the membership row went to `ended` and nothing else
+     * changed: the home stayed on the list with its address, and the person
+     * whose home it was could no longer remove it, because D-125 lets only an
+     * ACTIVE member change their own home.
+     *
+     * ONE TRANSACTION, and the order is the design. It is opened FIRST and the
+     * membership row is then read `FOR UPDATE` (#697: a lock outside a
+     * transaction is decoration); the row is ended, and only then are the
+     * person's homes in THIS group emptied, in the same transaction. A member
+     * adding their own home at the same moment locks the same membership row
+     * inside place-save's transaction (`hostStillBelongs()`), so either the
+     * home is added first and emptied here, or this ends the membership first
+     * and the add is refused: never a home left behind for somebody who has
+     * gone.
+     *
+     * `$onlyFor`: when the member is leaving on their own, their own account
+     * number, so the row must be theirs; null for a leader acting on the group.
+     *
+     * The leaders are told AFTER the commit, by `tellLeadersHomesReleased()`,
+     * which never throws — a broken mail route must never undo a departure.
+     *
+     * @return array{ended:bool, userID:int, released:list<array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int}>}
+     */
+    public static function endMembership(\mysqli $db, int $siteId, int $groupId, int $membershipId, ?int $onlyFor = null): array
+    {
+        $none = ['ended' => false, 'userID' => 0, 'released' => []];
+        if ($membershipId <= 0) {
+            return $none;
+        }
+
+        $db->begin_transaction();
+        try {
+            $lock = $db->prepare(
+                'SELECT `userID`, `status` FROM `tblSmallGroupMembers` '
+                . 'WHERE `membershipID` = ? AND `groupID` = ? AND `siteID` = ?'
+                . ($onlyFor !== null ? ' AND `userID` = ?' : '')
+                . ' FOR UPDATE'
+            );
+            if ($onlyFor !== null) {
+                $lock->bind_param('iiii', $membershipId, $groupId, $siteId, $onlyFor);
+            } else {
+                $lock->bind_param('iii', $membershipId, $groupId, $siteId);
+            }
+            $lock->execute();
+            $row = $lock->get_result()->fetch_assoc();
+            $lock->close();
+            // Already ended (a second press, a stale page, another leader
+            // first): nothing changes, and "ended" means THIS call ended it.
+            if ($row === null || (string) $row['status'] === 'ended') {
+                $db->rollback();
+
+                return $none;
+            }
+            $userId    = (int) $row['userID'];
+            $wasActive = (string) $row['status'] === 'active';
+
+            $end = $db->prepare(
+                "UPDATE `tblSmallGroupMembers` SET `status` = 'ended', `endedAt` = NOW() "
+                . 'WHERE `membershipID` = ? AND `groupID` = ? AND `siteID` = ?'
+            );
+            $end->bind_param('iii', $membershipId, $groupId, $siteId);
+            $end->execute();
+            $ended = $end->affected_rows > 0;
+            $end->close();
+
+            // Only somebody who WAS an active member can be a host (a host is
+            // named only from active members, `hostFromPost()`), so a pending
+            // request being withdrawn releases nothing.
+            $released = ($ended === true && $wasActive === true) ? self::releaseHomesOf($db, $userId, $siteId, $groupId) : [];
+            $db->commit();
+        } catch (\Throwable $e) {
+            $db->rollback();
+            throw $e;
+        }
+
+        return ['ended' => $ended, 'userID' => $userId, 'released' => $released];
+    }
+
+    /**
+     * 🏠 Empty every meeting place whose named host is `$userId` (D-168): every
+     * listed home they host, and the group's usual place when it is theirs.
+     * Scoped to one group (`$siteId` and `$groupId`), or — for offboarding,
+     * which ends every membership the person has everywhere — to every group
+     * in every organisation (both null).
+     *
+     * RUNS INSIDE THE CALLER'S TRANSACTION, and the caller must already have
+     * ended the membership in it; this opens none of its own, so it can be one
+     * step of offboarding's single transaction. The rows are read `FOR UPDATE`
+     * before they are changed, so what it answers is exactly what it emptied.
+     *
+     * A FAILURE PART-WAY (round 1 of #952's check) throws, and the caller
+     * decides what survives: `endMembership()` rolls its whole transaction
+     * back, so the membership does not end either and the request fails with
+     * nothing changed; offboarding wraps this in a SAVEPOINT and rolls back
+     * to it, so the step is all-or-nothing while the rest of the offboarding
+     * goes on, the step is recorded as failed, and no leader is told
+     * (section F of tools/series-suggestion-host-selftest.php).
+     *
+     * The PLANNED meetings it counts (dated today or later on the organisation's
+     * clock, `todayFor()`) are the ones that were to be held at the emptied
+     * place: a meeting pointing at a removed home now reads "a place no longer
+     * recorded", and one at the usual place reads the emptied place. They are
+     * left as they are — choosing where to meet instead is the leaders'
+     * decision, which is why D-168 has them told.
+     *
+     * @return list<array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int}>
+     */
+    public static function releaseHomesOf(\mysqli $db, int $userId, ?int $siteId = null, ?int $groupId = null): array
+    {
+        if ($userId <= 0) {
+            return [];
+        }
+        $scope      = $groupId !== null && $siteId !== null ? ' AND `groupID` = ? AND `siteID` = ?' : '';
+        $bindScope  = static function (\mysqli_stmt $stmt, int $userId) use ($scope, $siteId, $groupId): void {
+            if ($scope !== '') {
+                $stmt->bind_param('iii', $userId, $groupId, $siteId);
+            } else {
+                $stmt->bind_param('i', $userId);
+            }
+        };
+        /** @var array<string, array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int, placeIDs:list<int>}> $byGroup */
+        $byGroup = [];
+        $entry   = static function (int $site, int $group) use (&$byGroup): string {
+            $key = $site . ':' . $group;
+            $byGroup[$key] ??= ['siteID' => $site, 'groupID' => $group, 'homes' => 0, 'usualPlace' => false, 'plannedMeetings' => 0, 'placeIDs' => []];
+
+            return $key;
+        };
+
+        // 1. The listed homes they host.
+        $homes = $db->prepare(
+            'SELECT `placeID`, `siteID`, `groupID` FROM `tblSmallGroupPlaces` '
+            . 'WHERE `hostUserID` = ? AND `isActive` = 1' . $scope . ' FOR UPDATE'
+        );
+        $bindScope($homes, $userId);
+        $homes->execute();
+        foreach ($homes->get_result()->fetch_all(MYSQLI_ASSOC) as $home) {
+            $key = $entry((int) $home['siteID'], (int) $home['groupID']);
+            $byGroup[$key]['homes']++;
+            $byGroup[$key]['placeIDs'][] = (int) $home['placeID'];
+        }
+        $homes->close();
+        if ($byGroup !== []) {
+            $emptyHomes = $db->prepare(
+                'UPDATE `tblSmallGroupPlaces` SET ' . self::EMPTIED_HOME_SET
+                . ' WHERE `hostUserID` = ? AND `isActive` = 1' . $scope
+            );
+            $bindScope($emptyHomes, $userId);
+            $emptyHomes->execute();
+            $emptyHomes->close();
+        }
+
+        // 2. The group's usual place, when it is their home.
+        $usual = $db->prepare(
+            'SELECT `siteID`, `groupID` FROM `tblSmallGroups` WHERE `hostUserID` = ?' . $scope . ' FOR UPDATE'
+        );
+        $bindScope($usual, $userId);
+        $usual->execute();
+        $usualRows = $usual->get_result()->fetch_all(MYSQLI_ASSOC);
+        $usual->close();
+        foreach ($usualRows as $group) {
+            $byGroup[$entry((int) $group['siteID'], (int) $group['groupID'])]['usualPlace'] = true;
+        }
+        if ($usualRows !== []) {
+            $emptyUsual = $db->prepare(
+                'UPDATE `tblSmallGroups` SET ' . self::EMPTIED_USUAL_PLACE_SET . ' WHERE `hostUserID` = ?' . $scope
+            );
+            $bindScope($emptyUsual, $userId);
+            $emptyUsual->execute();
+            $emptyUsual->close();
+        }
+
+        // 3. The planned meetings that were to be held at those places.
+        foreach ($byGroup as $key => $group) {
+            $today = self::todayFor($group['siteID']);
+            $where = [];
+            if ($group['placeIDs'] !== []) {
+                $where[] = '`placeID` IN (' . implode(',', array_map('intval', $group['placeIDs'])) . ')';
+            }
+            if ($group['usualPlace'] === true) {
+                $where[] = '`placeID` IS NULL';
+            }
+            $count = $db->prepare(
+                'SELECT COUNT(*) AS `n` FROM `tblSmallGroupMeetings` WHERE `groupID` = ? AND `siteID` = ? '
+                . 'AND `meetingDate` >= ? AND (' . implode(' OR ', $where) . ')'
+            );
+            $count->bind_param('iis', $group['groupID'], $group['siteID'], $today);
+            $count->execute();
+            $byGroup[$key]['plannedMeetings'] = (int) ($count->get_result()->fetch_assoc()['n'] ?? 0);
+            $count->close();
+            unset($byGroup[$key]['placeIDs']);
+        }
+
+        return array_values($byGroup);
+    }
+
+    /**
+     * ✉️ Tell each affected group's leaders that a departing host's home is no
+     * longer a meeting place, and to choose a new one (D-168). Called AFTER the
+     * commit that released the homes; NEVER THROWS, so a mail route that is
+     * broken or not set up never undoes or blocks a departure.
+     *
+     * Who: every ACTIVE leader and co-leader of the group whose account is
+     * active, except the person who left. The message names the person who
+     * left (the leaders already see them on the group's member list) and NEVER
+     * the address, which has just been deleted (D-126) and must not survive in
+     * a mailbox. Plain text (`bodyIsText`), because a group's name is typed by
+     * a person (#859), and `siteId` so the footer and the link are the group's
+     * own organisation's (#683).
+     *
+     * @param list<array{siteID:int, groupID:int, homes:int, usualPlace:bool, plannedMeetings:int}> $released
+     *
+     * @param ?array $outcome Filled with each group's NAME, sorted by what
+     *                        became of its leaders, so a caller covering
+     *                        several groups (offboarding) can say exactly that
+     *                        (#952, rounds 2 and 3 of the check): `told` (a mail
+     *                        service took at least one message), `noLeader`
+     *                        (no other current leader to write to — the person
+     *                        who left may have been the only one), `notSent`
+     *                        (there were leaders, but nothing could be sent, or
+     *                        they could not be read).
+     *
+     * @return int How many messages a mail service took or kept (for the caller's words).
+     */
+    public static function tellLeadersHomesReleased(\mysqli $db, array $released, int $hostId, ?array &$outcome = null): int
+    {
+        $told    = 0;
+        $outcome = ['told' => [], 'noLeader' => [], 'notSent' => []];
+        foreach ($released as $group) {
+            $toldHere  = 0;
+            $groupName = '';
+            try {
+                $info = $db->prepare('SELECT `groupName` FROM `tblSmallGroups` WHERE `groupID` = ? AND `siteID` = ? LIMIT 1');
+                $info->bind_param('ii', $group['groupID'], $group['siteID']);
+                $info->execute();
+                $groupName = (string) ($info->get_result()->fetch_assoc()['groupName'] ?? '');
+                $info->close();
+
+                $leaders = $db->prepare(
+                    'SELECT u.`emailAddress` FROM `tblSmallGroupMembers` m '
+                    . 'INNER JOIN `tblUsers` u ON u.`userID` = m.`userID` '
+                    . "WHERE m.`groupID` = ? AND m.`siteID` = ? AND m.`status` = 'active' "
+                    . "AND m.`memberRole` IN ('leader','co-leader') AND u.`isActive` = 1 AND m.`userID` <> ?"
+                );
+                $leaders->bind_param('iii', $group['groupID'], $group['siteID'], $hostId);
+                $leaders->execute();
+                $addresses = array_column($leaders->get_result()->fetch_all(MYSQLI_ASSOC), 'emailAddress');
+                $leaders->close();
+
+                $words = self::homesReleasedMessage(
+                    $groupName,
+                    self::personName($hostId),
+                    $group,
+                    PortalAddress::absolute('small-groups/group?id=' . $group['groupID'], $group['siteID'])
+                );
+            } catch (\Throwable $e) {
+                Logger::errorPlatform('SmallGroups', 'Warning', 'SG_HOST_LEFT_READ', 'The leaders of a group whose host left could not be read, so they were not told', '');
+                $outcome['notSent'][] = $groupName !== '' ? $groupName : 'a small group';
+                continue;
+            }
+            $addresses = array_values(array_filter(array_map(static fn ($a): string => trim((string) $a), $addresses),
+                static fn (string $a): bool => $a !== '' && filter_var($a, FILTER_VALIDATE_EMAIL) !== false));
+            $label = $groupName !== '' ? $groupName : 'a small group';
+            if ($addresses === []) {
+                $outcome['noLeader'][] = $label;
+                continue;
+            }
+            foreach ($addresses as $address) {
+                try {
+                    if (Mailer::send($address, $words['subject'], $words['body'], [], ['siteId' => $group['siteID'], 'bodyIsText' => true]) === true) {
+                        $told++;
+                        $toldHere++;
+                    }
+                } catch (\Throwable $e) {
+                    // The fault's own words are never recorded: a mail server's
+                    // refusal can quote the recipient's address.
+                    Logger::errorPlatform('Mailer', 'Warning', 'SG_HOST_LEFT_MAIL', 'A leader could not be told that a host left their group', '');
+                }
+            }
+            $outcome[$toldHere > 0 ? 'told' : 'notSent'][] = $label;
+        }
+
+        return $told;
+    }
+
+    /**
+     * 🗣️ What offboarding's page says about the homes it took off small groups,
+     * and the ONE place it is worded (#952, round 3 of the check). Each group is
+     * NAMED under what became of its leaders, so an administrator knows whom to
+     * contact, and a group whose only leader was the person who left is told
+     * apart from one whose leaders simply could not be e-mailed — there are no
+     * leaders to "tell" in the first case. '' when no home was taken off.
+     *
+     * @param array{told:list<string>, noLeader:list<string>, notSent:list<string>} $outcome From tellLeadersHomesReleased().
+     */
+    public static function offboardingHomesWords(int $groupCount, array $outcome): string
+    {
+        if ($groupCount <= 0) {
+            return '';
+        }
+        $names = static function (array $list): string {
+            if (count($list) <= 1) {
+                return implode('', $list);
+            }
+            $last = array_pop($list);
+
+            return implode(', ', $list) . ' and ' . $last;
+        };
+        $words = ' Their home was taken off ' . ($groupCount === 1 ? '1 small group' : $groupCount . ' small groups') . ' as a meeting place.';
+        if ($outcome['told'] !== []) {
+            $words .= ' The leaders of ' . $names($outcome['told']) . ' are being e-mailed to choose a new place.';
+        }
+        if ($outcome['notSent'] !== []) {
+            $words .= ' The leaders of ' . $names($outcome['notSent']) . ' could not be e-mailed, so please tell them to choose a new place.';
+        }
+        if ($outcome['noLeader'] !== []) {
+            $one    = count($outcome['noLeader']) === 1;
+            $words .= ' ' . $names($outcome['noLeader']) . ($one === true ? ' has' : ' have') . ' no other current leader to tell, '
+                . 'so please choose a new place for ' . ($one === true ? 'it' : 'them') . ' or name a new leader.';
+        }
+
+        return $words;
+    }
+
+    /**
+     * ✍️ The leaders' message, and the ONE place it is worded (D-168). Plain
+     * text. `$link` is the group's page, or '' when the portal has no address
+     * to give (`PortalAddress::absolute()`), in which case no link is written.
+     *
+     * @param array{homes:int, usualPlace:bool, plannedMeetings:int} $released
+     *
+     * @return array{subject:string, body:string}
+     */
+    public static function homesReleasedMessage(string $groupName, string $hostName, array $released, string $link): array
+    {
+        $who   = $hostName !== '' ? $hostName : 'A member';
+        $group = $groupName !== '' ? $groupName : 'your small group';
+        $what  = [];
+        if ($released['usualPlace'] === true) {
+            $what[] = 'the group\'s usual meeting place';
+        }
+        if ($released['homes'] > 0) {
+            $what[] = $released['homes'] === 1 ? 'one of the homes on the group\'s list' : $released['homes'] . ' of the homes on the group\'s list';
+        }
+        $body = $who . ' has left ' . $group . '. Their home was ' . implode(' and ', $what) . ', so it is no longer '
+            . 'a meeting place for the group, and its address has been taken off the group\'s places. (If the portal '
+            . 'looked up a map position for that address, it may remember the position until its keeping period ends.)' . "\n\n"
+            . 'Please choose a new place for the group to meet.';
+        if ($released['plannedMeetings'] > 0) {
+            // Worded for BOTH kinds of place: a meeting at the usual place
+            // follows whatever usual place is chosen next, while a meeting set
+            // to a removed home keeps pointing at it until it is changed.
+            $body .= ' ' . ($released['plannedMeetings'] === 1
+                ? 'One planned meeting had been set to meet there, so please check where it will now meet.'
+                : $released['plannedMeetings'] . ' planned meetings had been set to meet there, so please check where they will now meet.');
+        }
+        if ($link !== '') {
+            $body .= "\n\n" . 'The group\'s page: ' . $link;
+        }
+
+        return ['subject' => 'A meeting place of ' . $group . ' needs replacing', 'body' => $body];
+    }
+
+    /**
+     * 🔒 Is `$userId` still an ACTIVE member of this group, asked with their
+     * membership row LOCKED (`FOR UPDATE`) inside the caller's transaction?
+     * For a save that is about to name somebody as a home's host: it makes
+     * that save and `endMembership()` take turns on the same row, so a home is
+     * never stored for somebody whose departure has just emptied their homes
+     * (D-168). Outside a transaction the lock would be decoration (#697).
+     */
+    public static function hostStillBelongs(\mysqli $db, int $siteId, int $groupId, int $userId): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+        $stmt = $db->prepare(
+            "SELECT 1 FROM `tblSmallGroupMembers` WHERE `groupID` = ? AND `siteID` = ? AND `userID` = ? AND `status` = 'active' FOR UPDATE"
+        );
+        $stmt->bind_param('iii', $groupId, $siteId, $userId);
+        $stmt->execute();
+        $found = $stmt->get_result()->fetch_assoc() !== null;
+        $stmt->close();
+
+        return $found;
+    }
+
+    /**
      * Additive push of one meeting's headcount into the Attendance app.
      * Preconditions (all soft-fail → null): the meeting/group resolve
      * site-scoped; the group has a serviceTypeID; site setting
@@ -964,7 +1387,12 @@ final class SmallGroups
      *   - an empty choice → nobody named;
      *   - the host already stored → kept, even if they have since left the
      *     group (the form shows them as the current choice, so an untouched
-     *     Save must not change it; the map rule refuses them anyway);
+     *     Save must not change it; the map rule refuses them anyway). Since
+     *     #952 (D-168) leaving the group empties the leaver's homes in the
+     *     same transaction (`endMembership()`, and offboarding through
+     *     `releaseHomesOf()`), so this case is reached only by a way out of a
+     *     group that does not end the membership row — removing somebody
+     *     from the whole organisation is one (`admin/sites/users.php`);
      *   - anybody else → only an ACTIVE member of THIS group. Anything else is
      *     refused (`ok` false), never quietly stored as "nobody".
      *

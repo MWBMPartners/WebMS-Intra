@@ -173,15 +173,21 @@ if ($action === 'add') {
         $_SESSION['flash_msg']  = 'Cannot remove the last active leader — assign another leader first.';
         $_SESSION['flash_type'] = 'danger';
     } else {
-        $upd = $db->prepare("UPDATE tblSmallGroupMembers SET status = 'ended', endedAt = NOW() WHERE membershipID = ? AND groupID = ?");
-        $ok = false;
-        if ($upd !== false) {
-            $upd->bind_param('ii', $membershipId, $groupId);
-            $upd->execute();
-            $ok = $upd->affected_rows > 0;
-            $upd->close();
+        // 🏠 #952, D-168: the ONE place a membership ends, which also empties
+        //    any home of theirs the group meets in, in the same transaction;
+        //    the group's leaders are then told to choose a new place.
+        $outcome   = SmallGroups::endMembership($db, $siteId, $groupId, $membershipId);
+        $ok        = $outcome['ended'];
+        $homeWords = '';
+        if ($ok === true && $outcome['released'] !== []) {
+            $told      = SmallGroups::tellLeadersHomesReleased($db, $outcome['released'], $outcome['userID']);
+            $homeWords = ' Their home is no longer one of the group\'s meeting places, and its address has been taken off the group\'s '
+                . 'places (a map position the portal looked up for it may be remembered until its keeping period ends). '
+                . ($told > 0
+                    ? 'The group\'s leaders are being e-mailed to choose a new place.'
+                    : 'No e-mail could be sent to the group\'s leaders, so please choose a new place.');
         }
-        $_SESSION['flash_msg']  = $ok === true ? 'Member removed.' : 'Could not remove that member.';
+        $_SESSION['flash_msg']  = $ok === true ? 'Member removed.' . $homeWords : 'Could not remove that member.';
         $_SESSION['flash_type'] = $ok === true ? 'success' : 'danger';
         if ($ok === true) {
             Logger::activity('SmallGroupMemberChanged', 'Removed member from group ' . $group['groupName'], $userId > 0 ? $userId : null);

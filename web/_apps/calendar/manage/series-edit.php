@@ -336,6 +336,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $matched = (int) ($matchStmt->get_result()->fetch_assoc()['n'] ?? 0);
         $matchStmt->close();
 
+        // 🚦 #965, D-169: a suggestion still waiting to be approved stays a
+        //    draft until it is approved on the moderation page (which e-mails
+        //    the person who suggested it). Counted among the SAME rows the
+        //    statement above has just locked, so an approval a moment earlier
+        //    is seen. Asked of every chosen date's status through the one
+        //    rule; one pending date refuses the whole change, because applying
+        //    it to the others alone would report a success nobody asked for.
+        $pendingAmongChosen = 0;
+        if ($bulkStatus !== '' && \Portal\Core\EventSuggestions::whyStatusRefused('pending', $bulkStatus) !== null) {
+            $pendingStmt = $mysqli->prepare(
+                'SELECT COUNT(*) AS `n` FROM `tblEvents` WHERE `eventID` IN (' . $placeholders . ') '
+                . 'AND `seriesID` = ? AND `siteID` = ? AND `isDeleted` = 0 AND `externalFeedID` IS NULL '
+                . "AND `submissionStatus` = 'pending'"
+            );
+            $pendingStmt->bind_param(str_repeat('i', count($validIds)) . 'ii', ...array_merge(array_values($validIds), [$seriesID, $siteId]));
+            $pendingStmt->execute();
+            $pendingAmongChosen = (int) ($pendingStmt->get_result()->fetch_assoc()['n'] ?? 0);
+            $pendingStmt->close();
+        }
+        if ($pendingAmongChosen > 0) {
+            $mysqli->rollback();
+            $_SESSION['flash_msg']  = \Portal\Core\EventSuggestions::bulkStatusRefusal($pendingAmongChosen);
+            $_SESSION['flash_type'] = 'warning';
+            header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
+            exit();
+        }
+
         $stmt = $mysqli->prepare($sql);
         $stmt->bind_param($paramTypes, ...$paramValues);
         $stmt->execute();

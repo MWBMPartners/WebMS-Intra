@@ -205,6 +205,43 @@ try {
         [$effective, $userId], 'si'
     );
 
+    // 5b. Their homes stop being small groups' meeting places (#952; the
+    //     owner, 12 November 2026 — D-168): step 5a has just ended every
+    //     membership, and a host who leaves a group takes their home off it
+    //     at once, address and all. `SmallGroups::releaseHomesOf()` is the
+    //     one place that does it (the same as a member leaving one group),
+    //     here across every group in every organisation, inside THIS
+    //     transaction. Recorded like every other step; a deadlock or a lock
+    //     wait ends the offboarding exactly as `$run` does, and the leaders
+    //     are e-mailed only after the commit, below.
+    //
+    //     ALL OR NOTHING (round 1 of #952's check). The step is several
+    //     statements (every listed home, then every usual place, then the
+    //     planned meetings are counted), and the catch below lets the
+    //     offboarding carry on and commit, as every other step does — so a
+    //     failure part-way used to commit the homes already emptied, record
+    //     the step as failed, and tell no leader about them. A SAVEPOINT makes
+    //     the step one unit inside the transaction: on a failure it is rolled
+    //     back to the point before it, so either every home is released and
+    //     the leaders are told, or none is and the step is recorded as failed
+    //     on Admin, Errors (the homes then stay, as they were before #952).
+    //     A deadlock or a lock wait still ends the whole offboarding, as `$run`
+    //     does, because those undo more than this step.
+    $releasedHomes = [];
+    $db->savepoint('release_small_group_homes');
+    try {
+        $releasedHomes = \Portal\Core\SmallGroups::releaseHomesOf($db, $userId);
+        $db->release_savepoint('release_small_group_homes');
+        $stepsLog[]    = ['step' => 'release_small_group_homes', 'ok' => true, 'affected' => count($releasedHomes)];
+    } catch (\Throwable $e) {
+        if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
+            throw $e;
+        }
+        $db->query('ROLLBACK TO SAVEPOINT `release_small_group_homes`');
+        $releasedHomes = [];
+        $stepsLog[]    = ['step' => 'release_small_group_homes', 'ok' => false, 'error' => $e->getMessage()];
+    }
+
     // 6. Remove EVERY role holding, in EVERY organisation (#516: a role now
     //    belongs to one organisation, but offboarding ends every
     //    membership this person has, everywhere — see
@@ -353,6 +390,22 @@ try {
 }
 
 if ($committed === true) {
+    // ✉️ D-168: the leaders of every group whose meeting place was this
+    //    person's home are told to choose a new one. After the commit, and
+    //    `tellLeadersHomesReleased()` never throws, so a broken mail route
+    //    can never reach the catch above ("nothing was changed").
+    //    The page then SAYS what happened (round 2 of #952's check: it said
+    //    nothing, while leaving and removing say when nobody could be told).
+    //    Appended to every message below, the failure ones included.
+    $homesNote = '';
+    if ($releasedHomes !== []) {
+        $leadersOutcome = null;
+        \Portal\Core\SmallGroups::tellLeadersHomesReleased($db, $releasedHomes, $userId, $leadersOutcome);
+        // Worded in ONE place, naming each group under what became of its
+        // leaders (round 3 of the check).
+        $homesNote = \Portal\Core\SmallGroups::offboardingHomesWords(count($releasedHomes), $leadersOutcome);
+    }
+
     // 🧾 WHETHER THE ACCOUNT IS SWITCHED OFF IS READ FROM THE ACCOUNT, after
     //    the commit, and from nothing else (#982 round 5). Rounds 2-4 decided
     //    it from the step log, and the step log can be wrong about what the
@@ -368,6 +421,7 @@ if ($committed === true) {
         'end_site_memberships'        => 'ending organisation memberships',
         'end_leadership_assignments'  => 'ending leadership roles',
         'end_small_group_memberships' => 'ending small-group memberships',
+        'release_small_group_homes'   => 'removing their home from small groups\' meeting places',
         'delete_user_roles'           => 'removing roles',
         'delete_user_groups'          => 'removing group memberships',
         'delete_user_depts'           => 'removing department memberships',
@@ -415,11 +469,11 @@ if ($committed === true) {
         ? ''
         : ' These steps failed: ' . implode(', ', $failedSteps) . '. The reasons have been recorded on Admin, Errors.';
     if ($isActiveNow === 0 && $failedSteps === []) {
-        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote;
+        $_SESSION['flash_msg']  = 'Offboarded. Their account is switched off, and what each step did has been recorded.' . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'success';
     } elseif ($isActiveNow === 0) {
         $_SESSION['flash_msg']  = 'The offboarding was recorded and their account is switched off, but not everything was done.'
-            . $failedWords . $erasureNote;
+            . $failedWords . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'danger';
     } else {
         $_SESSION['flash_msg']  = ($isActiveNow === null
@@ -427,7 +481,7 @@ if ($committed === true) {
                   . 'still be able to sign in: check it, and switch it off, on the Users page.'
                 : 'The offboarding was recorded, but their account is NOT switched off, so they may still be able to sign '
                   . 'in: switch it off on the Users page.')
-            . $failedWords . $erasureNote;
+            . $failedWords . $erasureNote . $homesNote;
         $_SESSION['flash_type'] = 'danger';
     }
 }

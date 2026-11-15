@@ -24545,3 +24545,49 @@ over HTTP; S the source rules; Z the tidy-up.
   exchange rates (#993, waiting on the owner). A pledge paid online has no ceiling (#1083).
 - `currency-selftest.php`'s server runs with `opcache.enable=0`: with it on, a file planted mid-run was not re-read for two
   seconds and every new plant passed. Measured.
+
+
+### Series window, pending suggestions, a leaving host's home (#847, #965, #952; D-159, D-168, D-169)
+
+- `EventSuggestions::whyStatusRefused($submissionStatus, $newStatus)` is the ONE rule (null = allowed). A pending
+  suggestion may hold only `STATUS_WHILE_PENDING` (`draft`). Asked under each writer's own row lock:
+  `calendar/manage/save.php` (update), `events/api/update.php` (only when `status` is sent), and
+  `calendar/manage/series-edit.php` (counted among the locked chosen rows; one pending date refuses the whole
+  bulk change, worded by `bulkStatusRefusal()`). Why not only `published`: `calendar/event.php`, `feed.php` and
+  `rsvp.php` list cancelled and postponed events to members too.
+- The series window is judged by `EventVisibility::where()` ("website" mode: today inside the dates), and the
+  public door (`PublicDoor::events()`) has no look-ahead limit; that is why a window ending before a later date
+  lists it while open and drops it before its day. The first form sentence said otherwise and was untrue.
+- `SmallGroups::endMembership()` is the ONE place a membership ends (join.php "leave", member-save.php "remove").
+  One transaction: membership row locked FOR UPDATE first, ended, then `releaseHomesOf()` empties that person's
+  homes in that group; a failure rolls the whole transaction back (the membership does not end, the request
+  fails, nothing changes). `releaseHomesOf()` runs inside the caller's transaction and is also offboarding step 5b
+  (`release_small_group_homes`), across every group, wrapped in a SAVEPOINT so a part-way failure is rolled back
+  to before the step (all or nothing), recorded as failed, and no leader is told; the rest of the offboarding
+  commits. `EMPTIED_HOME_SET` is the one SET clause a removed home gets (place-save's Remove uses it too).
+  `tellLeadersHomesReleased()` e-mails ACTIVE leaders/co-leaders with an ACTIVE account, after the commit, and
+  never throws; `homesReleasedMessage()` is the one wording, and never includes the address.
+- The remembered map answer (D-183, `Geocoder`) has no forget method, so a usual place's looked-up position stays
+  until its keeping period ends; #1067 tracks erasing cached homes. Every sentence about removing the address
+  says so rather than claiming it is gone from the portal.
+- The race: place-save (create, and update when a NEW host is named) and the group save (new usual-place host)
+  ask `SmallGroups::hostStillBelongs()`, which locks the host's membership row inside the transaction. Section R
+  drives all three in BOTH orders: (a) a second connection holds the membership row ended-but-uncommitted, the
+  save is shown still waiting, then refused once the departure commits; (b) the save is stopped at its WRITE
+  (after its check) by a held parent row its foreign key must look up, and a third connection must find the
+  membership row still locked (so a departure would wait). Removing any of the three `begin_transaction()`
+  calls, or the `FOR UPDATE`, turns (b) red.
+- `tellLeadersHomesReleased()` also fills `$outcome` with each group's NAME under `told`, `noLeader` (no other
+  current leader to write to) or `notSent` (leaders who could not be e-mailed). `SmallGroups::offboardingHomesWords()`
+  is the one place offboarding's message about the homes is worded, naming each group. (The round-2 commit
+  message said it "reports the groups"; at that commit it reported only a count. Round 3 made it the names.) Naming as host the very person leaving at the same instant takes the
+  two locks in opposite orders, so MySQL may refuse one as a deadlock (rolled back whole).
+- `offboarding/user.php`'s list and rehire paragraph are written from `do.php` steps 1-10 and `rehire.php`
+  (account and organisation memberships only); change the three together. Pinned by section O.
+- Not covered (Found): removing somebody from ONE organisation (`admin/sites/users.php`) deletes their
+  `tblUserSites` row but leaves their small-group membership rows `active`, so their homes stay. Not "leaving the
+  group" in D-168's words, so not built; worth an issue.
+- Test: `tools/series-suggestion-host-selftest.php` (real HTTP, two organisations; sections W, S, H, R, F, O;
+  26 plants; a plant that cannot find its text stops the run as a failure; section F creates and drops a
+  trigger, so it needs CREATE TRIGGER). Wired into `portal-selftests.yml` as `selftest_seriessuggest` and
+  `tools/run-all-selftests.sh`.

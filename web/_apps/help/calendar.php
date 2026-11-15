@@ -293,6 +293,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         ticks it &mdash; and that includes an event a member of the public suggested, once it is approved.
         Events that existed before your portal was upgraded to this version kept what they had.
     </p>
+    <?php // 🚦 #965, D-169: EventSuggestions::whyStatusRefused(), asked by Manage Events, the events API and the series bulk edit. ?>
+    <p>
+        A suggestion still waiting to be approved stays a <strong>Draft</strong> until it is approved on Admin,
+        Calendar, Moderation, which is also what e-mails the person who suggested it. Until then, Manage Events,
+        the series bulk edit and the events API all refuse to publish, cancel or postpone it.
+    </p>
     <p class="text-muted small">
         Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out
         visitor sees, and the calendar feed people subscribe to &mdash; follow the &ldquo;Public&rdquo; box,

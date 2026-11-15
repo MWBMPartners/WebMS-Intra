@@ -413,6 +413,23 @@ if ($isCreate === true) {
         header('Location: ' . $backUrl);
         exit();
     }
+    // 🔒 #952, D-168: a NEWLY named host is asked again with their membership
+    //    row locked, inside this transaction, so the usual place is never
+    //    handed to somebody whose departure (`SmallGroups::endMembership()`,
+    //    which locks the same row) is emptying their homes at this moment.
+    //    The host already stored needs no second ask: this group's row is
+    //    locked above, and a departure empties it under that same lock.
+    //    (Naming as host the very person leaving at the same instant takes
+    //    the two locks in opposite orders, so MySQL may refuse one of the two
+    //    as a deadlock: that one is rolled back whole, nothing half-written.)
+    if ($hostPick['host'] !== null && $hostPick['host'] !== $storedHost
+        && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $hostPick['host']) === false) {
+        $db->rollback();
+        $_SESSION['flash_msg']  = 'The host must be an active member of this group. Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $backUrl);
+        exit();
+    }
     $place = SmallGroups::placeAgreementAfterSave($lockedRow, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked, $markDrawn, $markTicked);
     $placeEnteredBy = $place['enteredBy'];
     $placeHost      = $place['host'];

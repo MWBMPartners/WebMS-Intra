@@ -385,7 +385,7 @@ if ($nothingToWrite === false) {
         //    decoration), and answer exactly as the top does for a hidden or
         //    missing event: 404, nothing written.
         $live = $db->prepare(
-            'SELECT `isDeleted` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? '
+            'SELECT `isDeleted`, `submissionStatus` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? '
             . 'AND `externalFeedID` IS NULL FOR UPDATE'
         );
         $live->bind_param('ii', $eventId, $siteId);
@@ -395,6 +395,24 @@ if ($nothingToWrite === false) {
         if ($liveRow === null || (int) $liveRow['isDeleted'] === 1) {
             $db->rollback();
             ApiResponse::error('Event not found', 404);
+        }
+
+        // 🚦 #965, D-169: a suggestion still waiting to be approved stays a
+        //    draft until it is approved on the moderation page, which is what
+        //    e-mails the person who suggested it — so an API caller cannot
+        //    publish, cancel or postpone it. Asked only when a status was sent
+        //    (an update of the name alone is not a publish), on the LOCKED
+        //    row, through the one rule. 409: the request is well formed; the
+        //    event is in a state that does not allow it yet.
+        if (array_key_exists('status', $body) === true) {
+            $pendingRefusal = \Portal\Core\EventSuggestions::whyStatusRefused(
+                $liveRow['submissionStatus'] === null ? null : (string) $liveRow['submissionStatus'],
+                (string) $body['status']
+            );
+            if ($pendingRefusal !== null) {
+                $db->rollback();
+                ApiResponse::error($pendingRefusal, 409);
+            }
         }
 
         $stmt = $db->prepare($sql);

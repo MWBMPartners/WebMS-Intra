@@ -327,6 +327,66 @@ final class EventSuggestions
     }
 
     /**
+     * 🚦 THE ONE STATUS a suggestion still waiting to be approved may hold
+     * (#965, D-169). The public form stores every suggestion as `draft` with
+     * `submissionStatus = 'pending'`; it leaves `draft` only through the
+     * moderation handler's approval, which is what e-mails the person who
+     * suggested it (D-134).
+     */
+    public const STATUS_WHILE_PENDING = 'draft';
+
+    /**
+     * 🚫 May an event's status be set to `$newStatus` while its suggestion is
+     * in `$submissionStatus`? Null when it may, else the plain reason it may
+     * not (#965; the owner, 12 November 2026 — D-169).
+     *
+     * D-169: publishing a pending suggestion is REFUSED, with a message to
+     * approve it first, so moderation and the approval e-mail always happen;
+     * it rules OUT treating a publish as an approval. Before #965 three writers
+     * could do exactly that — Manage Events' edit, the events API's update and
+     * the series bulk edit — and the suggestion went live, e-mailed nobody and
+     * stayed in the moderation queue, so approving it later sent the e-mail
+     * for an event that had been on the calendar for days.
+     *
+     * WHY EVERY STATUS BUT `draft`, NOT ONLY `published`. Members are shown
+     * `cancelled` and `postponed` events too (`calendar/event.php`,
+     * `calendar/feed.php` and `calendar/rsvp.php` all list the three), so
+     * setting a pending suggestion to "Cancelled" would put it in front of
+     * members just as surely, still unapproved. A suggestion nobody wants is
+     * REJECTED on the moderation page, which is the route that records it.
+     *
+     * Taken as FACTS (the stored `submissionStatus`, read by the caller under
+     * its own lock, and the status about to be written), so the three writers
+     * ask one rule and cannot disagree (#647). A suggestion that has been
+     * approved or rejected, and every event that was never a suggestion
+     * (`submissionStatus` NULL), is not this rule's business.
+     */
+    public static function whyStatusRefused(?string $submissionStatus, string $newStatus): ?string
+    {
+        if ($submissionStatus !== 'pending' || $newStatus === self::STATUS_WHILE_PENDING) {
+            return null;
+        }
+
+        return 'This event is a suggestion that is still waiting to be approved, so it cannot be published, cancelled '
+            . 'or postponed yet. Approve it first on Admin, Calendar, Moderation: approving is what publishes it and '
+            . 'tells the person who suggested it. Nothing was saved.';
+    }
+
+    /**
+     * 🗣️ The same refusal for the series bulk edit, which changes several
+     * dates at once and so must say how many of the chosen dates are waiting
+     * (the whole change is refused, never applied to the others alone, so the
+     * page never reports a success it only partly delivered).
+     */
+    public static function bulkStatusRefusal(int $pending): string
+    {
+        return ($pending === 1 ? 'One of the chosen dates is a suggestion' : $pending . ' of the chosen dates are suggestions')
+            . ' still waiting to be approved, so the status cannot be changed to published, cancelled or postponed '
+            . 'yet. Approve ' . ($pending === 1 ? 'it' : 'them') . ' first on Admin, Calendar, Moderation, or leave '
+            . ($pending === 1 ? 'it' : 'them') . ' unticked here. Nothing was changed.';
+    }
+
+    /**
      * 🗣️ What the moderation page says after an approval about the e-mail,
      * one whole sentence per outcome. "Sent" is never said of a message that
      * was only kept (`Mailer::send()` answers true for both).

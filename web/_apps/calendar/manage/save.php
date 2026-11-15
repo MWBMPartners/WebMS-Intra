@@ -1705,8 +1705,9 @@ if ($action === 'update') {
     $refusedUnderLock = null;
     $mysqli->begin_transaction();
     try {
+        // `submissionStatus` is read here, under the same lock, for #965 below.
         $lockStmt = $mysqli->prepare(
-            'SELECT `isDeleted`, `seriesID` FROM `tblEvents` '
+            'SELECT `isDeleted`, `seriesID`, `submissionStatus` FROM `tblEvents` '
             . 'WHERE `eventID` = ? AND `siteID` = ? AND `externalFeedID` IS NULL FOR UPDATE'
         );
         $lockStmt->bind_param('ii', $eventID, $siteId);
@@ -1725,6 +1726,23 @@ if ($action === 'update') {
                     ? Site::url('calendar/manage/series-edit') . '?seriesID=' . $lockedSeries
                     : Site::url('calendar/manage'),
             ];
+        } else {
+            // 🚦 #965, D-169: a suggestion still waiting to be approved stays a
+            //    draft until it is approved on the moderation page, which is
+            //    what e-mails the person who suggested it. Asked on the LOCKED
+            //    row, so an approval or a rejection a moment earlier is seen.
+            //    `EventSuggestions::whyStatusRefused()` is the one rule.
+            $pendingRefusal = \Portal\Core\EventSuggestions::whyStatusRefused(
+                $lockedRow['submissionStatus'] === null ? null : (string) $lockedRow['submissionStatus'],
+                $status
+            );
+            if ($pendingRefusal !== null) {
+                $refusedUnderLock = [
+                    'words' => $pendingRefusal,
+                    'type'  => 'warning',
+                    'to'    => Site::url('calendar/manage') . '?edit=' . $eventID,
+                ];
+            }
         }
 
         if ($refusedUnderLock === null) {

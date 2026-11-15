@@ -82,6 +82,17 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
             <option value="cancelled" <?php echo ($ev['status'] ?? '') === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
             <option value="postponed" <?php echo ($ev['status'] ?? '') === 'postponed' ? 'selected' : ''; ?>>Postponed</option>
         </select>
+        <?php
+        // 🚦 #965, D-169: a suggestion still waiting to be approved stays a
+        //    draft until it is approved, and the handler refuses anything
+        //    else (`EventSuggestions::whyStatusRefused()`). Said here BEFORE
+        //    the Save, so nobody finds out only by being refused. The control
+        //    is not disabled: a disabled control is not submitted (#667).
+        if ((string) ($ev['submissionStatus'] ?? '') === 'pending'): ?>
+            <div class="form-text">This is a suggestion still waiting to be approved. It stays a draft until it is
+                approved on <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/moderation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Calendar, Moderation</a>,
+                which also tells the person who suggested it.</div>
+        <?php endif; ?>
     </div>
 
     <?php
@@ -577,6 +588,52 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                     pulled back. The portal's own pages (the event's page, the calendar a signed-out visitor sees and
                     the calendar feed people subscribe to) follow the "Public" box above, not this one.
                 </p>
+                <?php
+                // 🔁 #847, D-159 (the owner, 12 November 2026): a repeating
+                //    series keeps ONE fixed website window — the two dates
+                //    typed here are copied onto every date the repeat makes
+                //    (save.php's create INSERT lists the three columns, and the
+                //    repeat copies take that row's columns). D-159 keeps that
+                //    for the first install and asks that the form SAY so;
+                //    storing the window relative to each date is #1016.
+                //    Shown on the NEW-event form only, because a series is made
+                //    only there: editing one date later changes that date alone.
+                //
+                //    WHAT THE WINDOW REALLY DOES, and the second sentence must
+                //    say it (round 1 of #847's check): it is judged against
+                //    TODAY, not against each date's own day
+                //    (`EventVisibility::where()` in "website" mode: "today is
+                //    inside the dates"), and the public door lists every date
+                //    still to come with no look-ahead limit. So while today is
+                //    inside the window EVERY date still to come is listed, the
+                //    ones after the Until date included, and once the Until date
+                //    has passed NONE is — a later date comes off the website
+                //    before its day. A first version said such a window "keeps
+                //    that date off the website", which is untrue for every day
+                //    the window is open. The bracket (round 2 of the check) is
+                //    there because "every date" over-claimed: the door lists
+                //    only `published` rows with both boxes ticked, and it gives
+                //    a website a limited number at a time. ROUND 3: the bracket
+                //    named one default (20), which is the two raw feeds' only:
+                //    the framed page (`PublicDoor::PAGE_DEFAULT_LIMIT`) and the
+                //    pasted script (`public-door.js`) show 10 unless told more.
+                //    So it names only the ceiling, read from
+                //    `PublicDoor::MAX_LIMIT` (never typed here), and says the
+                //    default is lower; section W drives every default.
+                //    The words AND that behaviour are pinned by section W of
+                //    tools/series-suggestion-host-selftest.php.
+                if ($isEdit === false): ?>
+                    <p class="small text-secondary mt-2 mb-0" id="websiteSeries-help-<?php echo $websiteIdSuffix; ?>">
+                        If this event repeats (see Repeats above), the same From and Until dates apply to every date in
+                        the series: they are not worked out again for each date. While today is between the two dates,
+                        every date of the series still to come is on the website, including those after the Until date;
+                        once the Until date has passed, none of them is, so a later date comes off the website before its
+                        day. (A date you later make a draft, cancel or untick on its own is not shown, and a website is
+                        given at most <?php echo (int) \Portal\Core\PublicDoor::MAX_LIMIT; ?> dates at a time, and fewer
+                        unless it asks for more.) Leave both empty for no date limit, or edit a single date afterwards to
+                        give it dates of its own.
+                    </p>
+                <?php endif; ?>
             <?php else: ?>
                 <p class="mb-1"><?php
                     // The SWITCH's state, said as the switch: "Shown on the public website"
