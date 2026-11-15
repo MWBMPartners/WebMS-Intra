@@ -4,6 +4,39 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events: a series' website window is said truly; a suggestion can't be published unapproved; a host who leaves takes their home off the group (#847, #965, #952; D-159, D-168, D-169)
+
+- **A repeating series' public-website window is said plainly, and truly, on the form (#847, D-159).** The
+  new-event form says the From and Until dates apply to every date of a series and are not worked out again for
+  each date, and says what that does: the window is judged against TODAY, so while today is inside it every date
+  still to come is on the website (those after the Until date included), and once the Until date has passed none
+  is, so a later date comes off before its day. It also says a date made a draft, cancelled or unticked on its
+  own is not shown, and that a website is given at most `PublicDoor::MAX_LIMIT` (50) dates at a time and fewer
+  unless it asks for more (the feeds default to 20, the framed page and the pasted script to 10; the number in
+  the sentence is printed from the constant, and section W drives every default).
+  Storing the window relative to each date is #1016. Behaviour unchanged; driven through the real public door.
+- **A suggested event cannot be published before it is approved (#965, D-169).** Manage Events' edit, the events
+  API's update and the series bulk edit used to publish a still-pending suggestion: it went live, e-mailed nobody
+  and stayed in the moderation queue. All three now refuse to set a pending suggestion to Published, Cancelled or
+  Postponed (members see all three), with a message to approve it first; the API answers 409. The edit form says
+  so beside the Status box. Rejecting stays the route for a suggestion nobody wants.
+- **A host who leaves a small group takes their home off it (#952, D-168).** Leaving, being removed by a leader,
+  or being offboarded now takes every home of theirs off the group (removed from the list, address deleted, as a
+  leader's Remove does) and clears the group's usual place if it was theirs (country kept). The group's current
+  leaders are e-mailed to choose a new place. A map position the portal looked up for the address can still be
+  remembered until its keeping period ends (D-183; erasing remembered home positions is #1067), and every message
+  says so. The same person's home in another organisation's group is untouched unless they leave that group too
+  (offboarding leaves all of them).
+- **The offboarding page now lists every step and says what a rehire does and does not put back** (a rehire also
+  cancels an erasure request still waiting for review). It used to name seven steps and nothing about small
+  groups, and to read as if a rehire restored everything but credentials. After an offboarding, the message
+  now says how many small groups their home was taken off and whether those groups' leaders could be e-mailed.
+- **Checked:** series-suggestion-host 207 (26 planted faults, each red), public-website-tick 349, event-repeat-pages
+  398, outside-services 377, event-suggester-privacy 134, erasure-pages 271, time-zones, help-pages and every audit
+  script green on MySQL 8.0.36. Four rounds of independent check (stored and personal data), the last clean.
+  **Not run:** MariaDB, MySQL 8.4, two real simultaneous requests (the staged-race tests stand in), real mail
+  delivery. Codex has not reviewed this. Open: #1080, #1081, #1067.
+
 ### Rota swap requests have limits; the largest online gift is a setting (#989, #992; D-171, D-172)
 
 - **Rota swap requests (#989).** By default a member may make 10 swap requests a day (named and open together,

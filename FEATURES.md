@@ -2356,3 +2356,9 @@ reads as reassurance. Run the loop above — it takes seconds.
 
 - Duty Roster: swap request limits (per member per day; one open request per duty), set on Admin → Settings → Member limits (#989).
 - Giving: the online gift ceiling is configurable per organisation and per installation, and the give form says it (#992).
+- Small groups: "When a host leaves the group, their home stops being a meeting place and the current leaders are
+  e-mailed (D-168)."
+- Calendar moderation: "A suggestion waiting for approval cannot be published, cancelled or postponed until it is
+  approved (D-169)."
+- Public website: "A series' website window is one fixed pair of dates for every date, judged against today
+  (D-159; per-date window is #1016)."
