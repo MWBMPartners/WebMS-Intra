@@ -3247,10 +3247,51 @@ q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND site
 // REAL member in, put each failure through the real callback, and read the
 // page the browser is sent to. Each also proves the words were said ONCE and
 // that the session is still the member's own.
-$wrongState = static function (string $jar, int $ipLast, string $provider = 'ms365'): array {
-    req($jar, 'GET', '/login/' . $provider, null, ip($ipLast));         // the real start, which stores a state
+// #1042 round 5: every signed-in sentence ENDS "You are still signed in, and
+// nothing on your account has changed." The session half was always checked;
+// the second half was pinned by NOTHING (the independent check changed the
+// member's name one line before the no-account refusal, and linked her to the
+// Google identity before the switched-off refusal, and every check stayed
+// green). So each signed-in failure now reads, before AND after, everything a
+// sign-in could write about the person: her own row in tblUsers (every
+// column), and her rows in tblLinkedAccounts (a provider link),
+// tblLocalAccounts (a password), tblUserSites (an organisation), tblUserRoles
+// (a role) and tblTrustedDevices (a remembered device) - and requires the two
+// readings to be IDENTICAL. Two things may change and are deliberately NOT
+// read: tblActivityLogs (a failure is recorded there on purpose - the
+// no-account refusal writes SsoNewAccounts::REFUSAL_EVENT, a switched-off
+// account's attempt writes LoginBlocked against THAT account, and none of it
+// is "your account"), and the session file (whose person is checked by
+// user_id, and which holds the one-time words for the page).
+$accountState = static function (int $userId): array {
+    return [
+        'tblUsers'          => q('SELECT * FROM tblUsers WHERE userID = ?', 'i', [$userId]),
+        'tblLinkedAccounts' => q('SELECT * FROM tblLinkedAccounts WHERE userID = ? ORDER BY linkID', 'i', [$userId]),
+        'tblLocalAccounts'  => q('SELECT * FROM tblLocalAccounts WHERE userID = ? ORDER BY localID', 'i', [$userId]),
+        'tblUserSites'      => q('SELECT * FROM tblUserSites WHERE userID = ? ORDER BY siteID', 'i', [$userId]),
+        'tblUserRoles'      => q('SELECT * FROM tblUserRoles WHERE userID = ? ORDER BY userRoleID', 'i', [$userId]),
+        'tblTrustedDevices' => q('SELECT * FROM tblTrustedDevices WHERE userID = ? ORDER BY deviceID', 'i', [$userId]),
+    ];
+};
+/** The tables whose rows for this person differ between two readings ([] = nothing changed). */
+$changedIn = static function (array $before, array $after): array {
+    $changed = [];
+    foreach ($before as $table => $rows) {
+        if ($rows !== ($after[$table] ?? null)) {
+            $changed[] = $table;
+        }
+    }
 
-    return req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => str_repeat('0', 32), 'code' => 'p1042-not-a-code']), null, ip($ipLast));
+    return $changed;
+};
+// A wrong-state failure, with Xena's account read either side of it:
+// 'changed' lists any table whose rows for her differ afterwards.
+$wrongState = static function (string $jar, int $ipLast, string $provider = 'ms365') use ($accountState, $changedIn): array {
+    $before = $accountState(PEOPLE['xena']);
+    req($jar, 'GET', '/login/' . $provider, null, ip($ipLast));         // the real start, which stores a state
+    $back = req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => str_repeat('0', 32), 'code' => 'p1042-not-a-code']), null, ip($ipLast));
+
+    return $back + ['changed' => $changedIn($before, $accountState(PEOPLE['xena']))];
 };
 // #1042 round 4: a signed-in member reads the SIGNED-IN sentence, never the
 // one written for somebody signing in ($stateOut), which must be absent.
@@ -3269,11 +3310,11 @@ $saidOnce   = static function (string $jar, int $ipLast, string $path, string $w
 $m09      = $wrongState($xenaIn, 200);
 $m09Page  = $m09['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(200)) : ['status' => 0, 'body' => ''];
 $m09Who   = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
-ok('M09 a member SIGNED IN by password whose Microsoft sign-in comes back with a wrong state is sent to the Account page, which says "' . $stateWords . '" - and it is said once, and she is still signed in as herself',
+ok('M09 a member SIGNED IN by password whose Microsoft sign-in comes back with a wrong state is sent to the Account page, which says "' . $stateWords . '" - and it is said once, she is still signed in as herself, and nothing on her account changed',
     $m09Pass = $xenaPw['status'] === 302 && $m09['status'] === 302 && $m09['location'] === '/account'
     && $m09Page['status'] === 200 && $shows($m09Page['body'], $stateWords) === true && $shows($m09Page['body'], $stateOut) === false
-    && $m09Who === PEOPLE['xena'] && $saidOnce($xenaIn, 200, '/account', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
-    'sign-in ' . describe($xenaPw) . '; callback ' . describe($m09) . '; page ' . $m09Page['status'] . '; session person ' . $m09Who);
+    && $m09Who === PEOPLE['xena'] && $m09['changed'] === [] && $saidOnce($xenaIn, 200, '/account', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
+    'sign-in ' . describe($xenaPw) . '; callback ' . describe($m09) . '; page ' . $m09Page['status'] . '; session person ' . $m09Who . '; her account changed in: ' . implode(',', $m09['changed']));
 
 // M10: the same signed-in member, with this organisation REFUSING new
 // accounts, and Microsoft sending the address that matches no account (the
@@ -3287,6 +3328,7 @@ $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '0']);
 file_put_contents($scratchAuth, $stubbed);
 clearstatcache(true, $scratchAuth);
 try {
+    $m10Before = $accountState(PEOPLE['xena']);
     $m10Start = req($xenaIn, 'GET', '/login/ms365', null, ip(201));
     $m10State = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $m10Start['location'], $m) === 1 ? $m[1] : '';
     $m10      = req($xenaIn, 'GET', '/login/ms365/callback?' . http_build_query(['state' => $m10State, 'code' => STUB . json_encode(['sub' => 'p1042-ms-xena', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena'])]), null, ip(201));
@@ -3296,21 +3338,22 @@ try {
 }
 $m10Page = $m10['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(201)) : ['status' => 0, 'body' => ''];
 $m10Who  = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
-ok('M10 the same SIGNED-IN member, with this organisation refusing new accounts, whose Microsoft sign-in matches no account: no account is made, she is sent to the Account page, which says "' . $m10Words . '", once, and NOT the signed-out "' . $ssoWords . '" nor any word of an invitation - and she is still signed in as herself',
+$m10Changed = $changedIn($m10Before, $accountState(PEOPLE['xena']));
+ok('M10 the same SIGNED-IN member, with this organisation refusing new accounts, whose Microsoft sign-in matches no account: no account is made, she is sent to the Account page, which says "' . $m10Words . '", once, and NOT the signed-out "' . $ssoWords . '" nor any word of an invitation - and she is still signed in as herself, and nothing on her account changed (her own row, links, password, organisations, roles and devices read before and after)',
     $ownRow() === '0' && $m10State !== '' && $madeForXena() === [] && $m10['status'] === 302 && $m10['location'] === '/account'
     && $m10Page['status'] === 200 && $shows($m10Page['body'], $m10Words) === true
     && $problemBox($m10Page['body']) === $m10Words && $shows($m10Page['body'], $ssoWords) === false && stripos($problemBox($m10Page['body']), 'invit') === false
-    && $m10Who === PEOPLE['xena'] && $saidOnce($xenaIn, 201, '/account', htmlspecialchars($m10Words, ENT_QUOTES, 'UTF-8')) === true,
-    'own row ' . var_export($ownRow(), true) . '; callback ' . describe($m10) . '; page ' . $m10Page['status'] . '; session person ' . $m10Who);
+    && $m10Who === PEOPLE['xena'] && $m10Changed === [] && $saidOnce($xenaIn, 201, '/account', htmlspecialchars($m10Words, ENT_QUOTES, 'UTF-8')) === true,
+    'own row ' . var_export($ownRow(), true) . '; callback ' . describe($m10) . '; page ' . $m10Page['status'] . '; session person ' . $m10Who . '; her account changed in: ' . implode(',', $m10Changed));
 
 // M11: the Google callback does the same for a signed-in member (its own
 // calls to oauthError(); the refusal there is M04b's).
 $m11     = $wrongState($xenaIn, 202, 'google');
 $m11Page = $m11['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(202)) : ['status' => 0, 'body' => ''];
-ok('M11 the GOOGLE callback with a wrong state sends the same signed-in member to the Account page, which says "' . $stateWordsG . '", once',
+ok('M11 the GOOGLE callback with a wrong state sends the same signed-in member to the Account page, which says "' . $stateWordsG . '", once, and nothing on her account changed',
     $m11Pass = $m11['status'] === 302 && $m11['location'] === '/account' && $shows($m11Page['body'], $stateWordsG) === true
-    && (int) (sessionEntries($xenaIn)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaIn, 202, '/account', htmlspecialchars($stateWordsG, ENT_QUOTES, 'UTF-8')) === true,
-    'callback ' . describe($m11));
+    && (int) (sessionEntries($xenaIn)['user_id'] ?? 0) === PEOPLE['xena'] && $m11['changed'] === [] && $saidOnce($xenaIn, 202, '/account', htmlspecialchars($stateWordsG, ENT_QUOTES, 'UTF-8')) === true,
+    'callback ' . describe($m11) . '; her account changed in: ' . implode(',', $m11['changed']));
 $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => 'follow']);
 
 // M12: "Add a password" sends the person to the callback with ITS OWN address
@@ -3334,12 +3377,12 @@ $m12Ask  = req($xenaSso, 'GET', '/account/add-password', null, ip(203));
 $m12Back = sessionEntries($xenaSso)['login_redirect'] ?? null;
 $m12     = $wrongState($xenaSso, 203);
 $m12Page = $m12['location'] === '/account/add-password' ? req($xenaSso, 'GET', '/account/add-password', null, ip(203)) : ['status' => 0, 'body' => ''];
-ok('M12 a member signed in by Microsoft with no password, sent from "Add a password" to sign in again, whose sign-in comes back with a wrong state is sent BACK to "Add a password", which says "' . $stateWords . '", once',
+ok('M12 a member signed in by Microsoft with no password, sent from "Add a password" to sign in again, whose sign-in comes back with a wrong state is sent BACK to "Add a password", which says "' . $stateWords . '", once, and nothing on her account changed',
     $m12In['back']['status'] === 302 && $m12Ask['status'] === 200 && $m12Back === '/account/add-password'
     && $m12['status'] === 302 && $m12['location'] === '/account/add-password'
     && $m12Page['status'] === 200 && $shows($m12Page['body'], $stateWords) === true && $shows($m12Page['body'], $stateOut) === false
-    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaSso, 203, '/account/add-password', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
-    'sso sign-in ' . describe($m12In['back']) . '; page ' . $m12Ask['status'] . '; come-back ' . var_export($m12Back, true) . '; callback ' . describe($m12));
+    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && $m12['changed'] === [] && $saidOnce($xenaSso, 203, '/account/add-password', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
+    'sso sign-in ' . describe($m12In['back']) . '; page ' . $m12Ask['status'] . '; come-back ' . var_export($m12Back, true) . '; callback ' . describe($m12) . '; her account changed in: ' . implode(',', $m12['changed']));
 
 // M13: an ORGANISATION cannot choose "allow" (only follow or refuse are
 // offered, because "allow" could never undo the installation's refusal). A
@@ -3473,7 +3516,8 @@ $drivenIn = ($m09Pass === true && $m11Pass === true) ? ['state'] : [];
 // right, and a failure would then rightly go back THERE; these checks are
 // about the Account page's link buttons, so the come-back is cleared first.
 putInSession($xenaSso, ['login_redirect' => null]);
-$failIn = static function (string $jar, int $ipLast, string $provider, callable $query) use ($scratchAuth, $stubbed, $authAsCopied): array {
+$failIn = static function (string $jar, int $ipLast, string $provider, callable $query) use ($scratchAuth, $stubbed, $authAsCopied, $accountState, $changedIn): array {
+    $before = $accountState(PEOPLE['xena']);   // the signed-in member every caller but M28 drives
     file_put_contents($scratchAuth, $stubbed);
     clearstatcache(true, $scratchAuth);
     try {
@@ -3486,24 +3530,26 @@ $failIn = static function (string $jar, int $ipLast, string $provider, callable 
     }
     $page = $back['location'] === '/account' ? req($jar, 'GET', '/account', null, ip($ipLast)) : ['status' => 0, 'body' => ''];
 
-    return ['back' => $back, 'page' => $page, 'who' => (int) (sessionEntries($jar)['user_id'] ?? 0)];
+    return ['back' => $back, 'page' => $page, 'who' => (int) (sessionEntries($jar)['user_id'] ?? 0),
+        'changed' => $changedIn($before, $accountState(PEOPLE['xena']))];
 };
 /**
  * One signed-in failure judged: sent to the Account page, whose box holds
  * EXACTLY the signed-in sentence for this problem and provider and not the
- * signed-out one, said once, and still Xena's session. Records it as driven.
+ * signed-out one, said once, still Xena's session, and NOTHING on her account
+ * changed (round 5: the sentence's own last clause). Records it as driven.
  */
 $judgeIn = static function (array $r, string $problem, string $provider, int $ipLast) use ($xenaSso, $said, $problemBox, $shows, $saidOnce, &$drivenIn): array {
     $in  = $said($problem, $provider, true);
     $out = $said($problem, $provider, false);
     $fine = $r['back']['status'] === 302 && $r['back']['location'] === '/account' && $r['page']['status'] === 200
         && $problemBox($r['page']['body']) === $in && $shows($r['page']['body'], $out) === false
-        && $r['who'] === PEOPLE['xena'] && $saidOnce($xenaSso, $ipLast, '/account', htmlspecialchars($in, ENT_QUOTES, 'UTF-8')) === true;
+        && $r['who'] === PEOPLE['xena'] && $r['changed'] === [] && $saidOnce($xenaSso, $ipLast, '/account', htmlspecialchars($in, ENT_QUOTES, 'UTF-8')) === true;
     if ($fine === true) {
         $drivenIn[] = $problem;
     }
 
-    return [$fine, $provider . ': callback ' . describe($r['back']) . ', box "' . mb_substr($problemBox($r['page']['body']), 0, 120) . '", session person ' . $r['who']];
+    return [$fine, $provider . ': callback ' . describe($r['back']) . ', box "' . mb_substr($problemBox($r['page']['body']), 0, 120) . '", session person ' . $r['who'] . ', her account changed in: ' . implode(',', $r['changed'])];
 };
 $claimsFor = static fn (string $provider, string $email): array => $provider === 'ms365'
     ? ['sub' => 'p1042r4-ms-' . md5($email), 'preferred_username' => $email, 'name' => 'Selftest two-step r4']

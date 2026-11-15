@@ -105,8 +105,9 @@ if ($level === 'installation') {
     $finish($choice === '1'
         ? 'Saved. For the whole installation, a Microsoft or Google sign-in that matches no account makes a new one — '
             . 'except in an organisation that has chosen to refuse.'
-        : 'Saved. For the whole installation, a Microsoft or Google sign-in that matches no account is now refused, '
-            . 'and the person is told to ask an administrator for an invitation.', 'success');
+        : 'Saved. For the whole installation, a Microsoft or Google sign-in that matches no account is now refused. '
+            . 'Somebody signing in is told to ask an administrator for an invitation; a member who is already signed in '
+            . 'is told that sign-in could not be used with their account.', 'success');
 }
 
 if ($level === 'organisation') {
@@ -136,8 +137,9 @@ if ($level === 'organisation') {
     );
     $finish($choice === 'follow'
         ? 'Saved. This organisation now follows the installation\'s choice.'
-        : 'Saved. In this organisation, a Microsoft or Google sign-in that matches no account is now refused, and the '
-            . 'person is told to ask an administrator for an invitation.', 'success');
+        : 'Saved. In this organisation, a Microsoft or Google sign-in that matches no account is now refused. '
+            . 'Somebody signing in is told to ask an administrator for an invitation; a member who is already signed in '
+            . 'is told that sign-in could not be used with their account.', 'success');
 }
 
 $finish('Nothing was saved: the form did not say which level to change.', 'warning');

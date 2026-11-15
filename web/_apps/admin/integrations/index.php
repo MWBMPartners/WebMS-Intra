@@ -450,8 +450,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-body">
         <p class="text-secondary small mb-3">
             When somebody signs in with Microsoft or Google and no account here is linked to them or has their
-            e-mail address, the portal can make them a new account, or refuse and tell them to ask an administrator
-            for an invitation. A member whose e-mail address changed after a backup was restored looks exactly like
+            e-mail address, the portal can make them a new account, or refuse. When it refuses, somebody signing in
+            is told to ask an administrator for an invitation, and a member who is already signed in (linking
+            Microsoft or Google from their Account page) is told that sign-in could not be used with their account,
+            and nothing on it changes. A member whose e-mail address changed after a backup was restored looks exactly like
             a newcomer, so making an account can give them a second, empty one. Refusing turns real newcomers away
             too. If either the installation or this organisation refuses, it is refused.
         </p>
@@ -463,7 +465,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="d-flex flex-column flex-sm-row gap-2">
                     <select class="form-select" id="sso-install-choice" name="choice">
                         <option value="1"<?php echo $ssoInstallAllows === true ? ' selected' : ''; ?>>Make a new account</option>
-                        <option value="0"<?php echo $ssoInstallAllows === false ? ' selected' : ''; ?>>Refuse, and say to ask for an invitation</option>
+                        <option value="0"<?php echo $ssoInstallAllows === false ? ' selected' : ''; ?>>Refuse</option>
                     </select>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
@@ -481,7 +483,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="d-flex flex-column flex-sm-row gap-2">
                     <select class="form-select" id="sso-own-choice" name="choice">
                         <option value="follow"<?php echo $ssoOwnRefuses === false ? ' selected' : ''; ?>>Follow the installation's choice</option>
-                        <option value="0"<?php echo $ssoOwnRefuses === true ? ' selected' : ''; ?>>Refuse here, and say to ask for an invitation</option>
+                        <option value="0"<?php echo $ssoOwnRefuses === true ? ' selected' : ''; ?>>Refuse here</option>
                     </select>
                     <button type="submit" class="btn btn-primary">Save</button>
                 </div>
