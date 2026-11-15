@@ -180,7 +180,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Tip:</strong> A PDF summary of your approved claim is generated automatically by the system and can be used for your personal records.
+            <!-- #954: until 13 November 2026 nothing in the portal could open this PDF, so "can be used" could not be followed. -->
+            <strong>Tip:</strong> The portal makes a PDF summary of your claim when you submit it, and makes it again when you change the claim and each time it moves on (approved, not approved, paid). Withdrawing a claim does not remake it. Open it from the claim's own page, under Generated PDF, to keep for your records. Only the newest version is kept: each one replaces the one before, so the link always gives you the latest.
         </div>
     </div>
 
@@ -290,6 +291,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul>
         <li><strong>Opening a claim</strong>, or the form to change one (whether or not the claim can still be changed): the claim's number.</li>
         <li><strong>Opening a receipt</strong>: the receipt's number and the claim's number.</li>
+        <li><strong>Opening a claim's generated PDF</strong>: the claim's number.</li>
         <li><strong>Your list of claims</strong> on the Expenses page: which page of the list it was and how many claims it showed.</li>
         <li>The <strong>approvals list</strong> and the <strong>treasury list</strong>: how many claims the list showed.</li>
         <li><strong>The expenses spreadsheet</strong>: which departments it covered and how many claims were in it &mdash; not which claims.</li>

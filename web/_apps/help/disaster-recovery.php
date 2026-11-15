@@ -222,6 +222,14 @@ must-know shortcuts.</p>
             them is still waiting afterwards.) Putting back the one table they are kept in WOULD
             lose them, so the portal refuses to and says why. A backup taken since 27&nbsp;October&nbsp;2026 does not cause
             this loss in the first place.</li>
+        <?php // 🌐 #801: the monthly translation limits count what was really spent, so a
+              //    restore must not give an organisation its month's allowance back. ?>
+        <li><strong>This month&rsquo;s translation figures are not wound back</strong> &mdash; the
+            portal counts how many translation requests each organisation has made this month, and
+            what they cost, because the monthly limits read those figures. Putting a backup back keeps
+            the <strong>higher</strong> of this month&rsquo;s figures and the backup&rsquo;s, for each
+            organisation, so an organisation cannot spend its monthly limit a second time; the result
+            says when it did. Earlier months come back exactly as the backup has them.</li>
     </ul>
 </div></div>
 
