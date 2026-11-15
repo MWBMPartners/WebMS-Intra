@@ -1182,7 +1182,11 @@ $seed(REQ_B_ASK, ORG_B, ADMB, 'pending_confirmation', null);
 // every setting back), which made this test's pins fail for a reason that had
 // nothing to do with the pages. Kept after #947 because the pins need a KNOWN
 // figure whatever state the database arrives in, not only after that one test.
-foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365'] as $key => $value) {
+// #1019: the network-address period too, for the same reason (the privacy
+// pages print it, and section Q7 changes it IN PLACE and puts it back; a run
+// stopped part-way through Q7 is repaired here by the next run).
+foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365',
+    'privacy.networkAddressDays' => '365'] as $key => $value) {
     $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
     $state['settings'][$key] = $row;
     if ($row === null) {
@@ -6449,14 +6453,20 @@ ok('Q6 with every plant taken out again, both pages are whole again (#1019)', $q
 //    NOT reachable over HTTP: it needs the settings reader itself to throw,
 //    and a page whose settings cannot be read does not draw at all; Q10 asks
 //    the real class for those words directly instead.
+// HOW IT IS PUT BACK, and why it holds if the run is stopped here. The
+// installation's row was forced to 365 at the start of the run, and the value
+// it held before that is in $state['settings'], so cleanup() puts it back by
+// that row's number. Q7 therefore changes the row IN PLACE and never deletes
+// and re-inserts it: a new row would have a new number and cleanup() would
+// match nothing (round 4 of the check measured that: a SIGINT after the first
+// change left 200 on a fresh row, and the next run went 269 of 271). The
+// signal handler's exit() skips the `finally` below, which is why cleanup()
+// and the forced 365 at the start of the NEXT run are what make that safe.
+// An organisation's own rows are removed by removeWorld() with the world.
 $q7Key    = 'privacy.networkAddressDays';
 $q7Before = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
-if (array_key_exists($q7Key, $state['settings']) === false) {
-    $state['settings'][$q7Key] = $q7Before; // put back by the clean-up even if this section dies
-}
 $q7SetInstallation = static function (string $value) use ($q7Key): void {
-    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
-    q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$q7Key, $value, '365']);
+    q('UPDATE tblSettings SET settingValue = ? WHERE settingKey = ? AND siteID IS NULL', 'ss', [$value, $q7Key]);
 };
 $q7SetOwn = static function (int $site, ?string $value) use ($q7Key): void {
     q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [$site, $q7Key]);
@@ -6533,11 +6543,7 @@ try {
     // Back as it was, NOW: later sections compare rendered pins taken at 365.
     $q7SetOwn(ORG_A, null);
     $q7SetOwn(ORG_B, null);
-    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
-    if ($q7Before !== null) {
-        q('INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, NULL, ?, ?, ?, 0)', 'isss',
-            [(int) $q7Before['settingID'], $q7Key, (string) $q7Before['settingValue'], '365']);
-    }
+    $q7SetInstallation((string) $q7Before['settingValue']);
 }
 foreach ($q7Results as $label => $wrong) {
     ok($label . ' (#1019)', $wrong === '', $wrong);
@@ -6545,9 +6551,9 @@ foreach ($q7Results as $label => $wrong) {
 ok('Q7p the template planted to read the activity log\'s facts instead of its own: Q7\'s state goes red, and the file is put back byte for byte (#1019)',
     $q7Applied === true && $q7Planted !== '' && (string) file_get_contents($q7Template) === $q7Original,
     ($q7Applied === true ? 'applied' : 'NOT APPLIED') . ' | observed: ' . $q7Planted);
-$q7Restored = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
-ok('Q7r the network-address setting is put back exactly as it was before Q7 (#1019)',
-    ($q7Before === null && $q7Restored === null) || ($q7Before !== null && $q7Restored !== null && $q7Restored['settingValue'] === $q7Before['settingValue']),
+$q7Restored = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+ok('Q7r the network-address setting is put back exactly as it was before Q7, on the same row (#1019)',
+    $q7Restored !== null && $q7Restored['settingValue'] === $q7Before['settingValue'] && $q7Restored['settingID'] === $q7Before['settingID'],
     json_encode([$q7Before, $q7Restored]));
 // Q10: "could not be read", asked of the real class in the running copy.
 $q10 = shell_exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg(

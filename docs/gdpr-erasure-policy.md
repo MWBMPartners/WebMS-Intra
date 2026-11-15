@@ -152,11 +152,15 @@ facts, the network address, the browser name and the request headers. The
 request itself keeps the network address it was sent from (D-176), and only a
 visitor-address request (above) empties it sooner. A request sent with no
 e-mail address cannot be found by any erasure. Its network address is still
-emptied by the nightly clear-out once it is older than the organisation's
+emptied by the retention clear-out once it is older than the organisation's
 period for network addresses (`privacy.networkAddressDays`, a year unless
-changed, or kept for ever where the organisation and the installation both
-choose that; D-188, #1019), if that scheduled job has been set up; the request
-itself is kept, because nothing in the portal deletes a prayer request. A
+changed; D-188, #1019). The clear-out runs nightly where that scheduled job has
+been set up, or when a global administrator runs it by hand on Admin,
+Maintenance, Retention. Nothing empties the address where the period in force
+is "keep for ever": where the organisation has chosen that for itself (which
+the installation must allow), or where the installation keeps addresses for
+ever and the organisation has not chosen a shorter period. The request itself
+is kept, because nothing in the portal deletes a prayer request. A
 signed-in member opening the form is told it is not linked to their account,
 and that the network address is kept. One record
 outside the form still follows the ordinary rule: where reCAPTCHA v3 is the

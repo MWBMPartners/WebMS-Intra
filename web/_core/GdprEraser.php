@@ -3988,12 +3988,16 @@ class GdprEraser
      * WHAT IT CANNOT REACH: a request sent without an e-mail address. Nothing
      * on it says whose it is, so a request by address cannot find it. Its
      * network address is not kept for ever on that account, though: the
-     * nightly clear-out empties `submitterIP` once it is older than the
+     * retention clear-out empties `submitterIP` once it is older than the
      * organisation's network-address period (NetworkAddressRetention::PLACES,
-     * D-188, #1019), unless the organisation and the installation both keep
-     * addresses for ever, and only once that scheduled job is set up. The
-     * request itself stays: nothing under web/ deletes a prayer request (no
-     * DELETE of tblPrayerRequests anywhere).
+     * D-188, #1019). It runs as the nightly scheduled job where that has been
+     * set up, or when a global administrator runs it by hand on Admin,
+     * Maintenance, Retention. Nothing empties it where the period in force
+     * for the organisation is "keep for ever": its own choice of that where
+     * the installation allows it, or the installation's "keep for ever" when
+     * the organisation has chosen no shorter period. The request itself
+     * stays: nothing under web/ deletes a prayer request (no DELETE of
+     * tblPrayerRequests anywhere).
      *
      * Exactly one audit line, including when nothing matched. A failure is a
      * FAILED step, not a crash; the fault's own words are not recorded.
