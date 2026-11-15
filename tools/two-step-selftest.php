@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 165; // five added by #598 (part L); nine by #907 (K56-K64); two by #1042 (part M)
+const EXPECTED_CHECKS = 172; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b)
 
 function refuse(string $why): never
 {
@@ -339,6 +339,7 @@ const PEOPLE = [
     'vic'   => 922032, // K (#903): a GLOBAL administrator, who sets the passkey address on the Settings page
     'wes'   => 922033, // L (#598): half-way through signing in when the password is changed elsewhere
     'xena'  => 922034, // M (#1042): her account as a whole restore puts it back - the OLD e-mail address, no Microsoft link
+    'yan'   => 922035, // M (#1042): an administrator of the default organisation only, not of the installation
 ];
 /** #1042: the address Xena changed to AFTER the snapshot, which Microsoft now sends. The account the callback makes for it is numbered by the database, so it is found by this. */
 const P1042_NEW_EMAIL = 'xena.changed.p1042.twostep@selftest.invalid';
@@ -437,6 +438,8 @@ function removeWorld(): void
     // #903: K51 and K53/K54 may leave an organisation's own passkey-address row
     // if interrupted. A real installation never holds one (no page can make it).
     q("DELETE FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NOT NULL");
+    // #1042: an organisation's own choice, if a run stopped inside part M.
+    q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
     // #907: the default organisation's own address, if a run stopped while K60-K64
     // had lent it one. Only this test's own made-up name is cleared; the run
     // itself puts back exactly what was there (see `hostPattern1` in cleanup()).
@@ -1033,6 +1036,8 @@ foreach (PEOPLE as $who => $id) {
 }
 // #903: vic alone is a global administrator (part K uses her on the Settings page).
 q('UPDATE tblUsers SET isAdmin = 1, isRootAdmin = 1 WHERE userID = ?', 'i', [PEOPLE['vic']]);
+// #1042: yan administers the default organisation and nothing more.
+q('UPDATE tblUserSites SET isSiteAdmin = 1 WHERE userID = ? AND siteID = 1', 'i', [PEOPLE['yan']]);
 // Believe the "X-Forwarded-For" header from 127.0.0.1, so each part has a visitor address of its own.
 setting('portal.trustedProxies', '127.0.0.1');
 setting('portal.trustedProxyHeader', 'x-forwarded-for');
@@ -3035,53 +3040,170 @@ ok('L5 that browser, asking to be trusted at the code step after the change, is 
     describe($trusted) . '; live devices before ' . $devicesBefore . ', after ' . $liveDevices() . '; refusals recorded ' . records('wes', 'TotpDeviceTrustRefused'));
 
 // =============================================================================
-head('M. #1042: a Microsoft sign-in after a whole restore, for a member who changed their e-mail address after the snapshot');
+head('M. #1042: a Microsoft sign-in that matches no account makes one only where the setting allows it (D-185)');
 // =============================================================================
-// KNOWN OPEN FAULT, REPRODUCED AND NOT FIXED. What SHOULD happen is the
-// owner's decision (#1042): nothing in docs/decisions/ says whether a
-// Microsoft or Google sign-in may create an account at all, nor how a sign-in
-// that matches nobody should end. So this section proves the fault is real and
-// changes nothing. M02 PASSES WHILE THE FAULT IS PRESENT: when #1042 is
-// decided and built, M02 must be rewritten to the decided behaviour - it will
-// go red the moment the callback stops making the account, which is the point.
-//
 // THE STATE A WHOLE RESTORE LEAVES, made here with SQL rather than by running
 // a restore (a whole restore of this test's database would replace every
 // other part's world): the restore puts tblUsers and tblLinkedAccounts back as
 // they were at the snapshot, so Xena's account holds her OLD address and has
 // NO Microsoft link - she linked Microsoft and changed her address after the
-// snapshot was taken. Microsoft then sends her NEW address and her subject.
-// That is exactly the fixture below: her account as made for every person in
-// this test (old address, no link), and a sign-in naming the new address.
-$xenaJar = newJar();
-$xenaLinksBefore = (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['xena']])['n'];
-$newHoldersBefore = (int) one('SELECT COUNT(*) AS n FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL])['n'];
-ok('M01 premise: Xena\'s account is as a restore leaves it - her old address, no Microsoft link - and no account holds her new address',
-    $xenaLinksBefore === 0 && $newHoldersBefore === 0
-    && (string) one('SELECT emailAddress FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['xena']])['emailAddress'] === 'xena.twostep@selftest.invalid',
-    'links before ' . $xenaLinksBefore . ', accounts holding the new address before ' . $newHoldersBefore);
-// Part K put the scratch Auth.php back as copied, stubs removed; the provider
-// stubs go back in for this one sign-in and come out again straight after.
-file_put_contents($scratchAuth, $stubbed);
-clearstatcache(true, $scratchAuth);
-try {
-    $xenaStart = req($xenaJar, 'GET', '/login/ms365', null, ip(190));
-    $xenaState = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $xenaStart['location'], $xm) === 1 ? $xm[1] : '';
-    $xenaBack  = req($xenaJar, 'GET', '/login/ms365/callback?' . http_build_query(['state' => $xenaState, 'code' => STUB . json_encode(
-        ['sub' => 'p1042-ms-xena', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena']
-    )]), null, ip(190));
-} finally {
-    file_put_contents($scratchAuth, $authAsCopied);
+// snapshot. Microsoft then sends her NEW address and her subject, which is
+// exactly what a newcomer looks like to the callback.
+//
+// D-185 (the owner, 13 November 2026): whether such a sign-in may make a new
+// account is the setting `auth.sso.createAccounts`, default ALLOW; an
+// organisation may refuse, and the stricter level wins. A refusal signs nobody
+// in, makes nothing, says "No account on this portal matches this sign-in. Ask
+// an administrator to invite you." and is recorded with no e-mail address.
+// The choice is made on Admin, Integrations (#674: each box filled from its
+// OWN level's row), which this part drives over HTTP.
+setting('auth.sso.createAccounts', '1');               // remembered, so the clean-up puts it back exactly
+q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
+$ssoKey   = 'auth.sso.createAccounts';
+$ssoWords = 'No account on this portal matches this sign-in. Ask an administrator to invite you.';
+/**
+ * Xena's sign-in, in a new browser, with the provider stubs in for this one
+ * sign-in only. Microsoft by default; 'google' sends the same new address the
+ * way Google does (the `email` claim), so the Google callback's own call to
+ * the rule is driven too - without M04b, removing it turned nothing red.
+ */
+$xenaSignIn = static function (int $ipLast, string $provider = 'ms365') use ($scratchAuth, $stubbed, $authAsCopied): array {
+    $jar = newJar();
+    file_put_contents($scratchAuth, $stubbed);
     clearstatcache(true, $scratchAuth);
-}
-$madeFor = q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL]);
-$madeId  = (int) ($madeFor[0]['userID'] ?? 0);
-$madeLinks = $madeId > 0 ? (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ? AND provider = 'ms365' AND providerSub = 'p1042-ms-xena'", 'i', [$madeId])['n'] : 0;
-ok('M02 KNOWN FAULT #1042 REPRODUCED (passes while the fault is present; rewrite when #1042 is decided): the callback found no link, no account with the new address and no switched-off one, so it MADE A NEW, EMPTY ACCOUNT for that address, linked Microsoft to it and signed the browser in as it - while Xena\'s real account was left with no link',
-    $xenaState !== '' && count($madeFor) === 1 && $madeId !== PEOPLE['xena'] && $madeLinks === 1
-    && (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['xena']])['n'] === 0
-    && signedIn($xenaJar, ip(190)) === true,
-    'callback ' . describe($xenaBack) . '; error records for this sign-in: ' . json_encode(array_column(q('SELECT errorCode FROM tblErrors WHERE visitorIP = ?', 's', [ip(190)]), 'errorCode')) . '; accounts now holding the new address ' . count($madeFor) . ' (number ' . $madeId . ', Xena is ' . PEOPLE['xena'] . '); its Microsoft links ' . $madeLinks);
+    $claims = $provider === 'ms365'
+        ? ['sub' => 'p1042-ms-xena', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena']
+        : ['sub' => 'p1042-g-xena', 'email' => P1042_NEW_EMAIL, 'name' => 'Selftest two-step xena'];
+    try {
+        $start = req($jar, 'GET', '/login/' . $provider, null, ip($ipLast));
+        $state = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $start['location'], $m) === 1 ? $m[1] : '';
+        $back  = req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => $state, 'code' => STUB . json_encode($claims)]), null, ip($ipLast));
+    } finally {
+        file_put_contents($scratchAuth, $authAsCopied);
+        clearstatcache(true, $scratchAuth);
+    }
+    $login = $back['location'] === '/login' ? req($jar, 'GET', '/login', null, ip($ipLast))['body'] : '';
+
+    return ['jar' => $jar, 'state' => $state, 'back' => $back, 'login' => $login, 'in' => signedIn($jar, ip($ipLast))];
+};
+$madeForXena = static fn (): array => q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [P1042_NEW_EMAIL]);
+$dropMadeForXena = static function () use ($madeForXena): void {
+    foreach ($madeForXena() as $made) {
+        foreach (['tblActivityLogs', 'tblErrors', 'tblLinkedAccounts', 'tblLocalAccounts', 'tblUserSites', 'tblUsers'] as $table) {
+            q('DELETE FROM ' . $table . ' WHERE userID = ?', 'i', [(int) $made['userID']]);
+        }
+    }
+};
+$refusals = static fn (): array => q('SELECT * FROM tblActivityLogs WHERE activityType = ? ORDER BY logID', 's', ['SsoNewAccountRefused']);
+/** The Integrations card's two boxes, as drawn: which option of each is selected, and whether each form is there. */
+$ssoCard = static function (string $jar, int $ipLast): array {
+    $page = req($jar, 'GET', '/admin/integrations', null, ip($ipLast));
+    $sel  = static function (string $id) use ($page): ?string {
+        if (preg_match('#<select[^>]*id="' . $id . '"[^>]*>(.*?)</select>#s', $page['body'], $m) !== 1) {
+            return null;
+        }
+        return preg_match('#<option value="([^"]*)" selected>#', $m[1], $o) === 1 ? $o[1] : '(none selected)';
+    };
+
+    return ['status' => $page['status'], 'install' => $sel('sso-install-choice'), 'own' => $sel('sso-own-choice'), 'token' => token($page['body'])];
+};
+$ssoPost = static function (string $jar, int $ipLast, array $fields) use ($ssoCard): array {
+    $card = $ssoCard($jar, $ipLast);
+
+    return req($jar, 'POST', '/admin/integrations/sso-accounts-save', ['csrf_token' => $card['token']] + $fields, ip($ipLast));
+};
+$ownRow     = static fn (): ?string => one("SELECT settingValue FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID = 1")['settingValue'] ?? null;
+$installRow = static fn (): ?string => one("SELECT settingValue FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NULL")['settingValue'] ?? null;
+
+ok('M01 premise: Xena\'s account is as a restore leaves it - her old address, no Microsoft link - no account holds her new address, the installation allows new accounts and the organisation has no row of its own',
+    (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['xena']])['n'] === 0
+    && $madeForXena() === []
+    && (string) one('SELECT emailAddress FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['xena']])['emailAddress'] === 'xena.twostep@selftest.invalid'
+    && $installRow() === '1' && $ownRow() === null);
+
+// M02: the DEFAULT (D-185: allow) - exactly what the callback has always done.
+$m02  = $xenaSignIn(190);
+$made = $madeForXena();
+$madeId = (int) ($made[0]['userID'] ?? 0);
+ok('M02 by DEFAULT (D-185: allow) the callback makes a new account for the address Microsoft sent, links Microsoft to it and signs the browser in as it - which is the #1042 duplicate, now a choice rather than the only behaviour',
+    $m02['state'] !== '' && count($made) === 1 && $madeId !== PEOPLE['xena']
+    && (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ? AND provider = 'ms365' AND providerSub = 'p1042-ms-xena'", 'i', [$madeId])['n'] === 1
+    && $m02['in'] === true,
+    'callback ' . describe($m02['back']) . '; accounts holding the new address ' . count($made));
+$dropMadeForXena();
+
+// M03: the card, as a global administrator, with nothing chosen anywhere.
+[$vicSso] = passwordStep('vic', ip(191));
+$cardBefore = $ssoCard($vicSso, 191);
+ok('M03 the Integrations page shows a global administrator BOTH boxes: the installation\'s on "make a new account" and the organisation\'s on "follow the installation"',
+    $cardBefore['status'] === 200 && $cardBefore['install'] === '1' && $cardBefore['own'] === 'follow',
+    json_encode($cardBefore));
+
+// M04: the organisation refuses, through the page.
+$m04Saved = $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '0']);
+$m04      = $xenaSignIn(192);
+$m04Refusals = $refusals();
+$m04Record   = json_encode($m04Refusals);
+ok('M04 with THIS ORGANISATION refusing (saved on the page): the sign-in makes NO account, signs nobody in, shows "' . $ssoWords . '" and is recorded once - and the record holds no e-mail address',
+    $m04Saved['status'] === 302 && $ownRow() === '0' && $installRow() === '1'
+    && $madeForXena() === [] && $m04['in'] === false && $m04['back']['status'] === 302
+    && str_contains($m04['login'], $ssoWords) === true
+    && count($m04Refusals) === 1 && str_contains((string) $m04Record, '@') === false && str_contains((string) $m04Record, 'xena.changed') === false,
+    'own row ' . var_export($ownRow(), true) . '; callback ' . describe($m04['back']) . '; refusals ' . count($m04Refusals) . ': ' . mb_substr((string) $m04Record, 0, 300));
+// M04b: the same refusal through the GOOGLE callback, which asks the rule from
+// its own line in Auth.php.
+$m04b = $xenaSignIn(196, 'google');
+$m04bRefusals = $refusals();
+ok('M04b with this organisation refusing, a GOOGLE sign-in naming the same new address is refused the same way: no account, nobody signed in, the same words, and a second refusal recorded that names Google and no e-mail address',
+    $m04b['state'] !== '' && $madeForXena() === [] && $m04b['in'] === false
+    && str_contains($m04b['login'], $ssoWords) === true
+    && count($m04bRefusals) === 2 && str_contains((string) ($m04bRefusals[1]['activityDescription'] ?? ''), 'Google') === true
+    && str_contains((string) json_encode($m04bRefusals), '@') === false,
+    'callback ' . describe($m04b['back']) . '; refusals ' . count($m04bRefusals) . ': ' . mb_substr((string) json_encode($m04bRefusals), 0, 300));
+
+// M05: the STRICTER level wins, the other way round: the installation refuses
+// and the organisation's own row says '1' (no page offers that; made with SQL,
+// as an old or hand-written row would be).
+$m05Saved = $ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => '0']);
+q("UPDATE tblSettings SET settingValue = '1' WHERE settingKey = 'auth.sso.createAccounts' AND siteID = 1");
+$m05 = $xenaSignIn(193);
+ok('M05 the installation REFUSING beats an organisation row saying allow: no account is made and nobody is signed in (the stricter level wins, D-185)',
+    $m05Saved['status'] === 302 && $installRow() === '0' && $ownRow() === '1'
+    && $madeForXena() === [] && $m05['in'] === false && str_contains($m05['login'], $ssoWords) === true,
+    'install ' . var_export($installRow(), true) . ', own ' . var_export($ownRow(), true) . '; callback ' . describe($m05['back']));
+
+// M06 (#674): installation allows, organisation refuses. The page must show
+// EACH box from its own row, and a Save of the installation's box that touched
+// nothing must leave both rows as they were.
+$ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => '1']);
+q("UPDATE tblSettings SET settingValue = '0' WHERE settingKey = 'auth.sso.createAccounts' AND siteID = 1");
+$card06 = $ssoCard($vicSso, 191);
+$ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => (string) $card06['install']]);
+ok('M06 (#674) with the installation allowing and the organisation refusing, the page shows the installation box on "make" and the organisation box on "refuse" - and saving the installation box untouched leaves the installation allowing and the organisation refusing',
+    $card06['install'] === '1' && $card06['own'] === '0' && $installRow() === '1' && $ownRow() === '0',
+    json_encode($card06) . '; install ' . var_export($installRow(), true) . ', own ' . var_export($ownRow(), true));
+
+// M07: an ORGANISATION administrator (not global) is shown no installation box,
+// and a hand-made post to change the installation is refused and recorded.
+[$yanSso] = passwordStep('yan', ip(194));
+$yanCard  = $ssoCard($yanSso, 194);
+$yanPost  = $ssoPost($yanSso, 194, ['level' => 'installation', 'choice' => '0']);
+ok('M07 an organisation administrator sees only the organisation\'s box, and a hand-made post changing the INSTALLATION is refused, recorded, and changes nothing',
+    $yanCard['status'] === 200 && $yanCard['install'] === null && $yanCard['own'] === '0'
+    && $yanPost['status'] === 302 && $installRow() === '1'
+    && (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SettingsGroupSaveRefused'", 'i', [PEOPLE['yan']])['n'] === 1,
+    json_encode($yanCard) . '; post ' . describe($yanPost) . '; install ' . var_export($installRow(), true));
+
+// M08: following the installation again (the page deletes the organisation's
+// row) brings the default back: the same sign-in makes the account.
+$ssoPost($yanSso, 194, ['level' => 'organisation', 'choice' => 'follow']);
+$m08 = $xenaSignIn(195);
+ok('M08 once the organisation follows the installation again (its row deleted by the page), the same sign-in makes the account as before',
+    $ownRow() === null && count($madeForXena()) === 1 && $m08['in'] === true,
+    'own ' . var_export($ownRow(), true) . '; callback ' . describe($m08['back']));
+$dropMadeForXena();
+q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
+
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

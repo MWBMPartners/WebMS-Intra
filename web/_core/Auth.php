@@ -2381,6 +2381,15 @@ class Auth
                     self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
                 }
 
+                // 🆕 May a Microsoft sign-in make a NEW account here? (#1042,
+                //    D-185). Asked only here, after the link, the e-mail
+                //    address and the switched-off guard have all found
+                //    nothing — which is also exactly what a member whose link
+                //    and address changed after a restored backup looks like,
+                //    and why it is a setting. A refusal signs nobody in and
+                //    makes nothing.
+                self::refuseNewAccountUnlessAllowed('Microsoft');
+
                 // ➕ Create new user + link
                 $userId = self::createUser($name, $email, $avatar, $mysqli);
                 self::linkAccount($userId, 'ms365', $sub !== '' ? $sub : $email, $email, $mysqli);
@@ -2680,6 +2689,12 @@ class Auth
                     Logger::activity('LoginBlocked', 'Google sign-in attempt for deactivated account #' . $switchedOffId, $switchedOffId);
                     self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
                 }
+
+                // 🆕 May a Google sign-in make a NEW account here? (#1042,
+                //    D-185). Asked only here, after every way of matching an
+                //    existing account has failed. A refusal signs nobody in
+                //    and makes nothing.
+                self::refuseNewAccountUnlessAllowed('Google');
 
                 // ➕ Create new user + link
                 $userId = self::createUser($name, $email, $avatar, $mysqli);
@@ -4835,10 +4850,60 @@ class Auth
     {
         self::ensureSession();
         http_response_code($httpCode);
-        $_SESSION['flash_msg']  = $message;
-        $_SESSION['flash_type'] = 'danger';
+        // #1042: under the sign-in page's OWN key. It used to be the general
+        // `flash_msg`, which the sign-in page never printed, so the person was
+        // told nothing; see takeSignInProblem().
+        $_SESSION[self::SIGN_IN_PROBLEM_KEY] = $message;
         header('Location: ' . Site::url('login'));
         exit();
+    }
+
+    /** The session key a failed Microsoft or Google sign-in leaves its words under, for the sign-in page (#1042). */
+    private const SIGN_IN_PROBLEM_KEY = 'sign_in_problem';
+
+    /**
+     * ❌ Why the last Microsoft or Google sign-in in this browser failed, or ''
+     * (#1042). Taken out of the session as it is read, so it is said once.
+     * The ONE reader; only `oauthError()` writes it, always with this file's
+     * own words, never a visitor's.
+     *
+     * @return string
+     */
+    public static function takeSignInProblem(): string
+    {
+        $words = $_SESSION[self::SIGN_IN_PROBLEM_KEY] ?? null;
+        unset($_SESSION[self::SIGN_IN_PROBLEM_KEY]);
+
+        return is_string($words) === true ? $words : '';
+    }
+
+    /**
+     * 🆕 Stop a Microsoft or Google sign-in here unless it may make a new
+     * account (#1042, D-185). `SsoNewAccounts::allowed()` is the ONE rule.
+     *
+     * On a refusal: nobody is signed in (the callback has granted nothing yet
+     * — `beginSessionFor()` and `$_SESSION['user_id']` come after the account
+     * is found or made), nothing is created, the person reads
+     * `SsoNewAccounts::REFUSAL_WORDS`, and the refusal is recorded. The record
+     * names the provider and NOT the e-mail address the provider sent: an
+     * activity description is fixed words (#933), and this address belongs to
+     * nobody on the portal, so an erasure could never find it.
+     *
+     * @param string $providerWords 'Microsoft' or 'Google' — this file's own words, never a visitor's.
+     *
+     * @return void
+     */
+    private static function refuseNewAccountUnlessAllowed(string $providerWords): void
+    {
+        if (SsoNewAccounts::allowed() === true) {
+            return;
+        }
+        Logger::activity(
+            SsoNewAccounts::REFUSAL_EVENT,
+            'A ' . $providerWords . ' sign-in matched no account, and new accounts by Microsoft or Google sign-in '
+                . 'are switched off here, so none was made'
+        );
+        self::oauthError(SsoNewAccounts::REFUSAL_WORDS, 403);
     }
 
     /**

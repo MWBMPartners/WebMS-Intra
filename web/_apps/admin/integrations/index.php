@@ -41,6 +41,7 @@ use Portal\Core\Mailer;
 use Portal\Core\MailerGoogle;
 use Portal\Core\Router;
 use Portal\Core\Site;
+use Portal\Core\SsoNewAccounts;
 use Portal\Core\WebPush;
 
 // 📌 Page metadata
@@ -342,6 +343,35 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// ============================================================================
+// 🆕 May a Microsoft or Google sign-in make a NEW account? (#1042, D-185)
+// ============================================================================
+// Two boxes, each filled from ITS OWN level's row (#674): the installation's
+// from InstallationSettings::value(), the open organisation's from its own row
+// read directly — never from the merged settings, where the organisation's row
+// has already won, so a Save that touched nothing would write the wrong level.
+// A missing installation row reads as '1', which is what SsoNewAccounts does.
+$ssoInstallValue = InstallationSettings::value(SsoNewAccounts::SETTING_KEY);
+$ssoInstallAllows = SsoNewAccounts::levelAllows($ssoInstallValue);
+$ssoOwnValue = null;
+$ssoOwnUnread = false;
+try {
+    $ssoSite = Site::id();
+    $ssoKey  = SsoNewAccounts::SETTING_KEY;
+    $ssoRead = $mysqli->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ? LIMIT 1');
+    $ssoRead->bind_param('si', $ssoKey, $ssoSite);
+    $ssoRead->execute();
+    $ssoRow = $ssoRead->get_result()->fetch_assoc();
+    $ssoRead->close();
+    $ssoOwnValue = $ssoRow === null ? null : (string) $ssoRow['settingValue'];
+} catch (\Throwable $ssoReadFailed) {
+    $ssoOwnUnread = true;
+}
+// An organisation row that does not refuse (a stored '1') changes nothing,
+// because the stricter level wins, so it is shown as following.
+$ssoOwnRefuses = $ssoOwnValue !== null && SsoNewAccounts::levelAllows($ssoOwnValue) === false;
+$ssoInForce = SsoNewAccounts::allowed();
+
 // 📄 Include header
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -402,6 +432,61 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endforeach; ?>
         </div>
+    </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- 🆕 New accounts by Microsoft or Google sign-in (#1042, D-185)           -->
+<!-- ====================================================================== -->
+<div class="card mb-4" id="sso-new-accounts">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="fa-solid fa-user-plus me-2" aria-hidden="true"></i>New accounts by Microsoft or Google sign-in</h5>
+        <?php if ($ssoInForce === true): ?>
+            <span class="badge bg-secondary" data-sso-in-force="allow">Allowed here</span>
+        <?php else: ?>
+            <span class="badge bg-secondary" data-sso-in-force="refuse">Refused here</span>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <p class="text-secondary small mb-3">
+            When somebody signs in with Microsoft or Google and no account here is linked to them or has their
+            e-mail address, the portal can make them a new account, or refuse and tell them to ask an administrator
+            for an invitation. A member whose e-mail address changed after a backup was restored looks exactly like
+            a newcomer, so making an account can give them a second, empty one. Refusing turns real newcomers away
+            too. If either the installation or this organisation refuses, it is refused.
+        </p>
+        <?php if (App::isRootAdmin() === true): ?>
+            <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations/sso-accounts-save'), ENT_QUOTES, 'UTF-8'); ?>" class="mb-3">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="level" value="installation">
+                <label class="form-label fw-semibold" for="sso-install-choice">For the whole installation (every organisation)</label>
+                <div class="d-flex flex-column flex-sm-row gap-2">
+                    <select class="form-select" id="sso-install-choice" name="choice">
+                        <option value="1"<?php echo $ssoInstallAllows === true ? ' selected' : ''; ?>>Make a new account</option>
+                        <option value="0"<?php echo $ssoInstallAllows === false ? ' selected' : ''; ?>>Refuse, and say to ask for an invitation</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        <?php else: ?>
+            <p class="small mb-3">For the whole installation: <strong><?php echo $ssoInstallAllows === true ? 'a new account is made' : 'refused'; ?></strong>. Only a global administrator can change this.</p>
+        <?php endif; ?>
+        <?php if ($ssoOwnUnread === true): ?>
+            <p class="small text-danger mb-0">This organisation's own choice could not be read, so it is not offered for changing now. Try again shortly.</p>
+        <?php else: ?>
+            <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations/sso-accounts-save'), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="level" value="organisation">
+                <label class="form-label fw-semibold" for="sso-own-choice">For this organisation</label>
+                <div class="d-flex flex-column flex-sm-row gap-2">
+                    <select class="form-select" id="sso-own-choice" name="choice">
+                        <option value="follow"<?php echo $ssoOwnRefuses === false ? ' selected' : ''; ?>>Follow the installation's choice</option>
+                        <option value="0"<?php echo $ssoOwnRefuses === true ? ' selected' : ''; ?>>Refuse here, and say to ask for an invitation</option>
+                    </select>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 
