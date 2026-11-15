@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 121; // + S16b, S17b, S26b-S26i, S27b-S27d (#910)
-const EXPECTED_NO_CRAWL = 111;
+const EXPECTED_FULL     = 126; // + S16b, S17b, S26b-S26m, S27b-S27e (#910)
+const EXPECTED_NO_CRAWL = 116;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1209,6 +1209,13 @@ if ($only === []) {
         // default organisation; only the judge's as-sent reading refuses them.
         'S26h B\'s part with its first letter encoded'           => '/%' . strtoupper(bin2hex(KEY_B[0])) . substr(KEY_B, 1) . '/account',
         'S26i B\'s part followed by an encoded "/"'              => B . '%2Faccount',
+        // #910 round 5: paths the SERVER cannot read (parse_url() gives up on a
+        // colon and up to five digits), which it answers as the DEFAULT
+        // organisation. S27e is the control beside them.
+        'S26j a path "account:0"'                               => B . '/account:0',
+        'S26k a path "x:12345"'                                 => B . '/x:12345',
+        'S26l a path holding a time, "2026-06-01T10:30"'        => B . '/2026-06-01T10:30',
+        'S26m a path "account:0/p"'                             => B . '/account:0/p',
     ];
     foreach ($refused as $label => $address) {
         $went = sentTo($jarMember, B, $address);
@@ -1219,6 +1226,7 @@ if ($only === []) {
         'S27b control (#910, D-161): a page of B whose query holds a time, "T10:30", which the judge used to read as a scheme' => B . '/calendar?from=2026-06-01T10:30',
         'S27c control (#910 round 2): a page of B whose query holds an encoded backslash and tab' => B . '/people?search=C%3A%5CUsers&q=x%09y',
         'S27d control (#910 round 3): DOUBLE-encoded "?" and dots stay in B, because a browser reads "%252e" as text' => B . '/x%253F/%252e%252e/%252e%252e/p',
+        'S27e control (#910 round 5): "account:0" with a query after it, which the server CAN read' => B . '/account:0?y=1',
         'S28 control: B\'s front page'            => B . '/',
         'S29 control: B\'s front page, no slash'  => B,
     ];

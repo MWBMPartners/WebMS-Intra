@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 236; // + twelve more hostile cases over seven loops in round 3 (#910)
+const EXPECTED = 284; // counted from the run; rounds 2-5 of #910 added hostile cases over seven loops
 
 function refuse(string $why): never
 {
@@ -639,6 +639,20 @@ function hostile(string $prefix, ?string $other): array
         // a real address, and refusing it costs nothing. Pinned so the class
         // cannot lose it unnoticed.
         'a raw DEL after "?"'                    => $prefix . '/x?a=' . "\x7F",
+        // #910 round 5: a path the SERVER cannot read. PHP's parse_url() gives
+        // up on a colon and one to five digits, and the portal then answers the
+        // request as the default organisation's front page, whatever its first
+        // part says. Refused in every set-up (Site::pathOfRequest()).
+        'a path "a:0" (a colon and a digit)'     => $prefix . '/a:0',
+        'a path "x:12345"'                       => $prefix . '/x:12345',
+        'a path holding a time, "2026-06-01T10:30"' => $prefix . '/2026-06-01T10:30',
+        'a path "a:0/p"'                         => $prefix . '/a:0/p',
+        'a path "a:0" with a fragment (a browser does not send the fragment)' => $prefix . '/a:0#x',
+        // #910 round 5: a "." part. Harmless inside one organisation ("/./x" is
+        // "/x"), refused anyway because an address that says one place and goes
+        // to another is never one the portal writes; with one organisation only
+        // the "." half of the dot rule refuses it, which is what pins that half.
+        'a "." part'                             => $prefix . '/./x',
         'a backslash ("/\\outside.example")'     => '/\\outside.example',
         'a tab before the slashes'               => "/\t/outside.example",
         'a ".." part leaving the organisation'   => $prefix . '/assets/../../outside',
@@ -646,6 +660,9 @@ function hostile(string $prefix, ?string $other): array
     ];
     if ($other !== null) {
         $list['another organisation\'s address (' . $other . ')'] = $other;
+        // #910 round 5: a "." part in front of another organisation's address
+        // walks into it in a browser ("/./b/x" is "/b/x").
+        $list['a "." part in front of another organisation\'s address'] = $prefix . '/.' . $other;
     }
     // #910 round 4: the organisation's own part ENCODED. Site::detectFromPath()
     // reads the RAW first part and never decodes it, so "/%73elftest-cb-b/x"
@@ -680,6 +697,8 @@ $got = checkoutGoesTo($jarB, B, B . '/people?search=C%3A%5CUsers');
 ok('A09 checkout (#910 round 2): an address of B whose QUERY holds an encoded backslash is followed', $got['status'] === 302 && $got['location'] === B . '/people?search=C%3A%5CUsers', said($got));
 $got = checkoutGoesTo($jarB, B, B . '/people?q=x%09y');
 ok('A10 checkout (#910 round 2): an address of B whose QUERY holds an encoded tab is followed', $got['status'] === 302 && $got['location'] === B . '/people?q=x%09y', said($got));
+$got = checkoutGoesTo($jarB, B, B . '/account:0?y=1');
+ok('A11 checkout (#910 round 5): a colon and digit in the path is followed when a query follows it, because the server can then read the path', $got['status'] === 302 && $got['location'] === B . '/account:0?y=1', said($got));
 $got = checkoutGoesTo($jarB, B, '/giving/give');
 ok('A04 checkout refuses an address with NO organisation\'s part from inside B (the default organisation\'s page)', $got['status'] === 302 && $got['location'] === $frontB, said($got));
 

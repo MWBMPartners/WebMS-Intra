@@ -1907,8 +1907,7 @@ class Auth
      * THE SAME DECISION REACHES TWO MORE RULES (round 2 of #910's check): the
      * backslash rule and the DECODED control-character rule read only the path
      * — the address as sent, up to its first "?" or "#" — and so do the
-     * "." / ".." rule and the organisation rule (round 3; the parse_url() host
-     * test that sat beside them could never fire and was removed). A backslash or an encoded tab in a query or a fragment does
+     * "." / ".." rule and the organisation rule (round 3). A backslash or an encoded tab in a query or a fragment does
      * nothing to where a browser goes, and refusing them sent
      * "/people?search=C%3A%5CUsers" to the front page. A RAW control character
      * is still refused anywhere in the address, because a browser removes it
@@ -1916,9 +1915,9 @@ class Auth
      * end, which a browser trims. Measured by a differential run of this
      * method against the version before #910, in a one-organisation set-up
      * and with organisations told apart by the first part of the address:
-     * nothing it accepts leaves the site, or the organisation, when a browser
-     * (WHATWG) resolves it; everything it newly refuses either ends in a space
-     * or has dot parts behind an encoded "?" or "#" in its path.
+     * nothing it accepts leaves the site, or the organisation — read both as
+     * text and the way the server reads it, through Site::pathOfRequest() —
+     * when a browser (WHATWG) resolves it.
      *
      * TWO RULES WERE ADDED BY THE LINK SWEEP (#536). Every older rule is
      * still here, in the same order, unchanged — except the old scheme test,
@@ -2083,16 +2082,32 @@ class Auth
         //    docblock. Do not put it back to "be safe": it is the cry-wolf
         //    direction, and it sent people to the wrong page.
 
-        // 🗑️ NO parse_url() HOST TEST ANY MORE (round 3 of #910's check). It
-        //    asked PHP whether the path names a host, and it never could: the
-        //    path already begins with exactly one "/" and holds no backslash,
-        //    and only "//" or "\\" begins a host. Measured by a
-        //    differential run with and without it: its only effect was to
-        //    refuse harmless paths PHP's parser gives up on ("/a:0",
-        //    "/x:99999"), and none of the addresses it used to refuse leaves
-        //    the site or the organisation when a browser resolves it. A guard
-        //    nothing can trip only looks like protection; the leading-"/",
-        //    "//" and backslash rules above keep another host out.
+        // 🚫 Refuse an address the SERVER could not read a path out of (round
+        //    4 of #910's check). PHP's parse_url() gives up on a path holding a
+        //    colon and one to five digits ("/north/a:0", "/north/x:12345",
+        //    "/north/2026-06-01T10:30"), and both of the portal's own readers of
+        //    a request's path then use "/": the request is answered as the
+        //    DEFAULT organisation, whatever its first part says. Asked of the
+        //    address as a browser will SEND it — without its fragment, which a
+        //    browser never sends ("/north/a:0#x" is sent as "/north/a:0") — and
+        //    through Site::pathOfRequest(), the same rule the server uses, so
+        //    the two cannot drift. A time in the QUERY is unaffected
+        //    ("/calendar?from=2026-06-01T10:30" reads as "/calendar"). This is
+        //    refused in every set-up: with one organisation such an address is
+        //    answered as the front page, which is not where it says it goes,
+        //    and no page the portal draws has such a path.
+        //
+        //    WHAT ROUND 3 GOT WRONG, kept so it is not repeated: an older
+        //    parse_url() test here was removed as dead because it "could never
+        //    find a host" — true of hosts, and the measurement behind it was
+        //    about leaving the SITE. But a failed parse_url() was also the only
+        //    thing refusing these paths, which stay on the site and leave the
+        //    ORGANISATION. Removing it let "/north/a:0" through from inside
+        //    "north" (measured over HTTP: the person landed in the default
+        //    organisation). This test is that one, asked the server's way.
+        if (Site::pathOfRequest(substr($url, 0, strcspn($url, '#'))) === null) {
+            return $fallback;
+        }
 
         // 🚫 Reject a "." or ".." part, in every set-up (rule 3 above), in the
         //    path ONCE DECODED — which covers the path as sent too: decoding

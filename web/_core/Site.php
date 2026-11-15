@@ -2141,6 +2141,32 @@ class Site
     }
 
     /**
+     * 🧭 The path the portal reads out of a request address, or NULL when PHP
+     *    cannot read one — the ONE rule for that (#910, round 4 of its check).
+     *
+     * `parse_url()` gives up on some paths: a colon followed by one to five
+     * digits ("/north/a:0", "/north/2026-06-01T10:30") reads as a port and
+     * fails. Both readers of a request's path — detectFromPath() below and
+     * Router::extractPath() — treat that failure as "/", so such a request is
+     * answered as the DEFAULT organisation's front page, whatever its first
+     * part says. Auth::safeRedirectUrl() asks THIS method too, so it refuses
+     * exactly the addresses the server would misread; with its own copy of
+     * the rule the two could drift.
+     *
+     * @param string $requestUri The address as a browser sends it: path and
+     *                           query, never a fragment (a browser does not
+     *                           send one).
+     *
+     * @return string|null The path, or null when it cannot be read.
+     */
+    public static function pathOfRequest(string $requestUri): ?string
+    {
+        $path = parse_url($requestUri, PHP_URL_PATH);
+
+        return is_string($path) === true ? $path : null;
+    }
+
+    /**
      * Detect site from the first URL path segment.
      * Stores the matched prefix for Router to strip later.
      *
@@ -2150,11 +2176,10 @@ class Site
      */
     private static function detectFromPath(\mysqli $db): ?int
     {
-        $uri = $_SERVER['REQUEST_URI'] ?? '/';
-        $path = parse_url($uri, PHP_URL_PATH);
-        if ($path === null || $path === false) {
-            $path = '/';
-        }
+        $uri  = $_SERVER['REQUEST_URI'] ?? '/';
+        // An address PHP cannot read counts as "/", the default organisation
+        // (see pathOfRequest(), which the redirect judge asks as well).
+        $path = self::pathOfRequest(is_string($uri) === true ? $uri : '/') ?? '/';
 
         // 🔍 Extract first path segment
         $path = ltrim($path, '/');

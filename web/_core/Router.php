@@ -210,10 +210,10 @@ class Router
     {
         // 📝 Get the raw URI and strip the query string
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
-        $path = parse_url($uri, PHP_URL_PATH);
-        if ($path === null || $path === false) {
-            $path = '/';
-        }
+        // An address PHP cannot read counts as "/". Site::pathOfRequest() is
+        // the ONE rule for that, shared with Site::detectFromPath() and the
+        // redirect judge (#910), so the three cannot disagree.
+        $path = Site::pathOfRequest(is_string($uri) === true ? $uri : '/') ?? '/';
 
         // 🔤 Normalise: lowercase, trim slashes, collapse double slashes
         $path = strtolower(trim($path, '/'));
