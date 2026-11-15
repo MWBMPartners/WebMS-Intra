@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 112; // #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 113; // #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -3691,6 +3691,114 @@ check(
     'every table holding one member\'s own setting, erased with them, is also handed over in their own data copy (#813)',
     $copyFaults === [],
     implode('; ', $copyFaults)
+);
+
+// -----------------------------------------------------------------------------
+// 27. EVERY KIND OF RECORD ERASED WITH A PERSON IS IN THEIR DATA COPY, OR IS
+//     NAMED AS LEFT OUT WITH ITS REASON (#1063). Section 26 covers one kind
+//     of table; measured on 15 November 2026, 26 of the 53 tables the written
+//     list ERASES were handed over nowhere in `account/data-export`, so a
+//     member's copy of what the portal holds about them left out their event
+//     answers, pledges, text messages and more - all of which the erasure
+//     deletes. Now each `erase` table is either handed over there, or its
+//     catalogue entry carries `notInDataCopy`: one sentence saying why (a
+//     sign-in secret, for example).
+//
+//     FAILS BOTH WAYS: an `erase` table in neither place; a `notInDataCopy`
+//     sentence on a table that IS handed over (the excuse is stale); one on a
+//     table that is not `erase` (the rule is only about what is erased); and
+//     a sentence too short to be a reason.
+//
+//     "Handed over" is read exactly as section 26 reads it - the SQL given to
+//     $fetchUserRows(), sub-selects taken out, the tables after the outer FROM
+//     or a JOIN - plus the SQL given to `$mysqli->prepare(` in the same page,
+//     which is how the two mail blocks read their tables. What it cannot see:
+//     whether the right COLUMNS are handed over (it judges tables), a table
+//     handed over only through a GdprEraser helper the page calls, and
+//     whether the rows a block matches are the same rows the erasure deletes
+//     (each block's comment names the column; section 6 of
+//     tools/erasure-pages-selftest.php fetches the real page).
+// -----------------------------------------------------------------------------
+$readPreparedTables = static function (string $code, string $opener): array {
+    $tables = [];
+    $at     = 0;
+    while (($start = strpos($code, $opener, $at)) !== false) {
+        $open  = $start + strlen($opener) - 1;
+        $depth = 0;
+        $end   = $open;
+        for ($i = $open, $n = strlen($code); $i < $n; $i++) {
+            $c = $code[$i];
+            if ($c === '\'' || $c === '"') {
+                for ($i++; $i < $n && $code[$i] !== $c; $i++) {
+                    if ($code[$i] === '\\') {
+                        $i++;
+                    }
+                }
+                continue;
+            }
+            if ($c === '(') {
+                $depth++;
+            } elseif ($c === ')' && --$depth === 0) {
+                $end = $i;
+                break;
+            }
+        }
+        $call = substr($code, $open, $end - $open + 1);
+        $at   = $end + 1;
+        gc_findAll("/'((?:[^'\\\\]|\\\\.)*)'|\"((?:[^\"\\\\]|\\\\.)*)\"/", $call, $pieces, PREG_SET_ORDER);
+        $sql = '';
+        foreach ($pieces as $piece) {
+            $sql .= ($piece[2] ?? '') !== '' ? $piece[2] : $piece[1];
+        }
+        do {
+            $before = $sql;
+            $sql    = (string) preg_replace('/\(\s*SELECT[^()]*\)/i', ' ', $sql);
+        } while ($sql !== $before);
+        gc_findAll('/\b(?:FROM|JOIN)\s+`?(tbl\w+)`?/i', $sql, $named);
+        foreach ($named[1] as $name) {
+            $tables[$name] = true;
+        }
+    }
+
+    return $tables;
+};
+$inCopy     = $handedOver + $readPreparedTables($exportCode, '$mysqli->prepare(');
+$copyGaps   = [];
+$eraseCount = 0;
+foreach ($catalogue as $table => $entry) {
+    $decision = (string) ($entry['decision'] ?? '');
+    $leftOut  = $entry['notInDataCopy'] ?? null;
+    if ($leftOut !== null && $decision !== 'erase') {
+        $copyGaps[] = $table . ' carries notInDataCopy but its decision is "' . $decision . '", not erase';
+    }
+    if ($decision !== 'erase') {
+        continue;
+    }
+    $eraseCount++;
+    $handed = isset($inCopy[$table]) === true;
+    if ($handed === false && $leftOut === null) {
+        $copyGaps[] = $table . ' is erased with the person but is neither handed over by account/data-export nor named with notInDataCopy';
+    }
+    if ($handed === true && $leftOut !== null) {
+        $copyGaps[] = $table . ' is handed over by account/data-export, yet notInDataCopy says it is left out (a stale reason)';
+    }
+    if ($leftOut !== null && (is_string($leftOut) === false || strlen(trim($leftOut)) < 60)) {
+        $copyGaps[] = $table . "'s notInDataCopy is not a reason of a sentence or more";
+    }
+}
+// Premise: the rule must still be looking at the tables that started this.
+if ($eraseCount < 40) {
+    $copyGaps[] = 'premise: fewer than 40 erase tables in the written list (' . $eraseCount . '), so it is not being read as it should';
+}
+foreach (['tblEventRSVPs', 'tblPledges', 'tblSmsMessage'] as $known) {
+    if (isset($inCopy[$known]) === false) {
+        $copyGaps[] = 'premise: ' . $known . ' (the issue\'s own examples) is not found handed over, so the page is not being read as it should';
+    }
+}
+check(
+    'every table the written list erases with a person is in their data copy, or is named with its reason as deliberately left out, and no stale reason remains (#1063)',
+    $copyGaps === [],
+    implode('; ', $copyGaps)
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

@@ -421,9 +421,15 @@ class WebPush
             }
         } catch (\Throwable $e) {
             // 🛡️ Push is never allowed to break the page/cron that triggered
-            //    it (Livestream.php:62-64 try/catch precedent). Counts only —
+            //    it (Livestream.php's try/catch precedent). Counts only —
             //    never log endpoint/key material.
-            Logger::activity('WebPushSendToChannelFailed', 'channel=' . $channel . ' site=' . $siteId . ' err=' . mb_substr($e->getMessage(), 0, 120));
+            //
+            //    #990: the KIND of fault, never its own words. Those used to
+            //    go into the activity log (cut to 120 characters), and a push
+            //    service's or database's message can quote a device's
+            //    endpoint address or a stored value - which the line above
+            //    already said must never be logged.
+            Logger::activity('WebPushSendToChannelFailed', 'channel=' . $channel . ' site=' . $siteId . ' err=' . get_class($e));
         }
 
         return $result;

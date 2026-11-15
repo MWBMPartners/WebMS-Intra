@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 271; // #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 281; // #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -5591,7 +5591,9 @@ $n1017Plants = [
         '_apps/prayer-requests/anonymous-save.php', ['Captcha::verify($_POST, Captcha::FOR_ANONYMOUS_PRAYER_REQUEST)' => "Captcha::verify(\$_POST, 'prayer-request-plant')"],
         'refused on the action: the CaptchaRejected record holds userID'],
     'N53 every form\'s refusal made anonymous, the visitor form\'s included' => [
-        '_core/Captcha.php', ['if (in_array($form, self::PROMISES_ANONYMITY, true) === true) {' => 'if (true) {'],
+        // Two halves since #1044 (recordV3Refusal() and recordProblem() test
+        // the same list), so the plant names the line after it too.
+        '_core/Captcha.php', ["if (in_array(\$form, self::PROMISES_ANONYMITY, true) === true) {\n            Logger::activityNamingNobody(" => "if (true) {\n            Logger::activityNamingNobody("],
         'the visitor form: its refusal record does not name the signed-in member'],
 ];
 foreach ($n1017Plants as $label => [$rel, $swaps, $expect]) {
@@ -5616,6 +5618,105 @@ foreach ($n1017Plants as $label => [$rel, $swaps, $expect]) {
 }
 $n1017Clean = $n1017Observe();
 ok('N54 with every #1017 plant taken out again, the same run is green (#1017)', $n1017Clean === [], implode('; ', $n1017Clean));
+
+// ── N56-N60. #1044: the bot check's ERRORS-PAGE line on the anonymous form ────
+// When reCAPTCHA cannot be reached, or answers something that is not JSON,
+// Captcha writes an Errors-page line. That line went through
+// Logger::errorPlatform(), which keeps the sender's network address, browser
+// and headers - the same address as on the member's own sign-in records - so
+// the "anonymous" request could be matched to her on the Errors page. Now a
+// form on Captcha::PROMISES_ANONYMITY gets Logger::errorNamingNobody(), and
+// every other form keeps the ordinary line (the visitor form is the contrast).
+// The stand-in is UNREACHABLE in the first case ("drop": the connection is
+// read and closed, a network failure) and answers HTML in the second.
+$n1044Errors = static fn (int $after): array => q(
+    "SELECT * FROM `tblErrors` WHERE `errorID` > ? AND `errorPlatform` IN ('Captcha', 'cURL') ORDER BY `errorID`", 'i', [$after]);
+$n1044Observe = static function () use (&$jar, $state, $n1044Errors): array {
+    $wrong = [];
+    $cases = [
+        'unreachable' => [[['path' => '/recaptcha/api/siteverify', 'drop' => true]], 2],
+        'not JSON'    => [[['path' => '/recaptcha/api/siteverify', 'status' => 200, 'body' => '<html>not an answer</html>']], 1],
+    ];
+    foreach ($cases as $what => [$answer, $rowsWanted]) {
+        httpsStandinAnswers($state['https'], ['www.google.com' => $answer]);
+        httpsStandinRequests($state['https']);
+        $before  = (int) (one('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')['m'] ?? 0);
+        $subject = 'P1044 ' . bin2hex(random_bytes(4));
+        $sent    = sendAnonymousPrayer($jar['may'], ['subject' => $subject, 'body' => 'P1044 words', 'g-recaptcha-response' => 'p1044-made-up-token']);
+        $asked   = httpsStandinRequests($state['https']);
+        if (count($asked) !== 1) {
+            $wrong[] = $what . ': reCAPTCHA (the stand-in) was not asked once (asked ' . count($asked) . ')';
+        }
+        if (one('SELECT `requestID` FROM `tblPrayerRequests` WHERE `subject` = ?', 's', [$subject]) !== null
+            || str_contains($sent['sent']['location'], 'err=') === false) {
+            $wrong[] = $what . ': the request was saved, or the visitor was not told';
+        }
+        $rows = $n1044Errors($before);
+        if (count($rows) !== $rowsWanted) {
+            // Without this a captcha that wrote no line at all would pass below.
+            $wrong[] = $what . ': ' . count($rows) . ' Errors-page line(s) about the bot check, not ' . $rowsWanted;
+        }
+        foreach ($rows as $r) {
+            foreach (['userID', 'visitorIP', 'userAgent', 'requestHeaders'] as $col) {
+                if ($r[$col] !== null) {
+                    $wrong[] = $what . ': the ' . $r['errorPlatform'] . ' line holds ' . $col;
+                }
+            }
+        }
+    }
+    // The other half: the visitor form promises nothing, so its line is the
+    // ordinary one and keeps the network address. Without this a fix that made
+    // every bot-check error anonymous would pass.
+    httpsStandinAnswers($state['https'], ['www.google.com' => $cases['unreachable'][0]]);
+    httpsStandinRequests($state['https']);
+    $before = (int) (one('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')['m'] ?? 0);
+    $page   = req($jar['may'], 'GET', '/visit');
+    req($jar['may'], 'POST', '/visit', ['csrf_token' => token($page['body']), 'fullName' => 'P1044 Contrast', 'email' => 'p1044@contrast.invalid',
+        'g-recaptcha-response' => 'p1044-made-up-token']);
+    $rows = $n1044Errors($before);
+    if ($rows === [] || $rows[0]['visitorIP'] === null) {
+        $wrong[] = 'the visitor form: its bot-check error line does not keep the network address';
+    }
+    httpsStandinAnswers($state['https'], []);
+
+    return $wrong;
+};
+$n1044First = $n1044Observe();
+ok('N56 A SIGNED-IN MEMBER on the anonymous form, with reCAPTCHA (the stand-in) unreachable and then answering HTML: nothing is saved, and every Errors-page line the bot check writes holds no account, network address, browser or headers - while the same fault on the visitor form, which promises nothing, keeps the address (#1044)',
+    $n1044First === [], implode('; ', $n1044First));
+$n1044Plants = [
+    'N57 the bot check\'s error line written with Logger::errorPlatform() again' => [
+        '_core/Captcha.php', ['Logger::errorNamingNobody($platform, $severity, $code, $title, $detail);' => 'Logger::errorPlatform($platform, $severity, $code, $title, $detail);'],
+        'unreachable: the Captcha line holds visitorIP'],
+    'N58 Logger::errorNamingNobody() keeping the network address after all' => [
+        '_core/Logger.php', ['$ip          = $namesNobody === true ? null : self::clientIp();' => '$ip          = self::clientIp();'],
+        'not JSON: the Captcha line holds visitorIP'],
+    'N59 every bot-check error line made anonymous, the visitor form\'s included' => [
+        '_core/Captcha.php', ["        Logger::errorPlatform(\$platform, \$severity, \$code, \$title, \$detail);\n" => "        Logger::errorNamingNobody(\$platform, \$severity, \$code, \$title, \$detail);\n"],
+        'the visitor form: its bot-check error line does not keep the network address'],
+];
+foreach ($n1044Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $n1044Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1044)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$n1044Clean = $n1044Observe();
+ok('N60 with every #1044 plant taken out again, the same run is green (#1044)', $n1044Clean === [], implode('; ', $n1044Clean));
 // The captcha settings back as they were, now: later sections sign in again.
 foreach ($n1017Before as $key => $row) {
     if ($row === null) {
@@ -6583,6 +6684,103 @@ ok('the rendered-pin file holds exactly the pins this test compares, each once, 
     pinFileProblems() === [], implode(' | ', pinFileProblems()));
 
 // =============================================================================
+head('R. A member\'s full data copy holds the records the erasure deletes with them, and not another person\'s or a secret (#1063)');
+// =============================================================================
+// #1063: 26 kinds of record the written list ERASES with a person were handed
+// over nowhere in their data copy. Section 27 of gdpr-coverage-selftest.php
+// fails when one is missing from the page's SQL; this drives the real page.
+// Fay (A) and Dan (A) each get one row in six of those tables, with words
+// that say whose they are; Fay's copy must hold every one of hers and none of
+// Dan's, and must never hand over the secrets left out on purpose (a payment
+// company's references, a device's notification keys, a sign-in code).
+$r1063Rows = static function (int $who, string $tag): void {
+    q('INSERT INTO `tblSmsMessage` (`siteID`, `recipientUserID`, `recipientNumber`, `body`, `category`, `status`) VALUES (?, ?, ?, ?, ?, ?)',
+        'iissss', [ORG_A, $who, '+447700900' . substr((string) $who, -3), 'R1063 text for ' . $tag, 'general', 'sent']);
+    q('INSERT INTO `tblUserMilestone` (`userID`, `kind`, `label`, `monthDay`) VALUES (?, ?, ?, ?)', 'isss', [$who, 'birthday', 'R1063 day of ' . $tag, '05-06']);
+    q('INSERT INTO `tblPaymentMethod` (`siteID`, `userID`, `provider`, `customerRef`, `methodRef`, `label`) VALUES (?, ?, ?, ?, ?, ?)',
+        'iissss', [ORG_A, $who, 'stripe', 'R1063-CUSTREF-' . $tag, 'R1063-METHREF-' . $tag, 'R1063 card of ' . $tag]);
+    q('INSERT INTO `tblPushSubscriptions` (`siteID`, `userID`, `endpoint`, `p256dhKey`, `authKey`, `userAgent`) VALUES (?, ?, ?, ?, ?, ?)',
+        'iissss', [ORG_A, $who, 'https://push.example.invalid/R1063-ENDPOINT-' . $tag, 'R1063-P256-' . $tag, 'R1063-AUTH-' . $tag, 'R1063 browser of ' . $tag]);
+    q('INSERT INTO `tblAiUsage` (`siteID`, `userID`, `promptKind`, `provider`, `inputSample`) VALUES (?, ?, ?, ?, ?)',
+        'iisss', [ORG_A, $who, 'r1063', 'stub', 'R1063 question from ' . $tag]);
+    q('INSERT INTO `tblTotpBackupCodes` (`userID`, `codeHash`) VALUES (?, ?)', 'is', [$who, 'R1063-CODEHASH-' . $tag]);
+};
+$r1063Clear = static function (): void {
+    foreach (['tblSmsMessage' => 'recipientUserID', 'tblUserMilestone' => 'userID', 'tblPaymentMethod' => 'userID',
+        'tblPushSubscriptions' => 'userID', 'tblAiUsage' => 'userID', 'tblTotpBackupCodes' => 'userID'] as $table => $col) {
+        q('DELETE FROM `' . $table . '` WHERE `' . $col . '` IN (?, ?)', 'ii', [FAY, DAN]);
+    }
+};
+$r1063Clear();
+$r1063Rows(FAY, 'FAY');
+$r1063Rows(DAN, 'DAN');
+$r1063Observe = static function () use (&$jar): array {
+    $wrong  = [];
+    $export = req($jar['fay'], 'GET', '/account/data-export');
+    $copy   = json_decode($export['body'], true);
+    if ($export['status'] !== 200 || is_array($copy['data'] ?? null) === false) {
+        return ['the data copy did not come back as JSON (HTTP ' . $export['status'] . ')'];
+    }
+    $data = $copy['data'];
+    $want = [
+        'textMessagesSentToYou' => 'R1063 text for FAY', 'milestones' => 'R1063 day of FAY', 'paymentMethods' => 'R1063 card of FAY',
+        'notificationDevices' => 'R1063 browser of FAY', 'aiAssistantUse' => 'R1063 question from FAY',
+    ];
+    foreach ($want as $key => $words) {
+        if (str_contains((string) json_encode($data[$key] ?? null), $words) === false) {
+            $wrong[] = 'Fay\'s copy has no "' . $words . '" under ' . $key;
+        }
+    }
+    $whole = (string) json_encode($data);
+    if (preg_match('/R1063[^"]*DAN/', $whole) === 1) {
+        $wrong[] = 'Fay\'s copy holds one of Dan\'s records';
+    }
+    foreach (['CUSTREF', 'METHREF', 'ENDPOINT', 'P256', 'AUTH-', 'CODEHASH'] as $secret) {
+        if (str_contains($whole, 'R1063-' . $secret) === true) {
+            $wrong[] = 'Fay\'s copy hands over a secret left out on purpose (' . $secret . ')';
+        }
+    }
+
+    return $wrong;
+};
+$r1063First = $r1063Observe();
+ok('R1 Fay\'s full data copy holds her text message, milestone, saved payment method, notification device and AI question - all erased with her - and none of Dan\'s, and none of the secrets left out on purpose (#1063)',
+    $r1063First === [], implode('; ', $r1063First));
+$r1063Plants = [
+    'R2 the text-message block matching every member rather than the one asking' => [
+        '_apps/auth/account/data-export.php', ['FROM `tblSmsMessage` WHERE `recipientUserID` = ?' => 'FROM `tblSmsMessage` WHERE `recipientUserID` = ? OR 1 = 1'],
+        'Fay\'s copy holds one of Dan\'s records'],
+    'R3 the payment-method block handing over the payment company\'s reference' => [
+        '_apps/auth/account/data-export.php', ["'SELECT `siteID`, `provider`, `label`," => "'SELECT `siteID`, `provider`, `customerRef`, `label`,"],
+        'Fay\'s copy hands over a secret left out on purpose (CUSTREF)'],
+    'R4 the milestone block taken out of the copy' => [
+        '_apps/auth/account/data-export.php', ["FROM `tblUserMilestone` WHERE `userID` = ?" => "FROM `tblUserMilestone` WHERE `userID` = -1 AND `userID` = ?"],
+        'Fay\'s copy has no "R1063 day of FAY" under milestones'],
+];
+foreach ($r1063Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $r1063Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1063)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$r1063Clean = $r1063Observe();
+ok('R5 with every #1063 plant taken out again, the same copy is right (#1063)', $r1063Clean === [], implode('; ', $r1063Clean));
+$r1063Clear();
+
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');

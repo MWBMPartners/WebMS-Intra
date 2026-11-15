@@ -69,6 +69,15 @@ WHAT IT CANNOT SEE - this is a PRESENCE check (D-065)
   anonymous prayer form" is enforced against the plain spellings only; anything
   else is for review.
 
+Since #1044 it guards the ERROR logger's twin as well:
+`Logger::errorNamingNobody()` writes an Errors-page row with no account, network
+address, browser or headers, for a problem met while checking a form that
+promises anonymity (today only Captcha's bot check, when the provider cannot be
+reached or does not answer in JSON). Its callers are counted file by file
+exactly as above (ERROR_ON_PURPOSE, failing both ways), and the statements in
+Logger that make it keep nothing of the sender are pinned (ERROR_PINS), so the
+method cannot quietly start keeping the address again.
+
 Comments are left out by PHP's own `php -w` (strip comments and white space),
 never a regular expression, so a comment mentioning the method is not a call.
 
@@ -136,6 +145,26 @@ USES = {
     '"anonymous-prayer-request"': {},
 }
 
+# #1044: the error logger's twin. File (relative to web/) -> (calls, why).
+ERROR_METHOD = "errorNamingNobody"
+ERROR_ON_PURPOSE = {
+    "_core/Captcha.php": (
+        1,
+        "Captcha::recordProblem(), the ONE place an Errors-page line about the bot check itself is written: for a form "
+        "in Captcha::PROMISES_ANONYMITY (today only the anonymous prayer form) it keeps nothing of the sender (#1044)",
+    ),
+}
+ERROR_CALL = re.compile(r"Logger::" + ERROR_METHOD + r"\s*\(")
+# Statements in Logger.php (as `php -w` prints it), each exactly once: the
+# method hands writeErrorRow() its "names nobody" flag, and writeErrorRow()
+# then leaves the headers, the network address and the browser empty.
+ERROR_PINS = [
+    "self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, null, true);",
+    "$headersJson = $namesNobody === true ? null : json_encode(self::requestHeaders());",
+    "$ip = $namesNobody === true ? null : self::clientIp();",
+    "$ua = $namesNobody === true ? null : ($_SERVER['HTTP_USER_AGENT'] ?? '');",
+]
+
 LOGGER = "_core/Logger.php"
 # The method's own statement: the account and the five browser columns are
 # written as literal NULLs, never bound from anything.
@@ -170,6 +199,7 @@ def method_body(text: str) -> str:
 
 def problems(web: str) -> list[str]:
     found: dict[str, int] = {}
+    error_found: dict[str, int] = {}
     used: dict[str, dict[str, int]] = {needle: {} for needle in USES}
     for root, _dirs, files in os.walk(web):
         for name in files:
@@ -179,13 +209,16 @@ def problems(web: str) -> list[str]:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 raw = fh.read()
             wanted = [needle for needle in USES if needle.strip("'\"") in raw]
-            if METHOD not in raw and wanted == []:
+            if METHOD not in raw and ERROR_METHOD not in raw and wanted == []:
                 continue  # the cheap test first: php -w only on files that mention one of them
             text = stripped(path)
             rel = os.path.relpath(path, web).replace(os.sep, "/")
             count = len(CALL.findall(text))
             if count > 0:
                 found[rel] = count
+            error_count = len(ERROR_CALL.findall(text))
+            if error_count > 0:
+                error_found[rel] = error_count
             for needle in wanted:
                 seen = text.count(needle)
                 if seen > 0:
@@ -206,6 +239,22 @@ def problems(web: str) -> list[str]:
                 f"{rel} calls Logger::{METHOD}() {got} time(s); ON_PURPOSE says {expected}. Either a record that "
                 "should name nobody (anonymity, #988, or an account not in the database, #922) now names somebody "
                 "again, or a new one was added without a decision: change the list only on purpose."
+            )
+
+    for rel, count in sorted(error_found.items()):
+        if rel not in ERROR_ON_PURPOSE:
+            wrong.append(
+                f"{rel} calls Logger::{ERROR_METHOD}() {count} time(s), and is not on ERROR_ON_PURPOSE. An Errors-page "
+                "line that keeps nothing of the sender is only for a form promising anonymity (#1044); if this is one, "
+                "add it with the reason."
+            )
+    for rel, (expected, _why) in sorted(ERROR_ON_PURPOSE.items()):
+        got = error_found.get(rel, 0)
+        if got != expected:
+            wrong.append(
+                f"{rel} calls Logger::{ERROR_METHOD}() {got} time(s); ERROR_ON_PURPOSE says {expected}. Either an error "
+                "line on an anonymous form keeps the sender's network address again, or a new one was added without "
+                "a decision (#1044): change the list only on purpose."
             )
 
     for needle, expected in USES.items():
@@ -243,6 +292,14 @@ def problems(web: str) -> list[str]:
                 f"Logger::{METHOD}() no longer writes the account and the five browser columns as literal NULLs "
                 f"({PINNED_INSERT}, bound 'iss'): it must keep nothing that says who sent the record"
             )
+        logger_text = stripped(logger)
+        for statement in ERROR_PINS:
+            seen = logger_text.count(statement)
+            if seen != 1:
+                wrong.append(
+                    f"{LOGGER} holds `{statement}` {seen} time(s), not exactly once: Logger::{ERROR_METHOD}() must write "
+                    "its Errors-page row with no account, network address, browser or headers (#1044)"
+                )
     return wrong
 
 
@@ -414,6 +471,51 @@ def self_test() -> int:
     ok("the backup page's restore line going back to Logger::activity() is reported",
        applied12["v"] is True and any("maintenance/backup.php" in g for g in got), "; ".join(got))
 
+    # 13. #1044: the bot check's error line goes back to the ordinary logger.
+    applied13 = {"v": False}
+
+    def error_back(w: str) -> None:
+        applied13["v"] = replace(
+            w, "_core/Captcha.php",
+            "Logger::errorNamingNobody($platform, $severity, $code, $title, $detail);",
+            "Logger::errorPlatform($platform, $severity, $code, $title, $detail);",
+        )
+    got = with_copy(error_back)
+    ok("the bot check's error line on an anonymous form going back to Logger::errorPlatform() is reported (#1044)",
+       applied13["v"] is True and any(f"calls Logger::{ERROR_METHOD}() 0 time(s)" in g for g in got), "; ".join(got))
+
+    # 14. #1044: a new caller of the error twin outside the list.
+    got = with_copy(lambda w: write(w, "_apps/admin/zzerr.php",
+                                    "<?php\n\\Portal\\Core\\Logger::errorNamingNobody('X', 'Error', 'C', 'quiet');\n"))
+    ok("a call of Logger::errorNamingNobody() in a file not on the list is reported (#1044)",
+       any("zzerr.php" in g for g in got), "; ".join(got))
+
+    # 15. #1044: the twin starts keeping the network address again.
+    applied15 = {"v": False}
+
+    def error_keeps_address(w: str) -> None:
+        applied15["v"] = replace(
+            w, LOGGER,
+            "$ip          = $namesNobody === true ? null : self::clientIp();",
+            "$ip          = self::clientIp();",
+        )
+    got = with_copy(error_keeps_address)
+    ok("Logger::errorNamingNobody() keeping the network address is reported (#1044)",
+       applied15["v"] is True and any("$ip = $namesNobody" in g for g in got), "; ".join(got))
+
+    # 16. #1044: the twin no longer passes its flag.
+    applied16 = {"v": False}
+
+    def error_flag_dropped(w: str) -> None:
+        applied16["v"] = replace(
+            w, LOGGER,
+            "self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, null, true);",
+            "self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, null, false);",
+        )
+    got = with_copy(error_flag_dropped)
+    ok("Logger::errorNamingNobody() no longer passing its 'names nobody' flag is reported (#1044)",
+       applied16["v"] is True and any("null, true);" in g for g in got), "; ".join(got))
+
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1
 
@@ -436,9 +538,11 @@ def main() -> int:
             print(f"FAIL: {line}")
         return 1
     total = sum(n for n, _ in ON_PURPOSE.values())
+    error_total = sum(n for n, _ in ERROR_ON_PURPOSE.values())
     print(f"OK: Logger::{METHOD}() is called {total} time(s), only in the {len(ON_PURPOSE)} file(s) listed for "
           "anonymity (#988) or an account not in the database (#922), and still writes the account and the browser "
-          "columns as empty; the bot check's list of forms promising anonymity is as pinned. (A presence check: see "
+          f"columns as empty; Logger::{ERROR_METHOD}() is called {error_total} time(s), only where listed (#1044), and "
+          "still leaves the sender out; the bot check's list of forms promising anonymity is as pinned. (A presence check: see "
           "this file's header for what it cannot see.)")
     return 0
 

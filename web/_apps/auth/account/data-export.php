@@ -712,6 +712,160 @@ $payload = [
         //    Never who opened the case, its number, the visiting worker or the
         //    visit notes (D-184 rules those out).
         'careCasesAboutYou' => GdprEraser::careCasesAboutYou($userId),
+        // 📦 #1063: EVERY KIND OF RECORD THE ERASURE DELETES WITH YOU IS
+        //    HANDED OVER HERE TOO, or is named in the written list
+        //    (web/_core/personal-data-catalogue.php, `notInDataCopy`) with
+        //    the reason it is not. Measured on 15 November 2026, 26 of the
+        //    53 kinds the written list erases were in neither place; section
+        //    27 of tools/gdpr-coverage-selftest.php now fails both ways on
+        //    that list. Each block below matches on the column the erasure
+        //    deletes by, and applies the rule this file has always applied:
+        //    what is YOURS is handed over; another person's account number
+        //    (who granted, added, marked or entered it), a secret that works
+        //    without signing in, and notes a worker wrote (which can name
+        //    other people - the reasoning D-184 applied to visit notes) are
+        //    left out. Each says which.
+        //
+        // 🤖 What you asked the AI assistant and what it answered (both cut
+        //    to the first 1,000 characters when stored), and what it cost.
+        'aiAssistantUse' => $fetchUserRows(
+            'SELECT `siteID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costPence`, `inputSample`, `outputSample`, `occurredAt` '
+            . 'FROM `tblAiUsage` WHERE `userID` = ? ORDER BY `occurredAt` DESC'
+        ),
+        // 🧰 Equipment you are named as an owner, custodian or stakeholder of.
+        //    The notes are left out: the asset's administrator writes them.
+        'equipmentYouOwn' => $fetchUserRows(
+            'SELECT `siteID`, `assetID`, `roleKind`, `sharePercent`, `isLendingAuthority`, `isMaintenanceAuthority` '
+            . 'FROM `tblAssetOwners` WHERE `userID` = ?'
+        ),
+        // 🗓️ Events you were made a coordinator of. Who made you one is left
+        //    out (another person's account number).
+        'eventsYouCoordinate' => $fetchUserRows(
+            'SELECT `c`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `c`.`permissions`, `c`.`grantedAt`, `c`.`revokedAt` '
+            . 'FROM `tblEventCoordinators` AS `c` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `c`.`eventID` '
+            . 'WHERE `c`.`userID` = ?'
+        ),
+        // 👷 The event crews and jobs you are on, and the events you are
+        //    listed as one of the people at (a speaker, a host).
+        'eventCrewsYouAreOn' => $fetchUserRows(
+            'SELECT `crewID`, `role`, `addedAt` FROM `tblEventCrewMembers` WHERE `userID` = ?'
+        ),
+        'eventJobsYouHave' => $fetchUserRows(
+            'SELECT `jobID`, `assignedAt` FROM `tblEventJobAssignments` WHERE `userID` = ?'
+        ),
+        'eventsYouAreListedAt' => $fetchUserRows(
+            'SELECT `p`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `p`.`role`, `p`.`isPrimary`, `p`.`createdAt` '
+            . 'FROM `tblEventPeople` AS `p` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `p`.`eventID` '
+            . 'WHERE `p`.`userID` = ?'
+        ),
+        // ✋ Your answers to events: going, maybe or not going, and any
+        //    guests you said you would bring.
+        'eventAnswers' => $fetchUserRows(
+            'SELECT `r`.`siteID`, `r`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `r`.`response`, `r`.`guestCount`, `r`.`status`, '
+            . '`r`.`waitlistedAt`, `r`.`createdAt`, `r`.`updatedAt` '
+            . 'FROM `tblEventRSVPs` AS `r` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` '
+            . 'WHERE `r`.`userID` = ?'
+        ),
+        // ✉️ The invitation you joined by: the address it was sent to, the
+        //    role offered and the welcome written to you. The invitation's
+        //    code is left out (a stored fingerprint of a link), and so are
+        //    who sent or withdrew it.
+        'invitationYouAccepted' => $fetchUserRows(
+            'SELECT `siteID`, `email`, `intendedRole`, `welcomeMessage`, `expiresAt`, `acceptedAt`, `createdAt` '
+            . 'FROM `tblInvitation` WHERE `acceptedByID` = ?'
+        ),
+        // 🧭 Leadership roles you hold or held. The notes are left out (an
+        //    administrator writes them), and so are who recorded or changed
+        //    the role.
+        'leadershipRoles' => $fetchUserRows(
+            'SELECT `siteID`, `roleID`, `personName`, `personEmail`, `startDate`, `endDate`, `isActive`, `createdAt`, `updatedAt` '
+            . 'FROM `tblLeadershipAssignments` WHERE `userID` = ?'
+        ),
+        // 📰 Each newsletter sent to you: the address, and when it was
+        //    delivered, opened and a link in it pressed. The unsubscribe code
+        //    is left out: it works without signing in.
+        'newslettersSentToYou' => $fetchUserRows(
+            'SELECT `newsletterID`, `emailAddress`, `deliveredAt`, `openedAt`, `clickedAt`, `errorMsg` '
+            . 'FROM `tblNewsletterRecipient` WHERE `userID` = ?'
+        ),
+        // 🚪 If you were offboarded: when, why, what was chosen for your
+        //    data, and when you came back. Who did it is left out, and so is
+        //    the list of steps the portal carried out (a technical record of
+        //    the portal's own work, which can name other records).
+        'offboarding' => $fetchUserRows(
+            'SELECT `effectiveDate`, `reason`, `dataDisposition`, `offboardedAt`, `rehiredAt` '
+            . 'FROM `tblOffboarding` WHERE `userID` = ?'
+        ),
+        // 🪜 Pathways you are enrolled on, and the steps you have completed.
+        //    Who enrolled you, and who marked or took back a step, are left
+        //    out; so are a step's notes (whoever marked it wrote them).
+        'pathwayEnrolments' => $fetchUserRows(
+            'SELECT `siteID`, `pathwayID`, `status`, `enrolledAt`, `completedAt`, `updatedAt` FROM `tblPathwayEnrolments` WHERE `userID` = ?'
+        ),
+        'pathwayStepsCompleted' => $fetchUserRows(
+            'SELECT `siteID`, `stepID`, `source`, `completedAt`, `revokedAt` FROM `tblPathwayProgress` WHERE `userID` = ?'
+        ),
+        // 💳 The ways to pay you saved: which company and the label you gave
+        //    it. The company's own references for your account and card are
+        //    left out: with the portal's key they can be used to take a
+        //    payment, and your own Payment methods page does not show them.
+        'paymentMethods' => $fetchUserRows(
+            'SELECT `siteID`, `provider`, `label`, `isDefault`, `createdAt` FROM `tblPaymentMethod` WHERE `userID` = ?'
+        ),
+        // 🤝 Promises to give: to a campaign, and to a project.
+        'pledges' => $fetchUserRows(
+            'SELECT `siteID`, `campaignID`, `amountPence`, `currency`, `paymentSchedule`, `status`, `createdAt`, `updatedAt` '
+            . 'FROM `tblPledges` WHERE `userID` = ?'
+        ),
+        'projectPledges' => $fetchUserRows(
+            'SELECT `projectID`, `donorName`, `donorEmail`, `amountPence`, `currency`, `pledgedAt`, `fulfilledAt`, `isAnonymous`, `message` '
+            . 'FROM `tblProjectPledge` WHERE `donorID` = ?'
+        ),
+        // 🔔 The devices you allowed to receive notifications: the browser
+        //    and what it is sent. The device's address and its two keys are
+        //    left out: with them anybody could send notifications to it.
+        'notificationDevices' => $fetchUserRows(
+            'SELECT `siteID`, `userAgent`, `channels`, `createdAt`, `lastUsedAt`, `isActive`, `failCount`, `lastFailureAt` '
+            . 'FROM `tblPushSubscriptions` WHERE `userID` = ?'
+        ),
+        // 📖 Reading plans you started, and where you are in each.
+        'readingPlans' => $fetchUserRows(
+            'SELECT `planID`, `startedAt`, `completedAt`, `currentDay` FROM `tblReadingPlanEnrollment` WHERE `userID` = ?'
+        ),
+        // ▶️ Recordings you played, and when, with the scrambled network
+        //    address each play was recorded from (a network address is
+        //    personal data, D-178).
+        'recordingsPlayed' => $fetchUserRows(
+            'SELECT `recordingID`, `playedAt`, `ipHash` FROM `tblRecordingPlay` WHERE `userID` = ? ORDER BY `playedAt` DESC'
+        ),
+        // 📱 Text messages sent to you: the number, the words, and what
+        //    became of each. The text company's own reference is left out.
+        'textMessagesSentToYou' => $fetchUserRows(
+            'SELECT `siteID`, `recipientNumber`, `body`, `category`, `status`, `sentAt`, `createdAt` '
+            . 'FROM `tblSmsMessage` WHERE `recipientUserID` = ? ORDER BY `createdAt` DESC'
+        ),
+        // 🎂 The dates you have added to your profile (a birthday, an
+        //    anniversary) and who may see each.
+        'milestones' => $fetchUserRows(
+            'SELECT `kind`, `label`, `monthDay`, `originYear`, `privacy`, `createdAt` FROM `tblUserMilestone` WHERE `userID` = ?'
+        ),
+        // 🧭 The guided tours you have finished.
+        'toursCompleted' => $fetchUserRows(
+            'SELECT `tourID`, `completedAt` FROM `tblUserTours` WHERE `userID` = ?'
+        ),
+        // 👁️ When you opened a pastoral care file. Only the moment: whose
+        //    file it was is somebody else's (the reasoning of D-142).
+        'careFilesYouOpened' => $fetchUserRows(
+            'SELECT `viewedAt` FROM `tblCareAccessLog` WHERE `viewerID` = ? ORDER BY `viewedAt` DESC'
+        ),
+        // 🚶 Your own visitor record, from before you had an account. The
+        //    follow-up notes are left out (the people following you up wrote
+        //    them, and they can name others - D-184's reasoning), and so are
+        //    who entered it and who was following you up.
+        'yourVisitorRecord' => $fetchUserRows(
+            'SELECT `siteID`, `fullName`, `email`, `phone`, `firstVisitedAt`, `source`, `status`, `createdAt`, `updatedAt` '
+            . 'FROM `tblVisitor` WHERE `convertedUserID` = ?'
+        ),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields

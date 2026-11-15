@@ -1290,7 +1290,14 @@ function sendGoogleTestEmail(string $recipient): array
             'details' => 'Check the error log for details.',
         ];
     } catch (\RuntimeException $ex) {
-        Logger::activity('IntegrationTest', 'Google test email failed: ' . $ex->getMessage());
+        // #990: a fixed sentence in the activity log, never the error's own
+        //    words - Google's refusal can quote the recipient's or the
+        //    mailbox's address, and the activity log keeps it beyond every
+        //    erasure. The error goes to the Errors page, where any address in
+        //    it is taken out as it is written (D-174), and the administrator
+        //    pressing the button is shown it below, at the time.
+        Logger::activity('IntegrationTest', 'Google test email failed; the reason is on the Errors page');
+        Logger::errorPlatform('Google', 'Warning', 'TEST_EMAIL_FAIL', 'Google test email failed', $ex->getMessage());
         return [
             'success' => false,
             'message' => 'Exception: ' . $ex->getMessage(),
