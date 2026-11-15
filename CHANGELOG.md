@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A first Microsoft or Google sign-in may be refused by a setting; the Users page says only what is known (#1042, #1049; D-185)
+
+- **New accounts by sign-in are a setting (#1042).** Whether a Microsoft or Google sign-in that matches no
+  account may make a new one is `auth.sso.createAccounts` (migration 294), chosen on Admin, Integrations. Default
+  allow, so nothing changes until somebody chooses. A global administrator sets the installation's choice; an
+  organisation may only make it refuse, or follow the installation; the stricter level wins. A refused
+  newcomer is signed in nowhere, nothing is made, and the refusal is recorded with no e-mail address.
+  `SsoNewAccounts` is the one place the rule lives.
+- **A failed Microsoft or Google sign-in now says why.** The sign-in page never printed the reason before.
+  `SsoSignInProblem` is the one place the words are written, 12 failures for each of two providers. A member who
+  is already signed in (the Account page's link buttons and "Add a password" send them to these sign-ins) is
+  sent back to the page they came from and told, in words true for them, that the sign-in could not be used with
+  their account and that nothing on it has changed. A test reads the member's account and links before and after
+  each failure to prove that.
+- **The Users page's password refusal (#1049)** now says "switched off", names a dead link by its provider, and
+  says "no way in" only when that is true.
+- **Checked:** two-step 193, sso-new-accounts 27, erasure-pages 258, admin-password 53, sign-in-limits 178,
+  password-writer 56 and every audit script green on MySQL 8.0.36. Five rounds of independent check
+  (authentication), the last clean. **Not run:** a real Microsoft or Google service (stand-ins only), MySQL 8.4,
+  MariaDB, the end-to-end migration harness. Codex has not reviewed this. Open: #1073 (a signed-in member linking
+  an identity that matches nobody gets a new account made, older than this work), #1064 (merge duplicate accounts).
+
 ### A remembered map answer for a home is personal data (#1037, #1036, #1029; D-182, D-183)
 
 - **Homes and public places are told apart (D-183).** The event form, a small group's meeting place and a
