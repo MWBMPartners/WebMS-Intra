@@ -253,6 +253,7 @@ page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scrip
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
 attendance-walkins|tools/attendance-walkins-selftest.php|selftest_attwalkins|web:attendance-walkins SELFTEST_WEB_PORT=9655
 outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778
+series-suggestion-host|tools/series-suggestion-host-selftest.php|selftest_seriessuggest|SELFTEST_WEB_PORT=9847
 registration-retention|tools/registration-retention-selftest.php|selftest_regret|SELFTEST_WEB_PORT=9816
 activity-log-retention|tools/activity-log-retention-selftest.php|selftest_alret|SELFTEST_WEB_PORT=9932
 public-website-tick|tools/public-website-tick-selftest.php|selftest_pwtick|SELFTEST_WEB_PORT=9493

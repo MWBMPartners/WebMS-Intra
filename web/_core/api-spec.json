@@ -2160,6 +2160,9 @@
           "422": {
             "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
+          "409": {
+            "description": "The event is a suggestion still waiting to be approved (`submissionStatus` is `pending`), and the request asked to set `status` to anything but `draft`. A pending suggestion is published only by being approved on the portal's moderation page, which is also what e-mails the person who suggested it (#965, D-169). Nothing was saved."
+          },
           "404": {
             "description": "Event not found"
           },
@@ -4897,6 +4900,9 @@
           "422": {
             "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
+          "409": {
+            "description": "The event is a suggestion still waiting to be approved (`submissionStatus` is `pending`), and the request asked to set `status` to anything but `draft`. A pending suggestion is published only by being approved on the portal's moderation page, which is also what e-mails the person who suggested it (#965, D-169). Nothing was saved."
+          },
           "404": {
             "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
             "content": {
@@ -5027,6 +5033,9 @@
           },
           "422": {
             "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
+          },
+          "409": {
+            "description": "The event is a suggestion still waiting to be approved (`submissionStatus` is `pending`), and the request asked to set `status` to anything but `draft`. A pending suggestion is published only by being approved on the portal's moderation page, which is also what e-mails the person who suggested it (#965, D-169). Nothing was saved."
           },
           "404": {
             "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",

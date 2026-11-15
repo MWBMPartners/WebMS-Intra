@@ -116,11 +116,10 @@ $db = App::db();
 // 🗑️ Remove: empty the home, keep the row for the meetings that point at it.
 // -----------------------------------------------------------------------------
 if ($action === 'remove') {
+    // The SET is SmallGroups' one copy (#952): a home removed because its host
+    // left the group (D-168) is left in exactly this state too.
     $stmt = $db->prepare(
-        'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = NULL, `addressLine1` = NULL, `addressLine2` = NULL, '
-        . '`city` = NULL, `region` = NULL, `postcode` = NULL, `countryCode` = NULL, `latitude` = NULL, '
-        . '`longitude` = NULL, `what3words` = NULL, `placeEnteredByID` = NULL, `hostUserID` = NULL, '
-        . '`placeMapAgreed` = 0, `notAHome` = 0, `isActive` = 0 '
+        'UPDATE `tblSmallGroupPlaces` SET ' . SmallGroups::EMPTIED_HOME_SET . ' '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? AND `isActive` = 1'
         . ($canManage === true ? '' : ' AND `hostUserID` = ?')
     );
@@ -244,19 +243,37 @@ if ($action === 'create') {
     $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
     $notAHome  = $agreement['notAHome'];
-    $stmt = $db->prepare(
-        'INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `addressLine2`, `city`, '
-        . '`region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeEnteredByID`, '
-        . '`placeMapAgreed`, `notAHome`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    );
-    // 16 placeholders: i i s s s s s s s d d s i i i i
-    $stmt->bind_param(
-        'iisssssssddsiiii',
-        $siteId, $groupId, $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
-        $latitude, $longitude, $w3w, $host, $enteredBy, $agreed, $notAHome
-    );
-    $stmt->execute();
-    $stmt->close();
+    // 🔒 #952, D-168: the host's membership is asked again with its row
+    //    LOCKED, inside the transaction that writes. `SmallGroups::endMembership()`
+    //    locks the same row before it empties a departing host's homes, so a
+    //    member adding their own home while leaving in another tab either adds
+    //    it first (and the departure then empties it) or is refused here —
+    //    never a home stored for somebody who has gone. The transaction starts
+    //    first: a lock outside one is decoration (#697).
+    $db->begin_transaction();
+    try {
+        if ($host !== null && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {
+            $db->rollback();
+            $refuseHost();
+        }
+        $stmt = $db->prepare(
+            'INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `addressLine2`, `city`, '
+            . '`region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeEnteredByID`, '
+            . '`placeMapAgreed`, `notAHome`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        // 16 placeholders: i i s s s s s s s d d s i i i i
+        $stmt->bind_param(
+            'iisssssssddsiiii',
+            $siteId, $groupId, $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
+            $latitude, $longitude, $w3w, $host, $enteredBy, $agreed, $notAHome
+        );
+        $stmt->execute();
+        $stmt->close();
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollback();
+        throw $e;
+    }
     Logger::activity('SmallGroupPlaceSaved', 'Added a host\'s home to group: ' . $group['groupName'], $userId > 0 ? $userId : null);
     $_SESSION['flash_msg']  = 'The home was added to the group\'s list.';
     $_SESSION['flash_type'] = 'success';
@@ -320,6 +337,15 @@ try {
     $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
     $notAHome  = $agreement['notAHome'];
+    // 🔒 #952, D-168: a NEWLY named host is asked again with their membership
+    //    row locked, as on create, so a home is never handed to somebody whose
+    //    departure is emptying their homes at this moment. The host already
+    //    stored needs no second ask: this place's own row is locked above, and
+    //    a departure empties it under that same lock.
+    if ($host !== null && $host !== $storedHost && SmallGroups::hostStillBelongs($db, $siteId, $groupId, $host) === false) {
+        $db->rollback();
+        $refuseHost();
+    }
     $stmt = $db->prepare(
         'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = ?, `addressLine1` = ?, `addressLine2` = ?, `city` = ?, '
         . '`region` = ?, `postcode` = ?, `countryCode` = ?, `latitude` = ?, `longitude` = ?, `what3words` = ?, '

@@ -82,6 +82,17 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
             <option value="cancelled" <?php echo ($ev['status'] ?? '') === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
             <option value="postponed" <?php echo ($ev['status'] ?? '') === 'postponed' ? 'selected' : ''; ?>>Postponed</option>
         </select>
+        <?php
+        // 🚦 #965, D-169: a suggestion still waiting to be approved stays a
+        //    draft until it is approved, and the handler refuses anything
+        //    else (`EventSuggestions::whyStatusRefused()`). Said here BEFORE
+        //    the Save, so nobody finds out only by being refused. The control
+        //    is not disabled: a disabled control is not submitted (#667).
+        if ((string) ($ev['submissionStatus'] ?? '') === 'pending'): ?>
+            <div class="form-text">This is a suggestion still waiting to be approved. It stays a draft until it is
+                approved on <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/moderation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Calendar, Moderation</a>,
+                which also tells the person who suggested it.</div>
+        <?php endif; ?>
     </div>
 
     <?php
@@ -577,6 +588,26 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                     pulled back. The portal's own pages (the event's page, the calendar a signed-out visitor sees and
                     the calendar feed people subscribe to) follow the "Public" box above, not this one.
                 </p>
+                <?php
+                // 🔁 #847, D-159 (the owner, 12 November 2026): a repeating
+                //    series keeps ONE fixed website window — the two dates
+                //    typed here are copied onto every date the repeat makes
+                //    (save.php's create INSERT lists the three columns, and the
+                //    repeat copies take that row's columns). D-159 keeps that
+                //    for the first install and asks that the form SAY so;
+                //    storing the window relative to each date is #1016.
+                //    Shown on the NEW-event form only, because a series is made
+                //    only there: editing one date later changes that date alone.
+                //    The words are pinned by tools/series-website-window-selftest.php.
+                if ($isEdit === false): ?>
+                    <p class="small text-secondary mt-2 mb-0" id="websiteSeries-help-<?php echo $websiteIdSuffix; ?>">
+                        If this event repeats (see Repeats above), the same From and Until dates apply to every date in
+                        the series: they are not worked out again for each date. So a window that ends before a later
+                        date keeps that date off the website, and one that starts long before a date shows it early.
+                        Leave both empty for no date limit on any of them, or edit a single date afterwards to give it
+                        dates of its own.
+                    </p>
+                <?php endif; ?>
             <?php else: ?>
                 <p class="mb-1"><?php
                     // The SWITCH's state, said as the switch: "Shown on the public website"

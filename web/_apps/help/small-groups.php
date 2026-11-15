@@ -149,7 +149,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
       //    below is what the code does: SmallGroups::mayEditHome() (D-125),
       //    SmallGroups::placeAgreementAfterSave() and whyHostChangeRefused() (D-124, D-128),
       //    place-save.php's remove action (D-126), GdprEraser's hostUserID instructions (D-122),
-      //    and group.php's next-meeting panel (D-127). Change them together. ?>
+      //    group.php's next-meeting panel (D-127), and SmallGroups::endMembership() /
+      //    releaseHomesOf() for a host who leaves (#952, D-168). Change them together. ?>
 <section id="hosts" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-house-user me-2"></i>Hosts, Homes and Maps</h2>
     <p>
@@ -178,6 +179,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             agreeing, and the portal cannot tell a hall from a home.</li>
         <li><strong>Removing a home deletes its address at once.</strong> Meetings held or planned there then say they are at
             "a place no longer recorded".</li>
+        <li><strong>When a host leaves the group,</strong> whether they leave themselves, a leader removes them, or
+            they are offboarded, their home stops being one of the group's meeting places straight away: it is
+            removed from the list and its address deleted, as above, and if it was the group's usual meeting place,
+            every part of that place except the country is cleared. The group's leaders are e-mailed to choose a new
+            place.</li>
         <li><strong>Members see the next meeting.</strong> A meeting given a future date is a planned meeting. The
             group's members see the next one on the group's page, with where it is shown only if the group's
             address setting above lets them see addresses. A planned meeting takes no roll and is not counted in
