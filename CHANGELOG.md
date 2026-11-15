@@ -4,6 +4,22 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Page headers wrap on a phone (#848)
+
+- **One shared rule.** A page header (the row holding a title and its buttons) is a flex row, and a flex
+  row does not wrap unless told to, so on a 320-390px phone the buttons ran off the screen and the page
+  scrolled sideways. One rule in `portal.css` now lets every such row wrap below 768px, and the button
+  group inside it. It finds the row by its shape with `:has()`, so a page written later in the same
+  shape is covered without editing it. Nothing changes at 768px and wider (every element box in all 170
+  headers measured identical at 768, 1024 and 1440). A browser without `:has()` keeps the old look.
+- **Guards.** A hard gate, `check_page_headers_wrap.py` (170 headers found, 72 relying on the rule; the
+  issue's "79" could not be reproduced), and a real-browser test that draws every header at 320 and
+  390px plus five made-up shapes, each with a control that must overflow. Planted faults turn each red.
+- **Not done:** nobody has looked at phone screenshots; real titles longer than the test's sample text
+  are not tested; headers built by script or written as `<h2>` are covered by neither guard; the new
+  workflow steps have not run on GitHub. Three rounds of independent check (the tooling cap). Codex has
+  not reviewed this.
+
 ### One true send-log line per mail route tried; error rows under the message's organisation (#1051, #1050, #1053)
 
 - **The send log tells the truth about each route (#1051).** A message handed to a route is logged once
