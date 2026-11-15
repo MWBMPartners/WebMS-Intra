@@ -2142,7 +2142,20 @@ class Site
 
     /**
      * 🧭 The path the portal reads out of a request address, or NULL when PHP
-     *    cannot read one — the ONE rule for that (#910, round 4 of its check).
+     *    cannot read one (#910, round 4 of its check).
+     *
+     * WHO SHARES IT, exactly: the three readers that decide WHERE a request
+     * or a come-back address lands — detectFromPath() below (which
+     * organisation), Router::extractPath() (which page) and
+     * Auth::safeRedirectUrl() (the judge). Section G of
+     * tools/come-back-addresses-selftest.php pins all three. Other path
+     * readers are deliberately separate, because they answer different
+     * questions and none of them chooses an organisation or a page: the
+     * `?lang=` switch in web/public_html/index.php (it rebuilds the same
+     * address and then hands it to the judge), Auth::oldServiceWorkerWouldStore()
+     * (whether an old offline copy would have kept an answer), and the public
+     * door's own path reader in this file (which must NOT use parse_url(),
+     * see its comment).
      *
      * `parse_url()` gives up on some paths: a colon followed by one to five
      * digits ("/north/a:0", "/north/2026-06-01T10:30") reads as a port and

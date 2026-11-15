@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 301; // counted from the run; rounds 2-5 of #910 added hostile cases over seven loops
+const EXPECTED = 304; // counted from the run; rounds 2-5 of #910 added hostile cases over seven loops
 
 function refuse(string $why): never
 {
@@ -667,6 +667,17 @@ function hostile(string $prefix, ?string $other): array
         // #910 round 5: a "." part in front of another organisation's address
         // walks into it in a browser ("/./b/x" is "/b/x").
         $list['a "." part in front of another organisation\'s address'] = $prefix . '/.' . $other;
+        // #910 round 7: from the DEFAULT organisation, another organisation's
+        // part with its first letter ENCODED. Only the organisation rule's
+        // DECODED half refuses this (it looks the decoded part up and finds
+        // that organisation). It is a refusal of something harmless — the
+        // server reads the raw part, finds no organisation and stays in the
+        // default one — kept because an address naming another organisation
+        // in disguise is never one the portal writes; pinned so the half that
+        // does it cannot go unnoticed.
+        if ($prefix === '' && str_starts_with($other, '/') === true && strlen($other) > 2) {
+            $list['another organisation\'s part with its first letter encoded'] = '/%' . strtoupper(bin2hex($other[1])) . substr($other, 2);
+        }
     }
     // #910 round 4: the organisation's own part ENCODED. Site::detectFromPath()
     // reads the RAW first part and never decodes it, so "/%73elftest-cb-b/x"
@@ -880,33 +891,46 @@ $got = req($jarF, 'GET', '/%5Coutside.example?lang=cy');
 ok('F11 one organisation: an ENCODED backslash in the path is still refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
 
 // =============================================================================
-// G. The three readers of a request's path share ONE rule (#910 round 6)
+// G. The three readers that decide where a request lands share one rule (#910)
 // =============================================================================
 // Site::detectFromPath(), Router::extractPath() and Auth::safeRedirectUrl() must
 // all read a path through Site::pathOfRequest(), or the judge can accept an
-// address the server reads differently (round 5's regression). Read with PHP's
-// own tokeniser, comments dropped, each method's body only: the call must be
-// there and no parse_url() of its own.
+// address the server reads differently (round 5's regression).
+//
+// Judged on PHP's own TOKENS, never on text (round 7 of the check: a text
+// search passed `parse_url (…)` with a space, `PARSE_URL(` in capitals, an
+// alias, a string callable, and a call "present" only inside a string):
+//   - the call must be a real call: `Site` / `self` / a qualified Site name,
+//     `::`, `pathOfRequest`, `(` — a string holding those words does not count;
+//   - there must be NO parse_url anywhere in the method body in any spelling
+//     (any capitals, a leading "\", whitespace before "("), NO string naming
+//     it ('parse_url' handed to call_user_func(), array_map() and the like),
+//     and NO `use function … parse_url …` in the file (an alias).
+// A parse_url in a COMMENT is ignored on purpose: it does nothing.
 head('G. One rule for reading a request\'s path');
-$methodCode = static function (string $file, string $method): string {
-    $tokens = token_get_all((string) file_get_contents($file));
-    $code = ''; $depth = 0; $inside = false; $seenName = false; $started = false;
+/** The method body's tokens as [id, text], comments and whitespace dropped. */
+$methodTokens = static function (array $tokens, string $method): array {
+    $body = []; $depth = 0; $inside = false; $seenName = false;
     foreach ($tokens as $i => $t) {
+        $id   = is_array($t) ? $t[0] : $t;
         $text = is_array($t) ? $t[1] : $t;
-        if (is_array($t) && in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+        if (in_array($id, [T_COMMENT, T_DOC_COMMENT, T_WHITESPACE], true)) {
             continue;
         }
         if ($inside === false) {
-            if (is_array($t) && $t[0] === T_STRING && $t[1] === $method) {
-                $prev = $tokens[$i - 2] ?? null;
-                $seenName = is_array($prev) && $prev[0] === T_FUNCTION;
+            if ($id === T_STRING && $text === $method) {
+                $j = $i - 1;
+                while ($j >= 0 && is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) {
+                    $j--;
+                }
+                $seenName = is_array($tokens[$j] ?? null) && $tokens[$j][0] === T_FUNCTION;
             }
             if ($seenName === true && $text === '{') {
-                $inside = true; $depth = 1; $started = true;
+                $inside = true; $depth = 1;
             }
             continue;
         }
-        if ($text === '{' || (is_array($t) && in_array($t[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) {
+        if ($text === '{' || in_array($id, [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) {
             $depth++;
         } elseif ($text === '}') {
             $depth--;
@@ -914,21 +938,59 @@ $methodCode = static function (string $file, string $method): string {
                 break;
             }
         }
-        $code .= $text;
+        $body[] = [$id, $text];
     }
 
-    return $started === true ? $code : '';
+    return $body;
+};
+$namesParseUrl = static function (string $name): bool {
+    $parts = explode('\\', $name);
+
+    return strtolower((string) end($parts)) === 'parse_url';
 };
 $core = $repo . $sep . 'web' . $sep . '_core' . $sep;
 foreach ([
-    'G01 Site::detectFromPath()'   => [$core . 'Site.php', 'detectFromPath', 'self::pathOfRequest('],
-    'G02 Router::extractPath()'    => [$core . 'Router.php', 'extractPath', 'Site::pathOfRequest('],
-    'G03 Auth::safeRedirectUrl()'  => [$core . 'Auth.php', 'safeRedirectUrl', 'Site::pathOfRequest('],
-] as $label => [$file, $method, $call]) {
-    $body = $methodCode($file, $method);
-    ok($label . ' reads the path through Site::pathOfRequest() and has no parse_url() of its own',
-        $body !== '' && str_contains($body, $call) === true && str_contains($body, 'parse_url(') === false,
-        $body === '' ? 'method not found' : 'call ' . var_export(str_contains($body, $call), true) . ', own parse_url ' . var_export(str_contains($body, 'parse_url('), true));
+    'G01 Site::detectFromPath()'  => [$core . 'Site.php', 'detectFromPath'],
+    'G02 Router::extractPath()'   => [$core . 'Router.php', 'extractPath'],
+    'G03 Auth::safeRedirectUrl()' => [$core . 'Auth.php', 'safeRedirectUrl'],
+] as $label => [$file, $method]) {
+    $all   = token_get_all((string) file_get_contents($file));
+    $body  = $methodTokens($all, $method);
+    $calls = 0;
+    $own   = [];
+    foreach ($body as $k => [$id, $text]) {
+        // A real call: <Site|self|static|qualified Site> :: pathOfRequest (
+        if ($id === T_STRING && $text === 'pathOfRequest' && ($body[$k - 1][0] ?? null) === T_DOUBLE_COLON && ($body[$k + 1][1] ?? '') === '(') {
+            $who = $body[$k - 2] ?? [null, ''];
+            if (in_array(strtolower((string) $who[1]), ['self', 'static', 'site'], true)
+                || (in_array($who[0], [T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED], true) && str_ends_with(strtolower((string) $who[1]), '\\site'))) {
+                $calls++;
+            }
+        }
+        // Any parse_url as a name, in any spelling.
+        if (in_array($id, [T_STRING, T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED], true) && $namesParseUrl((string) $text) === true) {
+            $own[] = 'name ' . $text;
+        }
+        // A string naming it (a callable for call_user_func(), array_map() and the like).
+        if (in_array($id, [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true) && preg_match('/(^|[^a-z0-9_])parse_url($|[^a-z0-9_])/i', (string) $text) === 1) {
+            $own[] = 'string ' . $text;
+        }
+    }
+    // An alias anywhere in the file: use function … parse_url …
+    foreach ($all as $i => $t) {
+        if (is_array($t) && $t[0] === T_USE) {
+            $stmt = '';
+            for ($j = $i + 1; isset($all[$j]) && $all[$j] !== ';'; $j++) {
+                $stmt .= is_array($all[$j]) ? $all[$j][1] : $all[$j];
+            }
+            if (preg_match('/^\s*function\b/i', $stmt) === 1 && preg_match('/parse_url/i', $stmt) === 1) {
+                $own[] = 'use function' . $stmt;
+            }
+        }
+    }
+    ok($label . ' reads the path through a real Site::pathOfRequest() call and has no parse_url() of its own, in any spelling',
+        $body !== [] && $calls >= 1 && $own === [],
+        $body === [] ? 'method not found' : 'calls ' . $calls . '; own parse_url: ' . json_encode($own));
 }
 
 // =============================================================================

@@ -1895,9 +1895,10 @@ class Auth
      * owner decided the judge looks only at the part before the first "/",
      * "?" or "#". For an address this judge can accept, that part is EMPTY:
      * the rule "must begin with a single /" below is checked on the address
-     * AS SENT and once decoded (round 6: as sent too), so nothing stands
-     * before the first "/" in either — and a scheme must begin with a letter
-     * and stand before it. That rule is what now
+     * AS SENT (round 6), so nothing stands before its first "/" — and a
+     * scheme must begin with a letter and stand before it. Decoding changes
+     * only "%" codes, so the decoded address begins with "/" too. That rule
+     * is what now
      * keeps `javascript:`, `data:` and every other scheme out. So there is no separate scheme test
      * any more — one that could never fire would only look like protection.
      * If the leading-"/" rule is ever loosened, the scheme question comes back
@@ -2021,24 +2022,26 @@ class Auth
         // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
         $decoded = rawurldecode($url);
 
-        // 🚫 Must start with a single forward slash (relative path), AS SENT
-        //    and once decoded. This is also the scheme rule (#910, D-161): a
-        //    scheme can only stand before the first "/", "?" or "#", and here
-        //    nothing stands before it.
+        // 🚫 Must start with a single forward slash (relative path), AS SENT.
+        //    This is also the scheme rule (#910, D-161): a scheme can only
+        //    stand before the first "/", "?" or "#", and here nothing does.
         //
-        //    AS SENT TOO (round 6 of #910's check). Only the decoded form was
-        //    asked, so "%2Fx/a:0" was accepted: decoded it begins with "/",
-        //    but a browser does not decode it first — it reads "%2Fx/a:0" as
-        //    RELATIVE to the page it is on and sends "/payments/%2Fx/a:0",
-        //    which is not the address the rules below judged. With a raw "/"
-        //    first, what they judge is what a browser sends. A raw tab, line
-        //    break or space in front (which a browser would strip) is refused
-        //    here too, since it is not a "/"; "%252F" decodes only to "%2F" and
-        //    is refused by the decoded half; "/%2F…" decodes to "//" and is
-        //    refused next.
-        //    Nothing the portal builds writes a come-back address beginning
-        //    with an encoded "/".
-        if (str_starts_with($url, '/') === false || str_starts_with($decoded, '/') === false) {
+        //    AS SENT, not decoded (round 6 of #910's check). Only the decoded
+        //    form used to be asked, so "%2Fx/a:0" was accepted: decoded it
+        //    begins with "/", but a browser does not decode it first — it
+        //    reads "%2Fx/a:0" as RELATIVE to the page it is on and sends
+        //    "/payments/%2Fx/a:0", which is not the address the rules below
+        //    judged. With a raw "/" first, what they judge is what a browser
+        //    sends. This one test refuses all of: an encoded "/" first
+        //    ("%2F…", "%252F…"), and a raw tab, line break or space in front
+        //    (which a browser would strip), since none of them is a "/".
+        //    "/%2F…" decodes to "//" and is refused by the next rule.
+        //    The decoded form is no longer asked here: once the address as
+        //    sent begins with "/", so does the decoded one (decoding changes
+        //    only "%" codes), so that half could never fire and was removed
+        //    (round 7). Nothing the portal builds writes a come-back address
+        //    beginning with an encoded "/".
+        if (str_starts_with($url, '/') === false) {
             return $fallback;
         }
 
@@ -2083,8 +2086,8 @@ class Auth
         //    "/north/.. " is read as "/north/..", which climbs out of the
         //    organisation, while the "." / ".." rule below sees a part ".. ".
         //    Found by the differential run of round 3 of #910's check. (A
-        //    space at the start is already refused: the address must begin
-        //    with "/" or a "%" code. A space inside is encoded, not trimmed.)
+        //    space at the start is already refused: the address as sent must
+        //    begin with "/". A space inside is encoded, not trimmed.)
         if (str_ends_with($url, ' ') === true) {
             return $fallback;
         }
@@ -2280,6 +2283,12 @@ class Auth
             // so "/%6eorth/x" or "/north%2Fx" from inside "north" would put the
             // person in the default organisation. Both are pinned by
             // tools/come-back-addresses-selftest.php and site-addresses.
+            // The DECODED form only ever refuses MORE: from the default
+            // organisation, "/%73outh/x" is looked up as "south" and refused,
+            // although the server would read "%73outh", find nothing and stay
+            // in the default organisation. That refusal is harmless and kept
+            // on purpose (an address naming another organisation in disguise
+            // is never one the portal writes); come-back-addresses pins it.
             //
             // The "." / ".." test below is a DELIBERATE SECOND LINE that no
             // test can tell apart from its absence today: safeRedirectUrl()

@@ -211,8 +211,10 @@ class Router
         // 📝 Get the raw URI and strip the query string
         $uri = $_SERVER['REQUEST_URI'] ?? '/';
         // An address PHP cannot read counts as "/". Site::pathOfRequest() is
-        // the ONE rule for that, shared with Site::detectFromPath() and the
-        // redirect judge (#910), so the three cannot disagree.
+        // the rule for that shared by the three readers that decide where a
+        // request lands — this one, Site::detectFromPath() and the redirect
+        // judge (#910) — so they cannot disagree. See its docblock for the
+        // other path readers, which are deliberately separate.
         $path = Site::pathOfRequest(is_string($uri) === true ? $uri : '/') ?? '/';
 
         // 🔤 Normalise: lowercase, trim slashes, collapse double slashes
