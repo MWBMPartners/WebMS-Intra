@@ -120,8 +120,15 @@
  *        Microsoft falling back to a Google that cannot sign in (Google's
  *        line, which was missing), that message given up on, and the line's
  *        status before the queue settles it. #1050 pins the REASON a
- *        Microsoft 365 network failure gives; #1053 the Errors-page rows of
- *        both routes, under the message's organisation.
+ *        Microsoft 365 network failure gives. #1053 pins FIVE Errors-page
+ *        rows as under the message's organisation: Microsoft 365 refusing
+ *        (its no-answer row is written by the same call), Google refusing,
+ *        Google giving no answer (CURL_FAIL), the Google fallback that cannot
+ *        be used (FALLBACK_FAIL) and a mis-typed shared mailbox
+ *        (BAD_SHARED_MAILBOX). NOT pinned: the two CURL_INIT rows, because no
+ *        test can make curl_init() fail. And an alert e-mail sent while one
+ *        of those rows is recorded keeps its own 'failed' line, not taken for
+ *        the message's (#1051).
  *   R2   A message a caller names for another organisation (`siteId`) is
  *        KEPT in the queue under that organisation, not the one the request
  *        resolved to, and every send-log line about it - kept, sent later by
@@ -212,7 +219,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 195; // #1051 round 2 added two: the queue's "route-unusable" reason (R1) and a not-set-up route that throws (R2). #1051, #1053 added eight: three in R1 (a fallback whose sign-in fails, its last attempt given up on, and a route line before the queue settles it) and five in R2 (two page sends that throw, three SMTP error rows). #1039 added eight: part R2 (four, then four in round 2 of its check). #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
+const EXPECTED_CHECKS = 197; // #1051 round 3 added two, in R1: a mis-typed shared mailbox's error row, and an alert sent mid-attempt (two more error-row assertions joined existing checks). #1051 round 2 added two: the queue's "route-unusable" reason (R1) and a not-set-up route that throws (R2). #1051, #1053 added eight: three in R1 (a fallback whose sign-in fails, its last attempt given up on, and a route line before the queue settles it) and five in R2 (two page sends that throw, three SMTP error rows). #1039 added eight: part R2 (four, then four in round 2 of its check). #1043 added six, in R1. Before those 171: #1006 added twelve: part R1 (six, three in round 2 of its check, three in round 3).
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@mail-queue-selftest@@';
@@ -4219,6 +4226,23 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
             && $sent['left'] === 0 && $sent['lines'] === [$line('ms365', 'sent', SITE_R1)],
         json_encode($sent['job']['json']) . '; asked ' . json_encode($sent['asked']) . '; lines ' . json_encode($sent['lines'])
     );
+    //    #1053 (round 3 of its check): a MIS-TYPED shared mailbox. The route
+    //    still sends (from the ordinary "from" address) and writes an
+    //    Errors-page row saying the setting is wrong; that row is under the
+    //    message's organisation, because sendViaGraph() hands the organisation
+    //    to effectiveSender(). Pinned by nothing before: dropping that argument
+    //    put the row under the job's request's organisation with R1 green.
+    setting('mail.ms365.sharedMailbox', 'not an e-mail address');
+    $badBoxErrorsFrom = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS n FROM tblErrors')['n']);
+    $badBox = $r1Send('R1 through Microsoft 365, a mis-typed shared mailbox (#1053)', SITE_R1, $graphOk, $gmailOk);
+    setting('mail.ms365.sharedMailbox', '');
+    $badBoxErrorSites = array_map('intval', array_column(q("SELECT siteID FROM tblErrors WHERE errorID > ? AND errorCode = 'BAD_SHARED_MAILBOX'", 'i', [$badBoxErrorsFrom]), 'siteID'));
+    ok(
+        'Microsoft 365 with a MIS-TYPED shared mailbox still sends a waiting message for another organisation (from the ordinary address), and the Errors-page row saying the setting is wrong is under the message\'s own organisation, not the job\'s request\'s (#1053)',
+        ($badBox['job']['json']['sent'] ?? 0) === 1 && $badBox['left'] === 0 && $badBox['lines'] === [$line('ms365', 'sent', SITE_R1)]
+            && $badBoxErrorSites === [SITE_R1],
+        json_encode($badBox['job']['json']) . '; lines ' . json_encode($badBox['lines']) . '; BAD_SHARED_MAILBOX error rows under ' . json_encode($badBoxErrorSites)
+    );
     //    #1051: the route's line says 'queued' - "kept, and will be tried
     //    again", which it is - and no longer 'failed', which the column defines
     //    as "not being tried again". #1053: the route's ERRORS-PAGE row is under
@@ -4262,7 +4286,32 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
         'asked ' . json_encode($gRefused['asked']) . '; waiting ' . $gRefused['left'] . '; lines ' . json_encode($gRefused['lines']) . '; Gmail error rows under ' . json_encode($gmailErrorSites)
     );
     q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Google, refused'");
-    $nobody = $r1Send('R1 through Google, for no organisation', null, $graphOk, $gmailOk);
+    //    #1051 (round 3 of its check): an ALERT E-MAIL sent while that error is
+    //    recorded is not the message being handed over. Recording an error can
+    //    send mail (Logger's alert to the administrators), and it is sent here
+    //    INSIDE the job's attempt. errorRowFor() sets the job's list of route
+    //    lines aside while it records, so the alert's own send-log line is not
+    //    collected and re-statused by the queue. Pinned by nothing before:
+    //    removing that line left R1 green, because no case had alerts on.
+    //    The stand-in refuses the alert as it refuses the message, so the
+    //    alert's line is a FAILURE: written by a page's send it says 'failed'
+    //    (a page's send is not kept); collected by the queue's attempt it would
+    //    be written 'queued' and settled to what the MESSAGE became.
+    setting('portal.alerts.severities', 'Error');
+    setting('portal.alerts.recipients', mailOf('alerts'));
+    setting('portal.alerts.cooldown_minutes', '0'); // no cooldown, so an earlier alert's marker file cannot stop this one
+    $alertMark = (int) (one('SELECT COALESCE(MAX(emailLogID), 0) AS n FROM tblEmailLog')['n']);
+    $alerted   = $r1Send('R1 through Google, refused while alerts are on (#1051)', SITE_R1, $graphOk, $gmailNo);
+    setting('portal.alerts.recipients', ''); // no recipient, no alert, for every later case
+    $alertLines = q("SELECT provider, status FROM tblEmailLog WHERE emailLogID > ? AND toRecipients = ? AND subject LIKE '%Gmail send failed%' ORDER BY emailLogID", 'is', [$alertMark, mailOf('alerts')]);
+    ok(
+        'Google refuses a waiting message while ALERTS are on: the alert e-mail sent while recording the error has its own line saying it FAILED (it was refused too, and a page\'s send is not kept), not collected by the queue\'s attempt and re-statused as the message; and the message still has exactly ONE line, queued (#1051)',
+        $alerted['left'] === 1 && $alerted['lines'] === [$line('google', 'queued', SITE_R1)]
+            && $alertLines === [['provider' => 'google', 'status' => 'failed']],
+        'waiting ' . $alerted['left'] . '; lines ' . json_encode($alerted['lines']) . '; the alert\'s lines ' . json_encode($alertLines)
+    );
+    q("DELETE FROM tblMailQueue WHERE subject = 'R1 through Google, refused while alerts are on (#1051)'");
+    $nobody =$r1Send('R1 through Google, for no organisation', null, $graphOk, $gmailOk);
     ok(
         'a waiting message kept for NO organisation is recorded under none, as the queue\'s own lines always were - not under the organisation the job\'s request happened to resolve to (#1006)',
         ($nobody['job']['json']['sent'] ?? 0) === 1 && $nobody['left'] === 0 && $nobody['lines'] === [$line('google', 'sent', null)],
@@ -4286,12 +4335,18 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
     );
     $dropLine  = static fn (string $status = 'queued'): array => ['provider' => 'google', 'status' => $status, 'siteID' => SITE_R1, 'httpCode' => null, 'errorCode' => 'CURL_FAIL'];
     $dropSubject = 'R1 through Google, no answer at all (#1043)';
+    $dropErrorsFrom = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS n FROM tblErrors')['n']);
     $drop1 = $r1Send($dropSubject, SITE_R1, $graphOk, $gmailDrop);
+    //    #1053 (round 3 of its check): the Errors-page row this failure writes
+    //    is under the message's organisation too. Until this was asked, putting
+    //    the request's organisation back on MailerGoogle's CURL_FAIL row left
+    //    the whole of R1 green, because only the send-log line was checked.
+    $dropErrorSites = array_map('intval', array_column(q("SELECT siteID FROM tblErrors WHERE errorID > ? AND errorPlatform = 'Gmail' AND errorCode = 'CURL_FAIL'", 'i', [$dropErrorsFrom]), 'siteID'));
     ok(
-        'Google gives NO ANSWER AT ALL (the connection is dropped): the message waits to be tried again, and the attempt has EXACTLY ONE line in the send log - Google\'s own, saying it is queued to be tried again (#1051) and why ("CURL_FAIL"), under the message\'s own organisation (#1043)',
+        'Google gives NO ANSWER AT ALL (the connection is dropped): the message waits to be tried again, and the attempt has EXACTLY ONE line in the send log - Google\'s own, saying it is queued to be tried again (#1051) and why ("CURL_FAIL"), under the message\'s own organisation (#1043) - and its Errors-page row is under that organisation too (#1053)',
         $drop1['asked'] === ['oauth2.googleapis.com POST 200', 'gmail.googleapis.com POST 0'] && $drop1['left'] === 1
-            && $dropLines($dropSubject) === [$dropLine()],
-        'asked ' . json_encode($drop1['asked']) . '; waiting ' . $drop1['left'] . '; lines ' . json_encode($dropLines($dropSubject))
+            && $dropLines($dropSubject) === [$dropLine()] && $dropErrorSites === [SITE_R1],
+        'asked ' . json_encode($drop1['asked']) . '; waiting ' . $drop1['left'] . '; lines ' . json_encode($dropLines($dropSubject)) . '; CURL_FAIL error rows under ' . json_encode($dropErrorSites)
     );
     //    The SECOND attempt (made due at once by hand) adds exactly one more.
     q('UPDATE tblMailQueue SET nextAttemptAt = UTC_TIMESTAMP() - INTERVAL 1 SECOND WHERE subject = ?', 's', [$dropSubject]);
@@ -4373,16 +4428,22 @@ if (part('R1', 'A message the job sends later through Microsoft 365 or Google is
     //    about it. Exactly two lines, one per route tried: none for Google is
     //    the fault, and a third would be the queue writing one on top.
     setting('mail.fallbackProvider', 'google');
+    $fbErrorsFrom = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS n FROM tblErrors')['n']);
     $fbSignIn = $r1Send('R1 through Microsoft 365, then Google, whose sign-in gets no answer (#1051)', SITE_R1, $graphBroken, $gmailOk,
         ['oauth2.googleapis.com' => [['path' => '/token', 'drop' => true]]]);
     setting('mail.fallbackProvider', '');
     $fbCodes = array_column(q('SELECT errorCode FROM tblEmailLog WHERE subject = ? ORDER BY emailLogID', 's', ['R1 through Microsoft 365, then Google, whose sign-in gets no answer (#1051)']), 'errorCode');
+    //    #1053 (round 3 of its check): the fallback's Errors-page row, written
+    //    by sendViaGraph()'s catch, is under the message's organisation. Pinned
+    //    by nothing before: the request's organisation on it left R1 green.
+    $fbErrorSites = array_map('intval', array_column(q("SELECT siteID FROM tblErrors WHERE errorID > ? AND errorCode = 'FALLBACK_FAIL'", 'i', [$fbErrorsFrom]), 'siteID'));
     ok(
-        'Microsoft 365 fails and the fallback, Google, cannot even SIGN IN: the message waits, and there is exactly ONE line for EACH route tried - Microsoft\'s and Google\'s ("FALLBACK_FAIL"), both queued to be tried again, both under the message\'s own organisation (#1051)',
+        'Microsoft 365 fails and the fallback, Google, cannot even SIGN IN: the message waits, and there is exactly ONE line for EACH route tried - Microsoft\'s and Google\'s ("FALLBACK_FAIL"), both queued to be tried again, both under the message\'s own organisation (#1051) - and the fallback\'s Errors-page row is under that organisation too (#1053)',
         $fbSignIn['left'] === 1
             && $fbSignIn['asked'] === ['login.microsoftonline.com POST 200', 'graph.microsoft.com POST 500', 'oauth2.googleapis.com POST 0']
-            && $fbSignIn['lines'] === [$line('ms365', 'queued', SITE_R1), $line('google', 'queued', SITE_R1)] && $fbCodes === ['InternalServerError', 'FALLBACK_FAIL'],
-        'asked ' . json_encode($fbSignIn['asked']) . '; waiting ' . $fbSignIn['left'] . '; lines ' . json_encode($fbSignIn['lines']) . '; codes ' . json_encode($fbCodes)
+            && $fbSignIn['lines'] === [$line('ms365', 'queued', SITE_R1), $line('google', 'queued', SITE_R1)] && $fbCodes === ['InternalServerError', 'FALLBACK_FAIL']
+            && $fbErrorSites === [SITE_R1],
+        'asked ' . json_encode($fbSignIn['asked']) . '; waiting ' . $fbSignIn['left'] . '; lines ' . json_encode($fbSignIn['lines']) . '; codes ' . json_encode($fbCodes) . '; FALLBACK_FAIL error rows under ' . json_encode($fbErrorSites)
     );
     //    ...and when that message is finally GIVEN UP ON, its last attempt's two
     //    route lines say so: the queue settles them to 'failed' (#1051), the
