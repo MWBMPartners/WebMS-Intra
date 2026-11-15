@@ -37,7 +37,8 @@ class Giving
     //
     //    It used to be `GIVING_MAX_AMOUNT_PENCE`, 10,000.00 written into
     //    `payments/checkout.php` — the same figure in every currency, which
-    //    is a very different ceiling in, say, Japanese yen than in pounds. It
+    //    is a very different ceiling in, say, Thai baht (10,000 baht is a few
+    //    hundred pounds) than in pounds. It
     //    is a LIMIT now under the three-tier rule (#668): the hard maximum
     //    below, then the installation's figure, then the organisation's, each
     //    unable to loosen the one above. Set on Admin, Settings, Member
@@ -48,8 +49,11 @@ class Giving
     //    "the most any organisation here may set", in whatever currency each
     //    organisation uses. The portal holds no exchange rates (#993), so it
     //    cannot compare amounts across currencies — and an installation
-    //    hosting an organisation that gives in yen can now raise its figure
-    //    for that, which the fixed number never allowed.
+    //    hosting an organisation that gives in baht can now raise its figure
+    //    for that, which the fixed number never allowed. (Not the yen, nor any
+    //    currency not counted in hundredths: `Currency::whyNotChoosable()`
+    //    refuses those for every amount, this one included, and online
+    //    payments are taken only in `Currency::PAYMENT_CURRENCIES`.)
     //
     //    WHAT IT COVERS: a gift through the SELF-SERVICE online form only, as
     //    the old constant did. A pledge is paid at its own recorded amount,

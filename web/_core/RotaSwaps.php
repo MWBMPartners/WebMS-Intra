@@ -473,8 +473,8 @@ final class RotaSwaps
      * never a rolling 24 hours: "you can ask again tomorrow" has to be true.
      * `createdAtUtc` is written with `UTC_TIMESTAMP()` (migration 298) so
      * the comparison is between two UTC readings and no session time zone is
-     * involved. On a day the clocks change, `today` is still that date's
-     * first moment, so the day is 23 or 25 hours long, as it really is.
+     * involved. On a day the clocks change the day is 23 or 25 hours long, as
+     * it really is; see `dayStartUtcFor()` for where it begins.
      */
     public static function dayStartUtc(int $siteId): string
     {
@@ -482,22 +482,57 @@ final class RotaSwaps
     }
 
     /**
-     * 🕛 The same, for a zone and a moment given — so the rule can be proved at
-     * a FIXED moment (both clock-change days of a zone that changes, and a zone
-     * whose clocks change AT midnight) rather than only "now", which no test
-     * can choose. `dayStartUtc()` is the only caller under `web/`.
+     * 🕛 The EARLIEST instant whose reading on `$zone`'s clock falls on the
+     * same date as `$now` does there — in UTC. Takes a zone and a moment so the
+     * rule can be proved at FIXED moments, which "now" never reaches.
+     * `dayStartUtc()` is the only caller under `web/`.
      *
-     * The first moment of the date `$now` has ON THAT ZONE'S CLOCK, in UTC.
-     * PHP's `setTime(0, 0)` lands on the first moment that exists when
-     * midnight itself is skipped (America/Santiago's spring change happens at
-     * 00:00, so its day starts at 01:00), which is the start of that day.
+     * WORKED OUT FROM THE ZONE'S OWN TRANSITIONS, NOT `setTime(0, 0)` (round 2
+     * of the independent check). Where the clocks go back to exactly midnight,
+     * midnight happens TWICE, and PHP's `setTime(0, 0)` picks the SECOND one:
+     * Atlantic/Azores on 25 October 2026 gave 01:00 UTC where the day really
+     * began at 00:00 UTC, and America/Havana on 1 November 2026 gave 05:00 UTC
+     * where it began at 04:00 UTC — so a member's requests in that first hour
+     * were not counted and they could go over the limit once a year. The
+     * first version's docblock said "on a day the clocks change, today is
+     * still that date's first moment", which was untrue for exactly those.
+     *
+     * So, for each stretch of time in which the zone's offset is fixed, the
+     * instants whose local reading falls on the date are an interval worked
+     * out by arithmetic; the answer is the smallest start among them. That
+     * covers midnight skipped (America/Santiago in September: the day begins
+     * at 01:00), midnight twice (the two above), and a day the clocks go back
+     * ACROSS midnight, whose local date runs D, D-1, D again.
+     * `tools/rota-swaps-selftest.php` sweeps every zone PHP knows against an
+     * independent minute-by-minute search.
      */
     public static function dayStartUtcFor(string $zone, \DateTimeImmutable $now): string
     {
-        return $now->setTimezone(new \DateTimeZone($zone))
-            ->setTime(0, 0)
-            ->setTimezone(new \DateTimeZone('UTC'))
-            ->format('Y-m-d H:i:s');
+        $tz   = new \DateTimeZone($zone);
+        $date = $now->setTimezone($tz)->format('Y-m-d');
+        // The date's midnight read as if it were UTC: a local reading of the
+        // date is in [$midnight, $midnight + 86400) once its offset is added.
+        $midnight = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone('UTC')))->getTimestamp();
+        $from     = $midnight - 2 * 86400;
+        $to       = $midnight + 2 * 86400;
+        $changes  = $tz->getTransitions($from, $to);
+        if ($changes === false || $changes === []) {
+            return gmdate('Y-m-d H:i:s', $midnight - $tz->getOffset($now));
+        }
+        $earliest = null;
+        foreach ($changes as $i => $change) {
+            // The first entry is the state at $from; each later one a change.
+            $start  = max((int) $change['ts'], $from);
+            $end    = isset($changes[$i + 1]) === true ? (int) $changes[$i + 1]['ts'] : $to;
+            $offset = (int) $change['offset'];
+            $lo     = max($start, $midnight - $offset);
+            $hi     = min($end, $midnight + 86400 - $offset);
+            if ($lo < $hi && ($earliest === null || $lo < $earliest)) {
+                $earliest = $lo;
+            }
+        }
+
+        return gmdate('Y-m-d H:i:s', $earliest ?? ($midnight - $tz->getOffset($now)));
     }
 
     /**
@@ -600,6 +635,16 @@ final class RotaSwaps
         $mayHaveCommitted = false;
         try {
             $db->begin_transaction();
+            // 🔒 BOTH locks are load-bearing, and each is pinned by its own
+            //    two-process test in tools/rota-swaps-selftest.php: the duty's
+            //    by S16-S17 (two open requests for ONE duty), the asker's by
+            //    S34-S35 (two posts for two DIFFERENT duties at 9 of 10 a day,
+            //    where the duty lock cannot help). Do not turn either into a
+            //    plain read: a plain SELECT is a consistent read, so the first
+            //    one in the transaction FIXES its snapshot before the locks are
+            //    waited for, and the counts read afterwards would not see what
+            //    the other post committed meanwhile — measured: with the asker's
+            //    lock a plain read, S17 goes red.
             foreach (
                 [
                     ['SELECT `userID` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE', $askerId],
