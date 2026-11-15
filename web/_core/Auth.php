@@ -1906,15 +1906,19 @@ class Auth
      *
      * THE SAME DECISION REACHES TWO MORE RULES (round 2 of #910's check): the
      * backslash rule and the DECODED control-character rule read only the path
-     * — the address as sent, up to its first "?" or "#" — and so does the
-     * host test. A backslash or an encoded tab in a query or a fragment does
+     * — the address as sent, up to its first "?" or "#" — and so do the
+     * "." / ".." rule and the organisation rule (round 3; the parse_url() host
+     * test that sat beside them could never fire and was removed). A backslash or an encoded tab in a query or a fragment does
      * nothing to where a browser goes, and refusing them sent
      * "/people?search=C%3A%5CUsers" to the front page. A RAW control character
      * is still refused anywhere in the address, because a browser removes it
-     * from the whole address before reading it. Measured by a differential
-     * run of this method against the version before #910 (371,296 addresses):
-     * nothing it refused before is now refused differently, and none of the
-     * 9,642 it newly accepts leaves the portal when a browser resolves it.
+     * from the whole address before reading it, and so is a space at the very
+     * end, which a browser trims. Measured by a differential run of this
+     * method against the version before #910, in a one-organisation set-up
+     * and with organisations told apart by the first part of the address:
+     * nothing it accepts leaves the site, or the organisation, when a browser
+     * (WHATWG) resolves it; everything it newly refuses either ends in a space
+     * or has dot parts behind an encoded "?" or "#" in its path.
      *
      * TWO RULES WERE ADDED BY THE LINK SWEEP (#536). Every older rule is
      * still here, in the same order, unchanged — except the old scheme test,
@@ -1949,7 +1953,12 @@ class Auth
      *    pages that once judged come-back addresses for themselves (#620)
      *    each needed the same refusal. Nothing the portal builds holds such a
      *    part (Site::url() never writes one), and only the PATH is read:
-     *    "?a=../b" after the "?" is not a path part and is not refused.
+     *    "?a=../b" after the "?" is not a path part and is not refused. The
+     *    path is what comes before the first RAW "?" or "#"; a "%3F" or "%23"
+     *    inside it does not end it, because a browser does not read it as
+     *    one, so "/north/x%3F/%2e%2e/%2e%2e/south" is refused (#910 round 3:
+     *    the decoded text used to be cut at its decoded "?", and that address
+     *    was accepted while a browser walked out to "/south").
      *
      * THE FALLBACK IS THE ORGANISATION'S OWN FRONT PAGE. It used to be the
      * bare "/", which under "the first part of the address" is the DEFAULT
@@ -2055,6 +2064,18 @@ class Auth
             return $fallback;
         }
 
+        // 🚫 Reject a space at the END of the address as sent. A browser trims
+        //    spaces from both ends of an address before reading it (the WHATWG
+        //    parser removes leading and trailing C0 controls and spaces), so
+        //    "/north/.. " is read as "/north/..", which climbs out of the
+        //    organisation, while the "." / ".." rule below sees a part ".. ".
+        //    Found by the differential run of round 3 of #910's check. (A
+        //    space at the start is already refused: the address must begin
+        //    with "/" or a "%" code. A space inside is encoded, not trimmed.)
+        if (str_ends_with($url, ' ') === true) {
+            return $fallback;
+        }
+
         // 🚫 (#910, D-161) No "letter-run and colon ANYWHERE" test here any
         //    more. It refused "/calendar?from=2026-06-01T10:30" and every other
         //    address with a time in it, while the only place a browser reads a
@@ -2062,25 +2083,34 @@ class Auth
         //    docblock. Do not put it back to "be safe": it is the cry-wolf
         //    direction, and it sent people to the wrong page.
 
-        // 🔍 Parse the PATH — if it has a host component, it's an external
-        //    redirect. Only the path, for the same reason as above: PHP's
-        //    parse_url() gives up on some ordinary queries, and nothing after
-        //    "?" or "#" can name a host.
-        $parsed = parse_url($pathDecoded);
-        if ($parsed === false || isset($parsed['host']) === true) {
-            return $fallback;
-        }
+        // 🗑️ NO parse_url() HOST TEST ANY MORE (round 3 of #910's check). It
+        //    asked PHP whether the path names a host, and it never could: the
+        //    path already begins with exactly one "/" and holds no backslash,
+        //    and only "//" or "\\" begins a host. Measured by a
+        //    differential run with and without it: its only effect was to
+        //    refuse harmless paths PHP's parser gives up on ("/a:0",
+        //    "/x:99999"), and none of the addresses it used to refuse leaves
+        //    the site or the organisation when a browser resolves it. A guard
+        //    nothing can trip only looks like protection; the leading-"/",
+        //    "//" and backslash rules above keep another host out.
 
-        // 🚫 Reject a "." or ".." part, in every set-up (rule 3 above)
-        foreach ([$url, $decoded] as $form) {
-            $parts = explode('/', substr($form, 0, strcspn($form, '?#')));
+        // 🚫 Reject a "." or ".." part, in every set-up (rule 3 above), in the
+        //    path AS SENT and in the path ONCE DECODED. The decoded path is NOT
+        //    cut again at a "?" or "#" it holds: those came from "%3F" and
+        //    "%23", which a browser does not read as the end of the path. The
+        //    first version cut it, so "/north/x%3F/%2e%2e/%2e%2e/south/p" was
+        //    judged only as far as "/north/x" while a browser walked out to
+        //    "/south/p" (round 3 of #910's check; older than #910).
+        foreach ([$pathSent, $pathDecoded] as $form) {
+            $parts = explode('/', $form);
             if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
                 return $fallback;
             }
         }
 
-        // 🏢 Reject an address that leaves this organisation (rule 2 above)
-        if (self::staysInThisOrganisation($url, $decoded) === false) {
+        // 🏢 Reject an address that leaves this organisation (rule 2 above),
+        //    judged on the same two forms of the path, for the same reason.
+        if (self::staysInThisOrganisation($pathSent, $pathDecoded) === false) {
             return $fallback;
         }
 
@@ -2159,9 +2189,11 @@ class Auth
      * of the address; in every other set-up the answer is yes, because the
      * path says nothing about the organisation.
      *
-     * Both forms of the address are judged, as it was sent and once decoded,
-     * and BOTH must pass. The browser is handed the first; a server in
-     * between may see the second.
+     * It is handed the PATH only, in both forms: as it was sent (up to its
+     * first raw "?" or "#") and that once decoded, NOT cut again at a "?" or
+     * "#" the decoding produced (#910 round 3: cutting at a decoded "%3F" let
+     * "/north/x%3F/%2e%2e/%2e%2e/south/p" through). BOTH must pass. The
+     * browser is handed the first; a server in between may see the second.
      *
      * A "." or ".." part never reaches here: safeRedirectUrl() refuses it
      * first, in every set-up (rule 3 there, #620). It used to be refused
@@ -2190,7 +2222,7 @@ class Auth
      * WHAT IT CANNOT DO: it judges the first part only. Whether the rest is
      * a real page, and whether the person may open it, are other checks.
      */
-    private static function staysInThisOrganisation(string $url, string $decoded): bool
+    private static function staysInThisOrganisation(string $pathSent, string $pathDecoded): bool
     {
         if (Site::isMultisiteEnabled() === false || Site::detectionMode() !== Site::MODE_PATH) {
             return true;
@@ -2198,9 +2230,11 @@ class Auth
 
         $prefix = Site::pathPrefix();
         $firsts = [];
-        foreach ([$url, $decoded] as $form) {
-            // The path only: nothing after "?" or "#" chooses the organisation.
-            $parts = explode('/', ltrim(substr($form, 0, strcspn($form, '?#')), '/'));
+        foreach ([$pathSent, $pathDecoded] as $form) {
+            // Each form is already the path only (nothing after a RAW "?" or
+            // "#" chooses the organisation). It is deliberately not cut again:
+            // a "?" or "#" in the decoded path came from "%3F" or "%23".
+            $parts = explode('/', ltrim($form, '/'));
             if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
                 return false;
             }

@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 141; // 99 + five more hostile cases over seven loops, A09, A10, C06, C07, F09-F11 (#910 round 2)
+const EXPECTED = 225; // + twelve more hostile cases over seven loops in round 3 (#910)
 
 function refuse(string $why): never
 {
@@ -617,6 +617,24 @@ function hostile(string $prefix, ?string $other): array
         'an encoded line break between slashes'  => '/%0a/outside.example',
         'two encoded slashes ("%2F%2F...")'      => '%2F%2Foutside.example',
         'a backslash after an encoded "?" (still the path to a browser)' => '/%3F\\outside.example',
+        // #910 round 3 (1): a RAW control character is refused ANYWHERE, the
+        // query and the fragment included — not only in the path. Each is in
+        // this organisation's own address, so only that rule can refuse it.
+        'a raw tab after "?"'                    => $prefix . '/x?a=' . "\t",
+        'a raw line break after "?"'             => $prefix . '/x?a=' . "\r\nX: y",
+        'a raw NUL after "?"'                    => $prefix . '/x?a=' . "\0",
+        'a raw tab after "#"'                    => $prefix . '/x#' . "\t",
+        'a raw line break after "#"'             => $prefix . '/x#' . "\n",
+        'a raw NUL after "#"'                    => $prefix . '/x#' . "\0",
+        // #910 round 3 (2): ".." parts behind an ENCODED "?" or "#" are still
+        // path parts to a browser, which walks out through them. And a space at
+        // the very end is trimmed by a browser, so ".. " is "..".
+        '".." parts behind an encoded "?"'       => $prefix . '/x%3F/%2e%2e/%2e%2e/outside',
+        '".." parts behind an encoded "#"'       => $prefix . '/x%23/%2e%2e/%2e%2e/outside',
+        '"%2E%2E" in capitals behind an encoded "?"' => $prefix . '/x%3F/%2E%2E/%2E%2E/outside',
+        'plain ".." behind an encoded "?"'       => $prefix . '/x%3F/../../outside',
+        'a time and ".." behind an encoded "?"'  => $prefix . '/T10:30x%3F/%2e%2e/%2e%2e/outside',
+        '".." with a space after it, at the end' => $prefix . '/.. ',
         'a backslash ("/\\outside.example")'     => '/\\outside.example',
         'a tab before the slashes'               => "/\t/outside.example",
         'a ".." part leaving the organisation'   => $prefix . '/assets/../../outside',

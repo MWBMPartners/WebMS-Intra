@@ -1061,7 +1061,9 @@ $unusable = [];
 // 'javascript:1' and the three after it are a scheme-shaped name read as a host
 // and a port; until round 2 of #910's check they were served as
 // "https://javascript:1" and the like.
-foreach (['javascript:alert(1)', 'javascript:1', 'javascript:443/alert(1)', 'vbscript:8080', 'data:80/x', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
+// 'javascript.:1', 'a.' and '80.' met a dot rule judged before the closing dot
+// was tidied away (round 3); 'x.1' and 'example.123' end in a number.
+foreach (['javascript:alert(1)', 'javascript:1', 'javascript:443/alert(1)', 'vbscript:8080', 'data:80/x', 'javascript.:1', 'a.', '80.', 'x.1', 'example.123', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
     $setSetting('product.publisherUrl', $bad);
     if ($servedUrl() !== null) {
         $unusable[] = $bad;
@@ -1075,6 +1077,12 @@ $u === 'https://publisher.example.org' ? ok('H10', 'a bare host name, typed unti
 $setSetting('product.publisherUrl', 'publisher.example.org:8080/about');
 $u = $servedUrl();
 $u === 'https://publisher.example.org:8080/about' ? ok('H10b', 'a bare host name with a port and a page (no "https://") is still accepted, as an https address') : bad('H10b', 'a bare host name with a port was not served', var_export($u, true));
+$setSetting('product.publisherUrl', 'publisher.example.org.');
+$u = $servedUrl();
+$u === 'https://publisher.example.org' ? ok('H10c', 'a full name with its closing dot is accepted, tidied to https://publisher.example.org') : bad('H10c', 'a full name with its closing dot was not served tidied', var_export($u, true));
+$setSetting('product.publisherUrl', '192.0.2.10');
+$u = $servedUrl();
+$u === 'https://192.0.2.10' ? ok('H10d', 'a whole IPv4 address is still accepted, although its last part is a number') : bad('H10d', 'a whole IPv4 address was not served', var_export($u, true));
 
 $openapiFile   = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'openapi.php';
 $openapiBefore = (string) file_get_contents($openapiFile);

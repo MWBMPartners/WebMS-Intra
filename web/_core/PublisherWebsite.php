@@ -32,7 +32,9 @@
  * this one). A bare name typed WITHOUT "http://" or "https://" is taken to
  * mean https, as PortalAddress does — but only when it holds a dot
  * ("www.example.org", "example.org:8080"), as every public website's name
- * does.
+ * does. The dot is looked for in the host name AFTER PortalAddress has tidied
+ * it, so a closing dot does not count ("a." and "javascript.:1" are refused;
+ * "example.org." is accepted as "example.org").
  *
  * WHAT IT REFUSES, never repairs: a space, line break or other control
  * character; a beginning with "://" other than http:// or https://
@@ -44,7 +46,8 @@
  * was always http(s), so it was never a script, but it was not what the
  * person typed and the header said it was refused); a beginning such as
  * `javascript:alert(1)` or `mailto:` that is not a name and port at all; a
- * user name or password; a host name that is not plain letters, digits,
+ * host whose last part is all digits ("x.1", "example.123"), unless it is a
+ * whole IPv4 address ("192.0.2.10"); a user name or password; a host name that is not plain letters, digits,
  * hyphens and dots; anything over 255 characters; and, after the host name,
  * any character an address may not carry unencoded (quotes, angle brackets
  * and the like).
@@ -113,14 +116,6 @@ final class PublisherWebsite
         $nameLength = strcspn($rest, '/?#');
         $after      = substr($rest, $nameLength);
 
-        // 🔤 A bare name (no "://") must hold a dot before any port. Without
-        //    this, "javascript:443/alert(1)" is a host called "javascript"
-        //    with port 443 to PortalAddress, and became a link the person
-        //    never typed. A public website's name always has a dot; a name
-        //    without one ("localhost") can still be given with its http://.
-        if ($scheme === '' && str_contains(explode(':', substr($rest, 0, $nameLength), 2)[0], '.') === false) {
-            return $refuse('Type the website address in full, beginning with https://, for example https://www.example.org. A name with no dot in it is not a website\'s address.');
-        }
 
         $server = PortalAddress::check($scheme . substr($rest, 0, $nameLength));
         if ($server['problem'] !== '') {
@@ -128,6 +123,28 @@ final class PublisherWebsite
         }
         if ($server['address'] === '') {
             return $refuse('That is not a website address. Type it in full, for example https://www.example.org');
+        }
+
+        // 🔤 Judge the host name AS PORTALADDRESS TIDIED IT (round 3 of #910's
+        //    check), because that is what ends up in the link: it drops a
+        //    closing dot, so a test on the typed text was met by "a." and
+        //    "javascript.:1" and gave "https://a" and "https://javascript:1".
+        $host = (string) parse_url($server['address'], PHP_URL_HOST);
+        //    A bare name (no "://") must hold a dot. Without this,
+        //    "javascript:443/alert(1)" is a host called "javascript" with port
+        //    443 to PortalAddress, a link the person never typed. A public
+        //    website's name always has a dot; a name without one ("localhost")
+        //    can still be given with its http://. "example.org." (a full name
+        //    with its closing dot) is accepted and tidied to "example.org".
+        if ($scheme === '' && str_contains($host, '.') === false) {
+            return $refuse('Type the website address in full, beginning with https://, for example https://www.example.org. A name with no dot in it is not a website\'s address.');
+        }
+        //    And a name whose last part is all digits ("x.1", "example.123")
+        //    cannot be a real host: no top-level domain is a number. Only a
+        //    whole IPv4 address ("192.0.2.10") ends in digits legitimately.
+        $lastLabel = substr($host, (int) strrpos('.' . $host, '.'));
+        if (ctype_digit($lastLabel) === true && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            return $refuse('That is not a website address: the part after the last dot is a number. Type the address in full, for example https://www.example.org');
         }
 
         // 🔤 After the host name, only the characters an address may carry as

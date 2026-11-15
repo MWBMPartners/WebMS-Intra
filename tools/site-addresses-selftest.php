@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 112; // + S16b, S17b, S27b, S27c (#910)
-const EXPECTED_NO_CRAWL = 102;
+const EXPECTED_FULL     = 119; // + S16b, S17b, S26b-S26g, S27b-S27d (#910)
+const EXPECTED_NO_CRAWL = 109;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1196,6 +1196,14 @@ if ($only === []) {
         'S24 ".." with the slash after it encoded'                  => B . '/..%2f' . KEY_A . '/account',
         'S25 the organisation\'s part in capitals (spelt another way than the request)' => '/' . strtoupper(KEY_B) . '/account',
         'S26 the organisation\'s part as the start of a longer word' => B . 'x/account',
+        // #910 round 3: ".." parts behind an ENCODED "?" or "#" walk out of B
+        // in a browser; the judge used to cut the decoded path there.
+        'S26b ".." behind an encoded "?", into another organisation' => B . '/x%3F/%2e%2e/%2e%2e/' . KEY_A . '/account',
+        'S26c ".." behind an encoded "#"'                        => B . '/x%23/%2e%2e/%2e%2e/' . KEY_A . '/account',
+        'S26d "%2E%2E" in capitals behind an encoded "?"'        => B . '/x%3F/%2E%2E/%2E%2E/' . KEY_A . '/account',
+        'S26e a time and ".." behind an encoded "?"'             => B . '/T10:30x%3F/%2e%2e/%2e%2e/' . KEY_A . '/account',
+        'S26f ".." with a space at the end, which a browser trims' => B . '/.. ',
+        'S26g a raw line break in the query'                     => B . "/account?a=\r\nX: y",
     ];
     foreach ($refused as $label => $address) {
         $went = sentTo($jarMember, B, $address);
@@ -1205,6 +1213,7 @@ if ($only === []) {
         'S27 control: a page of B, with a query' => B . '/calendar?view=list',
         'S27b control (#910, D-161): a page of B whose query holds a time, "T10:30", which the judge used to read as a scheme' => B . '/calendar?from=2026-06-01T10:30',
         'S27c control (#910 round 2): a page of B whose query holds an encoded backslash and tab' => B . '/people?search=C%3A%5CUsers&q=x%09y',
+        'S27d control (#910 round 3): DOUBLE-encoded "?" and dots stay in B, because a browser reads "%252e" as text' => B . '/x%253F/%252e%252e/%252e%252e/p',
         'S28 control: B\'s front page'            => B . '/',
         'S29 control: B\'s front page, no slash'  => B,
     ];
