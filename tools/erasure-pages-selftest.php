@@ -233,9 +233,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 259; // #1019 added section Q's six: 252 + 6; round 2 added plant Q5b.
-                             // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5.
-                             // MERGED (p982-land): both sides grew from 223,
+const EXPECTED_CHECKS = 265; // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
+                             // #1019 added section Q's six and round 2 plant Q5b: +7.
+                             // #1049 added M13l2-M13l7 (the Users page's
+                             // refusal says only what is known, one check per
+                             // sentence it can write): +6. 252 + 7 + 6 = 265.
+                             // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5 = 252.
+                            // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
                             // #982 round 12 added M13q (the Offboard page's
@@ -4245,6 +4249,55 @@ q("INSERT INTO `tblLinkedAccounts` (`userID`, `provider`, `providerSub`) VALUES 
 try {
     $lenRehire = $rehireM(M13_LEN);
     $lenSave   = $givePasswordM('root', M13_LEN);
+    // #1049: the SAME account in five more states, each built with SQL or a
+    // setting for one press of Save on the Users page and put back at once.
+    // (a) Microsoft sign-in set up, so the link really is a way in.
+    siteSetting(ORG_A, 'auth.ms365.enduser.clientID', 'selftest-1049-ms-client');
+    try {
+        $lenSaveSetUp = $givePasswordM('root', M13_LEN);
+        // (b) the link is a GOOGLE link, Google is NOT set up, Microsoft IS:
+        //     the callbacks match an active account by e-mail address, so it
+        //     may sign in with Microsoft. "No way in" would be untrue.
+        q("UPDATE `tblLinkedAccounts` SET `provider` = 'google' WHERE `userID` = ?", 'i', [M13_LEN]);
+        try {
+            $lenSaveOther = $givePasswordM('root', M13_LEN);
+        } finally {
+            q("UPDATE `tblLinkedAccounts` SET `provider` = 'ms365' WHERE `userID` = ?", 'i', [M13_LEN]);
+        }
+        // (c) switched OFF, with its Microsoft link working otherwise: every
+        //     way in needs the account switched on, so none may be claimed.
+        q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [M13_LEN]);
+        try {
+            $lenSaveOff = $givePasswordM('root', M13_LEN);
+        } finally {
+            q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [M13_LEN]);
+        }
+    } finally {
+        q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [ORG_A, 'auth.ms365.enduser.clientID']);
+    }
+    // (d) a passkey BESIDE the switched-off Microsoft link: a real way in,
+    //     and the dead link said as well.
+    q("INSERT INTO `tblWebAuthnCredentials` (`userID`, `credentialID`, `publicKey`) VALUES (?, 'selftest-1049-len-key', 'selftest-1049-key')", 'i', [M13_LEN]);
+    try {
+        $lenSavePasskey = $givePasswordM('root', M13_LEN);
+    } finally {
+        q('DELETE FROM `tblWebAuthnCredentials` WHERE `userID` = ?', 'i', [M13_LEN]);
+    }
+    // (e) the read of what the account has FAILS (a column renamed in the
+    //     server's copy of the page, for one press), as M13n does it.
+    $m13lPath     = $child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'users' . $sep . 'save.php';
+    $m13lOriginal = (string) file_get_contents($m13lPath);
+    $m13lFrom     = 'SELECT COUNT(*) AS `n` FROM `tblWebAuthnCredentials` WHERE `userID` = ?';
+    $m13lApplied  = substr_count($m13lOriginal, $m13lFrom) === 1;
+    $lenSaveUnread = '(not run)';
+    if ($m13lApplied === true) {
+        file_put_contents($m13lPath, str_replace($m13lFrom, 'SELECT COUNT(`noSuchColumn`) AS `n` FROM `tblWebAuthnCredentials` WHERE `userID` = ?', $m13lOriginal));
+        try {
+            $lenSaveUnread = $givePasswordM('root', M13_LEN);
+        } finally {
+            file_put_contents($m13lPath, $m13lOriginal);
+        }
+    }
 } finally {
     q('DELETE FROM `tblLinkedAccounts` WHERE `userID` = ?', 'i', [M13_LEN]);
 }
@@ -4255,6 +4308,35 @@ ok('M13l an account still LINKED to Microsoft (not set up here) is said to have 
     && str_contains($lenRehire, 'You can try giving it') === false && str_contains($lenRehire, 'You can give it') === false
     && $lenRows === 0 && str_contains($lenSave, 'No password was set') === true,
     'offboard said: ' . $lenOff . ' | rehire said: ' . $lenRehire . ' | save said: ' . $lenSave);
+// M13l2-M13l7 (#1049): the Users page's refusal says only what is known. Each
+// pins the WHOLE sentence its branch writes, so a branch that stopped being
+// reached (or a condition made unreachable) turns its check red.
+$noPw = 'No password was set, and nothing else was saved either. ';
+ok('M13l2 linked to Microsoft while NEITHER Microsoft nor Google sign-in is set up and no passkey: the page says it is still linked to a Microsoft account whose sign-in is not set up here and has no way in - never that it "signs in another way" (#1049)',
+    str_contains($lenSave, $noPw . 'This account has no password of its own, and it is still linked to a Microsoft account whose sign-in is not set up here, so it has no way to sign in at the moment.') === true
+    && str_contains($lenSave, 'signs in another way') === false,
+    'save said: ' . $lenSave);
+ok('M13l3 the same account with Microsoft sign-in SET UP: it signs in another way, with Microsoft - and nothing about a sign-in that is not set up (#1049)',
+    str_contains($lenSaveSetUp, $noPw . 'This account has no password of its own — it signs in another way, with Microsoft. This page does not add a password to such an account') === true
+    && str_contains($lenSaveSetUp, 'not set up here') === false,
+    'save said: ' . $lenSaveSetUp);
+ok('M13l4 linked to GOOGLE while Google is off and Microsoft is ON: it says the Google link is not set up here and that Microsoft sign-in is set up and works for the same e-mail address - never "no way to sign in" (#1049 round 2)',
+    str_contains($lenSaveOther, $noPw . 'This account has no password of its own, and it is still linked to a Google account whose sign-in is not set up here. Microsoft sign-in is set up on this portal: it works for a Microsoft account with the same e-mail address in the Microsoft tenant set up here. This page does not add a password') === true
+    && str_contains($lenSaveOther, 'no way to sign in') === false && str_contains($lenSaveOther, 'signs in another way') === false,
+    'save said: ' . $lenSaveOther);
+ok('M13l5 a SWITCHED-OFF account whose Microsoft link would otherwise work: it says the account is switched off and cannot sign in at the moment, and claims no way in (#1049 round 2)',
+    str_contains($lenSaveOff, $noPw . 'This account has no password of its own and is switched off, so it cannot sign in at the moment;') === true
+    && str_contains($lenSaveOff, 'signs in another way') === false
+    && (int) one('SELECT COUNT(*) AS `n` FROM `tblLocalAccounts` WHERE `userID` = ?', 'i', [M13_LEN])['n'] === 0,
+    'save said: ' . $lenSaveOff);
+ok('M13l6 a passkey BESIDE a Microsoft link whose sign-in is off: it signs in another way, with a passkey, and is also still linked to a Microsoft account whose sign-in is not set up here (#1049 round 2)',
+    str_contains($lenSavePasskey, $noPw . 'This account has no password of its own — it signs in another way, with a passkey. It is also still linked to a Microsoft account whose sign-in is not set up here. This page does not add a password') === true,
+    'save said: ' . $lenSavePasskey);
+ok('M13l7 when what the account has cannot be READ, it says only that a link or a passkey is recorded - no way in claimed, none denied, no column name (#1049 round 2)',
+    $m13lApplied === true && (string) file_get_contents($m13lPath) === $m13lOriginal
+    && str_contains($lenSaveUnread, $noPw . 'This account has no password of its own, and a link to Microsoft or Google or a passkey is recorded for it. This page does not add a password to such an account.') === true
+    && str_contains($lenSaveUnread, 'noSuchColumn') === false,
+    ($m13lApplied === true ? 'applied' : 'NOT APPLIED') . ' | save said: ' . $lenSaveUnread);
 
 // M13o: an account with no way in whose e-mail address is over 50 characters.
 // The Users page would make its sign-in name from that address and refuses it
