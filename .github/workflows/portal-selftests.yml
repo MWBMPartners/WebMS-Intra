@@ -613,7 +613,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps selftest_geocoder; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_comeback selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs selftest_installwide selftest_actdesc selftest_attwalkins selftest_rotaswaps selftest_geocoder selftest_rowrule selftest_position; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1445,6 +1445,28 @@ jobs:
           SELFTEST_DB_NAME: selftest_locks
           SELFTEST_WEB_PORT: '9836'
         run: php tools/settings-locks-selftest.php
+
+      # 🧱 #1048: the DATABASE half of the Settings row rule
+      #    (SettingsRowRule::nameRuleSql()), run on a temporary copy of
+      #    tblSettings with names it must and must not let through. Nothing ran
+      #    it before: replacing the whole rule with 1 = 1 left every test green.
+      - name: "Settings row rule, the SQL half, on a real database (#1048)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_rowrule
+        run: php tools/settings-row-rule-sql-selftest.php
+
+      # 📍 #1030: a map position that cannot be used is refused, with the
+      #    reason, on all eight pages that take one (asset locations, venues,
+      #    resources, events, a date's own details, the directory entry, small
+      #    groups and a host's home). They used to save without it, and an
+      #    edit wiped the stored one.
+      - name: "An unusable map position is refused on every form (#1030)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_position
+          SELFTEST_WEB_PORT: '9030'
+        run: php tools/position-refusal-selftest.php
 
       # 💷 #966 (D-133): no currency is built in. An organisation in euros sees
       #    no pound sign on the money pages, a project made over HTTP is stored

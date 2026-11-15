@@ -65,6 +65,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Location updated.';
         $_SESSION['flash_type'] = 'success';
     } else {
+        // 📍 A map position typed but unusable is REFUSED with the reason
+        //    (#1030). It used to be dropped: a new location was saved with no
+        //    position, and an edit WIPED the one already stored, under
+        //    "Location saved.". Asked here so the refusal is worded; asked again
+        //    by saveLocation(), whose 0 would otherwise read as "name required".
+        $positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+        if ($positionRefusal !== null) {
+            $_SESSION['flash_msg']  = $positionRefusal;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('assets/locations') . ($locationId > 0 ? '?edit=' . $locationId : ''));
+            exit();
+        }
         $saved = AssetRegister::saveLocation($siteId, $locationId, $_POST, $userId);
         $_SESSION['flash_msg']  = $saved > 0 ? 'Location saved.' : 'Location name is required.';
         $_SESSION['flash_type'] = $saved > 0 ? 'success' : 'danger';

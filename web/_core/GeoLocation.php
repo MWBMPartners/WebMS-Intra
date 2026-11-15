@@ -141,15 +141,21 @@ class GeoLocation
      * exponent form ("4.0E-5"), which the organisation page used to write
      * (#935) and which may still be stored.
      *
-     * Every caller already treats null as "no usable position". Checked caller
-     * by caller on 12 November 2026: the events API answers 422 for a pair it
-     * was sent and could not use; the organisation page refuses the save with
-     * a reason (added with this change); the What3Words focus, the reverse
-     * geocoder and the address suggester simply do without; and the remaining
-     * forms (assets, venues, resources, events, event overrides, directory,
-     * small groups) store no position from the boxes -- some then fill one in
-     * from a what3words address or the postal address -- which is what an
-     * out-of-range pair already did there, and is a gap, not a wrong place.
+     * Null means "no usable position", and it says nothing about WHY: two empty
+     * boxes and a word typed in one look the same here. A FORM must therefore
+     * not stop at null -- it asks `typedPositionProblem()` below, which tells
+     * those apart. The events API answers 422 for a pair it was sent and could
+     * not use; the What3Words focus, the reverse geocoder and the address
+     * suggester simply do without, because nobody typed anything there.
+     *
+     * WHAT WAS WRONG (#1030). Until 15 November 2026 seven forms (asset
+     * locations, venues, resources, events, a date's own details, a member's
+     * directory entry, and a small group with its hosts' homes) took null as
+     * "no position" and saved, so a person who mistyped a latitude was told
+     * the save had worked while their position was dropped -- and where the
+     * form changes something that already had a position, the stored one was
+     * wiped (every one of them but resources, which only adds). Each now asks
+     * `positionRefusal()` and refuses with the reason before anything is saved.
      *
      * @return array{lat: float, lng: float}|null
      */
@@ -204,6 +210,82 @@ class GeoLocation
         $number = (float) $text;
 
         return is_finite($number) === true ? $number : null;
+    }
+
+    /**
+     * 🧭 Why a map position somebody TYPED cannot be used, or '' when there is
+     * nothing to say: either the pair is usable, or neither box holds anything
+     * (no position was typed, so the form may store none, or fill one in from
+     * a what3words address or the postal address where it does that).
+     *
+     * This is the ONE judge of that question (#1030). The organisation page
+     * (#945) first wrote it inline; the seven forms of #1030 (eight pages)
+     * then needed the same answer, and eight copies would drift apart.
+     *
+     * The answer is a clause in lower case with no full stop, so a caller can
+     * put it into its own sentence: the organisation page keeps the stored
+     * position and SAYS so; every other form refuses through
+     * `positionRefusal()`.
+     *
+     * "Typed" is asked of the text after trimming spaces: a box holding only
+     * spaces is an empty box. Anything that is not text (a request can send
+     * `latitude[]=1`) counts as typed, because it was sent.
+     *
+     * The three reasons are checked in this order, so each is only ever given
+     * for the case it describes: one box empty, then not a number, then out of
+     * range (text that is not a number has no range to be outside).
+     */
+    public static function typedPositionProblem(mixed $lat, mixed $lng): string
+    {
+        $typed = static function (mixed $value): bool {
+            return $value !== null && (is_string($value) === false || trim($value) !== '');
+        };
+        $latTyped = $typed($lat);
+        $lngTyped = $typed($lng);
+        if ($latTyped === false && $lngTyped === false) {
+            return '';
+        }
+        if (self::validateCoords($lat, $lng) !== null) {
+            return '';
+        }
+        if ($latTyped === false || $lngTyped === false) {
+            return 'only one of the two boxes was filled in';
+        }
+        if (self::coordinateNumber($lat) === null || self::coordinateNumber($lng) === null) {
+            return 'the latitude and longitude must be numbers, written with a full stop for the decimal point (for example 51.5074 and -0.1278)';
+        }
+
+        return 'the latitude must be from -90 to 90 and the longitude from -180 to 180';
+    }
+
+    /**
+     * 🚫 The whole message a form shows when it REFUSES to save because of the
+     * map position, or null when the position is no reason to refuse (#1030).
+     *
+     * Worded like the other refusals on those forms ("… Nothing was saved."),
+     * and it says how to get past it, because the person may not have meant to
+     * give a position at all.
+     *
+     * WHY REFUSE rather than save the rest. Seven of the eight pages already
+     * refuse the whole save for a mistyped what3words address, for the same
+     * reason: a position somebody meant to give must not vanish while the page
+     * says "saved". (The eighth, asset locations, still drops a mistyped
+     * what3words address without a word; that is not this change.) The advice is "empty both boxes", never "to give no
+     * position": with both empty, some forms fill a position in from a
+     * what3words address or the postal address, so that would be untrue there.
+     * (The organisation page is the one exception, kept from
+     * #945: there a refusal threw away a whole form of address lines, country
+     * and currency, so it saves the rest and leaves the stored position alone.)
+     */
+    public static function positionRefusal(mixed $lat, mixed $lng): ?string
+    {
+        $reason = self::typedPositionProblem($lat, $lng);
+        if ($reason === '') {
+            return null;
+        }
+
+        return 'The map position could not be used: ' . $reason
+            . '. Correct it, or empty both boxes. Nothing was saved.';
     }
 
     /**

@@ -52,6 +52,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h4 mb-2"><i class="fa-solid fa-pen-to-square me-2 text-primary"></i>Per-occurrence overrides — <?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
     <p class="text-muted small">For recurring series: override or cancel a single date without touching the series rule.</p>
 
+    <?php
+    // 💬 THE SAVE HANDLER'S MESSAGE IS PRINTED HERE (#1030). The save handler
+    //    refuses a bad date, a mistyped what3words address and an unusable map
+    //    position with a message in the session -- and until 15 November 2026
+    //    this page printed none of them, so a refusal looked exactly like a
+    //    save that had worked. Nothing prints these centrally.
+    $flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+    $flashType = (string) ($_SESSION['flash_type'] ?? '');
+    unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+    ?>
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>">
+            <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
+
     <?php if (count($rows) === 0): ?>
         <div class="alert alert-info small">No overrides yet.</div>
     <?php else: ?>

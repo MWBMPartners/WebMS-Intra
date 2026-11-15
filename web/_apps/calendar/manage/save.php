@@ -173,6 +173,17 @@ $locationEmail   = trim($_POST['locationEmail'] ?? '');
 // never a silent bad store); a non-empty invalid W3W is rejected with a
 // flash + redirect BEFORE anything is saved (nothing else in this handler
 // has side effects yet at this point).
+// A map position TYPED but unusable is refused the same way, with the reason
+// (#1030). It used to become "no position" -- and an edit then wiped the one
+// stored, or the address look-up below filled in a different one -- while the
+// page said the event was saved. GeoLocation::positionRefusal() decides.
+$positionRefusal = GeoLocation::positionRefusal($_POST['locationGeoLat'] ?? null, $_POST['locationGeoLng'] ?? null);
+if ($positionRefusal !== null) {
+    $_SESSION['flash_msg']  = $positionRefusal;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
 $geoCoords = GeoLocation::validateCoords($_POST['locationGeoLat'] ?? null, $_POST['locationGeoLng'] ?? null);
 $locationGeoLat = $geoCoords['lat'] ?? null;
 $locationGeoLng = $geoCoords['lng'] ?? null;
