@@ -233,7 +233,8 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 265; // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
+const EXPECTED_CHECKS = 271; // #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+                             // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
                              // refusal says only what is known, one check per
@@ -6436,6 +6437,126 @@ foreach ($q1019Plants as $label => [$rel, $swaps]) {
 }
 $q1019Again = $q1019Observe();
 ok('Q6 with every plant taken out again, both pages are whole again (#1019)', $q1019Again === [], implode('; ', $q1019Again));
+
+// ⏳ Q7-Q11 (#1019 round 3 of the check): the PERIOD paragraph, in every state
+//    a member can be told, on both pages. Q2 sees only the default state, and
+//    the network-address period, the activity log's and the map answers' all
+//    default to 365 days — so the template reading the ACTIVITY LOG's facts
+//    instead of its own passed every check above (measured: 259 of 259). The
+//    installation's figure here is 200 days, which neither of the other two
+//    holds, and organisation A's own is 45. Each state's words are LITERALS,
+//    never worked out by the class under test (#647). "Could not be read" is
+//    NOT reachable over HTTP: it needs the settings reader itself to throw,
+//    and a page whose settings cannot be read does not draw at all; Q10 asks
+//    the real class for those words directly instead.
+$q7Key    = 'privacy.networkAddressDays';
+$q7Before = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+if (array_key_exists($q7Key, $state['settings']) === false) {
+    $state['settings'][$q7Key] = $q7Before; // put back by the clean-up even if this section dies
+}
+$q7SetInstallation = static function (string $value) use ($q7Key): void {
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+    q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$q7Key, $value, '365']);
+};
+$q7SetOwn = static function (int $site, ?string $value) use ($q7Key): void {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [$site, $q7Key]);
+    if ($value !== null) {
+        siteSetting($site, $q7Key, $value);
+    }
+};
+/** What each page shows above the list, for each viewer: [[state attribute, words], ...]; '' entries when absent. */
+$q7Observe = static function () use ($jar, $q1019Visitor): array {
+    $out = [];
+    foreach (['/privacy', '/privacy/policy'] as $path) {
+        foreach ([[$q1019Visitor, ADDR_A, 'A visitor'], [$jar['cal'], ADDR_A, 'A member'], [$jar['admb'], ADDR_B, 'B administrator']] as [$who, $address, $label]) {
+            $page  = req($who, 'GET', $path, null, $address);
+            $doc   = \Dom\HTMLDocument::createFromString((string) $page['body'], LIBXML_NOERROR);
+            $found = $doc->querySelectorAll('[data-network-address-retention]');
+            $out[$path . ' ' . $label] = count($found) === 1 && $page['status'] === 200 && str_contains((string) $page['body'], '</html>') === true
+                ? [(string) $found[0]->getAttribute('data-network-address-retention'), trim((string) preg_replace('/\s+/', ' ', (string) $found[0]->textContent))]
+                : ['', 'status ' . $page['status'] . ', ' . count($found) . ' period paragraphs'];
+        }
+    }
+
+    return $out;
+};
+/** '' when every page shows, for A and for B, the expected state and a sentence containing the expected words. */
+$q7Judge = static function (array $seen, array $forA, array $forB): string {
+    $wrong = [];
+    foreach ($seen as $where => [$stateSeen, $words]) {
+        [$stateWanted, $wordsWanted] = str_contains($where, ' B ') === true ? $forB : $forA;
+        if ($stateSeen !== $stateWanted || str_contains($words, $wordsWanted) === false) {
+            $wrong[] = $where . ': [' . $stateSeen . '] ' . mb_substr($words, 0, 160);
+        }
+    }
+
+    return implode('; ', $wrong);
+};
+$q7Days     = static fn (int $n): array => ['days', 'emptied by a nightly clear-out once it is ' . $n . ' days old'];
+$q7OwnNever = ['own-never', 'this organisation has chosen to keep the address for ever, so nothing empties it'];
+$q7InstNever = ['installation-never', 'this portal keeps the address for ever, and this organisation has not chosen a shorter period, so nothing empties it'];
+$q7States = [
+    'Q7 an organisation\'s own SHORTER figure: A has chosen 45 days under an installation of 200, and both pages say 45 at A and 200 at B (which follows the installation)'
+        => ['200', '45', $q7Days(45), $q7Days(200)],
+    'Q8 an organisation\'s own "keep for ever" where the installation allows it: both pages tell A it chose that, and tell B the portal keeps them for ever'
+        => ['0', '0', $q7OwnNever, $q7InstNever],
+    'Q9 the installation\'s "keep for ever" with A following it: both pages say the portal keeps the address for ever at A and B'
+        => ['0', null, $q7InstNever, $q7InstNever],
+];
+$q7Results = [];
+try {
+    foreach ($q7States as $label => [$installation, $ownA, $forA, $forB]) {
+        $q7SetInstallation($installation);
+        $q7SetOwn(ORG_A, $ownA);
+        $q7SetOwn(ORG_B, null);
+        $q7Results[$label] = $q7Judge($q7Observe(), $forA, $forB);
+    }
+    // 🧪 Q7p: the swap the round-3 checker made, planted in the running copy
+    //    in Q7's state: the template asking the ACTIVITY LOG's facts. It must
+    //    go red here (the activity log is at 365, not 45 or 200).
+    $q7Template = $plantFile('_core/templates/network-addresses.php');
+    $q7Original = (string) file_get_contents($q7Template);
+    $q7From     = '$networkAddressFacts = NetworkAddressRetention::memberFactsForSite($mysqli, Site::id());';
+    $q7Applied  = substr_count($q7Original, $q7From) === 1;
+    $q7Planted  = '';
+    if ($q7Applied === true) {
+        $q7SetInstallation('200');
+        $q7SetOwn(ORG_A, '45');
+        file_put_contents($q7Template, str_replace($q7From, '$networkAddressFacts = \Portal\Core\ActivityLogRetention::memberFactsForSite($mysqli, Site::id());', $q7Original));
+        try {
+            $q7Planted = $q7Judge($q7Observe(), $q7Days(45), $q7Days(200));
+        } finally {
+            file_put_contents($q7Template, $q7Original);
+        }
+    }
+} finally {
+    // Back as it was, NOW: later sections compare rendered pins taken at 365.
+    $q7SetOwn(ORG_A, null);
+    $q7SetOwn(ORG_B, null);
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+    if ($q7Before !== null) {
+        q('INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, NULL, ?, ?, ?, 0)', 'isss',
+            [(int) $q7Before['settingID'], $q7Key, (string) $q7Before['settingValue'], '365']);
+    }
+}
+foreach ($q7Results as $label => $wrong) {
+    ok($label . ' (#1019)', $wrong === '', $wrong);
+}
+ok('Q7p the template planted to read the activity log\'s facts instead of its own: Q7\'s state goes red, and the file is put back byte for byte (#1019)',
+    $q7Applied === true && $q7Planted !== '' && (string) file_get_contents($q7Template) === $q7Original,
+    ($q7Applied === true ? 'applied' : 'NOT APPLIED') . ' | observed: ' . $q7Planted);
+$q7Restored = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+ok('Q7r the network-address setting is put back exactly as it was before Q7 (#1019)',
+    ($q7Before === null && $q7Restored === null) || ($q7Before !== null && $q7Restored !== null && $q7Restored['settingValue'] === $q7Before['settingValue']),
+    json_encode([$q7Before, $q7Restored]));
+// Q10: "could not be read", asked of the real class in the running copy.
+$q10 = shell_exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg(
+    'require $argv[1]; echo \Portal\Core\NetworkAddressRetention::privacyPageWords(["state" => "unknown", "days" => 0]);'
+) . ' ' . escapeshellarg($plantFile('_core/NetworkAddressRetention.php')));
+ok('Q10 "could not be read" (not reachable over HTTP; asked of the real class): the words say the period in force could not be read, and promise no figure (#1019)',
+    is_string($q10) && str_contains($q10, 'The period in force here could not be read just now.') === true
+    && preg_match('/\d+ days?/', $q10) !== 1,
+    (string) $q10);
 @unlink($q1019Visitor);
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared

@@ -150,11 +150,15 @@ by `Logger::activityNamingNobody()`, which keeps the record's type, words and
 organisation and leaves out the account number, the session's fingerprint and
 facts, the network address, the browser name and the request headers. The
 request itself keeps the network address it was sent from (D-176), and only a
-visitor-address request (above) empties it. A request sent with no e-mail
-address cannot be found by any erasure, and its network address is kept with
-no end date: nothing in the portal deletes a prayer request, so it stays until
-#1019 sets a keeping period for stored network addresses (D-178). A signed-in member opening the form is told it is not
-linked to their account, and that the network address is kept. One record
+visitor-address request (above) empties it sooner. A request sent with no
+e-mail address cannot be found by any erasure. Its network address is still
+emptied by the nightly clear-out once it is older than the organisation's
+period for network addresses (`privacy.networkAddressDays`, a year unless
+changed, or kept for ever where the organisation and the installation both
+choose that; D-188, #1019), if that scheduled job has been set up; the request
+itself is kept, because nothing in the portal deletes a prayer request. A
+signed-in member opening the form is told it is not linked to their account,
+and that the network address is kept. One record
 outside the form still follows the ordinary rule: where reCAPTCHA v3 is the
 captcha in use and it REFUSES the request (nothing is then sent), its own
 "CaptchaRejected" record names a signed-in member's account (#1017).
