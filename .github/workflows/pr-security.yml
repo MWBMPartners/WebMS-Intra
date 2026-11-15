@@ -1681,6 +1681,18 @@ jobs:
         if: always()
         run: node tools/offline-page-selftest.mjs
 
+      # 📱 #848: every page header (a page's <h1> and its buttons) is drawn in
+      #    a real browser at 320 and 390px with the real portal.css, and must
+      #    fit. The headers come from the page source, by the audit check
+      #    below, so the two cannot disagree about which headers exist. Needs
+      #    a browser, PHP, python3 and the internet (Bootstrap and Font
+      #    Awesome come from their CDNs, as on a real page); it REFUSES rather
+      #    than skipping without them.
+      - name: 'Every page header fits a phone, in a real browser (#848)'
+        id: page_headers_wrap_browser
+        if: always()
+        run: node tools/page-headers-wrap-selftest.mjs
+
       # 🌍 #942, D-133: the installer's country suggestion promises to send
       #    nothing anywhere. Every installer answer carries a strict Content
       #    Security Policy (web/_install/csp.php). It refuses scripts without the
@@ -1955,6 +1967,19 @@ jobs:
         id: pagination_one_ellipsis
         if: always()
         run: python3 -I tools/audit-checks/check_pagination_one_ellipsis.py
+
+      # 📱 #848. A page header is a flex row holding the page's <h1> and its
+      #    buttons, and a flex row does not wrap unless told to, so on a phone
+      #    the buttons ran off the screen. ONE rule in portal.css now lets
+      #    every such row wrap below 768px, keyed on the row's shape. This
+      #    fails if that rule is changed or removed, or if a page's <h1> is in
+      #    a shape the rule cannot reach (more than two levels inside its row,
+      #    or a row told flex-nowrap). Whether a header FITS is measured by
+      #    tools/page-headers-wrap-selftest.mjs, not here.
+      - name: 'Every page header can wrap on a phone (hard gate, #848)'
+        id: page_headers_wrap
+        if: always()
+        run: python3 -I tools/audit-checks/check_page_headers_wrap.py
 
       # 🌍 #763. A member could choose their interface language, the choice was
       #    stored, and nothing applied it: the question was asked during

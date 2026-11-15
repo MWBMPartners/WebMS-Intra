@@ -90,6 +90,7 @@ use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Events;
 use Portal\Core\GdprEraser;
+use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\NetworkAddressRetention;
@@ -108,6 +109,10 @@ if (class_exists(ActivityLogRetention::class, false) === false) {
 // 🌐 #1019: the same, for the network-address period.
 if (class_exists(NetworkAddressRetention::class, false) === false) {
     require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'NetworkAddressRetention.php';
+}
+// 🗺️ #1037: the same, for the address look-up cache's period.
+if (class_exists(GeocodeCacheRetention::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'GeocodeCacheRetention.php';
 }
 
 /**
@@ -824,14 +829,19 @@ function giving_identity_sweep_rows(): array
  *
  * @return array{activity:int,errors:int,registrations:int,checkinDetail:int,
  *               givingIdentityDue:int,givingIdentityOnHold:int,givingIdentityWaiting:int,givingIdentityNotDue:int,
- *               givingIdentityUnfinished:int,networkAddresses:int}
+ *               givingIdentityUnfinished:int,networkAddresses:int,geocodeCache:int}
  */
 function preview_retention_counts(): array
 {
     $db = App::db();
     $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0,
         'givingIdentityDue' => 0, 'givingIdentityOnHold' => 0, 'givingIdentityWaiting' => 0, 'givingIdentityNotDue' => 0,
-        'givingIdentityUnfinished' => 0, 'networkAddresses' => 0];
+        'givingIdentityUnfinished' => 0, 'networkAddresses' => 0, 'geocodeCache' => 0];
+
+    // 🗺️ Remembered map answers (#1037), by the same period and the same
+    //    statement as the delete. -1 when the period could not be worked out:
+    //    a page must not show "0" for "could not tell".
+    $out['geocodeCache'] = run_geocode_cache_sweep(false);
 
     // 📝 Activity logs and error rows, counted organisation by organisation
     //    with each organisation's own figure, plus the rows that belong to no
@@ -1392,6 +1402,35 @@ function run_part_file_sweep(): array
     }
 }
 
+/**
+ * 🗺️ Delete remembered map answers not used within the period in force
+ *    (#1037, D-182). With `$reallyDelete` false, count them instead.
+ *
+ * ONE PERIOD FOR THE WHOLE CACHE, and it is the SHORTEST in force anywhere.
+ * `tblGeocodeCache` has no organisation column — one answer serves every
+ * organisation that looks the same address up — so there is no "owning"
+ * organisation to take a period from. `GeocodeCacheRetention::periodInForce()`
+ * explains why the shortest is right: deleting an answer early costs one more
+ * request to the provider; keeping it longer than an organisation chose is the
+ * thing D-182 exists to stop.
+ *
+ * A fault here never stops the rest of the nightly job, and "could not work
+ * the period out" deletes NOTHING rather than guessing one (answers -1 then).
+ */
+function run_geocode_cache_sweep(bool $reallyDelete): int
+{
+    try {
+        $db = App::db();
+
+        return GeocodeCacheRetention::sweep($db, GeocodeCacheRetention::periodInForce($db), $reallyDelete);
+    } catch (\Throwable $e) {
+        error_log('[WebMS-Intra] retention sweep: the remembered map answers could not be cleared ('
+            . get_class($e) . ').');
+
+        return -1;
+    }
+}
+
 function run_retention_sweep(): array
 {
     $db = App::db();
@@ -1521,6 +1560,7 @@ function run_retention_sweep(): array
 
     $webhookPayloadsCleared = run_webhook_payload_sweep();
     $transcriptsDeleted    = run_transcript_sweep();
+    $geocodeCacheDeleted   = run_geocode_cache_sweep(true);
     $partFiles             = run_part_file_sweep();
 
     return [
@@ -1558,6 +1598,10 @@ function run_retention_sweep(): array
         //    totalDeleted — unlike every figure above it, which empties rows
         //    that remain.
         'transcriptsDeleted'   => $transcriptsDeleted,
+        // 🗺️ Remembered map answers (#1037). Really deleted, so counted in
+        //    totalDeleted; -1 means the clear-out could not run and deleted
+        //    nothing, and counts as 0 there.
+        'geocodeCacheDeleted'  => $geocodeCacheDeleted,
         // 🧹 Part-written PDFs a killed process left behind (#721). FILES, not
         //    rows, so NOT added to totalDeleted — that figure is what somebody
         //    reads to work out what happened to the database, and mixing files
@@ -1567,6 +1611,6 @@ function run_retention_sweep(): array
         'partFilesRemoved'     => $partFiles['removed'],
         'partFilesLeft'        => $partFiles['left'],
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
-                                + $transcriptsDeleted,
+                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted),
     ];
 }

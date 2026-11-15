@@ -236,6 +236,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 'showAddress' => false,
                 'compact'     => true,
                 'lookup'      => true,
+                // 🏛️ D-183: a venue is a public place.
+                'addressKind' => 'public',
                 'w3wSuggest'  => true,
             ]); ?>
 

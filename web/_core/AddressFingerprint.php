@@ -64,7 +64,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/712
  * -----------------------------------------------------------------------------
  */
@@ -93,6 +93,40 @@ final class AddressFingerprint
     }
 
     /**
+     * 🏠 The same fingerprint, made ONLY with the installation's own secret
+     *    key — or null when that key cannot be read (#1037 round 4, D-183).
+     *
+     * For a value that must never be stored under a weaker salt. A remembered
+     * map position of somebody's HOME is the first (`Geocoder`): D-183 rules
+     * out "an unsalted fingerprint for a home", and of()'s stand-in salt, the
+     * portal version, is printed in every release and so is no secret at all —
+     * a home's key made from it can be checked against a list of addresses by
+     * anybody holding the database. So this answers null instead, and the
+     * caller does without the stored value: the Geocoder then still looks the
+     * address up but remembers nothing for a home. of() keeps its stand-in on
+     * purpose, for the reason given at salt().
+     */
+    public static function withInstallationKey(string $text): ?string
+    {
+        $key = self::installationKey();
+        if ($key === null) {
+            return null;
+        }
+
+        return hash('sha256', $key . '|' . $text);
+    }
+
+    /**
+     * 🔑 Whether the installation's own secret key can be read just now. Asked
+     *    by the privacy notice, so that it says a home's position is mixed with
+     *    that key only while it can be (`GeocodeCacheRetention::privacyWords()`).
+     */
+    public static function hasInstallationKey(): bool
+    {
+        return self::installationKey() !== null;
+    }
+
+    /**
      * 🧂 The installation's own salt.
      *
      * The encryption key is used because it is already per-installation, is
@@ -104,18 +138,41 @@ final class AddressFingerprint
      * rather than a per-installation one, so it is weaker — but it is still not
      * an unsalted hash, and a rate limit that stopped working because a key file
      * was unreadable would be worse than one using a weaker salt. A fully
-     * installed portal never takes this path.
+     * installed portal never takes this path. That reasoning is about a NETWORK
+     * address on a rate limit; it does not carry to a home's position, which
+     * is why withInstallationKey() has no stand-in.
      */
     private static function salt(): string
     {
-        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
-        if (is_readable($keyPath) === true) {
-            $key = (string) file_get_contents($keyPath);
-            if ($key !== '') {
-                return $key;
-            }
+        return self::installationKey()
+            ?? (defined('PORTAL_VERSION') === true ? (string) PORTAL_VERSION : 'webms-intra');
+    }
+
+    /**
+     * 🔑 The contents of `_auth_keys/enc.key`, or null when there is NO KEY:
+     *    the file is missing, cannot be read, is not a file at all (a folder of
+     *    that name), or is EMPTY. A file holding anything at all, one byte or
+     *    a lone newline included, is a working key.
+     *
+     * Asked of `SecretSettings::keyFileContents()`, the reader the portal's
+     * secrets already use, rather than read here (#1037 round 5). This class
+     * used to keep its own copy, which asked only is_readable() — and
+     * is_readable() says yes to a FOLDER, so a folder in the key file's place
+     * made file_get_contents() raise a PHP notice on every call. Since round 4
+     * that is every look-up of a home's address and both privacy pages, each
+     * writing a row to the error log (a public place's look-up never asks for
+     * the key). A third copy of one test is how one copy goes wrong.
+     *
+     * The require is guarded because two self-tests load this class by hand,
+     * without the portal's class loader (the house pattern, see
+     * `ActivityLogRetention::needSettingLimit()`).
+     */
+    private static function installationKey(): ?string
+    {
+        if (class_exists(SecretSettings::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'SecretSettings.php';
         }
 
-        return defined('PORTAL_VERSION') === true ? (string) PORTAL_VERSION : 'webms-intra';
+        return SecretSettings::keyFileContents();
     }
 }

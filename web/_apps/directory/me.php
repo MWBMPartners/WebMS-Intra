@@ -67,6 +67,23 @@ $visRow = function (string $field, string $label, string $current, string $help 
 <h1 class="mb-3"><i class="fa-solid fa-user-pen me-2"></i>My directory profile</h1>
 <p class="text-muted">Update what you share and who sees it.</p>
 
+<?php
+// 💬 THE SAVE HANDLER'S MESSAGE IS PRINTED HERE (#1030). directory/save.php
+//    refuses a mistyped what3words address and an unusable map position with a
+//    message, and warns when a what3words address could not be checked, all
+//    through the session -- and until 15 November 2026 this page printed none
+//    of them, so a refusal looked exactly like a save that had worked. Nothing
+//    prints these centrally: each page prints its own.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+?>
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType !== '' ? $flashType : 'info', ENT_QUOTES, 'UTF-8'); ?>">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+<?php endif; ?>
+
 <form method="post" action="<?php echo htmlspecialchars(Site::url('directory/save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
 
@@ -102,6 +119,8 @@ $visRow = function (string $field, string $label, string $current, string $help 
                     'showAddress'         => false,
                     'compact'             => true,
                     'lookup'              => true,
+                    // 🏠 D-183: a member's own address is their home.
+                    'addressKind'         => 'home',
                     'w3wSuggest'          => true,
                     'lookupAddressField'  => 'displayAddress',
                 ]);

@@ -16,7 +16,8 @@
  *
  * WHAT `totalDeleted` COUNTS, said exactly because the two came apart once
  * (#714): the figures for rows really DELETED, which are `activityDeleted`,
- * `errorsDeleted`, `registrationsDeleted` and `transcriptsDeleted`. Everything
+ * `errorsDeleted`, `registrationsDeleted`, `transcriptsDeleted` and (#1037)
+ * `geocodeCacheDeleted`, the remembered map answers. Everything
  * else the answer reports is a row that was EMPTIED and remains -- the
  * check-in detail, the giving identities, the webhook payloads -- and is
  * deliberately outside the total, because "deleted N rows" has to be true.

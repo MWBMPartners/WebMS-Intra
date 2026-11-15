@@ -10,7 +10,8 @@
  *              Apps menu open — and that the cookie banner and the "Install
  *              app" prompt never sit on top of each other. Also: that a
  *              keyboard focus ring on the bar can be seen (#832), and that
- *              four whole pages fit a phone with real-looking rows (#833).
+ *              four whole pages fit a phone with real-looking rows (#833),
+ *              and two whose page headers alone used to be too wide (#848).
  * Package:     Portal\Tools
  * Author:      MWBM Partners Ltd (t/a MWservices)
  * Copyright:   2026-present MWBM Partners Ltd (t/a MWservices) - All Rights Reserved
@@ -376,7 +377,16 @@ $seedSites = static function (mysqli $db) use (&$seeded, $tag, $typeName, $album
 $seedSites($db);
 $widePages = '/settings|push.apple.com;/attendance|' . $typeName . ';/photos|' . $albumName
     . ';/attendance?page=6|' . $typeName
-    . ';/admin/users|northfellowshipregionalpartnership;/admin/users?page=4|' . PAGE_FILLER . ';/admin/users?page=5|' . PAGE_FILLER;
+    . ';/admin/users|northfellowshipregionalpartnership;/admin/users?page=4|' . PAGE_FILLER . ';/admin/users?page=5|' . PAGE_FILLER
+    // 📱 #848: two pages whose HEADER alone was wider than a phone — seven
+    //    buttons beside "Manage Giving", four beside "Leadership Directory" —
+    //    until portal.css let every page header wrap. They need no rows: the
+    //    buttons are drawn for an administrator whatever the data, so the
+    //    premise is the page's own title, looked for in its <h1> only ("h1:",
+    //    see top-bar-selftest.mjs) — a refusal page has a different title.
+    //    With the rule taken out of a copy of portal.css
+    //    (TOP_BAR_SELFTEST_WEB), both go red here.
+    . ';/giving/manage|h1:Manage Giving;/leadership|h1:Leadership Directory';
 echo 'Added ' . count($seeded['users']) . " members, and 300 attendance sessions and a photo album in each organisation, for the four whole-page checks; they are removed at the end\n";
 
 // 📁 A copy of web/, with throwaway credentials, served by PHP's own server
@@ -671,6 +681,7 @@ echo "\n" . ($failures === 0
       . "      a keyboard focus ring on the bar is at least 3:1 in both themes, with and without the colour-blind palette (#832);\n"
       . "      and, signed in as the administrator (both passes), /settings, /attendance, /photos and /admin/users fit a\n"
       . "      320 and a 390px phone with real-looking rows and a long page list, without the list rule splitting a money\n"
-      . "      figure, a word, a badge or a button's label, and an alert quoting a long setting name fits too (#833)\n"
+      . "      figure, a word, a badge or a button's label, and an alert quoting a long setting name fits too (#833);\n"
+      . "      and /giving/manage and /leadership, whose page headers alone were wider than a phone, fit too (#848)\n"
     : "FAIL: {$failures} account run(s) found a fault (the ✗ lines above)\n");
 exit($failures === 0 ? 0 : 1);

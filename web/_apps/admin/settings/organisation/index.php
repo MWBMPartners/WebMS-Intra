@@ -328,6 +328,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 'values'      => $values,
                 'compact'     => false,
                 'lookup'      => true,
+                // 🏛️ D-183: the organisation's own address is a public place.
+                'addressKind' => 'public',
                 'w3wSuggest'  => true,
                 // 🌍 The country is a list drawn just below, not the shared
                 //    form's two-letter box (#942).

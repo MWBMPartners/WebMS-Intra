@@ -59,6 +59,16 @@ if ($action === 'add') {
     // 📍 #456 Chunk A — hand-entered only, NULL = inherit the parent
     // event's own coords/W3W. Invalid non-empty W3W is rejected here
     // (nothing else in this handler has side effects yet).
+    // A map position TYPED but unusable is refused the same way, with the
+    // reason (#1030). It used to be stored as none, so this date quietly took
+    // the event's own position instead, and a second save of the same date
+    // wiped the one it had.
+    $positionRefusal = GeoLocation::positionRefusal($_POST['overrideGeoLat'] ?? null, $_POST['overrideGeoLng'] ?? null);
+    if ($positionRefusal !== null) {
+        $_SESSION['flash_msg']  = $positionRefusal;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $redirect, true, 302); exit();
+    }
     $overrideCoords = GeoLocation::validateCoords($_POST['overrideGeoLat'] ?? null, $_POST['overrideGeoLng'] ?? null);
     $overrideW3WRaw = trim((string) ($_POST['overrideW3W'] ?? ''));
     $overrideW3W = null;

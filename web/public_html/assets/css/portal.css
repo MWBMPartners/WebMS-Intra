@@ -880,6 +880,55 @@ textarea:focus-visible,
     overflow-wrap: break-word;
 }
 
+/* ----- 📱 Page headers wrap on a phone (#848) -----
+   Most pages open with a flex row holding the page's <h1> and a group of
+   buttons: `d-flex justify-content-between align-items-center`. A flex row
+   never wraps unless told to, so on a 320-390px phone a title beside its
+   buttons ran off the right-hand side and the whole page scrolled sideways.
+   #833 fixed four such pages one at a time by adding `flex-wrap`; #848
+   counted the rest (count them with
+   `python3 -I tools/audit-checks/check_page_headers_wrap.py`, which prints
+   how many rows rely on this rule — never from here).
+   WHY ONE RULE KEYED ON THE SHAPE, AND NOT A CLASS ON EVERY PAGE: a class
+   would have to be remembered on every page written from now on, and the
+   rows got onto so many pages by being copied from older ones. `:has()`
+   matches the row by what it holds — the <h1> as a child, or as a grandchild
+   inside a title-and-subtitle block — so a page written tomorrow in the same
+   shape is covered without touching it. (This stylesheet also uses `:has()`
+   for `.portal-data-list`, further down. A browser without `:has()` simply
+   keeps the old behaviour; nothing breaks.)
+   WHAT IT DOES: below 768px the header row may wrap, so its buttons go onto
+   a line under the title instead of off the screen, and a button group that
+   is itself a `d-flex` (and is not the block holding the <h1>) may wrap
+   too — /attendance's five buttons alone were wider than a 320px phone.
+   `gap` keeps 8px between the title and the buttons, and `row-gap` 8px
+   between wrapped lines of buttons; a page's own `gap-*` class wins, being
+   `!important` in Bootstrap, and so does an explicit `flex-nowrap`.
+   WHY ONLY BELOW 768px: wrapping a row also changes how wide its parts may
+   be. A title block holding a long sentence of explanation is measured at
+   its full one-line width when the row may wrap, so on a desktop its buttons
+   would drop under it where today the sentence wraps beside them. Below
+   768px that is the right layout; above it nothing here changes at all.
+   WHY A COLUMN IS LEFT ALONE: a `flex-column flex-md-row` header is already
+   one item per line on a phone; making it wrap does nothing, and a `gap`
+   would add space nobody asked for. Its button group still wraps (second
+   selector), which matters because a column of one wide button row
+   overflows just the same.
+   Guarded by tools/audit-checks/check_page_headers_wrap.py (a hard gate: it
+   pins this rule word for word and fails on a header the rule cannot reach)
+   and tools/page-headers-wrap-selftest.mjs (every header the check finds,
+   drawn in a real browser at 320 and 390px). */
+@media (max-width: 767.98px) {
+    .d-flex:not(.flex-column):has(> h1, > * > h1) {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .d-flex:has(> h1, > * > h1) > .d-flex:not(:has(> h1)) {
+        flex-wrap: wrap;
+        row-gap: 0.5rem;
+    }
+}
+
 /* Mobile: stacked layout with data-label */
 @media (max-width: 767.98px) {
     .portal-data-row {

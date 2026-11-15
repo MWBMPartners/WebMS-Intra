@@ -9484,17 +9484,24 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 -- the three overrideGeoLat/overrideGeoLng/overrideW3W columns on
 -- tblEventOccurrenceOverrides are already folded inline into their CREATE
 -- TABLE blocks above. This block carries tblGeocodeCache (a global geocode
--- result cache — never PII, never tenant-scoped), the 14 settings seeds,
--- the 10 route seeds, and the self-record.
+-- result cache, never tenant-scoped), the 14 settings seeds, the 10 route
+-- seeds, and the self-record.
+-- 🔒 #1037, migration 290: the cache keeps NO address text. It used to keep
+--    `queryText` (the address as typed) and `formatted` (the provider's
+--    wording of it), and either can be a member's home address — a small
+--    group's host (#809), or any address a member typed. A row is found by
+--    `queryHash` alone. The old "never PII" here was untrue — and for a HOME
+--    the position itself is the house (kept to about a centimetre), so a home
+--    row is personal data: marked by `addressKind`, keyed with the
+--    installation's secret, and kept only for D-182's period (D-183).
 CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
     `cacheID`     INT           NOT NULL AUTO_INCREMENT,
-    `queryHash`   CHAR(64)      NOT NULL COMMENT 'sha256(direction | lowercased query text)',
+    `queryHash`   CHAR(64)      NOT NULL COMMENT 'Public place: sha256(direction | lowercased query text). Home: the same text fingerprinted with the installation''s secret key (AddressFingerprint). The address itself is not stored (#1037, D-183)',
     `direction`   ENUM('forward','reverse') NOT NULL DEFAULT 'forward',
-    `queryText`   VARCHAR(500)  NOT NULL,
     `latitude`    DECIMAL(10,7) DEFAULT NULL,
     `longitude`   DECIMAL(10,7) DEFAULT NULL,
-    `formatted`   VARCHAR(500)  DEFAULT NULL COMMENT 'Provider display/formatted address',
     `provider`    VARCHAR(20)   NOT NULL COMMENT 'google or nominatim',
+    `addressKind` ENUM('home','public') NOT NULL DEFAULT 'home' COMMENT 'home: somebody''s own address, personal data, key mixed with the installation''s secret; public: a venue, business or the organisation (D-183, migration 290)',
     `hitCount`    INT           NOT NULL DEFAULT 1,
     `createdAt`   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `lastUsedAt`  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -9502,7 +9509,7 @@ CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
     UNIQUE KEY `uq_geoc_hash` (`queryHash`),
     KEY `idx_geoc_lastused` (`lastUsedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (migration 180)';
+COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy); keeps no address text (migrations 180, 290)';
 
 -- 🌍 org.address.countryCode ships EMPTY (#942, D-133): no country is built
 --    in. The installer ASKS for the installation's country and writes it
@@ -11834,6 +11841,18 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('288_email_log_site_comment.sql
 -- migration rewrites only that comment on a database that already exists.
 -- This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('289_task_reminder_wall_clock_comment.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 290_geocode_cache_keeps_no_address.sql (#1037) ─────────────────────
+-- tblGeocodeCache is written above without queryText and formatted. A fresh
+-- install holds no cache rows for the migration's delete to act on. The
+-- migration also seeds how long a remembered map answer is kept (D-182),
+-- installation-wide, a year by default; each organisation may choose a
+-- shorter figure on Admin, Maintenance, Retention (GeocodeCacheRetention).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'geo.cache.retentionDays', '365', '365', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('290_geocode_cache_keeps_no_address.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 292_expense_claim_pdf_route.sql (#954) ─────────────────────────────

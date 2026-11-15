@@ -87,6 +87,15 @@
  *                               it, since nothing ever read it). Each
  *                               organisation has its own; 0 means keep for
  *                               ever. Changed at /admin/settings/attendance.
+ *   geo.cache.retentionDays    (default 365) — how long a remembered map
+ *                               answer (tblGeocodeCache) may go unused before it
+ *                               is deleted (#1037, D-182). Set ON THIS PAGE
+ *                               through Portal\Core\GeocodeCacheRetention, by the
+ *                               same people as the activity log's (D-118); an
+ *                               installation figure below an organisation's is
+ *                               refused, naming them. No "never": D-182 rules it
+ *                               out. The cache is SHARED (no organisation column),
+ *                               so the clear-out uses the shortest period in force.
  *   maintenance.cronToken      ('' by default — used by /cron/retention-sweep;
  *                               an empty value switches the job off)
  *
@@ -139,6 +148,7 @@ declare(strict_types=1);
 use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\Logger;
 use Portal\Core\NetworkAddressRetention;
 use Portal\Core\Router;
@@ -344,6 +354,133 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
 }
 
 // -----------------------------------------------------------------------------
+// 🗺️ How long a remembered map answer is kept (#1037, D-182)
+// -----------------------------------------------------------------------------
+// The same two forms and the same people as the activity log's above (D-118):
+// the organisation's figure by an administrator of THAT organisation, the
+// installation's by a global administrator only (anybody else posting it falls
+// through to the gate below, which refuses it with a 403 and records it). No
+// "never" choice: D-182 rules it out. ASK WHETHER A FIELD ARRIVED (#677),
+// REFUSE WITH THE REASON (#668), RECORD every refusal, numbers only.
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($postedAction === 'geocode-retention-organisation'
+        || ($postedAction === 'geocode-retention-installation' && $isGlobalAdmin === true))
+) {
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        $alrFinish('Invalid or expired form token, so nothing was changed. Please try again.', 'danger');
+    }
+
+    $gcrWho     = isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null;
+    $gcrForSite = $postedAction === 'geocode-retention-organisation';
+    $gcrSiteId  = Site::id();
+    $gcrLevel   = $gcrForSite === true ? 'organisation ' . $gcrSiteId : 'the installation';
+    $gcrChoice  = array_key_exists('choice', $_POST) === true && is_string($_POST['choice']) === true ? $_POST['choice'] : null;
+    $gcrAllowed = $gcrForSite === true ? ['days', 'follow'] : ['days'];
+    // The range a refusal names is the one really allowed on THAT form (#940
+    // round 4's lesson): the installation's figure for an organisation.
+    $gcrAllowedDays = $gcrForSite === true ? GeocodeCacheRetention::installationDays() : GeocodeCacheRetention::HARD_MAX_DAYS;
+
+    if ($gcrChoice === null || in_array($gcrChoice, $gcrAllowed, true) === false) {
+        Logger::activity(
+            'GeocodeCacheRetentionRefused',
+            'A change to how long ' . $gcrLevel . ' keeps remembered map answers was refused: no recognised choice was sent. Nothing was saved.',
+            $gcrWho
+        );
+        $alrFinish('The form did not say how long to keep remembered map answers, so nothing was changed.', 'danger');
+    }
+
+    $gcrDays = null;
+    if ($gcrChoice === 'days') {
+        $gcrRaw = array_key_exists('days', $_POST) === true && is_string($_POST['days']) === true ? trim($_POST['days']) : '';
+        if (preg_match('/^\d{1,6}$/', $gcrRaw) !== 1 || (int) $gcrRaw < 1) {
+            Logger::activity(
+                'GeocodeCacheRetentionRefused',
+                'A change to how long ' . $gcrLevel . ' keeps remembered map answers was refused: the number of days was not a whole number of 1 or more. Nothing was saved.',
+                $gcrWho
+            );
+            $alrFinish(GeocodeCacheRetention::notANumberWords($gcrAllowedDays), 'danger');
+        }
+        $gcrDays = (int) $gcrRaw;
+    }
+
+    $gcrResult = $gcrForSite === true
+        ? GeocodeCacheRetention::saveForSite($mysqli, $gcrSiteId, $gcrDays, App::isAdmin())
+        : GeocodeCacheRetention::saveInstallation($mysqli, (int) $gcrDays, $isGlobalAdmin);
+
+    $gcrAsked = $gcrDays === null ? 'to follow the installation' : 'for ' . GeocodeCacheRetention::inWords($gcrDays);
+    if ($gcrResult['outcome'] === 'refused') {
+        Logger::activity(
+            'GeocodeCacheRetentionRefused',
+            'A change to how long ' . $gcrLevel . ' keeps remembered map answers (' . $gcrAsked . ') was refused'
+            . ($gcrResult['refusal'] === '' ? '' : ' (' . $gcrResult['refusal'] . ')')
+            // A COUNT of the organisations that blocked it, never their names:
+            // the log is read later and by others.
+            . (($gcrResult['blockedOrganisations'] ?? 0) > 0
+                ? '; ' . (int) $gcrResult['blockedOrganisations'] . ' organisation(s) have chosen a longer figure'
+                : '')
+            . '. Nothing was saved.',
+            $gcrWho
+        );
+    } elseif ($gcrResult['outcome'] !== 'unchanged') {
+        Logger::activity(
+            'GeocodeCacheRetentionSaved',
+            'How long ' . $gcrLevel . ' keeps remembered map answers was changed (' . $gcrAsked . ').',
+            $gcrWho
+        );
+    }
+
+    $alrFinish($gcrResult['message'], $gcrResult['type']);
+}
+
+// 🗺️ The figures the map-answer forms draw. The organisation's choice is ITS
+//    OWN row only (#674, #677); its box's `max` is widened to a figure above
+//    the installation's that only SQL or a restore can store, rather than the
+//    figure altered, so an untouched Save matches what is stored (#668, #687).
+$gcrInstallationDays = GeocodeCacheRetention::installationDays();
+$gcrSiteDays         = GeocodeCacheRetention::daysForSite(Site::id());
+$gcrOwn              = GeocodeCacheRetention::ownDays($mysqli, Site::id());
+$gcrOwnMax           = max($gcrInstallationDays, $gcrOwn ?? 0);
+
+/** The organisation's map-answer form, drawn in ONE place for both views of this page. */
+$gcrOrganisationForm = static function () use ($gcrOwn, $gcrOwnMax, $gcrInstallationDays): void {
+    ?>
+                        <h3 class="h6">For this organisation</h3>
+                        <p class="small text-muted">Its own figure may be shorter than the installation's, never longer.</p>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>" data-geocode-retention-form="organisation">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="geocode-retention-organisation">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="follow" id="gcrOwnFollow"
+                                       <?php echo $gcrOwn === null ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="gcrOwnFollow">Follow the installation
+                                    (<?php echo htmlspecialchars(GeocodeCacheRetention::inWords($gcrInstallationDays), ENT_QUOTES, 'UTF-8'); ?>)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="gcrOwnDays"
+                                       <?php echo $gcrOwn !== null ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="gcrOwnDays">Delete answers not used for</label>
+                                <input type="number" min="1" max="<?php echo (int) $gcrOwnMax; ?>"
+                                       class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                       name="days" aria-label="Number of days, for this organisation"
+                                       value="<?php echo $gcrOwn !== null ? (int) $gcrOwn : ''; ?>">
+                                <span class="small">days</span>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Save for this organisation</button>
+                        </form>
+    <?php
+};
+
+/** What the card explains, in both views: what is kept, and which period decides. */
+// (c) of #1037 round 2: this said "a remembered answer holds no address", and
+//     the card went on to imply nobody could get one back. Untrue for a home:
+//     the position is kept to about a centimetre, so it IS the house (D-183).
+// #1037 round 4: it went on to say "the clear-out uses the shortest period any
+//     organisation has chosen" whoever had chosen, which was untrue while no
+//     organisation had chosen one. The words are built in ONE place now, from
+//     the same facts as the success message and the privacy notice.
+$gcrExplained = GeocodeCacheRetention::cardWords($mysqli);
+
+// -----------------------------------------------------------------------------
 // 📜 The activity-log figures every view of this page draws (#932)
 // -----------------------------------------------------------------------------
 //    PREFILLED FROM THE RIGHT LAYER (#674, #677). The installation's choice
@@ -496,10 +633,16 @@ if ($isGlobalAdmin === false) {
         if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true) {
             $gateForm = $retentionForms[$postedAction] ?? null;
             Logger::activity(
-                $gateForm !== null ? $retentionNames[$gateForm[0]]['refused'] : 'RetentionSweepRefused',
-                $gateForm !== null
-                    ? 'Refused: how long the installation keeps ' . $retentionNames[$gateForm[0]]['what'] . ' may only be changed by a global administrator. Nothing was saved.'
-                    : 'Refused: the audit-log retention sweep may only be run by a global administrator',
+                match (true) {
+                    $postedAction === 'geocode-retention-installation' => 'GeocodeCacheRetentionRefused',
+                    $gateForm !== null                                 => $retentionNames[$gateForm[0]]['refused'],
+                    default                                            => 'RetentionSweepRefused',
+                },
+                match (true) {
+                    $postedAction === 'geocode-retention-installation' => 'Refused: how long the installation keeps remembered map answers may only be changed by a global administrator. Nothing was saved.',
+                    $gateForm !== null                                 => 'Refused: how long the installation keeps ' . $retentionNames[$gateForm[0]]['what'] . ' may only be changed by a global administrator. Nothing was saved.',
+                    default                                            => 'Refused: the audit-log retention sweep may only be run by a global administrator',
+                },
                 $_SESSION['user_id'] ?? null
             );
         }
@@ -559,6 +702,13 @@ if ($isGlobalAdmin === false) {
             <?php $alrOrganisationForm('address'); ?>
         </div>
     </div>
+    <div class="card shadow-sm border-primary mt-3" id="geocode-cache-retention" data-geocode-retention-card="organisation">
+        <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
+            <h2 class="h6"><i class="fa-solid fa-map-location-dot me-1"></i>How long remembered map answers are kept</h2>
+            <p class="small text-muted" data-geocode-card-words="1"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php $gcrOrganisationForm(); ?>
+        </div>
+    </div>
     <p class="small text-muted mt-3">
         Everything else on this page &mdash; the clear-out itself, and the figure every organisation is
         held to &mdash; acts across the whole installation, so only a global administrator can use it.
@@ -593,7 +743,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction !== 'sweep') {
         $flashMsg  = 'Sweep complete. Deleted ' . $result['activityDeleted']
                    . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s), '
                    . $result['registrationsDeleted'] . ' event registration(s) and '
-                   . $result['transcriptsDeleted'] . ' transcript(s). '
+                   . $result['transcriptsDeleted'] . ' transcript(s)'
+                   // 🗺️ #1037: really deleted, so in the total, so itemised.
+                   //    -1 is "could not run", said as such and not as 0.
+                   . ($result['geocodeCacheDeleted'] >= 0
+                       ? ', and ' . $result['geocodeCacheDeleted'] . ' remembered map answer(s). '
+                       : '. Remembered map answers could NOT be cleared this time (the reason is in the server\'s error log). ')
                    // 🚪 Said as a separate sentence, with the word "emptied"
                    //    rather than "deleted", because nothing was deleted here
                    //    and the difference matters: the check-in rows and every
@@ -834,6 +989,40 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-lg-6">
                         <?php $alrOrganisationForm('address'); ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12" id="geocode-cache-retention">
+        <div class="card shadow-sm border-primary" data-geocode-retention-card="1">
+            <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
+                <h2 class="h6"><i class="fa-solid fa-map-location-dot me-1"></i>How long remembered map answers are kept (<code>tblGeocodeCache</code>)</h2>
+                <p class="small text-muted" data-geocode-card-words="1"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
+                <p class="mb-2">Answers that would be deleted now:
+                    <strong data-geocode-cache-due="<?php echo (int) $preview['geocodeCache']; ?>"><?php echo $preview['geocodeCache'] >= 0 ? number_format($preview['geocodeCache']) : 'could not be counted'; ?></strong></p>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <h3 class="h6">For every organisation on this installation</h3>
+                        <p class="small text-muted">
+                            The most any organisation may choose. A figure shorter than one an organisation has
+                            already chosen for itself is refused and those organisations are named.
+                        </p>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>" data-geocode-retention-form="installation">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="geocode-retention-installation">
+                            <input type="hidden" name="choice" value="days">
+                            <label class="form-label small mb-0" for="gcrInstDays">Delete answers not used for</label>
+                            <input type="number" min="1" max="<?php echo GeocodeCacheRetention::HARD_MAX_DAYS; ?>"
+                                   class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                   name="days" id="gcrInstDays"
+                                   value="<?php echo (int) $gcrInstallationDays; ?>">
+                            <span class="small">days (1 to <?php echo GeocodeCacheRetention::HARD_MAX_DAYS; ?>)</span>
+                            <div><button type="submit" class="btn btn-outline-primary btn-sm mt-2">Save for every organisation</button></div>
+                        </form>
+                    </div>
+                    <div class="col-lg-6">
+                        <?php $gcrOrganisationForm(); ?>
                     </div>
                 </div>
             </div>

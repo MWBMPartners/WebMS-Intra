@@ -206,6 +206,17 @@ if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {
 }
 $w3w = GeoLocation::validateW3W($w3wPosted);
 
+// 📍 A map position TYPED but unusable is refused the same way, with the
+//    reason (#1030). It used to be stored as none -- an edit wiping the one
+//    stored, or the address look-up below filling in a different one -- while
+//    the page said the group was saved. GeoLocation::positionRefusal() decides.
+$positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+if ($positionRefusal !== null) {
+    $_SESSION['flash_msg']  = $positionRefusal;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $backUrl);
+    exit();
+}
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 $latitude  = $coords['lat'] ?? null;
 $longitude = $coords['lng'] ?? null;
@@ -493,7 +504,15 @@ if ($latitude === null && $addressLine1 !== null && Geocoder::autoEnabled() === 
             'line1' => $addressLine1, 'line2' => $addressLine2, 'city' => $city,
             'region' => $region, 'postcode' => $postcode,
         ]);
-        $geo = Geocoder::forward($addressLine, $countryCode !== '' ? $countryCode : null);
+        // 🏠 D-183: a group's meeting place is its host's HOME unless the form
+        //    marked it "not anybody's home" (D-123) — the plain choice this form
+        //    already gives, decided by SmallGroups::placeAgreementAfterSave()
+        //    above. Unmarked is a home, which is the safe direction.
+        $geo = Geocoder::forward(
+            $addressLine,
+            $countryCode !== '' ? $countryCode : null,
+            (int) $placeNotAHome === 1 ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME
+        );
         if ($geo !== null) {
             $geocodedAt    = date('Y-m-d H:i:s');
             $geocodeSource = (string) ($geo['source'] ?? 'unknown');

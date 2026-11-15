@@ -77,24 +77,15 @@ if ($action === 'save') {
     $landlordOrgId   = (int) ($_POST['landlordOrgID'] ?? 0);
     $landlordOrgName = trim((string) ($_POST['landlord_orgName'] ?? ''));
 
-    // 🆕 An inline "new landlord" name always wins over the picked select —
-    // create the org (site-scoped, tblAssetOrgs) and use its id.
-    if ($landlordOrgName !== '') {
-        $newOrgId = AssetRegister::saveOrg($siteId, 0, [
-            'orgName'      => $landlordOrgName,
-            'contactName'  => (string) ($_POST['landlord_contactName'] ?? ''),
-            'contactEmail' => (string) ($_POST['landlord_contactEmail'] ?? ''),
-            'contactPhone' => (string) ($_POST['landlord_contactPhone'] ?? ''),
-            'agreementRef' => (string) ($_POST['landlord_agreementRef'] ?? ''),
-        ], $userId);
-        if ($newOrgId === 0) {
-            $_SESSION['flash_msg']  = 'Landlord name is required.';
-            $_SESSION['flash_type'] = 'danger';
-            header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
-            exit();
-        }
-        $landlordOrgId = $newOrgId;
-    }
+    // ⚠️ EVERY REFUSAL BELOW COMES BEFORE THE FIRST WRITE (#1030, round 2).
+    //    The "new landlord" used to be CREATED here, above the what3words,
+    //    position, country and time-zone refusals — each of which says the
+    //    venue was not saved — so a refused venue still left a landlord row
+    //    behind, and every retry of the same form added another copy
+    //    (measured: a bad position with a landlord name filled in, 0 -> 1).
+    //    The landlord is now created only after the last refusal, just before
+    //    the venue itself is written. Keep it there: a new refusal goes ABOVE
+    //    the block marked "THE FIRST WRITE".
 
     // 📍 #456 Chunk A — pre-validate a non-empty W3W here so a typo gets a
     // proper flash + redirect-back rather than a silent-to-null model-layer
@@ -102,6 +93,19 @@ if ($action === 'save') {
     $w3wPosted = trim((string) ($_POST['what3words'] ?? ''));
     if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {
         $_SESSION['flash_msg']  = t('location.w3w_invalid');
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
+    }
+
+    // 📍 A map position typed but unusable is REFUSED with the reason (#1030),
+    //    like the what3words address above. It used to be dropped: a new venue
+    //    was saved with no position, and an edit WIPED the one already stored,
+    //    while the page said "Venue updated.". GeoLocation::positionRefusal()
+    //    is the one place that decides and words it; saveVenue() asks it again.
+    $positionRefusal = GeoLocation::positionRefusal($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
+    if ($positionRefusal !== null) {
+        $_SESSION['flash_msg']  = $positionRefusal;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
         exit();
@@ -135,6 +139,7 @@ if ($action === 'save') {
     //    would reach the "a venue name is required" message below, which would be untrue.
     $storedZone    = null;
     $storedCountry = null;
+    $existing      = null;
     if ($isCreate === false) {
         $existing      = Venues::getVenue($venueId, $siteId);
         $storedZone    = $existing !== null ? (string) ($existing['timezone'] ?? '') : null;
@@ -163,9 +168,54 @@ if ($action === 'save') {
         exit();
     }
 
+    // 📝 A venue with no name, and an edit of a venue this organisation does
+    //    not have, are refused HERE, before anything is written. saveVenue()
+    //    refuses both too, but only after the landlord below would already
+    //    have been created, and its 0 cannot say which of them it was.
+    if (trim($data['venueName']) === '') {
+        $_SESSION['flash_msg']  = 'Could not save the venue — a venue name is required.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
+    }
+    if ($isCreate === false && $existing === null) {
+        $_SESSION['flash_msg']  = 'That venue could not be found, so nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage'));
+        exit();
+    }
+
+    // ✍️ THE FIRST WRITE. Nothing above this line writes anything.
+    // 🆕 An inline "new landlord" name always wins over the picked select —
+    // create the org (site-scoped, tblAssetOrgs) and use its id.
+    $landlordCreated = false;
+    if ($landlordOrgName !== '') {
+        $newOrgId = AssetRegister::saveOrg($siteId, 0, [
+            'orgName'      => $landlordOrgName,
+            'contactName'  => (string) ($_POST['landlord_contactName'] ?? ''),
+            'contactEmail' => (string) ($_POST['landlord_contactEmail'] ?? ''),
+            'contactPhone' => (string) ($_POST['landlord_contactPhone'] ?? ''),
+            'agreementRef' => (string) ($_POST['landlord_agreementRef'] ?? ''),
+        ], $userId);
+        if ($newOrgId === 0) {
+            $_SESSION['flash_msg']  = 'Landlord name is required.';
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+            exit();
+        }
+        $data['landlordOrgID'] = $newOrgId;
+        $landlordCreated       = true;
+    }
+
     $savedId = Venues::saveVenue($siteId, $venueId, $data, $userId);
     if ($savedId === 0) {
-        $_SESSION['flash_msg']  = 'Could not save the venue — a venue name is required.';
+        // Every refusal saveVenue() makes is asked above first, so a 0 here is
+        // a fault in the database rather than anything typed. Say what is TRUE:
+        // a landlord created a moment ago does exist now.
+        $_SESSION['flash_msg']  = 'The venue could not be saved.'
+            . ($landlordCreated === true
+                ? ' The new landlord "' . $landlordOrgName . '" WAS added to the list of landlords, so choose it from that list rather than typing it again.'
+                : '');
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
         exit();
