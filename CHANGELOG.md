@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Rota swap requests have limits; the largest online gift is a setting (#989, #992; D-171, D-172)
+
+- **Rota swap requests (#989).** By default a member may make 10 swap requests a day (named and open together,
+  counted on the organisation's own calendar day) and have one open request waiting per duty. Both are judged
+  inside `RotaSwaps::request()` with the member's account and the duty locked. The swap page says how many the
+  member has made and the limit before they type, draws no form at the day's limit, and never promises an e-mail.
+- **The largest online gift (#992).** It was a fixed 10,000.00 in every currency; it is now `giving.online.maxGift`,
+  in hundredths of the organisation's own currency, default 10,000.00. The give form says the most before anybody
+  presses Continue and offers no quick amount above it.
+- **One new page, Admin, Settings, Member limits (migration 298)** holds the three numbers at both levels. The
+  installation's figure caps the organisation's, a figure above the cap is refused (never lowered) and recorded, and
+  0 is refused because "no limit" is ruled out. The general Settings page refuses all three on every path.
+- **"Today" is worked out from the zone's own clock changes.** Where the clocks go back at exactly midnight
+  (Azores, Havana) `setTime(0, 0)` picks the second midnight; the old idiom is wrong on 35 of 8,675 change days
+  (#1082 tracks the other users of it).
+- **Checked:** rota-swaps 321, currency 166, settings-locks 270, money-amount 134, setting-limit 52, retention-caps
+  143, giving-retention 63, content-translation 185, every audit script and the end-to-end migration harness
+  (42 checks) green on MySQL 8.0.36. Four rounds of independent check (money and stored data); the last found one
+  untrue sentence, fixed and pinned. **Not run:** MariaDB, MySQL 8.4, a real browser or payment provider. Codex has
+  not reviewed this. **Not built:** #993 (spend counted in "pence" priced from US-dollar lists; waits on the
+  owner's exchange-rate answer). Open: #1082, #1083.
+
 ### Network addresses have a keeping period; an erasure empties more of them (#1019, #938, #1065; D-178, D-187, D-188, D-189)
 
 - **One setting, a year by default (D-188).** `privacy.networkAddressDays` (migration 295), set on Admin,

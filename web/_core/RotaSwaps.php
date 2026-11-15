@@ -8,6 +8,8 @@
  * duties. This class is the ONE place that decides:
  *
  *   - who a request may be aimed at          (`whyNotTarget()`)
+ *   - how many a member may make             (`limits()`, `whyOverLimits()`,
+ *     and `request()` under its locks — #989, D-171)
  *   - who may answer it, and how             (`whyNotAllowed()`, taking FACTS)
  *   - what an answer does to the duty        (`respond()`, under a row lock)
  *   - who is e-mailed, and what it says      (`tellAsked()`, `tellAnswered()`)
@@ -122,9 +124,12 @@
  *   - It cannot tell whether an e-mail ARRIVED. `tellAsked()` answers what
  *     `Mailer` answered: sent, kept in the queue, or not sent. Neither page
  *     promises the other person an e-mail, for that reason.
- *   - It does not stop a member asking several people about one duty. The
- *     first acceptance wins; the others are cancelled in the same
- *     transaction and leave their pages.
+ *   - It does not stop a member asking several NAMED people about one duty
+ *     (each is one e-mail, and the per-day limit bounds them). The first
+ *     acceptance wins; the others are cancelled in the same transaction and
+ *     leave their pages.
+ *   - It does not show an administrator who sent which requests; #989 asked
+ *     and D-171 did not decide it.
  *   - It does not check that the person taking a duty is free at that time,
  *     or suited to the role. The rota has no such facts to check against.
  *   - The HTTP test harness runs one request at a time, so the race is
@@ -174,6 +179,43 @@ final class RotaSwaps
     public const TARGET_SELF      = 'target-self';
     public const TARGET_NOT_HERE  = 'target-not-here';
     public const OPEN_NOT_ALLOWED = 'open-not-allowed';
+    /** An open request for this duty is already waiting, as many as the limit allows (D-171). */
+    public const OVER_OPEN_PER_DUTY = 'over-open-per-duty';
+    /** This member has sent as many requests today as the limit allows (D-171). */
+    public const OVER_PER_DAY       = 'over-per-day';
+
+    // -------------------------------------------------------------------------
+    // 🚧 THE TWO LIMITS ON ASKING (#989; the owner, 12 November 2026 — D-171).
+    //
+    //    Under D-141 an OPEN request is e-mailed to every member with the
+    //    switch on, so with no limit one member could send the whole
+    //    organisation any number of e-mails, each quoting their own typed
+    //    message. And with no mail-queue job running those e-mails are sent
+    //    inside the web request: when the host ends a long one the member
+    //    sees an error although the request was SAVED, presses Send again,
+    //    and everybody is e-mailed twice. The per-duty limit stops that
+    //    second copy.
+    //
+    //    Both are LIMITS under the three-tier rule (#668): a hard maximum
+    //    here, then the installation's figure, then the organisation's, each
+    //    unable to loosen the one above. Set on Admin, Settings, Member
+    //    limits; read through `SettingLimit`.
+    //
+    //    0 IS NOT "NO LIMIT" HERE, and that is deliberate: D-171 rules out "no
+    //    limit", so the saves refuse 0 and the least either may be is 1. A 0
+    //    written straight into the database is obeyed as 0 — nobody may ask —
+    //    which is the direction that sends no e-mail.
+    // -------------------------------------------------------------------------
+    /** How many OPEN requests may wait for one duty at once. */
+    public const OPEN_PER_DUTY_KEY      = 'rota.swap.maxOpenPerDuty';
+    public const OPEN_PER_DUTY_DEFAULT  = 1;
+    /** Ten: an open request already reaches the whole organisation, so more than a handful waiting for one duty is only noise. */
+    public const OPEN_PER_DUTY_HARD_MAX = 10;
+    /** How many requests (named and open together) one member may make in one day on the organisation's calendar. */
+    public const PER_DAY_KEY            = 'rota.swap.maxRequestsPerDay';
+    public const PER_DAY_DEFAULT        = 10;
+    /** A hundred a day is far past any real rota and still bounds the e-mail one member can cause. */
+    public const PER_DAY_HARD_MAX       = 100;
 
     // -------------------------------------------------------------------------
     // 📨 Why somebody was not sent an e-mail (`whyNotTold()`).
@@ -334,33 +376,325 @@ final class RotaSwaps
             self::TARGET_NOT_HERE => 'That person is not a member of this organisation, so the request was not sent.',
             self::OPEN_NOT_ALLOWED => 'Open swap requests are switched off here. Please choose a person to ask.',
             self::UNKNOWN_ACTION  => 'That answer was not understood, so nothing was changed.',
+            // The numbered sentences are overLimitWords(), which needs the
+            // count; these two are only what a caller without one reads.
+            self::OVER_OPEN_PER_DUTY => 'You already have as many open requests waiting for this duty as this organisation allows, so another was not posted.',
+            self::OVER_PER_DAY       => 'You have made as many swap requests today as this organisation allows, so this one was not sent.',
             default               => 'The swap request could not be answered. Nothing was changed.',
         };
     }
 
     /**
-     * Save a new request. Answers the new request's number, or 0 when the
-     * database refused it. The caller has already asked `whyNotTarget()` and
-     * checked that the duty is the asker's.
+     * 💬 What a member reads when a request would go over a limit (D-171: "a
+     * user friendly process", not a bare refusal). It says how many they have
+     * made (or have waiting) AND what the limit is — two numbers, never one
+     * standing for both — that nothing was sent, and what they CAN do now.
+     * The swap page draws the same words BEFORE anybody presses Send
+     * (`$beforeAsking`), so the refusal after a post is the rare case of two
+     * windows open at once.
+     *
+     * WHY TWO NUMBERS (round 1 of the independent check). The first version
+     * printed the LIMIT as the number made: "You have made {limit} swap
+     * requests today". That is true only when the count equals the limit.
+     * Lower the limit mid-day and a member who made 8 read "You have made 5";
+     * at a limit of 0 it said "You have made 0 … the most this organisation
+     * allows". The count is what `limitFacts()` read, the limit what
+     * `limits()` read, and each is printed as itself.
+     *
+     * A LIMIT OF 0 has its own sentence. The saves refuse 0, so it is reached
+     * only by a row written straight into the database, and then nobody may
+     * ask at all: "ask again tomorrow" and "withdraw it and post a new one"
+     * would both be untrue, so neither is said.
+     *
+     * It never says who set the limit: the installation's and the
+     * organisation's figures may be set by different people
+     * (`SettingLimit::refusalWords()` decided that first). And it never says
+     * withdrawing a request gives one back for the day: a withdrawn request was
+     * already sent, so it still counts.
+     *
+     * @param string $reason       `OVER_PER_DAY` or `OVER_OPEN_PER_DUTY`.
+     * @param int    $limit        The limit in force.
+     * @param int    $made         Requests made today (per day), or open requests waiting (per duty).
+     * @param bool   $beforeAsking True on the page before anything is posted.
      */
-    public static function request(\mysqli $db, int $slotId, int $askerId, int $targetUserId, string $message): int
+    public static function overLimitWords(string $reason, int $limit, int $made, bool $beforeAsking = false): string
+    {
+        $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
+        if ($reason === self::OVER_PER_DAY) {
+            if ($limit <= 0) {
+                return 'This organisation is not taking rota swap requests at the moment, so '
+                    . ($beforeAsking === true ? 'you cannot send one. ' : 'this one was not sent. ')
+                    . 'If this duty needs covering, ask whoever manages the rota to move it for you.';
+            }
+
+            return 'You have made ' . $plural($made, 'swap request', 'swap requests') . ' today, and this organisation allows '
+                . $limit . ' a day, so '
+                . ($beforeAsking === true ? 'you cannot send another today. ' : 'this one was not sent. ')
+                . 'You can ask again tomorrow. If this duty needs covering sooner, ask whoever manages the rota to move it for you.';
+        }
+        if ($reason === self::OVER_OPEN_PER_DUTY) {
+            if ($limit <= 0) {
+                return 'Open swap requests cannot be posted here at the moment, so '
+                    . ($beforeAsking === true ? 'the open option is not offered. ' : 'this one was not posted. ')
+                    . 'You can ask one named person instead.';
+            }
+
+            return 'You have ' . $plural($made, 'open request', 'open requests') . ' waiting for this duty, and this organisation allows '
+                . $limit . ' at a time, so another '
+                . ($beforeAsking === true ? 'cannot be posted' : 'was not posted')
+                . ': everybody it would go to has already been offered this duty. '
+                . 'You can ask one named person instead, or withdraw a waiting request from your Duty Roster page and post a new one.';
+        }
+
+        return 'The swap request was not sent.';
+    }
+
+    /**
+     * 🚧 The two limits in force for the organisation being served, each held
+     * to the installation's figure and the hard maximum (`SettingLimit`, the
+     * ONE place the three-tier rule is written).
+     *
+     * @return array{openPerDuty:int, perDay:int}
+     */
+    public static function limits(): array
+    {
+        return [
+            'openPerDuty' => SettingLimit::effective(self::OPEN_PER_DUTY_KEY, self::OPEN_PER_DUTY_DEFAULT, self::OPEN_PER_DUTY_HARD_MAX),
+            'perDay'      => SettingLimit::effective(self::PER_DAY_KEY, self::PER_DAY_DEFAULT, self::PER_DAY_HARD_MAX),
+        ];
+    }
+
+    /**
+     * 🕛 The moment the organisation's TODAY began, in UTC, as the database
+     * text a `createdAtUtc` is compared with.
+     *
+     * "Per day" is the organisation's calendar day (its own zone, D-171's
+     * "per day" read as a member would), never the database server's, and
+     * never a rolling 24 hours: "you can ask again tomorrow" has to be true.
+     * `createdAtUtc` is written with `UTC_TIMESTAMP()` (migration 298) so
+     * the comparison is between two UTC readings and no session time zone is
+     * involved. On a day the clocks change the day is 23 or 25 hours long, as
+     * it really is; see `dayStartUtcFor()` for where it begins.
+     */
+    public static function dayStartUtc(int $siteId): string
+    {
+        return self::dayStartUtcFor(Site::timezone($siteId), new \DateTimeImmutable('now'));
+    }
+
+    /**
+     * 🕛 The EARLIEST instant whose reading on `$zone`'s clock falls on the
+     * same date as `$now` does there — in UTC. Takes a zone and a moment so the
+     * rule can be proved at FIXED moments, which "now" never reaches.
+     * `dayStartUtc()` is the only caller under `web/`.
+     *
+     * WORKED OUT FROM THE ZONE'S OWN TRANSITIONS, NOT `setTime(0, 0)` (round 2
+     * of the independent check). Where the clocks go back to exactly midnight,
+     * midnight happens TWICE, and PHP's `setTime(0, 0)` picks the SECOND one:
+     * Atlantic/Azores on 25 October 2026 gave 01:00 UTC where the day really
+     * began at 00:00 UTC, and America/Havana on 1 November 2026 gave 05:00 UTC
+     * where it began at 04:00 UTC — so a member's requests in that first hour
+     * were not counted and they could go over the limit once a year. The
+     * first version's docblock said "on a day the clocks change, today is
+     * still that date's first moment", which was untrue for exactly those.
+     *
+     * So, for each stretch of time in which the zone's offset is fixed, the
+     * instants whose local reading falls on the date are an interval worked
+     * out by arithmetic; the answer is the smallest start among them. That
+     * covers midnight skipped (America/Santiago in September: the day begins
+     * at 01:00), midnight twice (the two above), and a day the clocks go back
+     * ACROSS midnight, whose local date runs D, D-1, D again.
+     * `tools/rota-swaps-selftest.php` sweeps every zone PHP knows against an
+     * independent minute-by-minute search.
+     */
+    public static function dayStartUtcFor(string $zone, \DateTimeImmutable $now): string
+    {
+        $tz   = new \DateTimeZone($zone);
+        $date = $now->setTimezone($tz)->format('Y-m-d');
+        // The date's midnight read as if it were UTC: a local reading of the
+        // date is in [$midnight, $midnight + 86400) once its offset is added.
+        $midnight = (new \DateTimeImmutable($date . ' 00:00:00', new \DateTimeZone('UTC')))->getTimestamp();
+        $from     = $midnight - 2 * 86400;
+        $to       = $midnight + 2 * 86400;
+        $changes  = $tz->getTransitions($from, $to);
+        if ($changes === false || $changes === []) {
+            return gmdate('Y-m-d H:i:s', $midnight - $tz->getOffset($now));
+        }
+        $earliest = null;
+        foreach ($changes as $i => $change) {
+            // The first entry is the state at $from; each later one a change.
+            $start  = max((int) $change['ts'], $from);
+            $end    = isset($changes[$i + 1]) === true ? (int) $changes[$i + 1]['ts'] : $to;
+            $offset = (int) $change['offset'];
+            $lo     = max($start, $midnight - $offset);
+            $hi     = min($end, $midnight + 86400 - $offset);
+            if ($lo < $hi && ($earliest === null || $lo < $earliest)) {
+                $earliest = $lo;
+            }
+        }
+
+        return gmdate('Y-m-d H:i:s', $earliest ?? ($midnight - $tz->getOffset($now)));
+    }
+
+    /**
+     * 🔢 The two counts the limits are judged on, for one member and one duty.
+     *
+     *   `openWaiting` — open requests THIS member posted for THIS duty that
+     *                   are still waiting. Only theirs: a request left by
+     *                   somebody who held the duty before cannot be withdrawn
+     *                   by this member, so it must not block them.
+     *   `sentToday`   — every request this member made today in this
+     *                   organisation, named or open, whatever has become of
+     *                   it since: a withdrawn or answered request was still
+     *                   sent, and its e-mails still went.
+     *
+     * A row with no `createdAtUtc` (made before migration 298) is not counted:
+     * on the day of the upgrade a member's earlier requests that day are
+     * missed, once.
+     *
+     * @return array{openWaiting:int, sentToday:int}
+     */
+    public static function limitFacts(\mysqli $db, int $siteId, int $slotId, int $askerId): array
+    {
+        $open = $db->prepare(
+            'SELECT COUNT(*) AS `n` FROM `tblRotaSwapRequest` '
+            . "WHERE `slotID` = ? AND `requestedByID` = ? AND `targetUserID` IS NULL AND `status` = 'pending'"
+        );
+        $open->bind_param('ii', $slotId, $askerId);
+        $open->execute();
+        $openWaiting = (int) ($open->get_result()->fetch_assoc()['n'] ?? 0);
+        $open->close();
+
+        $since = self::dayStartUtc($siteId);
+        $day   = $db->prepare(
+            'SELECT COUNT(*) AS `n` FROM `tblRotaSwapRequest` `w` '
+            . 'JOIN `tblRotaSlot` `s` ON `s`.`slotID` = `w`.`slotID` AND `s`.`siteID` = ? '
+            . 'WHERE `w`.`requestedByID` = ? AND `w`.`createdAtUtc` >= ?'
+        );
+        $day->bind_param('iis', $siteId, $askerId, $since);
+        $day->execute();
+        $sentToday = (int) ($day->get_result()->fetch_assoc()['n'] ?? 0);
+        $day->close();
+
+        return ['openWaiting' => $openWaiting, 'sentToday' => $sentToday];
+    }
+
+    /**
+     * 🚧 Would a request go over a limit? '' when it would not.
+     *
+     * It takes FACTS, so the swap page — which asks before drawing the form,
+     * to say so before anybody types — and `request()` — which asks again on
+     * counts read under its locks — apply one rule (#647). The per-day limit
+     * is asked first: when it is reached no request at all can go, which is
+     * the more useful thing to be told.
+     *
+     * @param bool                                     $open   True for an open request.
+     * @param array{openWaiting:int, sentToday:int}    $facts  From `limitFacts()`.
+     * @param array{openPerDuty:int, perDay:int}       $limits From `limits()`.
+     */
+    public static function whyOverLimits(bool $open, array $facts, array $limits): string
+    {
+        if ($facts['sentToday'] >= $limits['perDay']) {
+            return self::OVER_PER_DAY;
+        }
+        if ($open === true && $facts['openWaiting'] >= $limits['openPerDuty']) {
+            return self::OVER_OPEN_PER_DUTY;
+        }
+
+        return '';
+    }
+
+    /**
+     * Save a new request, judged against the two limits UNDER A LOCK (#989).
+     * The caller has already asked `whyNotTarget()` and checked that the duty
+     * is the asker's.
+     *
+     * WHY THE LOCKS. Counting and then inserting is two steps, so two posts
+     * at once (a double press, or two windows) could both count 9 under a
+     * limit of 10 and both insert. The transaction is opened FIRST (#697) and
+     * then two rows are locked, always in this order so two savers can never
+     * deadlock: the ASKER's own `tblUsers` row, which serialises every request
+     * one member makes (the per-day count), and the DUTY's row, which
+     * serialises the open requests for one duty. The counts are read after
+     * both locks, so the second post waits and then counts the first.
+     *
+     * @return array{swapID:int, reason:string, made:int, limit:int}
+     *         `swapID` is the new request's number, 0 when none was made.
+     *         `made` and `limit` are the count and the limit a limit refusal
+     *         was judged on (both 0 otherwise), for `overLimitWords()`.
+     *         `reason` is '' when made; a limit code (`OVER_*`) when refused;
+     *         `FAILED` when the database refused something before the commit
+     *         (nothing was saved); `UNKNOWN` when the commit itself failed, so
+     *         the request MAY have been saved — never worded as "not sent".
+     */
+    public static function request(\mysqli $db, int $siteId, int $slotId, int $askerId, int $targetUserId, string $message): array
     {
         $target = $targetUserId > 0 ? $targetUserId : null;
         // The column holds 500 characters; the form says so too. Cut on a
         // character, never a byte, so a name in another alphabet is not split.
-        $message = mb_substr(trim($message), 0, 500, 'UTF-8');
-        $stmt = $db->prepare(
-            'INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`) VALUES (?, ?, ?, ?)'
-        );
-        if ($stmt === false) {
-            return 0;
-        }
-        $stmt->bind_param('iiis', $slotId, $askerId, $target, $message);
-        $stmt->execute();
-        $newId = (int) $db->insert_id;
-        $stmt->close();
+        $message    = mb_substr(trim($message), 0, 500, 'UTF-8');
+        $mayHaveCommitted = false;
+        try {
+            $db->begin_transaction();
+            // 🔒 BOTH locks are load-bearing, and each is pinned by its own
+            //    two-process test in tools/rota-swaps-selftest.php: the duty's
+            //    by S16-S17 (two open requests for ONE duty), the asker's by
+            //    S34-S35 (two posts for two DIFFERENT duties at 9 of 10 a day,
+            //    where the duty lock cannot help). Do not turn either into a
+            //    plain read: a plain SELECT is a consistent read, so the first
+            //    one in the transaction FIXES its snapshot before the locks are
+            //    waited for, and the counts read afterwards would not see what
+            //    the other post committed meanwhile — measured: with the asker's
+            //    lock a plain read, S17 goes red.
+            foreach (
+                [
+                    ['SELECT `userID` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE', $askerId],
+                    ['SELECT `slotID` FROM `tblRotaSlot` WHERE `slotID` = ? FOR UPDATE', $slotId],
+                ] as [$sql, $id]
+            ) {
+                $lock = $db->prepare($sql);
+                $lock->bind_param('i', $id);
+                $lock->execute();
+                $lock->get_result()->free();
+                $lock->close();
+            }
 
-        return $newId;
+            $facts  = self::limitFacts($db, $siteId, $slotId, $askerId);
+            $limits = self::limits();
+            $why    = self::whyOverLimits($target === null, $facts, $limits);
+            if ($why !== '') {
+                $db->rollback();
+                $perDay = $why === self::OVER_PER_DAY;
+
+                return [
+                    'swapID' => 0,
+                    'reason' => $why,
+                    'made'   => $perDay === true ? $facts['sentToday'] : $facts['openWaiting'],
+                    'limit'  => $perDay === true ? $limits['perDay'] : $limits['openPerDuty'],
+                ];
+            }
+
+            $stmt = $db->prepare(
+                'INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`, `createdAtUtc`) '
+                . 'VALUES (?, ?, ?, ?, UTC_TIMESTAMP())'
+            );
+            $stmt->bind_param('iiis', $slotId, $askerId, $target, $message);
+            $stmt->execute();
+            $newId = (int) $db->insert_id;
+            $stmt->close();
+
+            $mayHaveCommitted = true;
+            $db->commit();
+
+            return ['swapID' => $newId, 'reason' => '', 'made' => 0, 'limit' => 0];
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+                // The connection has gone; the server discards the transaction.
+            }
+
+            return ['swapID' => 0, 'reason' => $mayHaveCommitted === true ? self::UNKNOWN : self::FAILED, 'made' => 0, 'limit' => 0];
+        }
     }
 
     /**

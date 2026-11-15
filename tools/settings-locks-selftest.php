@@ -1043,6 +1043,14 @@ check('B0b PREMISE (#932): audit.retentionDays is locked, by ActivityLogRetentio
 //    gutted to `return false;` the run stayed GREEN, the key simply dropping
 //    out of the enumeration — while the general editor would then let a global
 //    administrator delete the installation's row unrecorded.
+// 🚧 #989/#992 (round 1 of the independent check): the three member limits were
+//    stored through this editor unrefused — 500 a day and 0, and a 99,999,999.99
+//    gift ceiling. Named here so a lock method answering false for all three
+//    cannot drop them from the enumeration and leave the run green.
+$memberLimitKeys = ['rota.swap.maxOpenPerDuty', 'rota.swap.maxRequestsPerDay', 'giving.online.maxGift'];
+check('B0d PREMISE (#989, #992): the three member limits are locked, by MemberLimits::lockedInGeneralEditor()',
+    array_filter($memberLimitKeys, static fn (string $k): bool => in_array('MemberLimits::lockedInGeneralEditor', $locked[$k] ?? [], true) === false) === [],
+    'locked: ' . json_encode(array_intersect_key($locked, array_flip($memberLimitKeys))));
 check('B0c PREMISE (#1037): geo.cache.retentionDays is locked, by GeocodeCacheRetention::lockedInGeneralEditor()',
     in_array('GeocodeCacheRetention::lockedInGeneralEditor', $locked['geo.cache.retentionDays'] ?? [], true) === true,
     'locked by: ' . json_encode($locked['geo.cache.retentionDays'] ?? null));
@@ -1687,6 +1695,34 @@ check('P14 (#1048) with the name rule taken out of the save\'s UPDATE, the plant
     $p14['applied'] === true && ($p14['result']['waited'] ?? false) === true && ($p14['result']['row']['settingValue'] ?? '') === 'r1021-race',
     'applied: ' . var_export($p14['applied'], true) . '; ' . json_encode($p14['result']));
 
+// #989/#992: the member-limits lock taken out of each path in turn. Each must
+// turn red on the real HTTP press, for the installation's row of the per-day
+// limit (the row a global administrator stored 0 in).
+$p15a = $plant($copyOf('index.php'),
+    ["if (\$lockedKey !== null && \\Portal\\Core\\MemberLimits::lockedInGeneralEditor((string) \$lockedKey['settingKey']) === true) {" => 'if (false) {'],
+    static fn (): array => $pressDelete($installationRow('rota.swap.maxRequestsPerDay') ?? [])
+);
+check('P15a with the member-limits refusal taken out of the delete, the plant applied AND rota.swap.maxRequestsPerDay is DELETED',
+    $p15a['applied'] === true && ($p15a['result']['gone'] ?? false) === true, 'applied: ' . var_export($p15a['applied'], true));
+$p15b = $plant($copyOf('save.php'), [
+    'if (\\Portal\\Core\\MemberLimits::lockedInGeneralEditor($storedKey) === true) {'  => 'if (false) {',
+    'if (\\Portal\\Core\\MemberLimits::lockedInGeneralEditor($settingKey) === true) {' => 'if (false) {',
+], static function () use ($pressChange, $pressAdd, $installationRow): array {
+    return [
+        'change' => $pressChange($installationRow('rota.swap.maxRequestsPerDay'), '0'),
+        'add'    => $pressAdd('giving.online.maxGift'),
+    ];
+});
+check('P15b with the member-limits refusal taken out of BOTH save paths, the plant applied AND a CHANGE to 0 goes through',
+    $p15b['applied'] === true && ($p15b['result']['change']['changedTo'] ?? false) === true, 'applied: ' . var_export($p15b['applied'], true));
+check('P15c ...AND an ADD goes through', $p15b['applied'] === true && ($p15b['result']['add']['created'] ?? false) === true);
+$p15d = $plant($copyOf('index.php'), [
+    "\$memberLimitsLocked = \\Portal\\Core\\MemberLimits::lockedInGeneralEditor((string) \$row['settingKey']);" => '$memberLimitsLocked = false;',
+], static fn (): array => $drawnWrong($drawn()));
+check('P15d with the drawing\'s member-limits ask taken out, the plant applied AND section D names rota.swap.maxRequestsPerDay drawn with buttons',
+    $p15d['applied'] === true && count(array_filter($p15d['result'] ?? [], static fn (string $l): bool => str_starts_with($l, 'rota.swap.maxRequestsPerDay '))) > 0,
+    'applied: ' . var_export($p15d['applied'], true) . '; D reported: ' . implode('; ', $p15d['result'] ?? []));
+
 // Section S's own plants, in memory.
 $plantedIndex = str_replace(
     "\\Portal\\Core\\TranscriptRetention::lockedInGeneralEditor((string) \$lockedKey['settingKey'])",
@@ -1737,9 +1773,9 @@ $cleanUp();
 // S1 four times, S2, B0, B0b, B0c (#1037), B1a/b twice, B1c, B2 and B3 once per row, B4 once
 // per key, D0 to D4, P1 to P3, P6a/b, P7, P8, P9, P10, P4, P4c, P4b, P5;
 // #1021: S3, R0, R1a-c, R2 to R7 (10), P11 to P13, P4d; #967: P9b;
-// #1048: R8, R8a, P14.
+// #1048: R8, R8a, P14. #989/#992: B0d, P15a-d.
 $expected = 4 + 1 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 5 + 3 + 2 + 1 + 3 + 1 + 2 + 1
-    + 1 + 10 + 3 + 1 + 1 + 3;
+    + 1 + 10 + 3 + 1 + 1 + 3 + 1 + 4;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {

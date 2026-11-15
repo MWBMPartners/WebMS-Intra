@@ -447,6 +447,23 @@ if ($settingId > 0) {
     //    installation's figure and refuses an installation figure below an
     //    organisation's; this editor judges nothing. See
     //    GeocodeCacheRetention::lockedInGeneralEditor().
+    // 🚧 #989/#992: nor the rota swap limits and the largest online gift. Their
+    //    page (Admin, Settings, Member limits) holds an organisation to the
+    //    installation's figure, refuses 0 and records each refusal; this editor
+    //    judged nothing, so 500 a day and 0 were stored here unrefused. See
+    //    MemberLimits::lockedInGeneralEditor().
+    if (\Portal\Core\MemberLimits::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is a member limit and is written only on Admin, Settings, Member limits',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\MemberLimits::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if (\Portal\Core\GeocodeCacheRetention::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -1043,6 +1060,19 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\NetworkAddressRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🚧 #989/#992, the same refusal on the ADD path.
+    if (\Portal\Core\MemberLimits::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is a member limit and is written only on Admin, Settings, Member limits',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\MemberLimits::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

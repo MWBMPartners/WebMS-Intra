@@ -140,6 +140,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="<?php echo htmlspecialchars(Site::url('giving/count'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Count</a>
         <a href="<?php echo htmlspecialchars(Site::url('giving/reconcile'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Reconcile</a>
         <a href="<?php echo htmlspecialchars(Site::url('giving/categories'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Categories</a>
+        <?php /* The largest online gift (#992, D-172) is set on Member limits, which is for administrators: the page itself refuses anybody else. */ ?>
+        <?php if (\Portal\Core\App::isAdmin() === true): ?>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/settings/member-limits'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Online gift limit</a>
+        <?php endif; ?>
         <a href="<?php echo htmlspecialchars(Site::url('giving/reports'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Reports</a>
         <a href="<?php echo htmlspecialchars(Site::url('giving/hmrc-export'), ENT_QUOTES, 'UTF-8'); ?>?from=<?php echo urlencode($from); ?>&to=<?php echo urlencode($to); ?>" class="btn btn-outline-warning btn-sm"><i class="fa-solid fa-file-csv me-1"></i>HMRC CSV</a>
         <a href="<?php echo htmlspecialchars(Site::url('giving/statements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Statements</a>

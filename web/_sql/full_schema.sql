@@ -3548,6 +3548,7 @@ CREATE TABLE IF NOT EXISTS `tblRotaSwapRequest` (
     `responseMessage`  VARCHAR(500) DEFAULT NULL,
     `respondedAt`      DATETIME DEFAULT NULL,
     `createdAt`        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `createdAtUtc`     DATETIME DEFAULT NULL COMMENT 'A MOMENT IN UTC (#989, migration 298): when the request was made, written with UTC_TIMESTAMP() by RotaSwaps::request(). The per-day limit (D-171) counts a member''s requests since the start of the organisation''s own day by this column. Empty for a request made before migration 298, which the count leaves out',
     PRIMARY KEY (`swapID`),
     KEY `idx_rota_swap_slot` (`slotID`),
     KEY `idx_rota_swap_requester` (`requestedByID`),
@@ -11905,6 +11906,26 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('295_network_address_period.sql
 -- The `product.publisherUrl` row is seeded above, beside the other product
 -- brand settings; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('296_publisher_website_setting.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 298_member_limits.sql (#989, #992; D-171, D-172) ───────────────────
+-- tblRotaSwapRequest.createdAtUtc is written above, in the table itself. A
+-- fresh install holds no requests for the migration to leave empty. Here: the
+-- three limits, installation-wide, each at its built-in default (one open swap
+-- request waiting per duty, ten swap requests per member per day, and 10,000.00
+-- as the largest online gift, which was the fixed figure before), and the two
+-- addresses of Admin, Settings, Member limits, where an organisation may set a
+-- lower figure and a global administrator the installation's.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'rota.swap.maxOpenPerDuty',   '1',       '1',       0),
+    (NULL, 'rota.swap.maxRequestsPerDay', '10',     '10',      0),
+    (NULL, 'giving.online.maxGift',      '1000000', '1000000', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/member-limits',      'admin/settings/member-limits/index.php', 1),
+    ('admin/settings/member-limits/save', 'admin/settings/member-limits/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('298_member_limits.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

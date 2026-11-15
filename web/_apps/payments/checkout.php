@@ -12,8 +12,9 @@
  * #430). Descriptions are built server-side from the validated category /
  * project name — the POSTed `description` field is never read (S11, closes
  * the provider-page text-injection vector PayPal's own hosted checkout page
- * makes reachable). Giving amounts additionally carry a sanity ceiling
- * (S10) — see GIVING_MAX_AMOUNT_PENCE below.
+ * makes reachable). Giving amounts additionally carry a ceiling (S10), which
+ * is a limit set per installation and organisation since #992 (D-172) — see
+ * Giving::onlineGiftCeiling().
  *
  * @package   Portal\Payments
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -52,13 +53,6 @@ use Portal\Core\Site;
  */
 $backTo = static fn (): string => Auth::safeRedirectUrl($_POST['return_to'] ?? null);
 
-// 💷 Fat-finger/fraud ceiling on self-service online GIVING only (S10) —
-// large legitimate gifts should go through the office rather than this
-// form. Pledges are exempt (their amount is forced from the pledge row
-// below, never the POSTed value, so a large pledge is never at risk of
-// this rejecting it). Tune here.
-const GIVING_MAX_AMOUNT_PENCE = 1_000_000; // 10,000.00 in the organisation's currency
-
 Auth::ensureSession();
 Auth::requireLogin();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
@@ -84,7 +78,7 @@ $currency = \Portal\Core\Currency::ofSite();
 //    through a float: "1e5" became 15.00, "-5" became 5.00, "12,50" became
 //    1,250.00, and an absurd figure wrapped. Its maximum is what the payment's
 //    INT column holds; the giving ceiling below still applies to gifts, with
-//    its own message.
+//    its own message (Giving::onlineGiftCeiling()).
 $amountRaw   = $_POST['amount'] ?? '';
 $amountPence = \Portal\Core\Currency::parseAmount(is_string($amountRaw) === true ? $amountRaw : '', $currency, \Portal\Core\Currency::INT_COLUMN_MAX);
 if (is_string($amountPence) === true) {
@@ -169,10 +163,15 @@ if ($purpose === 'pledge') {
         header('Location: ' . $backTo());
         exit();
     }
-    // 💷 Fat-finger/fraud ceiling (S10) — large legitimate gifts should go
-    // through the office rather than this self-service form.
-    if ($amountPence > GIVING_MAX_AMOUNT_PENCE) {
-        $_SESSION['flash_msg']  = 'For large gifts please contact the office.';
+    // 💷 Fat-finger/fraud ceiling on self-service online GIVING only (S10):
+    //    large legitimate gifts go through the office rather than this form.
+    //    Pledges are exempt (their amount is forced from the pledge row above,
+    //    never the POSTed value). The ceiling was a fixed 10,000.00 here in
+    //    every currency; it is a limit now, in the organisation's own currency,
+    //    the installation's figure capping the organisation's (#992, D-172).
+    $ceiling = \Portal\Core\Giving::onlineGiftCeiling();
+    if ($amountPence > $ceiling) {
+        $_SESSION['flash_msg']  = \Portal\Core\Giving::onlineGiftTooLargeWords($ceiling, $currency);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . $backTo());
         exit();
