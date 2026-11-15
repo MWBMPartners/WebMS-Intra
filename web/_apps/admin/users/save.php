@@ -590,33 +590,71 @@ if ($action === 'update') {
                     // pointing at a sign-in that is not set up here. A
                     // provider name this page does not know counts as not
                     // set up: it cannot be shown to work.
+                    //
+                    // ROUND 2 OF THE CHECK, and the trap in it: "no way to
+                    // sign in" was said whenever the account's OWN link was
+                    // dead — but the Microsoft and Google callbacks also
+                    // match an active account by its E-MAIL ADDRESS when no
+                    // link is found, and then link it. So a Google-linked
+                    // account with Google off and Microsoft ON may well sign
+                    // in with Microsoft. "No way to sign in" is said only
+                    // when NEITHER sign-in is set up and there is no
+                    // passkey; where one is set up, the page says so with
+                    // the rehire page's own condition (same e-mail address).
+                    //
+                    // And every way in needs the account to be SWITCHED ON:
+                    // a link (findUserByLink() asks isActive = 1), an e-mail
+                    // match (a switched-off match is refused) and a passkey
+                    // (login/webauthn.php refuses one) alike. This save is
+                    // refused whole, so the STORED value is what stands.
                     $setUp     = ['ms365' => Auth::isMS365Configured(), 'google' => Auth::isGoogleConfigured()];
                     $named     = ['ms365' => 'Microsoft', 'google' => 'Google'];
                     $waysIn    = [];
-                    $deadLinks = 0;
+                    $deadNames = [];
                     foreach ($linkedBy as $provider => $linkCount) {
                         if (($setUp[$provider] ?? false) === true) {
                             $waysIn[] = 'with ' . $named[$provider];
                         } else {
-                            $deadLinks += $linkCount;
+                            $deadNames[] = $named[$provider] ?? 'another sign-in service';
                         }
                     }
                     if ($passkeyCount > 0) {
                         $waysIn[] = 'with a passkey';
                     }
-                    if ($waysIn !== []) {
+                    $deadWords = $deadNames === []
+                        ? ''
+                        : 'still linked to ' . (count($deadNames) === 1 ? 'a ' . $deadNames[0] . ' account' : 'accounts with ' . implode(' and ', $deadNames))
+                            . ' whose sign-in is not set up here';
+                    // The rehire page's sentences for a sign-in that is set
+                    // up, word for word, so the two pages agree.
+                    $setUpWords = [];
+                    if ($setUp['ms365'] === true) {
+                        $setUpWords[] = 'Microsoft sign-in is set up on this portal: it works for a Microsoft account with '
+                            . 'the same e-mail address in the Microsoft tenant set up here.';
+                    }
+                    if ($setUp['google'] === true) {
+                        $hostedDomain = (string) (App::settings('auth.google.hostedDomain') ?? '');
+                        $setUpWords[] = 'Google sign-in is set up on this portal: it works for a Google account with the '
+                            . 'same e-mail address' . ($hostedDomain !== '' ? ' in the ' . $hostedDomain . ' domain' : '') . '.';
+                    }
+                    if ($storedIsActive !== 1) {
+                        $refusalWhy = 'This account has no password of its own and is switched off, so it cannot sign in '
+                            . 'at the moment; a link to Microsoft or Google or a passkey is recorded for it. This page '
+                            . 'does not add a password to such an account.';
+                    } elseif ($waysIn !== []) {
                         $refusalWhy = 'This account has no password of its own — it signs in another way, '
                             . implode(' or ', $waysIn) . '.'
-                            . ($deadLinks > 0
-                                ? ' It is also still linked to a Microsoft or Google account whose sign-in is not set up here.'
-                                : '')
+                            . ($deadWords !== '' ? ' It is also ' . $deadWords . '.' : '')
                             . ' This page does not add a password to such an account, because that would be a second '
                             . 'way in rather than a correction.';
+                    } elseif ($setUpWords !== []) {
+                        $refusalWhy = 'This account has no password of its own, and it is ' . $deadWords . '. '
+                            . implode(' ', $setUpWords)
+                            . ' This page does not add a password to an account that is linked to Microsoft or Google.';
                     } else {
-                        $refusalWhy = 'This account has no password of its own, and it is still linked to a Microsoft '
-                            . 'or Google account whose sign-in is not set up here, so it has no way to sign in at the '
-                            . 'moment. This page does not add a password to an account that is linked to Microsoft or '
-                            . 'Google.';
+                        $refusalWhy = 'This account has no password of its own, and it is ' . $deadWords
+                            . ', so it has no way to sign in at the moment. This page does not add a password to an '
+                            . 'account that is linked to Microsoft or Google.';
                     }
                 } catch (\Throwable $whyUnread) {
                     $refusalWhy = null;
