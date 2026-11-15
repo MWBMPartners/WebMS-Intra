@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A remembered map answer for a home is personal data (#1037, #1036, #1029; D-182, D-183)
+
+- **Homes and public places are told apart (D-183).** The event form, a small group's meeting place and a
+  host's home say whether an address is somebody's home or a public place. A home's remembered position is
+  stored under a fingerprint mixed with the installation's secret key, so it cannot be looked up from an
+  address alone; a public place keeps the plain key. Migration 290 adds the column that records which.
+- **No secret key, no remembered home.** When `_auth_keys/enc.key` is missing, empty, a folder or unreadable,
+  a home is still looked up but nothing is remembered, and both privacy pages say so. One byte or a lone
+  newline is a working key. `SecretSettings::keyFileContents()` is now the one reader of that file.
+- **How long a remembered answer is kept is a capped setting (D-182).** The installation caps each
+  organisation, a stored 0 means "nothing chosen" and never "keep for ever", and the retention page and both
+  privacy pages say truthfully whose period is in force.
+- **A restore does not turn old answers into homes.** A snapshot taken before migration 290 puts no
+  remembered map answers back (whole restore, rehearsal and one-table restore), and says so; a newer snapshot
+  restores them with their kinds.
+- **Checked:** geocoder 142, activity-log-retention 103, backup-restore 559 checks, settings-locks, gdpr-eraser
+  313, gdpr-coverage, time-zones and every audit script green on MySQL 8.0.36; five rounds of independent
+  check (personal data and backups), the last found one untrue comment, now corrected. **Not run:** MySQL 8.4,
+  MariaDB on the package's own tests, a real browser (the look-up button's script is driven by nothing: #1071),
+  real look-up services. Codex has not reviewed this. Open: #1067 (an erasure cannot remove a cached home),
+  #1068, #1069.
+
 ### An unusable map position is refused with the reason; the Settings row rule's SQL is tested (#1030, #1048)
 
 - **Eight forms refuse an unusable position (#1030).** Asset locations, venues, resources, events, a
