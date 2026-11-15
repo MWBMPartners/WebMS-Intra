@@ -242,7 +242,10 @@ appended with its real date and a note that it was added later.
 | [D-184](184-a-members-data-copy-includes-their-care-cases.md) | 2026-11-13 | A member's data copy includes their own pastoral care cases, without workers' names or visit notes | in force |
 | [D-185](185-microsoft-google-sign-in-may-create-accounts-by-setting.md) | 2026-11-13 | Whether a Microsoft or Google sign-in may create a new account is a setting (default: allow), and duplicate accounts can be merged | in force |
 | [D-186](186-checks-and-reviews-by-claude-always-use-opus.md) | 2026-11-15 | Any check or review carried out by Claude uses Opus, whatever model is otherwise set | in force |
+| [D-187](187-change-history-addresses-are-kept-for-ever.md) | 2026-11-15 | The network address on a change-history entry is kept for ever, with the entry (an exception to D-178) | in force |
+| [D-188](188-network-addresses-are-kept-for-a-year-by-default.md) | 2026-11-15 | Network addresses are emptied after 365 days by default, by one setting capped like the activity log | in force |
+| [D-189](189-a-gift-aid-declarations-address-is-kept-with-the-declaration.md) | 2026-11-15 | A Gift Aid declaration's network address is kept with the declaration until its keep-until date | in force |
 
-*186 decisions. This index is checked against the folder by
+*189 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
