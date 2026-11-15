@@ -4,6 +4,63 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### One true send-log line per mail route tried; error rows under the message's organisation (#1051, #1050, #1053)
+
+- **The send log tells the truth about each route (#1051).** A message handed to a route is logged once
+  per route actually tried, first as waiting and then settled to the queue's verdict, so a refused
+  Microsoft 365 or Google attempt and a fallback are each one honest line. A route that is not set up and
+  throws stays "not set up".
+- **A network failure names its reason (#1050)** using libcurl's fixed wording, which cannot quote an
+  address or the message.
+- **Errors-page rows follow the message's organisation (#1053).** Microsoft 365, Google, the fallback and
+  a mis-typed shared mailbox all file their error row under the organisation the message belongs to, not
+  the one the sending request happened to resolve to. Five of these rows are pinned by tests that use two
+  organisations; the two `curl_init()` rows cannot be reached by a test and are not.
+- **Checked:** `mail-queue-selftest` 197, `mail-pages-selftest` 122, `mail-queue-pages-selftest` 118 on
+  MySQL 8.0.36, all audit scripts green; three rounds of independent check, the last clean. **Not run:**
+  MySQL 8.4, MariaDB. Codex has not reviewed this. Open: #1070 (an alert e-mail still goes to the
+  request's own alert recipients).
+
+### Erasure words, a fuller data copy, giving edge cases, care cases (#1018, #813, #970, #1015)
+
+- **A member's full data copy is fuller (#813, #1015).** It now names every organisation the member
+  belongs to, a switched-off one included (D-151 rules out listing a worker's records about OTHER people
+  in an organisation they cannot open, not a member's own membership). Five of a member's own settings
+  are in it, and so are their own pastoral care cases (D-184): organisation, the name as typed, category,
+  summary, status, opened and closed, and for each visit its day and kind only. Never who opened a case,
+  its number, the visiting workers or their notes, and no other person's codes or keys.
+- **Plainer reasons (#1018).** No reason a member reads names a database column.
+- **Giving edge cases (#970).** A record that is also the member's own is no longer counted as
+  "somebody else's"; the erasure's own match is unchanged. A tax declaration beside an emptied account is
+  cleared.
+- **Checked:** `erasure-pages-selftest.php` 252, `gdpr-eraser-selftest.php` 313, `gdpr-coverage-selftest.php`
+  and `outside-services-selftest.php` 377 all pass on MySQL 8.0.36, and every audit script is green. Three
+  rounds of independent check; the last found a test that would pass if a visit's full date and time were
+  handed over, now pinned (B4d). **Not run:** MySQL 8.4, MariaDB, the migration harness (no database
+  change). Codex has not reviewed this.
+
+### A claim's PDF can be opened; a restore keeps this month's translation figures (#954, #801)
+
+- **A claim's generated PDF can be opened (#954).** The claim page listed the PDF the portal
+  makes for each claim by name only, and nothing served it. `expenses/claim-pdf?claim=<n>`
+  (migration 292) now sends it to exactly the people who may open the claim — it asks
+  `ExpenseRules::reachToSee()` / `mayViewClaim()`, the same rule as the claim page and a receipt
+  (#867) — and anybody else gets byte for byte what a made-up claim gets. The bytes go out through
+  `ByteRange::send()` (#880). Every stage overwrites ONE file, so the address takes the claim number
+  alone and always gives the newest version, named after the newest stage; older stage rows on the
+  claim page say they were replaced and are not kept. Each look writes one `ExpenseClaimPdfOpen`
+  activity record with the claim number only (D-130); a refusal writes nothing. The Expenses guide's
+  tip about the PDF (which said it "can be used" when nothing could open it, and "of your approved
+  claim" when it is made at every stage) is corrected, and the list of what each look records gains
+  the PDF.
+- **A restore no longer hands an organisation its monthly translation allowance back (#801).**
+  `tblTranslationUsage` (#762) is now carried through a whole-database restore, a rehearsal (undone
+  with the rest) and a one-table restore of that table: the CURRENT month's rows keep the larger
+  figure per organisation and per counter (requests, money); earlier months come back as the
+  snapshot has them. The answer says when figures were kept. A failure the restore's transaction is
+  known to survive is said and the restore goes on; any other (a deadlock, a lost connection) stops
+  and undoes the whole restore. The disaster-recovery help page says so.
+
 ### Deleted assets and one lock order; task reminders on the organisation's clock (#1047, #1041)
 
 - **Nothing is written to an asset deleted while the write waited (#1047).** #1031 fixed this for

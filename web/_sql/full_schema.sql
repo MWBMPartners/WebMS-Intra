@@ -2663,6 +2663,13 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('expenses/receipt', 'expenses/view/receipt.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
+-- 📄 Opening a claim's own generated PDF (#954, migration 292). The same rule
+--    as a receipt (Portal\Core\ExpenseRules); this row must stay in step with
+--    web/_sql/292_expense_claim_pdf_route.sql.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('expenses/claim-pdf', 'expenses/view/claim-pdf.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
 -- ✏️ Changing a claim nobody has decided on yet (#651, migration 223). The
 --    rule about when that is allowed is in Portal\Core\ExpenseRules; these
 --    two rows must stay in step with web/_sql/223_expenses_edit_routes.sql.
@@ -11835,6 +11842,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('288_email_log_site_comment.sql
 -- migration rewrites only that comment on a database that already exists.
 -- This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('289_task_reminder_wall_clock_comment.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 292_expense_claim_pdf_route.sql (#954) ─────────────────────────────
+-- The `expenses/claim-pdf` address is written above, in the Expenses block of
+-- the routes; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('292_expense_claim_pdf_route.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 294_sso_new_accounts_setting.sql (#1042) ───────────────────────────

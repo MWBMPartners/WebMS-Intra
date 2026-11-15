@@ -1,13 +1,13 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 12 November 2026. Updated at every commit boundary and every
+*Overwritten, never appended. Current state only. 15 November 2026. Updated at every commit boundary and every
 change of a package's state (the owner, 10 November 2026: "update our handoff document regularly at each stage").*
 
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed and closed since 12 November: #1004, #1003, #880,
 #1021, #1031, #824, #865, #1028, #1025, #1024, #1043, #1040, #1013, #999, #820, #967, #991, #815, #866, #1039,
-#982 (+ #985), #922, #926, #973, #1045, #1047, #1041 (and everything listed in earlier handoffs).
+#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4), #1051 + #1050 + #1053 (landed with its docs) (and everything listed in earlier handoffs).
 Decisions recorded 12-13 November: D-180 to D-185 (D-181 event years 1900-2200+; D-182 map-memory period is a capped
 setting; D-183 a home's remembered position is personal data, homes vs public places chosen; D-184 care cases in the
 data copy; D-185 Microsoft/Google sign-in may create accounts by setting, default allow, plus a merge feature #1064 —
@@ -15,15 +15,12 @@ the owner says D-185 applies to SIGNula.id too: record it there when that reposi
 
 ## In flight (no shared files between them)
 
-| Package | Branch | State |
+| Package | Branch | State (15 Nov, new session; four agents dispatched, one worktree each) |
 |---|---|---|
-| #1037, #1036, #1029 — map memory (D-182, D-183) | `p1037-build` | Round 2 being checked |
-| #1018, #813, #970, #1015 — erasure words, data copy, giving edges, care cases (D-184) | `p1018-build` | Round 2 building |
-| #954, #801 — expense PDF, translation counter through a restore | `p954-build` | Round 2 being checked (migration 292) |
-| #1051, #1050, #1053 — send-log lines | `p1051-build` | Round 1 being checked |
-| #1049, #1042 — Users-page refusal wording; sign-in may create accounts (D-185) | `p1042-build` | Round 2 building (migration 294) |
+| #1037, #1036, #1029 — map memory (D-182, D-183) | `p1037-build` | Uncommitted round-2 edits found; builder finishing and committing |
+| #1049, #1042 — Users-page wording; sign-in may create accounts (D-185) | `p1042-build` | Uncommitted edits found; builder finishing (migration 294) |
 
-Migration numbers: 289 (#1041, landed), 290 (#1037), 292 (#954), 294 (#1042). 291 and 293 free.
+Migration numbers: 289 (#1041, landed), 290 (#1037), 292 (#954, landed), 294 (#1042). 291 and 293 free.
 
 **Fix list still to build (D-156):** #1019, #1044, #1030, #848, #990/#1007, #1048, #1063, #1065 (with #938), #1064
 (merge accounts, D-185), and the decisions to build: #808 (D-158), #847 (D-159), #863 (D-160), #910 (D-161),
@@ -54,6 +51,7 @@ leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 | What | Why |
 |---|---|
+| Pushing `claude/alpha-wip` | The 15 Nov session's push was refused by the permission classifier; local commits wait for approval |
 | SIGNula.id | Five local commits waiting for the owner's push approval |
 
 ## Six standing facts a reader needs
