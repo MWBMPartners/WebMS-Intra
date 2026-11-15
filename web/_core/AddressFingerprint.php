@@ -159,8 +159,9 @@ final class AddressFingerprint
      * used to keep its own copy, which asked only is_readable() — and
      * is_readable() says yes to a FOLDER, so a folder in the key file's place
      * made file_get_contents() raise a PHP notice on every call. Since round 4
-     * that is every map look-up and both privacy pages, each writing a row to
-     * the error log. A third copy of one test is how one copy goes wrong.
+     * that is every look-up of a home's address and both privacy pages, each
+     * writing a row to the error log (a public place's look-up never asks for
+     * the key). A third copy of one test is how one copy goes wrong.
      *
      * The require is guarded because two self-tests load this class by hand,
      * without the portal's class loader (the house pattern, see
