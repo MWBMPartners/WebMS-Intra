@@ -5,34 +5,35 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Landed and closed since 12 November: #1004, #1003, #880,
-#1021, #1031, #824, #865, #1028, #1025, #1024, #1043, #1040, #1013, #999, #820, #967, #991, #815, #866, #1039,
-#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4), #1051 + #1050 + #1053 (landed with its docs), #848, #1030 + #1048, #1037 + #1036 + #1029, #1042 + #1049 (migration 294), #1019 + #938 + #1065 (migration 295), #989 + #992 (migration 298), #847 + #965 + #952, #863 + #910 + #930 (migration 296) (and everything listed in earlier handoffs).
-Decisions recorded 12-13 November: D-180 to D-185 (D-181 event years 1900-2200+; D-182 map-memory period is a capped
-setting; D-183 a home's remembered position is personal data, homes vs public places chosen; D-184 care cases in the
-data copy; D-185 Microsoft/Google sign-in may create accounts by setting, default allow, plus a merge feature #1064 —
-the owner says D-185 applies to SIGNula.id too: record it there when that repository is next worked on).
+`claude/alpha-wip`, pushed after each landing (D-088; the owner approved pushing on 15 November). HEAD `93c81c87`.
+Landed 15 November (all with independent Opus checks, docs written from the final state): #1018 #813 #970 #1015,
+#1051 #1050 #1053, #848, #1030 #1048, #1037 #1036 #1029 (migration 290), #1042 #1049 (294), #1019 #938 #1065 (295),
+#989 #992 (298), #847 #965 #952, #863 #910 #930 (296). Decisions recorded 15 November: D-186 (Claude checks and reviews
+always run on Opus, here and machine-wide), D-187 to D-189 (network-address periods). Earlier landings are in the changelog.
+Migration numbers in use: 290, 292, 294, 295, 296, 298. 291, 293, 297 free.
 
-## In flight (no shared files between them)
+## Waiting on the owner
 
-| Package | Branch | State (15 Nov, new session; four agents dispatched, one worktree each) |
-|---|---|---|
+- **#993** (outside-provider spending counted in "pence" priced from US-dollar lists, D-173): where do exchange rates
+  come from, and are the limits in the installation's or each organisation's currency? Recommended: an administrator
+  types one rate per currency with its date, spending refused until set; limits in each organisation's own currency.
+- **#1067** an erasure cannot remove a cached home position (D-183) and **#1070** which organisation an alert e-mail
+  follows, **#1073** a signed-in member linking an identity that matches nobody gets a new account, **#1077/#1078** the
+  Gift Aid and rate-limit address periods: decisions or builds still open, see each issue.
 
-Migration numbers: 289 (#1041, landed), 290 (#1037), 292 (#954, landed), 294 (#1042). 291 and 293 free.
+## In flight
 
-**Fix list still to build (D-156):** #1019, #1044, #1030, #848, #990/#1007, #1048, #1063, #1065 (with #938), #1064
-(merge accounts, D-185), and the decisions to build: #808 (D-158), #847 (D-159), #863 (D-160), #910 (D-161),
-#930 (D-162), #938 (D-164), #934 (D-166), #939 (D-167), #952 (D-168), #965 (D-169), #986 (D-170), #989 (D-171),
-#992 (D-172), #993 (D-173). Raised this stretch and needing triage under D-156: #1049-#1062.
-Flaky under load (#1046): sign-in-limits 0b, public-website-tick sign-in, erasure-pages O6/O19, and port clashes in
-the whole-suite runner (re-run alone before calling red).
+Nothing was running at the time of writing; the next batch is being dispatched (see the table in the next update).
 
 ## Next, in this order
 
-1. Land the five packages above as each comes back clean.
-2. The fix list and decision builds.
-3. The 5 November backlog (D-055): #777, #569, #821, then medium and low.
-4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
+1. The fix list (D-156): #1044, #990/#1007, #1063 (one package: error rows, erasure and the data copy), #1064
+   (merge accounts, D-185), #1080/#1081/#1084 (small-group and suggestion follow-ups), #808 (D-158), #934, #939, #986,
+   #1016, #1065 done; then the decisions to build and issues #1049-#1084 raised this stretch needing triage.
+2. The 5 November backlog (D-055): #777, #569, #821, then medium and low.
+3. #754 (waits on the merge). 4. The Codex review (D-007), then the merge.
+Flaky under load (#1046): sign-in-limits 0b, public-website-tick sign-in, erasure-pages O6/O19, port clashes in the
+whole-suite runner (re-run alone before calling red).
 
 ## Working pattern that is paying off
 
@@ -49,7 +50,6 @@ leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 | What | Why |
 |---|---|
-| Pushing `claude/alpha-wip` | The 15 Nov session's push was refused by the permission classifier; local commits wait for approval |
 | SIGNula.id | Five local commits waiting for the owner's push approval |
 
 ## Six standing facts a reader needs
