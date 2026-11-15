@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 111; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 112; // #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -870,6 +870,20 @@ check(
 //        What this cannot see: whether a column holds somebody else's data at
 //        all. It only judges the pairing of a non-account column with an
 //        actor-matched instruction, which is the shape that does the harm.
+//    ONE NAMED EXCEPTION (#938, #1065; D-164, D-178): a column on
+//    GdprEraser::ACTOR_OWN_REQUEST_COLUMNS records the scrambled network
+//    address and browser of the request the ACTOR made, written by that same
+//    request, so on a row matched by the actor's number it is the actor's own
+//    and nobody else's. The list is pinned WHOLE just below, so widening it
+//    to get a column past this guard fails on purpose.
+$actorOwnRequest = \Portal\Core\GdprEraser::ACTOR_OWN_REQUEST_COLUMNS;
+check(
+    'the "actor\'s own request" exception names exactly the asset change history\'s and the scan log\'s scrambled address and browser (#938, #1065)',
+    $actorOwnRequest === ['tblAssetAudit' => ['ipHash'], 'tblAssetScanLog' => ['ipHash', 'userAgentHash']],
+    'GdprEraser::ACTOR_OWN_REQUEST_COLUMNS is now ' . json_encode($actorOwnRequest)
+    . ' -- every column on it is emptied with `= NULL` on EVERY row its actor touched, with the guard below'
+    . ' switched off for it. Add one only for a column written by the actor\'s OWN request, and pin it here.'
+);
 $freeTextOnActor = [];
 foreach ($instructions as $instruction) {
     $userCol = (string) ($instruction['userCol'] ?? '');
@@ -879,6 +893,9 @@ foreach ($instructions as $instruction) {
     foreach ((array) ($instruction['nullCols'] ?? []) as $column) {
         $column = (string) $column;
         if (in_array($column, $linkColumns, true) === true) {
+            continue;
+        }
+        if (in_array($column, $actorOwnRequest[(string) ($instruction['table'] ?? '')] ?? [], true) === true) {
             continue;
         }
         $freeTextOnActor[] = (string) ($instruction['table'] ?? '') . ': `' . $column

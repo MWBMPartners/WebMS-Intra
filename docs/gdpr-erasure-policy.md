@@ -150,11 +150,19 @@ by `Logger::activityNamingNobody()`, which keeps the record's type, words and
 organisation and leaves out the account number, the session's fingerprint and
 facts, the network address, the browser name and the request headers. The
 request itself keeps the network address it was sent from (D-176), and only a
-visitor-address request (above) empties it. A request sent with no e-mail
-address cannot be found by any erasure, and its network address is kept with
-no end date: nothing in the portal deletes a prayer request, so it stays until
-#1019 sets a keeping period for stored network addresses (D-178). A signed-in member opening the form is told it is not
-linked to their account, and that the network address is kept. One record
+visitor-address request (above) empties it sooner. A request sent with no
+e-mail address cannot be found by any erasure. Its network address is still
+emptied by the retention clear-out once it is older than the organisation's
+period for network addresses (`privacy.networkAddressDays`, a year unless
+changed; D-188, #1019). The clear-out runs nightly where that scheduled job has
+been set up, or when a global administrator runs it by hand on Admin,
+Maintenance, Retention. Nothing empties the address where the period in force
+is "keep for ever": where the organisation has chosen that for itself (which
+the installation must allow), or where the installation keeps addresses for
+ever and the organisation has not chosen a shorter period. The request itself
+is kept, because nothing in the portal deletes a prayer request. A
+signed-in member opening the form is told it is not linked to their account,
+and that the network address is kept. One record
 outside the form still follows the ordinary rule: where reCAPTCHA v3 is the
 captcha in use and it REFUSES the request (nothing is then sent), its own
 "CaptchaRejected" record names a signed-in member's account (#1017).
@@ -253,3 +261,13 @@ Two things the entry does not do for you, both read from
 
 Where one decision does not fit a table, a hand-written instruction in
 `GdprEraser::catalogue()` takes its place.
+
+A column that keeps a **network address**, raw or scrambled, also needs an
+`addressKept` sentence on its entry (#1019, D-178): one sentence a member reads,
+saying how long the address is kept and whether an erasure reaches it. The
+privacy pages print these sentences as they stand, through
+`Portal\Core\NetworkAddresses`. `check_network_address_periods.py` fails when an
+address-shaped column has none; where no keeping period is built yet the
+sentence says "No time limit is set yet" and the column goes on
+`tools/audit-checks/network_address_period_pending.txt`, and the check fails if
+the two disagree.

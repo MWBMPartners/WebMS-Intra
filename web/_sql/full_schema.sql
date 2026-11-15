@@ -3897,6 +3897,14 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'maintenance.cronToken', '',    '',    1)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- How long a network address is kept where nothing else limits it (#1019,
+-- D-178; matches migration 295). 0 means "keep for ever", allowed for an
+-- organisation only where the installation holds 0 too. Set at Admin,
+-- Maintenance, Retention through Portal\Core\NetworkAddressRetention.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'privacy.networkAddressDays', '365', '365', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/maintenance/retention', 'admin/maintenance/retention.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
@@ -4565,7 +4573,7 @@ CREATE TABLE IF NOT EXISTS `tblRecordingPlay` (
     `recordingID` INT      NOT NULL,
     `userID`      INT      DEFAULT NULL,
     `playedAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `ipHash`      CHAR(64) DEFAULT NULL,
+    `ipHash`      CHAR(64) DEFAULT NULL COMMENT 'Salted fingerprint of the network address a play came from, made by AddressFingerprint::of() since #1019 (before that an UNSALTED SHA-256 of the raw address). Emptied after privacy.networkAddressDays (D-178; migration 295)',
     PRIMARY KEY (`playID`),
     KEY `idx_rp_recording` (`recordingID`, `playedAt`),
     CONSTRAINT `fk_rp_recording` FOREIGN KEY (`recordingID`) REFERENCES `tblRecording`(`recordingID`) ON DELETE CASCADE,
@@ -8109,7 +8117,7 @@ CREATE TABLE IF NOT EXISTS `tblAssetAudit` (
     `actorType`    ENUM('user','system','public','kiosk') NOT NULL DEFAULT 'user',
     `actorUserID`  INT      DEFAULT NULL COMMENT 'No FK by design — see table comment',
     `apiKeyID`     INT      DEFAULT NULL COMMENT 'tblApiKeys.keyID when the change arrived via bearer API key — no FK by design',
-    `ipHash`       CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the actor''s IP (public/anonymous actions only)',
+    `ipHash`       CHAR(64) DEFAULT NULL COMMENT 'Salted SHA-256 of the network address each change came from, written on EVERY row by AssetRegister::audit(), signed-in changes included. Kept for ever with the entry (D-187); emptied by an erasure of the actor (#1019, D-164; migration 295)',
     `createdAt`    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`auditID`),
     KEY `idx_astaud_asset_created` (`assetID`, `createdAt`),
@@ -11875,6 +11883,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('292_expense_claim_pdf_route.sq
 -- (`admin/integrations/sso-accounts-save`, beside the other Integrations
 -- addresses), both declared above. Nothing else.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('294_sso_new_accounts_setting.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 295_network_address_period.sql (#1019) ─────────────────────────────
+-- The setting is seeded above beside the activity log's, and the two column
+-- comments are written in their tables; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('295_network_address_period.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 298_member_limits.sql (#989, #992; D-171, D-172) ───────────────────

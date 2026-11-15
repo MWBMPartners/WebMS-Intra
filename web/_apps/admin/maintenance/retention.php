@@ -69,6 +69,12 @@
  *                               (D-118); an installation figure below an
  *                               organisation's is refused, naming them (D-119).
  *                               The general settings editor refuses it.
+ *   privacy.networkAddressDays (default 365) — #1019, D-178: after how many
+ *                               days a network address is EMPTIED from the
+ *                               places NetworkAddressRetention::PLACES lists
+ *                               (the records stay). The activity log's rules
+ *                               exactly, through the same handler and
+ *                               RetentionPeriod; "Keep for ever" is its 0.
  *   errors.retentionDays       (default 365) — error logs, the same way,
  *                               EXCEPT that a stored 0 still falls back to a
  *                               year: "never delete" is the activity log's
@@ -123,6 +129,10 @@
  *     with a redirect back here, so the figures drawn afterwards are read
  *     fresh rather than from the request that changed them.
  *
+ *   - `action=address-retention-installation` / `-organisation` (#1019): how
+ *     long network addresses are kept, through NetworkAddressRetention, by the
+ *     SAME handler (`$retentionForms`), so both settings meet the same gates.
+ *
  *   Any OTHER action is refused and changes nothing: a value nobody sent on
  *   purpose must never fall through to the one button that deletes.
  *
@@ -140,6 +150,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\Logger;
+use Portal\Core\NetworkAddressRetention;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -237,16 +248,35 @@ $alrFinish = static function (string $message, string $type) use ($alrBack): nev
     header('Location: ' . $alrBack);
     exit();
 };
+// 🌐 #1019: the SAME handler saves how long network addresses are kept
+//    (NetworkAddressRetention, D-178), with the same rules and the same gates.
+//    One handler, not two copies: the two settings share every rule, and a fix
+//    made to one copy of a handler and not the other is #768's shape.
+//    `$retentionForms` maps each form's `action` to [the class that decides it,
+//    whether it is the ORGANISATION's form]; `$retentionNames` is how each
+//    setting is named in a message and in the activity log.
+$retentionForms = [
+    'activity-retention-organisation' => [ActivityLogRetention::class, true],
+    'activity-retention-installation' => [ActivityLogRetention::class, false],
+    'address-retention-organisation'  => [NetworkAddressRetention::class, true],
+    'address-retention-installation'  => [NetworkAddressRetention::class, false],
+];
+$retentionNames = [
+    ActivityLogRetention::class    => ['what' => 'the activity log', 'refused' => 'ActivityLogRetentionRefused', 'saved' => 'ActivityLogRetentionSaved'],
+    NetworkAddressRetention::class => ['what' => 'network addresses', 'refused' => 'NetworkAddressRetentionRefused', 'saved' => 'NetworkAddressRetentionSaved'],
+];
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
-    && ($postedAction === 'activity-retention-organisation'
-        || ($postedAction === 'activity-retention-installation' && $isGlobalAdmin === true))
+    && isset($retentionForms[$postedAction]) === true
+    && ($retentionForms[$postedAction][1] === true || $isGlobalAdmin === true)
 ) {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $alrFinish('Invalid or expired form token. Nothing was changed. Please try again.', 'danger');
     }
 
     $alrWho       = isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null;
-    $alrForSite   = $postedAction === 'activity-retention-organisation';
+    $alrClass     = $retentionForms[$postedAction][0];
+    $alrName      = $retentionNames[$alrClass];
+    $alrForSite   = $retentionForms[$postedAction][1];
     $alrSiteId    = Site::id();
     $alrLevel     = $alrForSite === true ? 'organisation ' . $alrSiteId : 'the installation';
     $alrChoice    = array_key_exists('choice', $_POST) === true && is_string($_POST['choice']) === true ? $_POST['choice'] : null;
@@ -255,17 +285,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
     // 🚫 No choice, or one this form does not offer: change nothing.
     if ($alrChoice === null || in_array($alrChoice, $alrAllowed, true) === false) {
         Logger::activity(
-            'ActivityLogRetentionRefused',
-            'A change to how long ' . $alrLevel . ' keeps the activity log was refused: no recognised choice was sent. Nothing was saved.',
+            $alrName['refused'],
+            'A change to how long ' . $alrLevel . ' keeps ' . $alrName['what'] . ' was refused: no recognised choice was sent. Nothing was saved.',
             $alrWho
         );
-        $alrFinish('The form did not say what to keep the activity log for, so nothing was changed.', 'danger');
+        $alrFinish('The form did not say what to keep ' . $alrName['what'] . ' for, so nothing was changed.', 'danger');
     }
 
     // 🔢 The number of days, read only for that choice.
     $alrDays = null;
     if ($alrChoice === 'never') {
-        $alrDays = ActivityLogRetention::NEVER;
+        $alrDays = $alrClass::NEVER;
     } elseif ($alrChoice === 'days') {
         $alrRaw = array_key_exists('days', $_POST) === true && is_string($_POST['days']) === true ? trim($_POST['days']) : '';
         // ⚠️ 0 typed as a NUMBER is refused, not read as "never": never is its
@@ -273,8 +303,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         //    a record of everybody's actions for ever.
         if (preg_match('/^\d{1,6}$/', $alrRaw) !== 1 || (int) $alrRaw < 1) {
             Logger::activity(
-                'ActivityLogRetentionRefused',
-                'A change to how long ' . $alrLevel . ' keeps the activity log was refused: the number of days was not a whole number of 1 or more. Nothing was saved.',
+                $alrName['refused'],
+                'A change to how long ' . $alrLevel . ' keeps ' . $alrName['what'] . ' was refused: the number of days was not a whole number of 1 or more. Nothing was saved.',
                 $alrWho
             );
             // 🗣️ #940 round 4: worded PER FORM. The installation's form may
@@ -284,24 +314,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
             //    chosen it, so its words come from ActivityLogRetention, the one
             //    place that already words the organisation's refusals.
             $alrFinish($alrForSite === true
-                ? ActivityLogRetention::refusalWordsForSite('not-a-number', (string) $activityInstallationDays, 0)
-                : 'A number of days has to be a whole number from 1 to ' . ActivityLogRetention::HARD_MAX_DAYS
-                    . '. For no time limit, choose "Never delete" instead. Nothing was saved.', 'danger');
+                ? $alrClass::refusalWordsForSite('not-a-number', (string) $alrClass::installationDays(), 0)
+                : 'A number of days has to be a whole number from 1 to ' . $alrClass::HARD_MAX_DAYS
+                    . '. For no time limit, choose "' . $alrClass::neverChoice() . '" instead. Nothing was saved.', 'danger');
         }
         $alrDays = (int) $alrRaw;
     }
 
     $alrResult = $alrForSite === true
-        ? ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isAdmin())
-        : ActivityLogRetention::saveInstallation($mysqli, (int) $alrDays, $isGlobalAdmin);
+        ? $alrClass::saveForSite($mysqli, $alrSiteId, $alrDays, App::isAdmin())
+        : $alrClass::saveInstallation($mysqli, (int) $alrDays, $isGlobalAdmin);
 
     $alrAsked = $alrDays === null
         ? 'to follow the installation'
-        : 'for ' . ActivityLogRetention::inWords($alrDays);
+        : 'for ' . $alrClass::inWords($alrDays);
     if ($alrResult['outcome'] === 'refused') {
         Logger::activity(
-            'ActivityLogRetentionRefused',
-            'A change to how long ' . $alrLevel . ' keeps the activity log (' . $alrAsked . ') was refused'
+            $alrName['refused'],
+            'A change to how long ' . $alrLevel . ' keeps ' . $alrName['what'] . ' (' . $alrAsked . ') was refused'
             . ($alrResult['refusal'] === '' ? '' : ' (' . $alrResult['refusal'] . ')')
             // D-119: a COUNT of the organisations that blocked it, never their
             // names — the log is read later and by others; the names are in
@@ -314,8 +344,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
         );
     } elseif ($alrResult['outcome'] !== 'unchanged') {
         Logger::activity(
-            'ActivityLogRetentionSaved',
-            'How long ' . $alrLevel . ' keeps the activity log was changed (' . $alrAsked . ').',
+            $alrName['saved'],
+            'How long ' . $alrLevel . ' keeps ' . $alrName['what'] . ' was changed (' . $alrAsked . ').',
             $alrWho
         );
     }
@@ -473,7 +503,6 @@ $gcrExplained = GeocodeCacheRetention::cardWords($mysqli);
 //    refuses (#675).
 $alrOwn       = ActivityLogRetention::ownDays($mysqli, Site::id());
 $alrInstNever = $activityInstallationDays === ActivityLogRetention::NEVER;
-$alrOwnMax    = max(ActivityLogRetention::HARD_MAX_DAYS, $alrOwn ?? 0);
 $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
 // What "never" costs, in words no stronger than is true: an erasure unlinks a
 // person's records but does not rewrite descriptions. Most descriptions name
@@ -497,53 +526,86 @@ $alrNeverCost = 'The log then grows without limit. Some records describe a perso
     . 'and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after '
     . 'that person has asked to be erased.';
 
+// 🌐 #1019: the same three figures for the network-address period.
+$narInstDays  = NetworkAddressRetention::installationDays();
+$narOwn       = NetworkAddressRetention::ownDays($mysqli, Site::id());
+$narInstNever = $narInstDays === NetworkAddressRetention::NEVER;
+// What the network-address period does, in words true of both forms (D-178).
+// The places are NetworkAddressRetention::PLACES; the privacy pages list them.
+$narExplained = 'A network address (IP address) is kept on some records for security, to look into misuse and for '
+    . 'support. In the places that have no other limit &mdash; password-reset requests, devices trusted for two-step '
+    . 'sign-in, prayer requests, an access key&rsquo;s last use, live-chat messages, answers to public forms, '
+    . 'and recording plays &mdash; the nightly clear-out empties the address once it is older than the figure below, '
+    . 'if that scheduled job has been set up. <strong>The records themselves are kept</strong>, exactly as they were; '
+    . 'only the address goes. &ldquo;Keep for ever&rdquo; keeps the addresses, where this installation allows it. '
+    . 'The change history keeps the addresses it recorded for ever, whatever this figure is.';
+
 /**
  * The organisation's own form, drawn in ONE place for both views of this page:
  * the global administrator's whole page and an organisation administrator's
- * page holding nothing else (D-118). Two copies would drift.
+ * page holding nothing else (D-118). Two copies would drift. Since #1019 it is
+ * drawn for BOTH periods; `$which` picks the activity log's figures and words
+ * or the network addresses', and the activity log's output is unchanged.
  */
-$alrOrganisationForm = static function () use ($alrOwn, $alrInstNever, $alrOwnMax, $alrSiteName, $activityInstallationDays): void {
+$alrOrganisationForm = static function (string $which = 'activity') use (
+    $alrOwn, $alrInstNever, $alrSiteName, $activityInstallationDays, $narOwn, $narInstNever, $narInstDays
+): void {
+    $f = $which === 'address'
+        ? [
+            'class' => NetworkAddressRetention::class, 'own' => $narOwn, 'instNever' => $narInstNever, 'instDays' => $narInstDays,
+            'action' => 'address-retention-organisation', 'id' => 'nar', 'held' => 'data-network-address-never-held',
+            'acts' => 'empties addresses', 'acted' => 'its addresses are emptied', 'olderThan' => 'Empty addresses older than',
+        ]
+        : [
+            'class' => ActivityLogRetention::class, 'own' => $alrOwn, 'instNever' => $alrInstNever, 'instDays' => $activityInstallationDays,
+            'action' => 'activity-retention-organisation', 'id' => 'alr', 'held' => 'data-activity-log-never-held',
+            'acts' => 'deletes records', 'acted' => 'its records are deleted', 'olderThan' => 'Delete records older than',
+        ];
+    $cls    = $f['class'];
+    $own    = $f['own'];
+    $never  = htmlspecialchars($cls::neverChoice(), ENT_QUOTES, 'UTF-8');
+    $ownMax = max($cls::HARD_MAX_DAYS, $own ?? 0);
     ?>
                         <h3 class="h6">For this organisation<?php echo $alrSiteName !== '' ? ' (' . htmlspecialchars($alrSiteName, ENT_QUOTES, 'UTF-8') . ')' : ''; ?></h3>
                         <p class="small text-muted">
                             Its own figure may be shorter than the installation's, never longer.
-                            <?php if ($alrInstNever === false): ?>
-                                <strong>&ldquo;Never delete&rdquo; is not available</strong>, because this installation
-                                deletes records after <?php echo (int) $activityInstallationDays; ?> days.
+                            <?php if ($f['instNever'] === false): ?>
+                                <strong>&ldquo;<?php echo $never; ?>&rdquo; is not available</strong>, because this installation
+                                <?php echo $f['acts']; ?> after <?php echo (int) $f['instDays']; ?> days.
                             <?php endif; ?>
                         </p>
-                        <?php if ($alrOwn === ActivityLogRetention::NEVER && $alrInstNever === false): ?>
-                            <p class="small text-warning-emphasis" data-activity-log-never-held="1">
+                        <?php if ($own === $cls::NEVER && $f['instNever'] === false): ?>
+                            <p class="small text-warning-emphasis" <?php echo $f['held']; ?>="1">
                                 <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
-                                This organisation has &ldquo;Never delete&rdquo; stored, but this installation does not
-                                allow it, so its records are deleted after <?php echo (int) $activityInstallationDays; ?> days
+                                This organisation has &ldquo;<?php echo $never; ?>&rdquo; stored, but this installation does not
+                                allow it, so <?php echo $f['acted']; ?> after <?php echo (int) $f['instDays']; ?> days
                                 like any longer figure.
                             </p>
                         <?php endif; ?>
                         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-                            <input type="hidden" name="action" value="activity-retention-organisation">
+                            <input type="hidden" name="action" value="<?php echo $f['action']; ?>">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="choice" value="follow" id="alrOwnFollow"
-                                       <?php echo $alrOwn === null ? 'checked' : ''; ?>>
-                                <label class="form-check-label" for="alrOwnFollow">Follow the installation
-                                    (<?php echo htmlspecialchars(ActivityLogRetention::inWords($activityInstallationDays), ENT_QUOTES, 'UTF-8'); ?>)</label>
+                                <input class="form-check-input" type="radio" name="choice" value="follow" id="<?php echo $f['id']; ?>OwnFollow"
+                                       <?php echo $own === null ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="<?php echo $f['id']; ?>OwnFollow">Follow the installation
+                                    (<?php echo htmlspecialchars($cls::inWords($f['instDays']), ENT_QUOTES, 'UTF-8'); ?>)</label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="choice" value="days" id="alrOwnDays"
-                                       <?php echo $alrOwn !== null && $alrOwn !== ActivityLogRetention::NEVER ? 'checked' : ''; ?>>
-                                <label class="form-check-label" for="alrOwnDays">Delete records older than</label>
-                                <input type="number" min="1" max="<?php echo (int) $alrOwnMax; ?>"
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="<?php echo $f['id']; ?>OwnDays"
+                                       <?php echo $own !== null && $own !== $cls::NEVER ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="<?php echo $f['id']; ?>OwnDays"><?php echo $f['olderThan']; ?></label>
+                                <input type="number" min="1" max="<?php echo (int) $ownMax; ?>"
                                        class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
                                        name="days" aria-label="Number of days, for this organisation"
-                                       value="<?php echo $alrOwn !== null && $alrOwn !== ActivityLogRetention::NEVER ? (int) $alrOwn : ''; ?>">
+                                       value="<?php echo $own !== null && $own !== $cls::NEVER ? (int) $own : ''; ?>">
                                 <span class="small">days</span>
                             </div>
-                            <?php if ($alrInstNever === true || $alrOwn === ActivityLogRetention::NEVER): ?>
+                            <?php if ($f['instNever'] === true || $own === $cls::NEVER): ?>
                                 <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="choice" value="never" id="alrOwnNever"
-                                           <?php echo $alrOwn === ActivityLogRetention::NEVER ? 'checked' : ''; ?>>
-                                    <label class="form-check-label" for="alrOwnNever"><strong>Never delete</strong></label>
+                                    <input class="form-check-input" type="radio" name="choice" value="never" id="<?php echo $f['id']; ?>OwnNever"
+                                           <?php echo $own === $cls::NEVER ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="<?php echo $f['id']; ?>OwnNever"><strong><?php echo $never; ?></strong></label>
                                 </div>
                             <?php endif; ?>
                             <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Save for this organisation</button>
@@ -570,16 +632,17 @@ $alrOrganisationForm = static function () use ($alrOwn, $alrInstNever, $alrOwnMa
 if ($isGlobalAdmin === false) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true) {
+            $gateForm = $retentionForms[$postedAction] ?? null;
             Logger::activity(
-                match ($postedAction) {
-                    'activity-retention-installation' => 'ActivityLogRetentionRefused',
-                    'geocode-retention-installation'  => 'GeocodeCacheRetentionRefused',
-                    default                           => 'RetentionSweepRefused',
+                match (true) {
+                    $postedAction === 'geocode-retention-installation' => 'GeocodeCacheRetentionRefused',
+                    $gateForm !== null                                 => $retentionNames[$gateForm[0]]['refused'],
+                    default                                            => 'RetentionSweepRefused',
                 },
-                match ($postedAction) {
-                    'activity-retention-installation' => 'Refused: how long the installation keeps the activity log may only be changed by a global administrator. Nothing was saved.',
-                    'geocode-retention-installation'  => 'Refused: how long the installation keeps remembered map answers may only be changed by a global administrator. Nothing was saved.',
-                    default                           => 'Refused: the audit-log retention sweep may only be run by a global administrator',
+                match (true) {
+                    $postedAction === 'geocode-retention-installation' => 'Refused: how long the installation keeps remembered map answers may only be changed by a global administrator. Nothing was saved.',
+                    $gateForm !== null                                 => 'Refused: how long the installation keeps ' . $retentionNames[$gateForm[0]]['what'] . ' may only be changed by a global administrator. Nothing was saved.',
+                    default                                            => 'Refused: the audit-log retention sweep may only be run by a global administrator',
                 },
                 $_SESSION['user_id'] ?? null
             );
@@ -629,6 +692,15 @@ if ($isGlobalAdmin === false) {
                 organisation&rsquo;s records for ever, where this installation allows it. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
             </p>
             <?php $alrOrganisationForm(); ?>
+        </div>
+    </div>
+    <h2 class="h4 mt-4 mb-3"><i class="fa-solid fa-network-wired me-2"></i>How long network addresses are kept</h2>
+    <div class="card shadow-sm border-primary" id="network-address-retention" data-network-address-retention-card="organisation">
+        <div class="card-body" data-network-address-in-force="<?php echo (int) NetworkAddressRetention::daysForSite(Site::id()); ?>">
+            <p class="small text-muted" data-network-address-explained="organisation">
+                <?php echo $narExplained; ?>
+            </p>
+            <?php $alrOrganisationForm('address'); ?>
         </div>
     </div>
     <div class="card shadow-sm border-primary mt-3" id="geocode-cache-retention" data-geocode-retention-card="organisation">
@@ -686,6 +758,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction !== 'sweep') {
                    . ' event-day(s) of anonymous check-ins and then emptied the scrambled address '
                    . 'out of ' . $result['checkinDetailCleared']
                    . ' check-in row(s). Those rows and their counts were not deleted.'
+                   // 🌐 #1019: emptied, not deleted, so its own sentence.
+                   . ' Emptied ' . $result['networkAddressesCleared'] . ' network address(es) older than their period; '
+                   . 'the records that held them were not deleted.'
                    // 🧾 Its own sentence, and "removed the name", never
                    //    "deleted": every gift, declaration and statement
                    //    record is still there with its amount and date.
@@ -872,6 +947,54 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <div class="col-12" id="network-address-retention">
+        <div class="card shadow-sm border-primary" data-network-address-retention-card="1">
+            <div class="card-body" data-network-address-in-force="<?php echo (int) NetworkAddressRetention::daysForSite(Site::id()); ?>">
+                <h2 class="h6"><i class="fa-solid fa-network-wired me-1"></i>How long network addresses are kept
+                    (setting: <code><?php echo htmlspecialchars(NetworkAddressRetention::KEY, ENT_QUOTES, 'UTF-8'); ?></code>)</h2>
+                <p class="small text-muted" data-network-address-explained="installation">
+                    <?php echo $narExplained; ?>
+                    The rules are the activity log&rsquo;s: an organisation may choose a shorter figure, never a
+                    longer one, and &ldquo;Keep for ever&rdquo; only where the installation keeps them for ever.
+                </p>
+                <p class="mb-2">Addresses that would be emptied now, across every organisation: <strong><?php echo number_format($preview['networkAddresses']); ?></strong></p>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <h3 class="h6">For every organisation on this installation</h3>
+                        <p class="small text-muted">
+                            Password-reset requests and trusted devices, which belong to an account rather than an
+                            organisation, follow this figure, and it is the most any organisation may choose. A figure
+                            shorter than one an organisation has already chosen for itself is refused and those
+                            organisations are named.
+                        </p>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="address-retention-installation">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="narInstDays"
+                                       <?php echo $narInstNever === false ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="narInstDays">Empty addresses older than</label>
+                                <input type="number" min="1" max="<?php echo NetworkAddressRetention::HARD_MAX_DAYS; ?>"
+                                       class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                       name="days" aria-label="Number of days, for every organisation"
+                                       value="<?php echo $narInstNever === true ? '' : (int) $narInstDays; ?>">
+                                <span class="small">days (1 to <?php echo NetworkAddressRetention::HARD_MAX_DAYS; ?>)</span>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="choice" value="never" id="narInstNever"
+                                       <?php echo $narInstNever === true ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="narInstNever"><strong>Keep for ever</strong></label>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm">Save for every organisation</button>
+                        </form>
+                    </div>
+                    <div class="col-lg-6">
+                        <?php $alrOrganisationForm('address'); ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     <div class="col-12" id="geocode-cache-retention">
         <div class="card shadow-sm border-primary" data-geocode-retention-card="1">
             <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
@@ -1051,10 +1174,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>"
-      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). <?php echo number_format($preview['givingIdentityDue']); ?> erased donor(s) would have their name and address removed from giving records whose keep-until date has passed (the gifts and their amounts are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
+      data-confirm="About <?php echo number_format($preview['activity'] + $preview['errors']); ?> log row(s) and <?php echo number_format($preview['registrations']); ?> event registration(s) are currently eligible, including any children's details they hold, and <?php echo number_format($preview['checkinDetail']); ?> anonymous check-in row(s) would have their scrambled sender address emptied out (those rows and their counts are kept). <?php echo number_format($preview['givingIdentityDue']); ?> erased donor(s) would have their name and address removed from giving records whose keep-until date has passed (the gifts and their amounts are kept). <?php echo number_format($preview['networkAddresses']); ?> network address(es) past their period would be emptied (the records are kept). The exact numbers may differ slightly, because more records become eligible as time passes. This cannot be undone. Continue?"
       data-confirm-destructive="true">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
-    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail'] + $preview['givingIdentityDue']) === 0 ? 'disabled' : ''; ?>>
+    <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail'] + $preview['givingIdentityDue'] + $preview['networkAddresses']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
     <?php /* #932: the activity log's period is no longer changed in the general

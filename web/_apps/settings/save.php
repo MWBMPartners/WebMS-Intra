@@ -429,6 +429,19 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🌐 #1019: the same refusal for how long network addresses are kept.
+    if (\Portal\Core\NetworkAddressRetention::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is how long network addresses are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\NetworkAddressRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     // 🗺️ #1037 (D-182): and how long remembered map answers are kept. Its page
     //    (Admin, Maintenance, Retention) holds an organisation to the
     //    installation's figure and refuses an installation figure below an
@@ -1034,6 +1047,19 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\ActivityLogRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🌐 #1019: the same refusal for how long network addresses are kept.
+    if (\Portal\Core\NetworkAddressRetention::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is how long network addresses are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\NetworkAddressRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

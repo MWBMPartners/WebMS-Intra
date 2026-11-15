@@ -233,12 +233,13 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 258; // MERGED (p1042-build): both sides grew from 247.
-                            // #1049 added M13l2-M13l7 (the Users page's
-                            // refusal says only what is known, one check per
-                            // sentence it can write): +6. #1018 added B4c,
-                            // #1015 B4d, O13b, O6b and its plant O6c: +5.
-                            // 247 + 6 + 5 = 258.
+const EXPECTED_CHECKS = 271; // #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+                             // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
+                             // #1019 added section Q's six and round 2 plant Q5b: +7.
+                             // #1049 added M13l2-M13l7 (the Users page's
+                             // refusal says only what is known, one check per
+                             // sentence it can write): +6. 252 + 7 + 6 = 265.
+                             // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5 = 252.
                             // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
@@ -1181,7 +1182,12 @@ $seed(REQ_B_ASK, ORG_B, ADMB, 'pending_confirmation', null);
 // every setting back), which made this test's pins fail for a reason that had
 // nothing to do with the pages. Kept after #947 because the pins need a KNOWN
 // figure whatever state the database arrives in, not only after that one test.
-foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365'] as $key => $value) {
+// #1019: the network-address period too, for the same reason (the privacy
+// pages print it, and section Q7 changes it IN PLACE and puts it back; a run
+// stopped part-way through Q7 is protected here by the next run forcing 365; after a SIGKILL the value from
+// before the kill is not recovered, which harms nothing because every run forces 365).
+foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365',
+    'privacy.networkAddressDays' => '365'] as $key => $value) {
     $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
     $state['settings'][$key] = $row;
     if ($row === null) {
@@ -6328,6 +6334,237 @@ foreach ($p1012Plants as $label => [$rel, $swaps, $expect]) {
 $p1012Again = $p1012Observe();
 ok('P14 with every plant taken out again, the same observations are all green (#1012)', $p1012Again === [], implode('; ', $p1012Again));
 q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$p1012ZoneWas, ORG_A]);
+
+// =============================================================================
+head('Q. The privacy pages name every place a network address is kept, and for how long (#1019, D-178)');
+// =============================================================================
+// 🌐 D-178: the privacy notice names network addresses and why they are kept,
+//    and each place has a set keeping period. The sentences live in the
+//    personal-data catalogue (`addressKept`), are printed through
+//    Portal\Core\NetworkAddresses by ONE template, and both privacy pages draw
+//    it. These checks read what a visitor and a member RECEIVE, at both
+//    organisations, and compare it with the catalogue the running copy holds.
+//    Whether each sentence is TRUE is a person's job at review; the static
+//    gate check_network_address_periods.py pins that each address column HAS
+//    one and that "No time limit is set yet" agrees with its pending list.
+$q1019Visitor = $child . $sep . 'p1019-visitor.jar';
+$q1019Expected = static function () use ($plantFile): array {
+    $catalogue = require $plantFile('_core/personal-data-catalogue.php');
+    $out = [];
+    foreach ($catalogue as $entry) {
+        foreach ((array) ($entry['addressKept'] ?? []) as $words) {
+            $out[] = trim((string) preg_replace('/\s+/', ' ', (string) $words));
+        }
+    }
+
+    return $out;
+};
+$q1019Observe = static function () use ($jar, $q1019Visitor, $q1019Expected): array {
+    $expected = $q1019Expected();
+    $wrong    = [];
+    foreach ([['/privacy', 'h2'], ['/privacy/policy', 'h3']] as [$path, $level]) {
+        foreach ([[$q1019Visitor, ADDR_A, 'a visitor at A'], [$jar['cal'], ADDR_A, 'a member at A'], [$jar['admb'], ADDR_B, 'an administrator at B']] as [$who, $address, $label]) {
+            $page = req($who, 'GET', $path, null, $address);
+            if ($page['status'] !== 200 || str_contains((string) $page['body'], '</html>') === false) {
+                $wrong[] = $path . ' for ' . $label . ' did not answer a whole page (' . $page['status'] . ')';
+                continue;
+            }
+            $doc      = \Dom\HTMLDocument::createFromString((string) $page['body'], LIBXML_NOERROR);
+            $headings = 0;
+            foreach ($doc->querySelectorAll($level) as $h) {
+                $headings += trim((string) $h->textContent) === 'Network addresses' ? 1 : 0;
+            }
+            $listed = [];
+            foreach ($doc->querySelectorAll('[data-network-addresses="listed"] li') as $li) {
+                $listed[] = trim((string) preg_replace('/\s+/', ' ', (string) $li->textContent));
+            }
+            if ($headings !== 1) {
+                $wrong[] = $path . ' for ' . $label . ': ' . $headings . ' "Network addresses" headings';
+            }
+            if ($doc->querySelector('[data-network-addresses="unreadable"]') !== null) {
+                $wrong[] = $path . ' for ' . $label . ': says the list could not be read';
+            }
+            if ($listed !== $expected) {
+                $wrong[] = $path . ' for ' . $label . ': lists ' . count($listed) . ' places, the catalogue holds ' . count($expected);
+            }
+            // ⏳ #1019 round 2: the period the places say they follow, stated
+            //    above the list for this organisation (a year by default).
+            $period = $doc->querySelector('[data-network-address-retention="days"]');
+            if ($period === null || str_contains((string) preg_replace('/\s+/', ' ', (string) $period->textContent), 'once it is 365 days old') === false) {
+                $wrong[] = $path . ' for ' . $label . ': does not state the network-address period (a year)';
+            }
+        }
+    }
+
+    return $wrong;
+};
+$q1019Words = $q1019Expected();
+ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, four saying no time limit is set yet (the consent record, #934; a Gift Aid declaration\'s, D-189; the two rate-limit tables), seven saying they follow the period for network addresses (D-188), and the two change histories saying nothing clears them (D-187)',
+    count($q1019Words) >= 18
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Prayer requests keep the network address'))) === 1
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Equipment label scans keep a scrambled form'))) === 1
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 4
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'the period for network addresses'))) === 7
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'with the address it recorded, is kept for ever: nothing clears it'))) === 2,
+    count($q1019Words) . ' sentences');
+$q1019First = $q1019Observe();
+ok('Q2 the Privacy & Data Protection page and the privacy policy, for a visitor and a member at one organisation and an administrator at another, each show ONE "Network addresses" section listing exactly the catalogue\'s sentences, in order, under the period they follow (#1019, D-178)',
+    $q1019First === [], implode('; ', $q1019First));
+$q1019Plants = [
+    'Q3 the template listing only the first place' => [
+        '_core/templates/network-addresses.php', ['foreach ($networkAddressPlaces as $networkAddressPlace):' => 'foreach (array_slice($networkAddressPlaces, 0, 1) as $networkAddressPlace):']],
+    'Q4 the privacy policy no longer drawing the section' => [
+        '_apps/privacy/policy.php', ["<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>" => '']],
+    'Q5b the period paragraph no longer drawn above the list (#1019 round 2)' => [
+        '_core/templates/network-addresses.php', ['<p data-network-address-retention=' => '<p data-planted-out=']],
+    'Q5 the list unreadable (the page must say so, never show an empty list)' => [
+        '_core/NetworkAddresses.php', ['$places = [];' => 'return [];']],
+];
+foreach ($q1019Plants as $label => [$rel, $swaps]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach ($swaps as $from => $to) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = [];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $q1019Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1019)',
+        $applied === true && $wrong !== [] && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$q1019Again = $q1019Observe();
+ok('Q6 with every plant taken out again, both pages are whole again (#1019)', $q1019Again === [], implode('; ', $q1019Again));
+
+// ⏳ Q7-Q11 (#1019 round 3 of the check): the PERIOD paragraph, in every state
+//    a member can be told, on both pages. Q2 sees only the default state, and
+//    the network-address period, the activity log's and the map answers' all
+//    default to 365 days — so the template reading the ACTIVITY LOG's facts
+//    instead of its own passed every check above (measured: 259 of 259). The
+//    installation's figure here is 200 days, which neither of the other two
+//    holds, and organisation A's own is 45. Each state's words are LITERALS,
+//    never worked out by the class under test (#647). "Could not be read" is
+//    NOT reachable over HTTP: it needs the settings reader itself to throw,
+//    and a page whose settings cannot be read does not draw at all; Q10 asks
+//    the real class for those words directly instead.
+// HOW IT IS PUT BACK, and why it holds if the run is stopped here. The
+// installation's row was forced to 365 at the start of the run, and the value
+// it held before that is in $state['settings'], so cleanup() puts it back by
+// that row's number. Q7 therefore changes the row IN PLACE and never deletes
+// and re-inserts it: a new row would have a new number and cleanup() would
+// match nothing (round 4 of the check measured that: a SIGINT after the first
+// change left 200 on a fresh row, and the next run went 269 of 271). The
+// signal handler's exit() skips the `finally` below, which is why cleanup()
+// and the forced 365 at the start of the NEXT run are what make that safe.
+// An organisation's own rows are removed by removeWorld() with the world.
+$q7Key    = 'privacy.networkAddressDays';
+$q7Before = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+$q7SetInstallation = static function (string $value) use ($q7Key): void {
+    q('UPDATE tblSettings SET settingValue = ? WHERE settingKey = ? AND siteID IS NULL', 'ss', [$value, $q7Key]);
+};
+$q7SetOwn = static function (int $site, ?string $value) use ($q7Key): void {
+    q('DELETE FROM tblSettings WHERE siteID = ? AND settingKey = ?', 'is', [$site, $q7Key]);
+    if ($value !== null) {
+        siteSetting($site, $q7Key, $value);
+    }
+};
+/** What each page shows above the list, for each viewer: [[state attribute, words], ...]; '' entries when absent. */
+$q7Observe = static function () use ($jar, $q1019Visitor): array {
+    $out = [];
+    foreach (['/privacy', '/privacy/policy'] as $path) {
+        foreach ([[$q1019Visitor, ADDR_A, 'A visitor'], [$jar['cal'], ADDR_A, 'A member'], [$jar['admb'], ADDR_B, 'B administrator']] as [$who, $address, $label]) {
+            $page  = req($who, 'GET', $path, null, $address);
+            $doc   = \Dom\HTMLDocument::createFromString((string) $page['body'], LIBXML_NOERROR);
+            $found = $doc->querySelectorAll('[data-network-address-retention]');
+            $out[$path . ' ' . $label] = count($found) === 1 && $page['status'] === 200 && str_contains((string) $page['body'], '</html>') === true
+                ? [(string) $found[0]->getAttribute('data-network-address-retention'), trim((string) preg_replace('/\s+/', ' ', (string) $found[0]->textContent))]
+                : ['', 'status ' . $page['status'] . ', ' . count($found) . ' period paragraphs'];
+        }
+    }
+
+    return $out;
+};
+/** '' when every page shows, for A and for B, the expected state and a sentence containing the expected words. */
+$q7Judge = static function (array $seen, array $forA, array $forB): string {
+    $wrong = [];
+    foreach ($seen as $where => [$stateSeen, $words]) {
+        [$stateWanted, $wordsWanted] = str_contains($where, ' B ') === true ? $forB : $forA;
+        if ($stateSeen !== $stateWanted || str_contains($words, $wordsWanted) === false) {
+            $wrong[] = $where . ': [' . $stateSeen . '] ' . mb_substr($words, 0, 160);
+        }
+    }
+
+    return implode('; ', $wrong);
+};
+$q7Days     = static fn (int $n): array => ['days', 'emptied by a nightly clear-out once it is ' . $n . ' days old'];
+$q7OwnNever = ['own-never', 'this organisation has chosen to keep the address for ever, so nothing empties it'];
+$q7InstNever = ['installation-never', 'this portal keeps the address for ever, and this organisation has not chosen a shorter period, so nothing empties it'];
+$q7States = [
+    'Q7 an organisation\'s own SHORTER figure: A has chosen 45 days under an installation of 200, and both pages say 45 at A and 200 at B (which follows the installation)'
+        => ['200', '45', $q7Days(45), $q7Days(200)],
+    'Q8 an organisation\'s own "keep for ever" where the installation allows it: both pages tell A it chose that, and tell B the portal keeps them for ever'
+        => ['0', '0', $q7OwnNever, $q7InstNever],
+    'Q9 the installation\'s "keep for ever" with A following it: both pages say the portal keeps the address for ever at A and B'
+        => ['0', null, $q7InstNever, $q7InstNever],
+];
+$q7Results = [];
+try {
+    foreach ($q7States as $label => [$installation, $ownA, $forA, $forB]) {
+        $q7SetInstallation($installation);
+        $q7SetOwn(ORG_A, $ownA);
+        $q7SetOwn(ORG_B, null);
+        $q7Results[$label] = $q7Judge($q7Observe(), $forA, $forB);
+    }
+    // 🧪 Q7p: the swap the round-3 checker made, planted in the running copy
+    //    in Q7's state: the template asking the ACTIVITY LOG's facts. It must
+    //    go red here (the activity log is at 365, not 45 or 200).
+    $q7Template = $plantFile('_core/templates/network-addresses.php');
+    $q7Original = (string) file_get_contents($q7Template);
+    $q7From     = '$networkAddressFacts = NetworkAddressRetention::memberFactsForSite($mysqli, Site::id());';
+    $q7Applied  = substr_count($q7Original, $q7From) === 1;
+    $q7Planted  = '';
+    if ($q7Applied === true) {
+        $q7SetInstallation('200');
+        $q7SetOwn(ORG_A, '45');
+        file_put_contents($q7Template, str_replace($q7From, '$networkAddressFacts = \Portal\Core\ActivityLogRetention::memberFactsForSite($mysqli, Site::id());', $q7Original));
+        try {
+            $q7Planted = $q7Judge($q7Observe(), $q7Days(45), $q7Days(200));
+        } finally {
+            file_put_contents($q7Template, $q7Original);
+        }
+    }
+} finally {
+    // Back as it was, NOW: later sections compare rendered pins taken at 365.
+    $q7SetOwn(ORG_A, null);
+    $q7SetOwn(ORG_B, null);
+    $q7SetInstallation((string) $q7Before['settingValue']);
+}
+foreach ($q7Results as $label => $wrong) {
+    ok($label . ' (#1019)', $wrong === '', $wrong);
+}
+ok('Q7p the template planted to read the activity log\'s facts instead of its own: Q7\'s state goes red, and the file is put back byte for byte (#1019)',
+    $q7Applied === true && $q7Planted !== '' && (string) file_get_contents($q7Template) === $q7Original,
+    ($q7Applied === true ? 'applied' : 'NOT APPLIED') . ' | observed: ' . $q7Planted);
+$q7Restored = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$q7Key]);
+ok('Q7r the network-address setting is put back exactly as it was before Q7, on the same row (#1019)',
+    $q7Restored !== null && $q7Restored['settingValue'] === $q7Before['settingValue'] && $q7Restored['settingID'] === $q7Before['settingID'],
+    json_encode([$q7Before, $q7Restored]));
+// Q10: "could not be read", asked of the real class in the running copy.
+$q10 = shell_exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg(
+    'require $argv[1]; echo \Portal\Core\NetworkAddressRetention::privacyPageWords(["state" => "unknown", "days" => 0]);'
+) . ' ' . escapeshellarg($plantFile('_core/NetworkAddressRetention.php')));
+ok('Q10 "could not be read" (not reachable over HTTP; asked of the real class): the words say the period in force could not be read, and promise no figure (#1019)',
+    is_string($q10) && str_contains($q10, 'The period in force here could not be read just now.') === true
+    && preg_match('/\d+ days?/', $q10) !== 1,
+    (string) $q10);
+@unlink($q1019Visitor);
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

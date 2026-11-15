@@ -4,6 +4,29 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Network addresses have a keeping period; an erasure empties more of them (#1019, #938, #1065; D-178, D-187, D-188, D-189)
+
+- **One setting, a year by default (D-188).** `privacy.networkAddressDays` (migration 295), set on Admin,
+  Maintenance, Retention with the activity log's rules: the installation caps each organisation, 0 means "never"
+  only where the installation allows it, and a figure above the cap is refused with the reason, never lowered.
+  The nightly clear-out empties ONLY the address and keeps every record, in seven places: password-reset
+  requests, trusted devices, prayer requests, an access key's last-used address, live-chat messages, public-form
+  answers and recording plays. It changes no other column (two tables restamp a "last seen" date on every update;
+  the clear-out writes those back to themselves, and a test fails when a place's table has one it does not hold).
+- **Kept for ever, said plainly (D-187, D-189).** The network address on a change-history entry stays with the entry
+  (D-116 holds), and a Gift Aid declaration's address stays with the declaration until its keep-until date. Both
+  privacy pages say so. Nothing yet empties a living member's declaration address (#1077), and two rate-limit
+  tables have no set period (#1078); the privacy pages say "no time limit is set yet" for those.
+- **An erasure empties more (#938, #1065).** A person's own asset-change addresses and their label-scan address and
+  browser are emptied at every organisation (`GdprEraser::ACTOR_OWN_REQUEST_COLUMNS`, pinned exactly).
+- **Recording plays** now store a salted fingerprint of the address, not an unsalted hash of the raw one.
+- **Privacy pages and a hard gate.** Both privacy pages print each place's period from the personal-data catalogue;
+  `check_network_address_periods.py` fails when an address column has no sentence, and its pending list fails both ways.
+- **Checked:** network-address-retention 22, activity-log-retention 108, erasure-pages 271, gdpr-eraser 318,
+  gdpr-coverage, retention-caps, settings-locks 250, scheduled-jobs 255 and every audit script green on MySQL
+  8.0.36; five rounds of independent check (retention, erasure, personal data), the last clean. **Not run:**
+  MySQL 8.4, MariaDB, the end-to-end migration harness, two saves at once. Codex has not reviewed this.
+
 ### A first Microsoft or Google sign-in may be refused by a setting; the Users page says only what is known (#1042, #1049; D-185)
 
 - **New accounts by sign-in are a setting (#1042).** Whether a Microsoft or Google sign-in that matches no
@@ -419,8 +442,8 @@
   session details emptied; an approval e-mail still waiting is deleted; in the record of one already sent (including
   one recorded under no organisation) the address is replaced with "[erased]" and any error message emptied, the record
   itself kept.
-- A request sent without an e-mail address cannot be found by any erasure, and nothing deletes a prayer request, so its
-  network address is kept with no end date until #1019 sets a keeping period (D-178).
+- A request sent without an e-mail address cannot be found by any erasure, and nothing deletes a prayer request, but its
+  network address is emptied by the nightly clear-out after the organisation's network-address period (#1019, D-188).
 - New hard gate `tools/audit-checks/check_activity_naming_nobody.py` names every caller of the method and fails both
   ways. Tests: section N of `tools/erasure-pages-selftest.php` (the member-facing sentences pinned as rendered; the
   four records a run writes read back whole), `activity-log`, `gdpr-eraser`, `gdpr-coverage`.
