@@ -4,6 +4,26 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An unusable map position is refused with the reason; the Settings row rule's SQL is tested (#1030, #1048)
+
+- **Eight forms refuse an unusable position (#1030).** Asset locations, venues, resources, events, a
+  date's own details, a member's directory entry, a small group and a host's home used to save
+  without a position they could not use, say "saved", and — on an edit — wipe the position already
+  stored. They now refuse with the reason and write nothing. One shared judge, `GeoLocation::typedPositionProblem()`,
+  decides why; `positionRefusal()` builds the sentence. The organisation page keeps its own behaviour (#945).
+- **Two pages now print their message.** Per-occurrence overrides and "My directory profile" printed none,
+  so their what3words refusal was invisible too.
+- **A refused venue leaves nothing behind.** The venue page used to create a new landlord before its
+  refusals, so every refused save added one. Every refusal now comes before the first write, and a test
+  counts rows in every table on a refused post for all 14 sections.
+- **The row rule's SQL is tested (#1048).** `settings-row-rule-sql-selftest.php` runs the real
+  `nameRuleSql()` on a real database, and R8 in `settings-locks-selftest.php` drives the real save through a
+  race to prove the rule is applied in the save's own UPDATE.
+- **Checked:** `position-refusal-selftest` 94, `settings-row-rule-sql-selftest` 45, `settings-locks-selftest`
+  239, time-zones 327, geocoder 90, access-pages 554, every audit script green, MySQL 8.0.36. Two rounds of
+  independent check (writes stored data; the last clean). **Not run:** MySQL 8.4, MariaDB, a real browser or
+  look-up service. Codex has not reviewed this. Open: #1072, #1074 and the issues raised from round 2.
+
 ### Page headers wrap on a phone (#848)
 
 - **One shared rule.** A page header (the row holding a title and its buttons) is a flex row, and a flex
