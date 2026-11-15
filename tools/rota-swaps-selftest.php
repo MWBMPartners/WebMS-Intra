@@ -2023,6 +2023,52 @@ $scnDayRace = static function () use ($newSlot, $ageOut, $child, $copyCore, $sit
 };
 
 
+/**
+ * Round 3 of the independent check: no member-facing text on the swap page
+ * promises an e-mail (D-141; the page's own header). The page is rendered in
+ * each state a member meets — plenty left, one left, an open request already
+ * waiting, the day's limit reached, a refused post — and its visible text is
+ * searched for a promise of delivery. The "how many left" paragraph is also
+ * pinned word for word, singular and plural.
+ */
+$scnNoPromise = static function () use ($newSlot, $ask, $ageOut, $limitsBack, $A, $B): array {
+    $limitsBack();
+    $ageOut('asker');
+    $text = static fn (string $html): string => trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags((string) preg_replace('#<(script|style)\b.*?</\1>#s', '', $html)), ENT_QUOTES, 'UTF-8')));
+    $pages = [];
+    $pages['ten left'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $openSlot = $newSlot($A);
+    $ask('asker', $openSlot, 0, 'Open, to fill the duty', true);
+    $pages['open waiting'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $openSlot['id'])['body']);
+    for ($i = 0; $i < 8; $i++) {
+        $ask('asker', $newSlot($A), $B, 'Filling the day ' . $i, true);
+    }
+    $pages['one left'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $ask('asker', $newSlot($A), $B, 'The tenth', true);
+    $pages['day full'] = $text(http('asker', 'GET', '/rota/swap?slot=' . $newSlot($A)['id'])['body']);
+    $pages['refused post'] = $text($ask('asker', $newSlot($A), $B, 'The eleventh', true)['body']);
+    $ageOut('asker');
+    $limitsBack();
+    // A promise of delivery: "is/are/will be e-mailed|emailed|notified|sent",
+    // "goes to every member", "they will receive". The page's own honest
+    // sentence ("whether or not anybody is e-mailed") is the one allowed form.
+    $promises = [];
+    foreach ($pages as $state => $words) {
+        $scan = str_replace('whether or not anybody is e-mailed', '', $words);
+        if (preg_match('/\b(is|are|will be|gets?|get) (e-?mailed|notified|sent an e-?mail)\b|goes to every member|will receive/i', $scan, $m) === 1) {
+            $promises[] = $state . ': "' . $m[0] . '"';
+        }
+    }
+    $tail = ' Each request counts towards this, whether or not anybody is e-mailed about it.';
+
+    return [
+        'none'   => $promises === [] && count($pages) === 5,
+        'words'  => str_contains($pages['ten left'], 'You can make 10 more swap requests today.' . $tail)
+            && str_contains($pages['one left'], 'You can make 1 more swap request today.' . $tail),
+        'detail' => $promises === [] ? 'no promise found' : implode('; ', $promises),
+    ];
+};
+
 // =============================================================================
 section('A  asking');
 // =============================================================================
@@ -2378,6 +2424,10 @@ $dr = $scnDayRace();
 check('S34 (the premise) two posts for two DIFFERENT duties at 9 of 10 today: the second WAITED for the asker\'s row while the first was inside its insert', $dr['premise'], $dr['detail']);
 check('S35 …and exactly ONE request was made; the other was refused by the day\'s limit, counting 10 made of 10', $dr['oneMade'], $dr['detail']);
 
+$np = $scnNoPromise();
+check('S36 the swap page, rendered as a member meets it (10 left, 1 left, an open request waiting, the day full, a refused post), promises nobody an e-mail', $np['none'], $np['detail']);
+check('S37 …and says how many are left, and that each counts whether or not anybody is e-mailed, word for word, plural and singular', $np['words'], $np['detail']);
+
 // =============================================================================
 section('P  the plants: each fault must turn its check red');
 // =============================================================================
@@ -2617,6 +2667,10 @@ $plants  = [
     'P55 the typed words put back in the form WITHOUT escaping' => ['_apps/rota/swap.php',
         ["placeholder=\"Reason / details…\"><?php echo htmlspecialchars(\$keptMessage, ENT_QUOTES, 'UTF-8'); ?>", "placeholder=\"Reason / details…\"><?php echo \$keptMessage; ?>"],
         static fn (): bool => $scnOpenPerDuty()['formKeeps'],
+    ],
+    'P56 the "how many left" sentence back to promising an e-mail (round 3\'s finding)' => ['_apps/rota/swap.php',
+        ['today. Each request counts towards this, whether or not anybody is e-mailed about it.</p>', 'today. Each one is e-mailed, and an open request goes to every member who has these e-mails switched on.</p>'],
+        static fn (): bool => $scnNoPromise()['none'],
     ],
 ];
 foreach ($plants as $name => [$file, $edits, $guard]) {

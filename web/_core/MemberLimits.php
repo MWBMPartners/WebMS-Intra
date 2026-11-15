@@ -76,7 +76,7 @@ final class MemberLimits
                 'money'   => false,
                 'min'     => 1,
                 'label'   => 'Open swap requests waiting for one duty',
-                'help'    => 'An open request is e-mailed to every member who has rota swap e-mails switched on, so this stops one duty being offered to everybody again and again.',
+                'help'    => 'An open request is offered to every member, and an e-mail is attempted to each one who has rota swap e-mails switched on, so this stops one duty being offered to everybody again and again.',
                 'inForce' => $rota['openPerDuty'],
             ],
             'per-day' => [

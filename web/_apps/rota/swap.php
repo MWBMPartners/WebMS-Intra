@@ -245,7 +245,11 @@ $csrf = Auth::csrfToken();
         <?php else: ?>
         <p class="small text-muted">The person you ask sees the request on their Duty Roster page and can accept or decline it there. Your request does not move the duty unless somebody accepts.</p>
         <?php if ($leftToday !== null): ?>
-            <p class="small text-muted" data-rota-swap-left="<?php echo (int) $leftToday; ?>">You can make <?php echo (int) $leftToday; ?> more swap request<?php echo $leftToday === 1 ? '' : 's'; ?> today. Each one is e-mailed, and an open request goes to every member who has these e-mails switched on.</p>
+            <?php /* Says only what is known (round 3 of the independent check): it used
+                     to say "Each one is e-mailed", which is untrue when the person asked
+                     has these e-mails off, has no usable address, or the mail route fails
+                     (RotaSwaps::whyNotTold()). No page promises an e-mail (D-141). */ ?>
+            <p class="small text-muted" data-rota-swap-left="<?php echo (int) $leftToday; ?>">You can make <?php echo (int) $leftToday; ?> more swap request<?php echo $leftToday === 1 ? '' : 's'; ?> today. Each request counts towards this, whether or not anybody is e-mailed about it.</p>
         <?php endif; ?>
         <?php if ($openFull === true && $allowOpenSwap === true && $flashLimit !== RotaSwaps::OVER_OPEN_PER_DUTY): ?>
             <p class="small" data-rota-swap-limit="open-per-duty"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_OPEN_PER_DUTY, $limits['openPerDuty'], $limitFacts['openWaiting'], true), ENT_QUOTES, 'UTF-8'); ?></p>
