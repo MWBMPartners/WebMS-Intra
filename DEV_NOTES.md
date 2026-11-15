@@ -23987,7 +23987,7 @@ methods on 12 November 2026 — count them from the test, not from here).
   in `tblUsers`; it became false the moment the page told administrators to use
   this request for members too. Nothing deletes a prayer request (no DELETE of
   `tblPrayerRequests` under `web/`), so a network address on one with no e-mail
-  address is kept with no end date until #1019 (D-178).
+  address is emptied by the nightly clear-out after the organisation's network-address period (#1019, D-188).
 
 ## A partial update reads the fields it was not sent under the lock (#1001)
 
@@ -24510,3 +24510,18 @@ over HTTP; S the source rules; Z the tidy-up.
   counters just as surely.
 - The carry was chosen over the issue's other option (only saying it on the Backup page): it is about
   130 lines in one class, no schema change.
+
+
+### Network addresses: a keeping period for every place that can have one (#1019; D-178, D-187, D-188, D-189)
+
+- `NetworkAddressRetention::PLACES` lists the seven swept places; each names the ON UPDATE columns of its table in
+  `hold` and `address_sweep()` writes them back to themselves (`col = col`), or the database restamps them
+  (measured: a trusted device "last seen" in August read as seen on the night of the clear-out). Scenario F of
+  `network-address-retention-selftest.php` reads `information_schema` and fails when a place's table has one it does not hold.
+- The test compares every row of every reachable table WHOLE (minus the address) before and after, with nullable
+  columns FILLED and restamped columns set to 2020 first; otherwise a restamp in the same second, or emptying an
+  already-empty column, compares equal, which is how a whole-row check passes on broken code.
+- A page test that renders only the DEFAULT state cannot tell two settings apart when both default to the same figure
+  (network addresses, the activity log and map answers all default to 365): section Q of `erasure-pages-selftest.php`
+  now sets 200 and 45 and drives each reachable state; "could not be read" is not reachable over HTTP and is asked of the class.
+- Nothing empties a living member's Gift Aid declaration address (only `GdprEraser` writes NULL into it, after an erasure): #1077.

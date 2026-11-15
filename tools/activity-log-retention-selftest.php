@@ -107,7 +107,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 103; // 73 + 21 in section Q and 9 plants PG1-PG9 (#1037)
+const AL_EXPECTED_CHECKS = 108; // 73, + section N's five (#1019 round 2), + 21 in section Q and 9 plants PG1-PG9 (#1037)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -932,6 +932,41 @@ $swept = $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($page()['body'])]);
 check('J2 a post with NO action is still the sweep, as it always was: the 400-day-old row is gone',
     [$swept['status'], (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = {$old}")->fetch_assoc()['n'] ?? 0)], [200, 0]);
 
+echo "N. The same page saves how long network addresses are kept (#1019)\n";
+// The handler is shared with the activity log's forms; these drive the
+// network-address forms through it, and read every result from the database.
+$signIn('globaladmin');
+$put('privacy.networkAddressDays', null, '30');
+$put('privacy.networkAddressDays', $siteOne, null);
+$n1 = $save(['action' => 'address-retention-organisation', 'choice' => 'days', 'days' => '10']);
+check('N1 an organisation\'s own 10 days for network addresses is stored, and the activity log\'s own figure is untouched',
+    [$setting('privacy.networkAddressDays', $siteOne), $setting(AL_KEY, $siteOne), str_contains($n1['page'], 'data-network-address-in-force="10"')],
+    ['10', null, true]);
+$beforeRefused = $activityCount('NetworkAddressRetentionRefused');
+$n2 = $save(['action' => 'address-retention-organisation', 'choice' => 'never']);
+check('N2 ...its "Keep for ever" under an installation of 30 days is REFUSED in its own words, nothing changes, and the refusal is recorded',
+    [$setting('privacy.networkAddressDays', $siteOne), str_contains($n2['flash']['text'], '"Keep for ever" for network addresses'),
+        $activityCount('NetworkAddressRetentionRefused')], ['10', true, $beforeRefused + 1]);
+$save(['action' => 'address-retention-installation', 'choice' => 'never']);
+$n3 = $save(['action' => 'address-retention-installation', 'choice' => 'days', 'days' => '5']);
+check('N3 the installation\'s "Keep for ever" is saved, and lowering it to 5 days beneath the organisation\'s 10 is refused, naming it (D-119)',
+    [$setting('privacy.networkAddressDays', null), str_contains($n3['flash']['text'], $siteOneName)], ['0', true]);
+$signIn('orgadmin');
+$o = $page();
+$token = $tokenOn($o['body']);
+$beforeRefused = $activityCount('NetworkAddressRetentionRefused');
+$n4 = $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'address-retention-installation', 'choice' => 'days', 'days' => '1']);
+check('N4 an organisation\'s administrator gets its own network-address form and not the installation\'s; posting that one is refused (403), recorded, and stores nothing',
+    [str_contains($o['body'], 'value="address-retention-organisation"'), str_contains($o['body'], 'value="address-retention-installation"'),
+        $n4['status'], $activityCount('NetworkAddressRetentionRefused'), $setting('privacy.networkAddressDays', null)],
+    [true, false, 403, $beforeRefused + 1, '0']);
+$n5 = $save(['action' => 'address-retention-organisation', 'choice' => 'follow']);
+check('N5 ...and may set its own organisation back to following the installation',
+    [$setting('privacy.networkAddressDays', $siteOne), $n5['flash']['type']], [null, 'success']);
+$signIn('globaladmin');
+$put('privacy.networkAddressDays', null, '365');
+$put('privacy.networkAddressDays', $siteOne, null);
+
 echo "K. The error log is untouched\n";
 check('K1 (scenario) its stored 0 still reads as a year on the page, and the real job deletes a 400-day-old error row and keeps a 300-day-old one',
     $scnErrorsYear(), true);
@@ -1183,10 +1218,12 @@ $plant = static function (string $relPath, string $from, string $to, callable $s
     return ['applied' => true, 'result' => $result];
 };
 
-$p1 = $plant('_core/ActivityLogRetention.php', '$reason = self::whyNotAllowedForSite($days, $installationStored);',
+// #1019 round 2: the rules moved into RetentionPeriod, which both the activity
+// log and network addresses extend, so P1, P2 and P9 plant THAT file.
+$p1 = $plant('_core/RetentionPeriod.php', '$reason = self::whyNotAllowedForSite($days, $installationStored);',
     '$reason = $days === self::NEVER ? \'\' : self::whyNotAllowedForSite($days, $installationStored);', $scnRefuseNever);
 check('P1 with an organisation\'s never let through under a number of days, the refusal scenario goes red', [$p1['applied'], $p1['result']], [true, false]);
-$p2 = $plant('_core/ActivityLogRetention.php', "            return self::NEVER;\n        }\n\n        return SettingLimit::installationAllows(",
+$p2 = $plant('_core/RetentionPeriod.php', "            return self::NEVER;\n        }\n\n        return SettingLimit::installationAllows(",
     "            return self::HARD_MAX_DAYS;\n        }\n\n        return SettingLimit::installationAllows(", $scnInstallNever);
 check('P2 with never clamped to 3650, the installation\'s never no longer reads as never', [$p2['applied'], $p2['result']], [true, false]);
 $p3 = $plant('_apps/cron/_retention-sweep.php', '$orphanDays === LOG_RETENTION_NEVER ? false : $db->prepare(', '$db->prepare(', $scnJobKeeps);
@@ -1202,13 +1239,15 @@ check('P6 with an unknown action let fall through to the sweep, the unknown-acti
 $p7 = $plant('_apps/admin/maintenance/retention.php', "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1 || (int) \$alrRaw < 1) {",
     "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1) {", $scnZeroNumber);
 check('P7 with 0 typed as a number accepted, the installation stores 0 and the zero-number scenario goes red', [$p7['applied'], $p7['result']], [true, false]);
-$p9 = $plant('_core/ActivityLogRetention.php', 'if ($above !== []) {', 'if (false) {', $scnLoweringRefused);
+$p9 = $plant('_core/RetentionPeriod.php', 'if ($above !== []) {', 'if (false) {', $scnLoweringRefused);
 check('P9 with D-119\'s refusal taken out, the installation is lowered beneath an organisation\'s never', [$p9['applied'], $p9['result']], [true, false]);
-$p10 = $plant('_apps/admin/maintenance/retention.php', "|| (\$postedAction === 'activity-retention-installation' && \$isGlobalAdmin === true))",
-    "|| \$postedAction === 'activity-retention-installation')", $scnOrgAdminNoInstallation);
+// #1019 round 2: the handler now serves the network-address forms too, through
+// `$retentionForms`; the gate is the same condition, written for both.
+$p10 = $plant('_apps/admin/maintenance/retention.php', "(\$retentionForms[\$postedAction][1] === true || \$isGlobalAdmin === true)",
+    "true", $scnOrgAdminNoInstallation);
 check('P10 with the page letting an organisation\'s administrator into the installation\'s save, it is no longer refused with a 403', [$p10['applied'], $p10['result']], [true, false]);
-$p11 = $plant('_apps/admin/maintenance/retention.php', 'ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isAdmin())',
-    'ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isRootAdmin())', $scnOrgAdminSaves);
+$p11 = $plant('_apps/admin/maintenance/retention.php', '$alrClass::saveForSite($mysqli, $alrSiteId, $alrDays, App::isAdmin())',
+    '$alrClass::saveForSite($mysqli, $alrSiteId, $alrDays, App::isRootAdmin())', $scnOrgAdminSaves);
 check('P11 with D-118 undone (global administrators only), the organisation\'s administrator cannot save their own figure', [$p11['applied'], $p11['result']], [true, false]);
 $p12 = $plant('_apps/admin/maintenance/retention.php', 'if ($isGlobalAdmin === false) {', 'if (false) {', $scnOrgAdminNoSweep);
 check('P12 with the global-administrator gate taken out, an organisation\'s administrator runs the sweep', [$p12['applied'], $p12['result']], [true, false]);
