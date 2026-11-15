@@ -7,7 +7,7 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed and closed since 12 November: #1004, #1003, #880,
 #1021, #1031, #824, #865, #1028, #1025, #1024, #1043, #1040, #1013, #999, #820, #967, #991, #815, #866, #1039,
-#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4), #1051 + #1050 + #1053 (landed with its docs), #848, #1030 + #1048, #1037 + #1036 + #1029, #1042 + #1049 (migration 294), #1019 + #938 + #1065 (migration 295), #989 + #992 (migration 298), #847 + #965 + #952 (and everything listed in earlier handoffs).
+#982 (+ #985), #922, #926, #973, #1045, #1047, #1041, #954 + #801 (migration 292), #1018 + #813 + #970 + #1015 (landed 870592b4), #1051 + #1050 + #1053 (landed with its docs), #848, #1030 + #1048, #1037 + #1036 + #1029, #1042 + #1049 (migration 294), #1019 + #938 + #1065 (migration 295), #989 + #992 (migration 298), #847 + #965 + #952, #863 + #910 + #930 (migration 296) (and everything listed in earlier handoffs).
 Decisions recorded 12-13 November: D-180 to D-185 (D-181 event years 1900-2200+; D-182 map-memory period is a capped
 setting; D-183 a home's remembered position is personal data, homes vs public places chosen; D-184 care cases in the
 data copy; D-185 Microsoft/Google sign-in may create accounts by setting, default allow, plus a merge feature #1064 —

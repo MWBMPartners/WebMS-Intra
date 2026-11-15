@@ -2362,3 +2362,11 @@ reads as reassurance. Run the loop above — it takes seconds.
   approved (D-169)."
 - Public website: "A series' website window is one fixed pair of dates for every date, judged against today
   (D-159; per-date window is #1016)."
+---------------------------------------------------------------------------
+- API page: the publisher's "Website" link comes from `product.publisherUrl`
+  (asked by the installer, optional; no link when empty or unusable).
+- Language switch (`?lang=`): returns to the same page, its query kept, after
+  the address is judged like every other "come back to" address.
+- Attendance API: members get no `updatedAt` on sessions (D-162).
+
+---------------------------------------------------------------------------

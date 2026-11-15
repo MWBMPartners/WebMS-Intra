@@ -4,6 +4,57 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The API description's publisher link, attendance timestamps, and the language switch's return address (#863, #930, #910; D-160, D-161, D-162)
+
+---------------------------------------------------------------------------
+
+### Changed
+- **The API page's "Website" link follows a setting (#863, D-160).** The page
+  that documents the API (`/api-docs`, from `/openapi.json`) showed the
+  publisher's name with a link to the product's own source repository, whoever
+  the publisher was. The link now comes from a new installation-wide setting,
+  `product.publisherUrl`. The installer asks for it (optional) on its Web
+  addresses page, and a global administrator can change it in Admin, Settings.
+  When it is empty, or not a usable http(s) website address, no link is shown.
+  Migration 296 seeds the row empty, so an upgraded installation shows the
+  name with no link until somebody sets one.
+
+### Fixed
+- **The language switch's return address goes through the one judge (#910,
+  D-161).** `?lang=xx` sent the browser back to the request's own address
+  unchecked; a non-browser client sending `/\elsewhere.example?lang=cy` was
+  answered `Location: /\elsewhere.example`. The whole return address, query
+  included, is now judged by `Auth::safeRedirectUrl()`.
+- **The redirect judge no longer refuses ordinary addresses (#910, D-161).**
+  It refused any letters-and-colon anywhere, and any backslash or encoded
+  tab/line break anywhere, so `/calendar?from=2026-06-01T10:30` and
+  `/people?search=C%3A%5CUsers` were sent to the front page — from a sign-in
+  `redirect`, the checkout and asset-page come-backs, and the language switch.
+  It now judges only the part of an address that can send a browser
+  somewhere: a scheme only before the first `/`, `?` or `#`; backslashes,
+  encoded control characters, dot parts and the organisation only in the
+  path.
+- **Holes in the judge found while doing that, all fixed:** dot parts behind
+  an encoded `?`/`#` (`/north/x%3F/%2e%2e/%2e%2e/south/p` walked into another
+  organisation; older than #910); a trailing space, which a browser trims
+  (`/north/.. `); a path the server cannot read (`/north/a:0` — answered as
+  the default organisation); an address beginning with an encoded `/`
+  (`%2Fx/a:0`, which a browser reads as relative). None of them left the site;
+  each could put somebody in the wrong organisation or on the wrong page.
+- **Members no longer see when an attendance session was last changed
+  (#930, D-162).** `api/attendance/list` leaves `updatedAt` out for a
+  signed-in caller who is not an administrator and does not hold "See the
+  attendance totals", as `updatedByID` already was. No page showed the time.
+
+---------------------------------------------------------------------------
+
+- **Checked:** come-back-addresses 304, site-addresses 128, page-head 61, access-pages 554, two-step 193,
+  sign-in-limits 178, installer 162, channel 220, site-modes 136, portal-address 93 and every audit script green on
+  MySQL 8.0.36. Six rounds of independent check on the redirect judge (authentication): differential fuzzes of
+  millions of addresses against the judge before #910, read as a browser reads them and as the server reads them,
+  found nothing that leaves the site or the organisation; the last round found only a test and comments, closed
+  under D-064. **Not run:** a real browser or Apache, MariaDB, MySQL 8.4. Codex has not reviewed this.
+
 ### Events: a series' website window is said truly; a suggestion can't be published unapproved; a host who leaves takes their home off the group (#847, #965, #952; D-159, D-168, D-169)
 
 - **A repeating series' public-website window is said plainly, and truly, on the form (#847, D-159).** The

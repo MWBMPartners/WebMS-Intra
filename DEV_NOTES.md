@@ -24591,3 +24591,116 @@ over HTTP; S the source rules; Z the tidy-up.
   26 plants; a plant that cannot find its text stops the run as a failure; section F creates and drops a
   trigger, so it needs CREATE TRIGGER). Wired into `portal-selftests.yml` as `selftest_seriessuggest` and
   `tools/run-all-selftests.sh`.
+
+
+### Publisher link, attendance list timestamps, the language switch's return address (#863, #930, #910)
+
+---------------------------------------------------------------------------
+
+### `Portal\Core\PublisherWebsite` (#863)
+- The ONE judge of the publisher's website address: `check()` when typed
+  (the installer), `usable()` on every read (`openapi.php`), because the
+  general settings editor can store any text. `openapi.php` also removes any
+  `info.contact.url` the file might carry, so a built-in address never reaches
+  a developer's page. Loads standalone (the installer requires it by hand).
+- The host name is judged by `PortalAddress::check()` (one rule for a host
+  name); this class adds the part after it (a path, query or fragment is
+  allowed here) and two rules of its own, both on the host AS TIDIED by
+  PortalAddress (which drops a closing dot):
+  - a bare name typed without `http(s)://` must hold a dot — otherwise
+    `javascript:1` is read as host "javascript", port 1 (`localhost:8080`
+    needs its `http://`; `example.org.` is accepted as `example.org`);
+  - a host whose last part is a number, the browser's way (all digits, or
+    `0x` + hex digits), is refused unless it is a whole dotted IPv4 address:
+    `x.1`, `example.123`, `0x7f.0x0.0x0.0x1`, `https://0x7f000001`,
+    `https://2130706433` refused; `192.0.2.10`, `0xample.org`, `x.io` pass.
+- Not changed: `info.license.url` in `api-spec.json` still points at the
+  product's source repository (D-160 is about the contact link only).
+
+### `Auth::safeRedirectUrl()` after #910 — what it reads, and why
+- **The address as sent must begin with `/`** (not only once decoded): a
+  browser reads `%2Fx/a:0` as relative. This one rule also keeps every scheme
+  out (a scheme stands before the first `/`), and refuses a raw tab, line
+  break or space in front. There is no separate scheme test any more; the old
+  "letters and a colon anywhere" test refused times in queries.
+- `//` once decoded is refused (another host).
+- **The path** is the address as sent up to its first RAW `?` or `#` (`%3F`
+  does not end a path to a browser), then decoded. Backslashes, decoded
+  control characters, dot parts and the organisation are judged on it — the
+  decoded path is never cut again at a decoded `?` or `#`.
+- A RAW control character (including DEL) is refused anywhere in the address;
+  so is a space at the very end (a browser trims it).
+- **A path the server cannot read is refused**: see `Site::pathOfRequest()`
+  below. Asked of the address as a browser sends it (no fragment:
+  `/north/a:0#x` is sent as `/north/a:0`). `/north/a:0?` and
+  `/north/account:0?y=1` are accepted, because a browser sends the `?` (an
+  empty query is still a query) and the server can then read the path.
+  Refused in every set-up, one organisation included (it would be answered as
+  the front page); no route key holds a colon.
+- The organisation rule reads both forms of the path. The AS-SENT form is the
+  one that matters (the server reads the raw first part); the decoded form
+  only ever refuses more (from the default organisation `/%73outh/x` is looked
+  up as "south" and refused, although the server would stay in the default
+  organisation) — harmless, kept on purpose, pinned.
+- Removed as unable to fire, each measured: the `parse_url()` host test's
+  HOST half (but see the lesson below), the dot test on the path as sent
+  (decoding leaves every raw `.` and `/` in place), and the decoded half of
+  the leading-`/` test (once the raw address begins with `/`, so does the
+  decoded one). Kept as a deliberate second line no test can distinguish: the
+  dot test inside `staysInThisOrganisation()` (it protects the helper's own
+  answer if it is ever called first).
+- **Lesson worth keeping (round 3 → round 5):** a `parse_url()` test was
+  removed as dead because it "could never find a host" — true of hosts, and
+  the measurement behind it was about leaving the SITE. It was also the only
+  thing refusing paths the server cannot read, which leave the ORGANISATION.
+  A guard can be dead for the question you measured and live for another.
+
+### `Site::pathOfRequest()` and the routing change (#910)
+- The rule for reading a path out of a request address (`parse_url()`, null
+  when it fails), shared by the three readers that decide where something
+  lands: `Site::detectFromPath()` (which organisation), `Router::extractPath()`
+  (which page) and `Auth::safeRedirectUrl()` (the judge). Both server readers
+  use `/` when it answers null, exactly as before (the check found them
+  identical to the old code for every string input; only non-string input
+  differs, and now fails safe).
+- Deliberately separate path readers: the `?lang=` block in
+  `web/public_html/index.php` (it rebuilds the address, then hands it to the
+  judge), `Auth::oldServiceWorkerWouldStore()`, and the public door's own
+  reader in `Site.php` (which must not use `parse_url()`).
+- Section G of `tools/come-back-addresses-selftest.php` pins the three on
+  PHP tokens (a real `Site::pathOfRequest()` call; no `parse_url` in any
+  spelling, string callable or `use function` alias).
+
+### How it was measured (scripts in the scratch folder, not committed)
+- A differential run against the judge before #910 (`722fc87a`), about 1.4
+  million addresses in each of two set-ups (one organisation; organisations
+  told apart by the first part, the request inside "north"). Every accepted
+  value was resolved as a browser would (node's WHATWG `URL`) and read two
+  ways: as text, and the server's way (PHP `parse_url()` on what the browser
+  sends). Final judge: 0 leave the site, 0 leave the organisation either way,
+  0 the server cannot read. Everything newly refused is one of: no raw `/`
+  first, a trailing space, dots behind an encoded `?`/`#`, or a path the
+  server cannot read. The default organisation of a multi-organisation set-up
+  was not fuzzed separately (it differs only by a database look-up that can
+  only refuse more); it is covered over HTTP by site-addresses S32b.
+- An oracle mistake worth knowing: building "what the browser sends" as
+  `pathname + search` drops an EMPTY query's `?`, which a browser does send,
+  and reported 19 leaks that do not exist. Use the href after the origin,
+  without the fragment.
+- CORRECTION carried from round 4: the round-3 commit (`523f1a4f`) said
+  cutting the organisation rule's decoded form again "cannot be told apart by
+  any test". Untrue — it refuses more; harmless; not dead code.
+
+### Attendance (#930)
+- `api/attendance/list` unsets `updatedAt` for limited callers on every
+  session, not only past ones, the same way `updatedByID` is: nearly every
+  session is a past one, and telling past from future would mean judging
+  "today" on the organisation's clock for one field. `createdAt` stays.
+
+### Tests touched
+- `tools/come-back-addresses-selftest.php` (hostile lists in every loop; A08–
+  A11, B05, C05–C07, F01–F11, section G), `tools/site-addresses-selftest.php`
+  (S16b, S17b, S26b–S26m, S27b–S27e, S32b, N10b), `tools/page-head-selftest.php`
+  (H06–H13), `tools/installer-selftest.php` (P01–P03),
+  `tools/access-pages-selftest.php` (Q26, Q26b). Counts are pinned in each
+  file; read them there.
