@@ -171,6 +171,21 @@ final class GeocodeCacheRetention
      */
     public static function periodInForce(\mysqli $db): int
     {
+        return self::periodFacts($db)['days'];
+    }
+
+    /**
+     * 🧹 The period in force AND where it comes from: `byOrganisation` is true
+     *    only when some organisation's own figure is SHORTER than the
+     *    installation's, so the words can say truly whose period it is.
+     *    #1037 round 3: the words said "the shortest period any organisation
+     *    has chosen" even when nobody had chosen one and the figure shown was
+     *    the installation's. Throws as periodInForce() does.
+     *
+     * @return array{days: int, byOrganisation: bool}
+     */
+    public static function periodFacts(\mysqli $db): array
+    {
         self::needSettingLimit();
 
         // 🔄 Read FRESH from the database, every row of the key at once, never
@@ -201,14 +216,15 @@ final class GeocodeCacheRetention
         }
         $stmt->close();
 
-        $shortest = self::installationDaysFromStored($installationStored);
+        $installation = self::installationDaysFromStored($installationStored);
+        $shortest     = $installation;
         foreach ($own as $figure) {
             // Each organisation's own figure is held to the installation's
             // (the minimum does that by itself) and so to the hard maximum.
             $shortest = min($shortest, $figure);
         }
 
-        return $shortest;
+        return ['days' => $shortest, 'byOrganisation' => $shortest < $installation];
     }
 
     /**
@@ -219,15 +235,22 @@ final class GeocodeCacheRetention
     public static function inForceWords(\mysqli $db): string
     {
         try {
-            $shortest = self::inWords(self::periodInForce($db));
+            $facts = self::periodFacts($db);
 
             return 'One remembered answer serves every organisation on this installation, so an answer is deleted '
-                . 'once it has not been used for the shortest period any organisation has chosen, which is now '
-                . $shortest . ', and only if the nightly clear-out job has been set up.';
+                . 'once it has not been used for '
+                . ($facts['byOrganisation'] === true
+                    ? 'the shortest period any organisation has chosen, which is now ' . self::inWords($facts['days'])
+                    : 'the period set for the whole installation, which is now ' . self::inWords($facts['days'])
+                        . ' (no organisation has chosen a shorter one)')
+                . ', and only if the nightly clear-out job has been set up.';
         } catch (\Throwable $e) {
+            // Neither "an organisation's" nor "the installation's": which one is
+            // in force is exactly what could not be read (#1037 round 3).
             return 'One remembered answer serves every organisation on this installation, so an answer is deleted '
-                . 'once it has not been used for the shortest period any organisation has chosen, and only if the '
-                . 'nightly clear-out job has been set up. The period now in force could not be read just now.';
+                . 'once it has not been used for the shortest period in force anywhere on it (the installation\'s '
+                . 'own, or a shorter one an organisation has chosen), and only if the nightly clear-out job has been '
+                . 'set up. The period now in force could not be read just now.';
         }
     }
 
@@ -241,10 +264,14 @@ final class GeocodeCacheRetention
     public static function privacyWords(\mysqli $db): string
     {
         try {
-            $period = 'once it has not been used for ' . self::inWords(self::periodInForce($db))
-                . ' (the shortest period any organisation on this portal has chosen)';
+            $facts  = self::periodFacts($db);
+            $period = 'once it has not been used for ' . self::inWords($facts['days'])
+                . ($facts['byOrganisation'] === true
+                    ? ' (the shortest period any organisation on this portal has chosen)'
+                    : ' (the period set for this whole portal; no organisation has chosen a shorter one)');
         } catch (\Throwable $e) {
-            $period = 'once it has not been used for the shortest period any organisation on this portal has chosen';
+            $period = 'once it has not been used for the period in force on this portal (which could not be read '
+                . 'just now)';
         }
 
         return 'When an address marked as somebody\'s home (for example a small group\'s host, or your own address '
@@ -253,7 +280,7 @@ final class GeocodeCacheRetention
             . 'kept with a scrambled form of the address, mixed with a secret key belonging to this installation, '
             . 'and not with the address itself, and it is deleted ' . $period . ', if the nightly clear-out has '
             . 'been set up. Nothing on it says whose home it is, so an erasure request cannot pick it out; the time '
-            . 'limit is what removes it. Positions of public places, such as venues, are not about anybody.';
+            . 'limit is what removes it. Positions of public places, such as venues, are treated as not about anybody.';
     }
 
     /**

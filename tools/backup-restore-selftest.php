@@ -5221,6 +5221,88 @@ register_shutdown_function(static function (): void {
     brs_removeFolder(Brs::$root);
 });
 
+/**
+ * 30 — a snapshot taken BEFORE migration 290 puts NO remembered map answer
+ * back (#1037 round 3, D-183).
+ *
+ * Before migration 290 a cache row had no `addressKind` and was keyed with a
+ * PLAIN SHA-256. Put back onto a database that has run 290, each such row
+ * would take the column's default, `home`, while keeping that plain key — a
+ * home row under an unsalted fingerprint, which D-183 rules out by name. The
+ * table is only a cache, so the restore leaves it EMPTY and says so, on a whole
+ * restore, on its rehearsal, and on a one-table restore. (The removed text
+ * columns are REMOVED_COLUMNS' business and are not what this proves.)
+ *
+ * It changes the shape of a table on the way, so it takes a snapshot of the
+ * starting state first and puts THAT back at the end, whatever happened.
+ */
+function brs_proof30(): void
+{
+    $backup = brs_backup('p30');
+    $start  = $backup->snapshot('proof 30, the starting state');
+    if (brs_check($start['success'] === true, 'the starting state is saved, to be put back at the end', brs_say($start)) === false) {
+        return;
+    }
+    $rows  = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblGeocodeCache')->fetch_row()[0];
+    $homes = static fn (): int => (int) Brs::$writer->query("SELECT COUNT(*) FROM tblGeocodeCache WHERE addressKind = 'home'")->fetch_row()[0];
+    $says  = static fn (array $r): bool => str_contains(json_encode($r, JSON_UNESCAPED_UNICODE) ?: '', 'taken before the portal recorded whether each address is somebody');
+
+    try {
+        // 1. The cache as it was before migration 290: no addressKind, the two
+        //    text columns, and two rows keyed the old, plain way.
+        brs_sql(
+            'DELETE FROM tblGeocodeCache',
+            'ALTER TABLE tblGeocodeCache DROP COLUMN addressKind',
+            "ALTER TABLE tblGeocodeCache ADD COLUMN queryText VARCHAR(500) NOT NULL DEFAULT '' AFTER direction",
+            'ALTER TABLE tblGeocodeCache ADD COLUMN formatted VARCHAR(500) DEFAULT NULL AFTER longitude',
+            "INSERT INTO tblGeocodeCache (queryHash, direction, queryText, latitude, longitude, formatted, provider) VALUES "
+            . "(SHA2('forward|[\"\",\"1 brs home lane\"]', 256), 'forward', '1 Brs Home Lane', 52.2053, 0.1218, '1 Brs Home Lane, Town', 'nominatim'), "
+            . "(SHA2('forward|[\"\",\"2 brs home lane\"]', 256), 'forward', '2 Brs Home Lane', 52.2054, 0.1219, NULL, 'nominatim')"
+        );
+        $older = $backup->snapshot('proof 30, before migration 290');
+        if (brs_check($older['success'] === true, 'a snapshot is taken of a cache that has not run migration 290 (two rows, no addressKind)', brs_say($older)) === false) {
+            return;
+        }
+
+        // 2. The upgrade, then a new answer remembered the new way.
+        brs_runMigration('290_geocode_cache_keeps_no_address.sql');
+        brs_sql("INSERT INTO tblGeocodeCache (queryHash, direction, latitude, longitude, provider, addressKind) VALUES (REPEAT('e', 64), 'forward', 1.5, 2.5, 'nominatim', 'public')");
+        brs_check($rows() === 1, 'migration 290 runs: the two old rows are gone and one new row is there', 'rows: ' . $rows());
+
+        // 3. The rehearsal says what a restore WOULD do, and changes nothing.
+        $rehearsed = $backup->restoreAll($older['directory'], true);
+        brs_check(
+            $rehearsed['success'] === true && $says($rehearsed) === true && str_contains(json_encode($rehearsed) ?: '', 'would be put back') && $rows() === 1,
+            'the rehearsal says none of the old snapshot\'s remembered map answers would be put back, and changes nothing',
+            brs_say($rehearsed) . '; rows: ' . $rows()
+        );
+
+        // 4. The whole restore: the cache is left EMPTY, and the answer says so.
+        $restored = $backup->restoreAll($older['directory'], false);
+        brs_check($restored['success'] === true, 'the snapshot taken before migration 290 is put back onto the database that has run it', brs_say($restored));
+        brs_check(
+            $rows() === 0 && $homes() === 0,
+            'THE POINT: none of its two rows is put back, so no row comes back marked a home under the old plain key (D-183)',
+            'rows: ' . $rows() . '; home rows: ' . $homes()
+        );
+        brs_check($says($restored) === true, '...and the restore\'s answer says so, and why (it is only a cache)', brs_say($restored));
+
+        // 5. One table on its own: the same.
+        brs_sql("INSERT INTO tblGeocodeCache (queryHash, direction, latitude, longitude, provider, addressKind) VALUES (REPEAT('f', 64), 'forward', 1.5, 2.5, 'nominatim', 'home')");
+        $one = $backup->restoreTable($older['directory'], 'tblGeocodeCache');
+        brs_check(
+            $one['success'] === true && $rows() === 0 && $says($one) === true,
+            'putting that one table back on its own leaves it empty too, and says so',
+            brs_say($one) . '; rows: ' . $rows()
+        );
+    } finally {
+        // Whatever happened: the table's shape as migration 290 leaves it, then the starting state.
+        brs_runMigration('290_geocode_cache_keeps_no_address.sql');
+        $back = $backup->restoreAll($start['directory'], false);
+        brs_check($back['success'] === true, 'the starting state is put back', brs_say($back));
+    }
+}
+
 $proofs = [
     1  => ['Imported calendar events with awkward raw bytes (#577)', 'brs_proof1', false],
     2  => ['Rows that point at rows of their own table (#578)', 'brs_proof2', false],
@@ -5246,6 +5328,7 @@ $proofs = [
     27 => ['Rows a restore cannot put back are kept, not lost (#694)', 'brs_proof27', false],
     28 => ['Rows waiting to be put back survive a restore (#697)', 'brs_proof28', false],
     29 => ['A snapshot says whether it was read at one moment in time, and whether anything is calling the scheduled job (#581)', 'brs_proof29', false],
+    30 => ['A snapshot taken before migration 290 puts no remembered map answer back (#1037, D-183)', 'brs_proof30', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],

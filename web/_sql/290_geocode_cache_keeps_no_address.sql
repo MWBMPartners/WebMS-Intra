@@ -95,7 +95,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 --    definition is restated word for word apart from the comment; a second
 --    run sets the same definition again and changes nothing.
 ALTER TABLE `tblGeocodeCache`
-    MODIFY COLUMN `queryHash` CHAR(64) NOT NULL COMMENT 'sha256(direction | lowercased query text). One-way: the address itself is not stored (#1037)';
+    MODIFY COLUMN `queryHash` CHAR(64) NOT NULL COMMENT 'Public place: sha256(direction | lowercased query text). Home: the same text fingerprinted with the installation''s secret key (AddressFingerprint). The address itself is not stored (#1037, D-183)';
 ALTER TABLE `tblGeocodeCache`
     COMMENT = 'Geocoder result cache — an address geocodes once (Nominatim policy); keeps no address text (migrations 180, 290)';
 

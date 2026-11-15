@@ -57,6 +57,10 @@
  *      is ticked, and the event form sends what its home/public pair says
  *      (home when nothing is chosen), each driven over HTTP (the venue
  *      form's public mark is D5)
+ *   Q  the privacy page and the privacy notice name the period really in
+ *      force for a home's remembered position: an organisation's shorter
+ *      figure as the shortest any organisation has chosen, and with none, the
+ *      installation's as the whole portal's (#1037 round 3)
  *   N  the cache keeps no address text (#1037): no column for it, no value
  *      in any row this run wrote holds any part of an address, and a forward
  *      answer carries no wording of the address
@@ -88,9 +92,10 @@
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
  *         PHP's curl extension and `proc_open()`. It REFUSES rather than
  *         skipping when anything is missing, because a skipped test reads
- *         exactly like a passing one. It changes three installation-wide
- *         settings (`geo.autoGeocode`, `geo.google.apiKey`,
- *         `geo.nominatim.lastCallAt`) and puts each back as it found it.
+ *         exactly like a passing one. It changes the installation-wide
+ *         settings named in `$settingKeys` below and puts each back as it
+ *         found it; section Q also writes one organisation's own
+ *         `geo.cache.retentionDays` row and deletes it again.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -166,8 +171,8 @@ if ($tables < 100) {
 // venues can be found and removed without touching anybody else's.
 const GT_MARK = 'Selftest1033';
 
-// ── The three settings it changes, read first so they can be put back ──────
-$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt', 'small-groups.enabled'];
+// ── The settings it changes, read first so they can be put back ────────────
+$settingKeys = ['geo.autoGeocode', 'geo.google.apiKey', 'geo.nominatim.lastCallAt', 'small-groups.enabled', 'geo.cache.retentionDays'];
 $settingsBefore = [];
 foreach ($settingKeys as $key) {
     $st = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
@@ -213,6 +218,9 @@ $tidyRows = static function () use ($db, $cacheIdBefore): void {
     $st->bind_param('s', $like);
     $st->execute();
     $st->close();
+    // Section Q's organisation figure (#1037 round 3). No organisation held
+    // one when this run started (the settings check refuses otherwise).
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'geo.cache.retentionDays' AND `siteID` IS NOT NULL");
     // Section O's events (#1037, D-183).
     $st = $db->prepare('DELETE FROM `tblEvents` WHERE `eventName` LIKE ?');
     $st->bind_param('s', $like);
@@ -327,7 +335,10 @@ file_put_contents(
         'db_port' => $dbPort,
     ], true) . ";\n"
 );
-file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
+// The installation's secret key for this run. Kept in a variable because
+// section O recomputes a HOME's cache key from it (#1037 round 3).
+$encKey = bin2hex(random_bytes(32));
+file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', $encKey);
 
 // The router imitates web/public_html/.htaccess, as the other page tests do.
 $router = <<<'ROUTER'
@@ -1058,8 +1069,16 @@ $stubReset();
 $homeO = $lookup($addrO, '', 'home');
 check('O1 a look-up marked as a HOME writes one row, marked home', [$stubCalls(), $kindsSince($markO)], [['nominatim'], ['home']]);
 $homeHash = $hashesSince($markO)[0] ?? '';
-check('O2 ...whose key is NOT the plain fingerprint of the address (it is mixed with the installation\'s secret), and no row has the plain key',
-    [$homeHash !== '' && $homeHash !== $portalKey($addrO, ''), $cacheRow($addrO)], [true, null]);
+// #1037 round 3: this used to ask only that the key DIFFERED from the plain
+// one, and an unkeyed sha256 of other text passed it. The expected key is now
+// rebuilt here from the enc.key this run wrote, exactly as
+// AddressFingerprint::of() makes it (sha256 of key | text), over the text
+// Geocoder::homeCacheKey() fingerprints. This IS a second copy of the rule
+// (#647's warning), kept on purpose: the property is "the installation's
+// secret is in it", and only a value made from that secret can show it.
+$homeText = 'geocode-home|forward|' . mb_strtolower(trim((string) (new ReflectionMethod(\Portal\Core\Geocoder::class, 'forwardKeyText'))->invoke(null, $addrO, null)));
+check('O2 ...whose key is EXACTLY the address fingerprinted with this installation\'s secret key, and no row has the plain key',
+    [$homeHash, $cacheRow($addrO)], [hash('sha256', $encKey . '|' . $homeText), null]);
 $stubReset();
 check('O3 the same home again is served from its row, and the stand-in is not asked', [$lookup($addrO, '', 'home'), $stubCalls()], [$homeO, []]);
 $stubReset();
@@ -1134,6 +1153,36 @@ check('O12 the Manage Events form draws the choice, with "This is someone\'s hom
      str_contains($manage, 'name="locationAddressKind" id="locationAddressKindPublic" value="public">'),
      str_contains($manage, 'data-address-kind-public-field="locationAddressKind"')],
     [true, true, true]);
+
+// ── Q ────────────────────────────────────────────────────────────────────────
+echo "Q. The privacy page and notice say the period really in force for a home's position (#1037 round 3)\n";
+/** The text of the element marked data-geocode-home-notice on one page, or ''. */
+$noticeOn = static function (string $path) use ($http): string {
+    $body = $http('GET', $path)['body'];
+    if (preg_match('#data-geocode-home-notice="1">(.*?)</(?:li|p)>#s', $body, $m) !== 1) {
+        return '';
+    }
+    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8')));
+};
+$setSetting('geo.cache.retentionDays', '365');
+$put40 = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, 'geo.cache.retentionDays', '40', '', 0)");
+$put40->bind_param('i', $siteId);
+$put40->execute();
+$put40->close();
+foreach (['/privacy' => 'Q1', '/privacy/policy' => 'Q2'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} {$path} names the organisation's 40 days, not the installation's 365, as the SHORTEST any organisation has chosen",
+        [str_contains($said, '40 days (the shortest period any organisation on this portal has chosen)'), str_contains($said, '365')],
+        [true, false]);
+}
+$db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'geo.cache.retentionDays' AND `siteID` IS NOT NULL");
+foreach (['/privacy' => 'Q3', '/privacy/policy' => 'Q4'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} with no organisation's own figure, {$path} names the 365 days as the period set for the whole portal, not as any organisation's choice",
+        [str_contains($said, '365 days (the period set for this whole portal; no organisation has chosen a shorter one)'), str_contains($said, 'any organisation on this portal has chosen)')],
+        [true, false]);
+}
+$setSetting('geo.cache.retentionDays', $settingsBefore['geo.cache.retentionDays']);
 
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');

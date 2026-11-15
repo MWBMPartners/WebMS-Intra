@@ -9481,7 +9481,7 @@ ON DUPLICATE KEY UPDATE `filename` = `filename`;
 --    installation's secret, and kept only for D-182's period (D-183).
 CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
     `cacheID`     INT           NOT NULL AUTO_INCREMENT,
-    `queryHash`   CHAR(64)      NOT NULL COMMENT 'sha256(direction | lowercased query text). One-way: the address itself is not stored (#1037)',
+    `queryHash`   CHAR(64)      NOT NULL COMMENT 'Public place: sha256(direction | lowercased query text). Home: the same text fingerprinted with the installation''s secret key (AddressFingerprint). The address itself is not stored (#1037, D-183)',
     `direction`   ENUM('forward','reverse') NOT NULL DEFAULT 'forward',
     `latitude`    DECIMAL(10,7) DEFAULT NULL,
     `longitude`   DECIMAL(10,7) DEFAULT NULL,

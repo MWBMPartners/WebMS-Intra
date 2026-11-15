@@ -618,9 +618,9 @@ class Geocoder
      * installation existed when this changed (D-135), so in practice there
      * were no such rows.
      *
-     * The column comment on `tblGeocodeCache.queryHash` ("sha256(direction |
-     * lowercased query text)") still reads true if "query text" is taken to
-     * be this text. The address itself is not stored at all since #1037.
+     * The column comment on `tblGeocodeCache.queryHash` says how a key is made
+     * for a public place and for a home, where "query text" is this text
+     * (D-183). The address itself is not stored at all since #1037.
      */
     private static function forwardKeyText(string $address, ?string $countryCode): string
     {

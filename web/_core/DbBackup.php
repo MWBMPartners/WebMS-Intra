@@ -225,10 +225,62 @@ class DbBackup
         // row. A snapshot taken before 290 still holds both, and without this
         // entry it would BLOCK a whole-database restore, as #712 above. The
         // saved text is discarded on purpose: bringing it back is the very
-        // thing 290 exists to undo, and a row is found by its `queryHash`
-        // alone, so the cache works without it.
+        // thing 290 exists to undo.
+        //
+        // AND NO ROW OF SUCH A SNAPSHOT GOES BACK AT ALL (#1037 round 3): a
+        // snapshot from before 290 has no `addressKind`, so its rows would
+        // come back as HOMES (the column's default) with the PLAIN key — the
+        // state D-183 rules out. See NOT_PUT_BACK_WITHOUT below.
         'tblGeocodeCache'        => ['queryText', 'formatted'],
     ];
+
+    /**
+     * 🗺️ Tables whose saved rows are NOT put back when the snapshot lacks the
+     * named column, although the database has it (#1037 round 3, D-183).
+     *
+     * `tblGeocodeCache` is a CACHE: losing it costs one fresh look-up per
+     * address, nothing more. A snapshot taken before migration 290 has no
+     * `addressKind`, so each of its rows would take the column's default,
+     * `home`, while keeping the plain SHA-256 key it was written with — a home
+     * row under an unsalted key, which D-183 rules out by name. So the table is
+     * left EMPTY by such a restore, and the restore's answer says so. Both ways
+     * of putting rows back (a whole restore and one table) ask
+     * leftEmptyForOldShape().
+     *
+     * @var array<string, string>
+     */
+    private const NOT_PUT_BACK_WITHOUT = ['tblGeocodeCache' => 'addressKind'];
+
+    /**
+     * 🗺️ Should this table's saved rows be left out, because the snapshot's
+     *    copy lacks a column NOT_PUT_BACK_WITHOUT names and the database has
+     *    it? Judged from the FIRST saved row's columns, before anything is
+     *    written. Names are compared ignoring capitals (forTable()'s reason).
+     *
+     * @param array<string, string|null>          $row
+     * @param array<string, array<string, mixed>> $tableFacts
+     */
+    private static function leftEmptyForOldShape(string $table, array $row, array $tableFacts): bool
+    {
+        foreach (self::NOT_PUT_BACK_WITHOUT as $name => $column) {
+            if (strcasecmp($table, $name) === 0) {
+                return isset($tableFacts[$column]) === true && array_key_exists($column, $row) === false;
+            }
+        }
+
+        return false;
+    }
+
+    /** The words for a table left empty that way, in a restore's answer. */
+    private static function leftEmptyWords(string $table, bool $dryRun): string
+    {
+        return 'The saved copy of ' . $table . ' (remembered map answers) was taken before the portal recorded '
+            . 'whether each address is somebody\'s home, so none of its rows ' . ($dryRun === true ? 'would be' : 'were')
+            . ' put back: it is only a cache, and each address will be looked up again the next time it is needed.';
+    }
+
+    /** @var list<string> Tables leftEmptyForOldShape() emptied in the restore now running. */
+    private array $leftEmptyForOldShape = [];
 
     /**
      * Column types whose values travel as TEXT, and column types whose values
@@ -3633,6 +3685,12 @@ class DbBackup
 
         try {
             foreach ($this->rows($dir, $table, $format) as $row) {
+                // 🗺️ A cache saved before it could say what its rows are: put
+                //    none of them back. See NOT_PUT_BACK_WITHOUT.
+                if ($columns === null && self::leftEmptyForOldShape($table, $row, $tableFacts) === true) {
+                    $this->leftEmptyForOldShape[] = $table;
+                    return 0;
+                }
                 // 🧹 A column a migration has since removed: see REMOVED_COLUMNS.
                 $row = self::withoutRemovedColumns($table, $row, $tableFacts);
                 if ($columns === null) {
@@ -4226,6 +4284,7 @@ class DbBackup
 
             // Refill parents first, so nothing is written before the row it
             // points at exists.
+            $this->leftEmptyForOldShape = [];
             foreach ($order as $table) {
                 $rowsDone += $this->loadTable(
                     $dir,
@@ -4359,6 +4418,12 @@ class DbBackup
             $heldTexts = $this->holdRestoredTexts($order, $dryRun);
             if ($heldTexts !== '') {
                 $warnings[] = $heldTexts;
+            }
+
+            // 🗺️ A cache left empty because the snapshot predates what it
+            //    must record (#1037 round 3). See NOT_PUT_BACK_WITHOUT.
+            foreach ($this->leftEmptyForOldShape as $leftEmpty) {
+                $warnings[] = self::leftEmptyWords($leftEmpty, $dryRun);
             }
 
             if ($dryRun === true) {
@@ -6133,8 +6198,14 @@ class DbBackup
             $skippedDuplicates = 0;
             $columns           = [];
             $statement         = null;
+            $leftEmpty         = false;
             try {
                 foreach ($rows as $row) {
+                    // 🗺️ As in loadTable(): see NOT_PUT_BACK_WITHOUT.
+                    if ($statement === null && self::leftEmptyForOldShape($table, $row, $tableFacts) === true) {
+                        $leftEmpty = true;
+                        break;
+                    }
                     // 🧹 As in loadTable(): see REMOVED_COLUMNS.
                     $row = self::withoutRemovedColumns($table, $row, $tableFacts);
                     if ($statement === null) {
@@ -6247,6 +6318,9 @@ class DbBackup
             }
             if ($heldTexts !== '') {
                 $result['notice'] = trim(($result['notice'] ?? '') . ' ' . $heldTexts);
+            }
+            if ($leftEmpty === true) {
+                $result['notice'] = trim(($result['notice'] ?? '') . ' ' . self::leftEmptyWords($table, false));
             }
 
             return $result;
