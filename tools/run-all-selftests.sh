@@ -311,6 +311,7 @@ public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
 offline-page-browser|node tools/offline-page-selftest.mjs
+page-headers-browser|node tools/page-headers-wrap-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 # 🔎 Every audit check's own self-test (#919), FOUND rather than listed: the
