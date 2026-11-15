@@ -874,6 +874,11 @@ as enforcing it in `~/.claude/settings.json`; on 1 November 2026 that file had n
 `env` block at all, so nothing refuses a seventh agent. Open the file before saying
 otherwise (#678).
 
+**CHECKS AND REVIEWS BY CLAUDE ALWAYS RUN ON OPUS (the owner, 15 November 2026 — D-186), whatever model is
+otherwise set.** Building may use a cheaper tier; an independent check, review, red-team pass or verification by a
+Claude agent never does. The `dev-team:opus-builder` agent type is Opus; name the model if a brief does not.
+Machine-wide too, in `~/.claude/CLAUDE.md`.
+
 **Deep analysis and deep planning run on Opus**, one agent at a time, in
 sequence. Implementation stays on Sonnet or Haiku, whichever fits — or Opus when
 the work is genuinely complex. **Verification is never done by a weaker model
