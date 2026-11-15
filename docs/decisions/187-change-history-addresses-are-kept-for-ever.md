@@ -9,7 +9,7 @@ change-history entry holds a network address beside it. Should the new "how long
 also empty that address on old entries, keeping the entry itself?
 
 **Answer:** the owner chose "Leave change-history addresses for ever". The address on a change-history entry stays
-with the entry for ever. D-116 holds in full; D-178 has this one stated exception. An erasure still reaches the
+with the entry for ever. D-116 holds in full; D-178 stays in force with this one stated exception, for these two tables only. An erasure still reaches the
 addresses on a person's own records where D-164 and D-178 say so. What members read must say so plainly: the
 change history, with the address it recorded, is not cleared.
 
@@ -19,7 +19,7 @@ change history's addresses are cleared or that every address has a time limit.
 **Where:** #1019 (`NetworkAddressRetention::PLACES` does not list the two change-history tables; the catalogue
 sentences and both privacy pages say "kept for ever"). Related: D-116, D-164, D-178.
 
-**Supersedes:** nothing. Narrows D-178 for these two tables only.
+**Supersedes:** nothing.
 
 ---
 
