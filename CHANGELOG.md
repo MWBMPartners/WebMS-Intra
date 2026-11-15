@@ -4,6 +4,24 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Erasure words, a fuller data copy, giving edge cases, care cases (#1018, #813, #970, #1015)
+
+- **A member's full data copy is fuller (#813, #1015).** It now names every organisation the member
+  belongs to, a switched-off one included (D-151 rules out listing a worker's records about OTHER people
+  in an organisation they cannot open, not a member's own membership). Five of a member's own settings
+  are in it, and so are their own pastoral care cases (D-184): organisation, the name as typed, category,
+  summary, status, opened and closed, and for each visit its day and kind only. Never who opened a case,
+  its number, the visiting workers or their notes, and no other person's codes or keys.
+- **Plainer reasons (#1018).** No reason a member reads names a database column.
+- **Giving edge cases (#970).** A record that is also the member's own is no longer counted as
+  "somebody else's"; the erasure's own match is unchanged. A tax declaration beside an emptied account is
+  cleared.
+- **Checked:** `erasure-pages-selftest.php` 252, `gdpr-eraser-selftest.php` 313, `gdpr-coverage-selftest.php`
+  and `outside-services-selftest.php` 377 all pass on MySQL 8.0.36, and every audit script is green. Three
+  rounds of independent check; the last found a test that would pass if a visit's full date and time were
+  handed over, now pinned (B4d). **Not run:** MySQL 8.4, MariaDB, the migration harness (no database
+  change). Codex has not reviewed this.
+
 ### A claim's PDF can be opened; a restore keeps this month's translation figures (#954, #801)
 
 - **A claim's generated PDF can be opened (#954).** The claim page listed the PDF the portal
