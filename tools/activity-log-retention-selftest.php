@@ -107,7 +107,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 96;  // 73 + 16 in section Q and 7 plants PG1-PG7 (#1037)
+const AL_EXPECTED_CHECKS = 103; // 73 + 21 in section Q and 9 plants PG1-PG9 (#1037)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1085,6 +1085,83 @@ $scnGcTokenRefused = static function () use ($gcWorld, $signIn, $postWithToken, 
     return $setting(GC_KEY, null) === '365' && $setting(GC_KEY, $siteOne) === null;
 };
 check('Q13 (scenario) both map-answer forms posted with no form token or a wrong one are refused and store nothing', $scnGcTokenRefused(), true);
+
+// #1037 round 4 (a): a STORED '0' is not a period. D-182 rules out "keep for
+// ever", and a reader that let 0 through made the clear-out keep everything
+// (sweep() refuses a period below 1) while the page said "now 0 days". Stored
+// by SQL, because neither form accepts 0 (Q3). With usable() reading `< 0`
+// instead of `< 1`, both of these go red (PG8 below, and measured by hand).
+/** A '0' stored at one level: the real job must still delete a 400-day answer, and the page must say 365. */
+$scnGcZeroStored = static function (string $level) use ($db, $gcWorld, $gcRow, $gcAlive, $http, $cronToken, $signIn, $page): array|string {
+    $db->query("DELETE FROM `tblGeocodeCache` WHERE `provider` = 'selftest-alret'");
+    $level === 'installation' ? $gcWorld('0', null, null) : $gcWorld('365', '0', null);
+    $ids = ['fourHundred' => $gcRow(400), 'ten' => $gcRow(10)];
+    $ran = $http('GET', '/cron/retention-sweep?token=' . $cronToken);
+    if ($ran['status'] !== 200 || str_contains($ran['body'], '"status":"ok"') === false) {
+        return 'the job did not run: ' . $ran['status'] . ' ' . substr($ran['body'], 0, 160);
+    }
+    $out = [];
+    foreach ($ids as $label => $id) {
+        $out[$label] = $gcAlive($id);
+    }
+    $signIn('orgadmin');
+    $body = $page()['body'];
+    $out['inForce'] = preg_match('/data-geocode-cache-in-force="(-?\d+)"/', $body, $m) === 1 ? $m[1] : null;
+    $out['saysZero'] = str_contains($body, 'now 0 days');
+    return $out;
+};
+$gcZeroWant = ['fourHundred' => false, 'ten' => true, 'inForce' => '365', 'saysZero' => false];
+check('Q14 (scenario) a 0 STORED as the installation\'s figure is "nothing chosen": the real job still deletes a 400-day answer, keeps a 10-day one, and the page says 365, never 0',
+    $scnGcZeroStored('installation'), $gcZeroWant);
+check('Q15 (scenario) ...and so is a 0 stored as an organisation\'s own figure',
+    $scnGcZeroStored('organisation'), $gcZeroWant);
+
+// #1037 round 4 (b): the card's words. They said the clear-out "uses the
+// shortest period any organisation has chosen" whoever had chosen. Now built by
+// GeocodeCacheRetention::cardWords() from periodFacts(), as the success message
+// and the privacy notice are. Each state's sentence is read off the REAL page
+// (or, for "could not be read", the real method), never written out here and
+// compared with itself.
+/** The card's words as the page draws them, whitespace folded, or ''. */
+$gcCardWords = static function () use ($page): string {
+    if (preg_match('#data-geocode-card-words="1">(.*?)</p>#s', $page()['body'], $m) !== 1) {
+        return '';
+    }
+    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode($m[1], ENT_QUOTES, 'UTF-8')));
+};
+$scnGcCardNobodyChose = static function () use ($gcWorld, $signIn, $gcCardWords): array {
+    $gcWorld('365', null, null);
+    $signIn('orgadmin');
+    $said = $gcCardWords();
+    return [str_contains($said, 'the period set for the whole installation, which is now 365 days (no organisation has chosen a shorter one)'),
+            str_contains($said, 'shortest period any organisation has chosen'), str_contains($said, 'only if the nightly clear-out job has been set up')];
+};
+check('Q16 (scenario) with no organisation\'s own figure, the card names the installation\'s 365 days as the whole installation\'s, not as any organisation\'s choice',
+    $scnGcCardNobodyChose(), [true, false, true]);
+$gcWorld('365', null, '20');
+$signIn('globaladmin');
+$q17 = $gcCardWords();
+check('Q17 with another organisation at 20 days, the card says the shortest period any organisation has chosen, now 20 days',
+    [str_contains($q17, 'the shortest period any organisation has chosen, which is now 20 days'), str_contains($q17, 'no organisation has chosen a shorter one')],
+    [true, false]);
+// "Could not be read" cannot be reached over HTTP without breaking the page's
+// own reads, so the REAL method is asked in this process with a connection
+// whose every statement fails, as a dropped connection's would.
+require_once $repo . $sep . 'web' . $sep . '_core' . $sep . 'GeocodeCacheRetention.php';
+$brokenDb = new class () extends mysqli {
+    public function __construct()
+    {
+    }
+    public function prepare(string $query): mysqli_stmt|false
+    {
+        throw new mysqli_sql_exception('planted by activity-log-retention-selftest: the read fails');
+    }
+};
+$q18 = \Portal\Core\GeocodeCacheRetention::cardWords($brokenDb);
+check('Q18 when the periods cannot be read, the card says so and names neither a figure nor whose period it is',
+    [str_contains($q18, 'The period now in force could not be read just now.'), str_contains($q18, 'which is now'),
+     str_contains($q18, 'no organisation has chosen a shorter one'), str_starts_with($q18, 'When an address is typed')],
+    [true, false, false, true]);
 $db->query("DELETE FROM `tblGeocodeCache` WHERE `provider` = 'selftest-alret'");
 $gcWorld('365', null, null);
 
@@ -1161,6 +1238,13 @@ $pg7 = $plant('_apps/admin/maintenance/retention.php', "        \$alrFinish('Inv
     "        // planted: the map-answer forms' form-token refusal taken out\n", $scnGcTokenRefused);
 check('PG7 with the map-answer forms\' form-token refusal taken out, a post with no token or a wrong one is SAVED', [$pg7['applied'], $pg7['result']], [true, false]);
 check('PG6 with the reader no longer holding an organisation\'s figure to the installation\'s, the reader-cap scenario goes red', [$pg6['applied'], $pg6['result']], [true, false]);
+$pg8 = $plant('_core/GeocodeCacheRetention.php', '(int) $text < 1', '(int) $text < 0',
+    static fn (): bool => $scnGcZeroStored('installation') === $gcZeroWant && $scnGcZeroStored('organisation') === $gcZeroWant);
+check('PG8 with a stored 0 read as a period of 0 days, the clear-out keeps everything and the zero scenarios go red', [$pg8['applied'], $pg8['result']], [true, false]);
+$pg9 = $plant('_core/GeocodeCacheRetention.php', "            . self::inForceWords(\$db)\n            . ' A deleted answer",
+    "            . 'One remembered answer serves every organisation on this installation, so the clear-out uses the shortest period any organisation has chosen.'\n            . ' A deleted answer",
+    static fn (): bool => $scnGcCardNobodyChose() === [true, false, true]);
+check('PG9 with the card\'s old fixed sentence put back, the nobody-chose card scenario goes red', [$pg9['applied'], $pg9['result']], [true, false]);
 check('P8 with every plant removed again, the refusal is green once more', $scnRefuseNever(), true);
 
 // ═════════════════════════════════════════════════════════════════════════════

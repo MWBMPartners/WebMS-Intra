@@ -1184,6 +1184,50 @@ foreach (['/privacy' => 'Q3', '/privacy/policy' => 'Q4'] as $path => $id) {
 }
 $setSetting('geo.cache.retentionDays', $settingsBefore['geo.cache.retentionDays']);
 
+// ── R ────────────────────────────────────────────────────────────────────────
+echo "R. With the installation's secret key unreadable, a home's answer is not remembered at all (#1037 round 4, D-183)\n";
+// Until round 4 AddressFingerprint::of() fell back to the portal VERSION as its
+// salt, which is printed in every release: a home was then remembered under a
+// key anybody could test against a list of addresses (the unsalted fingerprint
+// D-183 rules out), while the privacy notice said "mixed with a secret key
+// belonging to this installation". The key file is moved aside in THIS RUN'S
+// COPY only, and put back straight after.
+$keyFile  = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key';
+$keyAside = $keyFile . '.aside';
+rename($keyFile, $keyAside);
+check('R0 premise: the copy\'s secret key file is not there to read', is_readable($keyFile), false);
+$addrR = GT_MARK . ' Keyless Home Close';
+$markR = $cacheMark();
+$stubReset();
+$homeR = $lookup($addrR, '', 'home');
+check('R1 a HOME is still looked up (the stand-in is asked and its position comes back)',
+    [$stubCalls(), $homeR['ok'] ?? null, isset($homeR['lat']) === true], [['nominatim'], true, true]);
+check('R2 THE POINT: ...and NO row is written for it, under any key', $rowsSince($markR), 0);
+$stubReset();
+$lookup($addrR, '', 'home');
+check('R3 asked again, it is asked of the map service again, and still nothing is remembered', [$stubCalls(), $rowsSince($markR)], [['nominatim'], 0]);
+$stubReset();
+$lookup($addrO, '', 'home');
+check('R4 a home remembered while the key COULD be read is not served without it (its key cannot be made)', $stubCalls(), ['nominatim']);
+$markR2 = $cacheMark();
+$stubReset();
+$lookup($addrR, '', 'public');
+check('R5 a PUBLIC place is remembered exactly as before, under its plain key',
+    [$stubCalls(), $kindsSince($markR2), $hashesSince($markR2)], [['nominatim'], ['public'], [$portalKey($addrR, '')]]);
+foreach (['/privacy' => 'R6', '/privacy/policy' => 'R7'] as $path => $id) {
+    $said = $noticeOn($path);
+    check("{$id} {$path} says the key cannot be read and a home's position is not remembered, and does not say one is kept mixed with the key",
+        [str_contains($said, 'That key cannot be read just now, so while it cannot, the position of a home is not remembered at all'),
+         str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation')],
+        [true, false]);
+}
+rename($keyAside, $keyFile);
+$said = $noticeOn('/privacy');
+check('R8 with the key back, the notice says again that a home\'s position is kept, mixed with the installation\'s secret key',
+    [str_contains($said, 'It is kept with a scrambled form of the address, mixed with a secret key belonging to this installation'),
+     str_contains($said, 'cannot be read just now')],
+    [true, false]);
+
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');
 

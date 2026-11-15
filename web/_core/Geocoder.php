@@ -166,9 +166,14 @@ class Geocoder
         //    installation's secret, a public place's is not, so the same
         //    address asked both ways is two rows that cannot be told to be the
         //    same address from the database alone.
+        //
+        // 🔑 A home's key is null when the installation's secret key cannot be
+        //    read (#1037 round 4): the address is still looked up, and its
+        //    answer is neither read from nor written to the cache. See
+        //    homeCacheKey().
         $keyText = self::forwardKeyText($address, $countryCode);
         $hash    = $kind === self::KIND_PUBLIC ? self::cacheKey('forward', $keyText) : self::homeCacheKey($keyText);
-        if ($readCache === true) {
+        if ($readCache === true && $hash !== null) {
             $cached = self::cacheGet($hash);
             if ($cached !== null) {
                 return $cached;
@@ -189,7 +194,9 @@ class Geocoder
         // 📐 Both legs built `$result` through answer(), which has already
         //    checked and rounded the position, so there is nothing to tidy here
         //    and nothing unchecked reaches the cache.
-        self::cachePut($hash, $result['lat'], $result['lng'], $result['source'], $kind);
+        if ($hash !== null) {
+            self::cachePut($hash, $result['lat'], $result['lng'], $result['source'], $kind);
+        }
         return $result;
     }
 
@@ -573,13 +580,19 @@ class Geocoder
      * of addresses; this one needs the key as well. The leading words keep it
      * apart from every other value that class makes (network addresses).
      *
-     * When the key cannot be read that class falls back to the portal's
-     * version as its salt — weaker, still not unsalted — and an upgrade then
-     * changes every home key, which costs only fresh look-ups.
+     * WHEN THE KEY CANNOT BE READ THIS ANSWERS NULL, AND A HOME IS NOT
+     * REMEMBERED AT ALL (#1037 round 4). The first version used
+     * `AddressFingerprint::of()`, which then falls back to the portal's version
+     * as its salt. That version is printed in every release, so it is no
+     * secret: a home's key made from it can be tested against any list of
+     * addresses, which is the unsalted fingerprint D-183 rules out by name —
+     * while the privacy notice said the key was mixed with "a secret key
+     * belonging to this installation". Forgetting a home's answer costs only a
+     * fresh look-up each time; the key coming back costs nothing either.
      */
-    private static function homeCacheKey(string $queryText): string
+    private static function homeCacheKey(string $queryText): ?string
     {
-        return AddressFingerprint::of('geocode-home|forward|' . mb_strtolower(trim($queryText)));
+        return AddressFingerprint::withInstallationKey('geocode-home|forward|' . mb_strtolower(trim($queryText)));
     }
 
     /**

@@ -5474,6 +5474,10 @@ register_shutdown_function(static function (): void {
  * restore, on its rehearsal, and on a one-table restore. (The removed text
  * columns are REMOVED_COLUMNS' business and are not what this proves.)
  *
+ * And it must not go too far (#1037 round 4): a snapshot taken AFTER 290 puts
+ * every row back, kind and all, with no such warning (step 6). Nothing held
+ * that direction before, so a rule leaving EVERY snapshot's cache empty passed.
+ *
  * It changes the shape of a table on the way, so it takes a snapshot of the
  * starting state first and puts THAT back at the end, whatever happened.
  */
@@ -5535,6 +5539,39 @@ function brs_proof31(): void
             $one['success'] === true && $rows() === 0 && $says($one) === true,
             'putting that one table back on its own leaves it empty too, and says so',
             brs_say($one) . '; rows: ' . $rows()
+        );
+
+        // 6. #1037 round 4: the OTHER direction, which nothing held. A snapshot
+        //    taken AFTER migration 290 already records each row's kind, so its
+        //    rows must all come back and nothing may be said about an old
+        //    shape. With leftEmptyForOldShape() reading only "does the database
+        //    have addressKind" (planted, measured), steps 1-5 stayed green and
+        //    every snapshot's cache came back empty; these go red.
+        brs_sql(
+            'DELETE FROM tblGeocodeCache',
+            "INSERT INTO tblGeocodeCache (queryHash, direction, latitude, longitude, provider, addressKind) VALUES "
+            . "(REPEAT('a', 64), 'forward', 1.5, 2.5, 'nominatim', 'home'), "
+            . "(REPEAT('b', 64), 'forward', 3.5, 4.5, 'google', 'public')"
+        );
+        $newer = $backup->snapshot('proof 31, after migration 290');
+        if (brs_check($newer['success'] === true, 'a snapshot is taken of a cache that has run migration 290 (two rows, one home and one public)', brs_say($newer)) === false) {
+            return;
+        }
+        $kinds = static fn (): string => (string) Brs::$writer->query("SELECT GROUP_CONCAT(CONCAT(queryHash, ':', addressKind) ORDER BY queryHash) FROM tblGeocodeCache")->fetch_row()[0];
+        $want  = str_repeat('a', 64) . ':home,' . str_repeat('b', 64) . ':public';
+        brs_sql('DELETE FROM tblGeocodeCache');
+        $whole = $backup->restoreAll($newer['directory'], false);
+        brs_check(
+            $whole['success'] === true && $kinds() === $want && $says($whole) === false,
+            'putting back a snapshot taken AFTER migration 290 brings back both rows with their own kinds, and says nothing about an old shape',
+            brs_say($whole) . '; rows: ' . $kinds()
+        );
+        brs_sql('DELETE FROM tblGeocodeCache');
+        $oneNew = $backup->restoreTable($newer['directory'], 'tblGeocodeCache');
+        brs_check(
+            $oneNew['success'] === true && $kinds() === $want && $says($oneNew) === false,
+            '...and so does putting that one table back on its own',
+            brs_say($oneNew) . '; rows: ' . $kinds()
         );
     } finally {
         // Whatever happened: the table's shape as migration 290 leaves it, then the starting state.

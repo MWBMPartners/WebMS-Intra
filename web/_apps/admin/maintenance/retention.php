@@ -440,17 +440,15 @@ $gcrOrganisationForm = static function () use ($gcrOwn, $gcrOwnMax, $gcrInstalla
     <?php
 };
 
-/** What the card explains, in both views: what is kept, and why the shortest period decides. */
+/** What the card explains, in both views: what is kept, and which period decides. */
 // (c) of #1037 round 2: this said "a remembered answer holds no address", and
 //     the card went on to imply nobody could get one back. Untrue for a home:
 //     the position is kept to about a centimetre, so it IS the house (D-183).
-$gcrExplained = 'When an address is typed, the portal asks a map service where it is and remembers the answer so it '
-    . 'does not ask again. The address itself is not kept, but the position is, to about a centimetre: for somebody\'s '
-    . 'home that is the house, and anyone who can read the database can find the address with any online map. So an '
-    . 'answer for an address marked as a home is personal data, and the nightly clear-out deletes every answer not used '
-    . 'for the period below, if that scheduled job has been set up. One remembered answer serves every organisation on '
-    . 'this installation, so the clear-out uses the shortest period any organisation has chosen. A deleted answer is '
-    . 'simply asked again when it is next needed.';
+// #1037 round 4: it went on to say "the clear-out uses the shortest period any
+//     organisation has chosen" whoever had chosen, which was untrue while no
+//     organisation had chosen one. The words are built in ONE place now, from
+//     the same facts as the success message and the privacy notice.
+$gcrExplained = GeocodeCacheRetention::cardWords($mysqli);
 
 // -----------------------------------------------------------------------------
 // 📜 The activity-log figures every view of this page draws (#932)
@@ -636,7 +634,7 @@ if ($isGlobalAdmin === false) {
     <div class="card shadow-sm border-primary mt-3" id="geocode-cache-retention" data-geocode-retention-card="organisation">
         <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
             <h2 class="h6"><i class="fa-solid fa-map-location-dot me-1"></i>How long remembered map answers are kept</h2>
-            <p class="small text-muted"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="small text-muted" data-geocode-card-words="1"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
             <?php $gcrOrganisationForm(); ?>
         </div>
     </div>
@@ -878,7 +876,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm border-primary" data-geocode-retention-card="1">
             <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
                 <h2 class="h6"><i class="fa-solid fa-map-location-dot me-1"></i>How long remembered map answers are kept (<code>tblGeocodeCache</code>)</h2>
-                <p class="small text-muted"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
+                <p class="small text-muted" data-geocode-card-words="1"><?php echo htmlspecialchars($gcrExplained, ENT_QUOTES, 'UTF-8'); ?></p>
                 <p class="mb-2">Answers that would be deleted now:
                     <strong data-geocode-cache-due="<?php echo (int) $preview['geocodeCache']; ?>"><?php echo $preview['geocodeCache'] >= 0 ? number_format($preview['geocodeCache']) : 'could not be counted'; ?></strong></p>
                 <div class="row g-4">

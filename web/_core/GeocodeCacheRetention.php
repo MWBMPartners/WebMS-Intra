@@ -65,7 +65,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/1037
  * -----------------------------------------------------------------------------
  */
@@ -274,13 +274,60 @@ final class GeocodeCacheRetention
                 . 'just now)';
         }
 
+        // 🔑 #1037 round 4: "mixed with a secret key belonging to this
+        //    installation" was said whether or not that key could be read, and
+        //    when it could not, a home was remembered under a salt printed in
+        //    every release. Now a home is not remembered at all while the key
+        //    cannot be read (`Geocoder::homeCacheKey()`), and this says so.
+        //    Positions remembered while it could be read are still there, and
+        //    are still removed by the time limit, so that half is kept.
+        $remembers = self::homeIsRemembered() === true
+            ? 'the portal remembers the position it was given so that it need not ask the map service again. The '
+                . 'position is precise enough to identify the house. It is kept with a scrambled form of the address, '
+                . 'mixed with a secret key belonging to this installation, and not with the address itself, and it is '
+                . 'deleted '
+            : 'the portal would normally remember the position it was given, under a scrambled form of the address '
+                . 'mixed with a secret key belonging to this installation. That key cannot be read just now, so while '
+                . 'it cannot, the position of a home is not remembered at all and each look-up asks the map service '
+                . 'again. Any position remembered before then is precise enough to identify the house, is kept with '
+                . 'the scrambled form and not with the address itself, and is deleted ';
+
         return 'When an address marked as somebody\'s home (for example a small group\'s host, or your own address '
-            . 'in the directory) is looked up on a map, the portal remembers the position it was given so that it '
-            . 'need not ask the map service again. The position is precise enough to identify the house. It is '
-            . 'kept with a scrambled form of the address, mixed with a secret key belonging to this installation, '
-            . 'and not with the address itself, and it is deleted ' . $period . ', if the nightly clear-out has '
+            . 'in the directory) is looked up on a map, ' . $remembers . $period . ', if the nightly clear-out has '
             . 'been set up. Nothing on it says whose home it is, so an erasure request cannot pick it out; the time '
             . 'limit is what removes it. Positions of public places, such as venues, are treated as not about anybody.';
+    }
+
+    /**
+     * 🗺️ What the retention page's card says about remembered map answers, as
+     *    plain text; the page escapes it (#1037 round 4). The clear-out half is
+     *    inForceWords(), so the card, the success message and the privacy
+     *    notice are built from the same facts: the card used to say the
+     *    clear-out "uses the shortest period any organisation has chosen" even
+     *    when no organisation had chosen one and the period was the
+     *    installation's.
+     */
+    public static function cardWords(\mysqli $db): string
+    {
+        return 'When an address is typed, the portal asks a map service where it is and remembers the answer so it '
+            . 'does not ask again. The address itself is not kept, but the position is, to about a centimetre: for '
+            . 'somebody\'s home that is the house, and anyone who can read the database can find the address with any '
+            . 'online map. So an answer for an address marked as a home is personal data. '
+            . self::inForceWords($db)
+            . ' A deleted answer is simply asked again when it is next needed.';
+    }
+
+    /**
+     * 🔑 Whether a home's position is being remembered at all: only while the
+     *    installation's secret key can be read (`AddressFingerprint`).
+     */
+    private static function homeIsRemembered(): bool
+    {
+        if (class_exists(AddressFingerprint::class) === false) {
+            require_once __DIR__ . DIRECTORY_SEPARATOR . 'AddressFingerprint.php';
+        }
+
+        return AddressFingerprint::hasInstallationKey();
     }
 
     /**
