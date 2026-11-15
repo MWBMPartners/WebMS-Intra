@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 177; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13)
+const EXPECTED_CHECKS = 193; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13); sixteen by #1042 round 4 (M14-M29)
 
 function refuse(string $why): never
 {
@@ -340,6 +340,7 @@ const PEOPLE = [
     'wes'   => 922033, // L (#598): half-way through signing in when the password is changed elsewhere
     'xena'  => 922034, // M (#1042): her account as a whole restore puts it back - the OLD e-mail address, no Microsoft link
     'yan'   => 922035, // M (#1042): an administrator of the default organisation only, not of the installation
+    'zed'   => 922036, // M (#1042 round 4): SWITCHED OFF in part M; a signed-in member's sign-in names his address
 ];
 /** #1042: the address Xena changed to AFTER the snapshot, which Microsoft now sends. The account the callback makes for it is numbered by the database, so it is found by this. */
 const P1042_NEW_EMAIL = 'xena.changed.p1042.twostep@selftest.invalid';
@@ -409,9 +410,12 @@ function removeWorld(): void
     $db->query('DROP TRIGGER IF EXISTS ' . TRIGGER);
     q("DELETE FROM tblActivityLogs WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%' OR userAgent = ?", 's', [AGENT]);
     q("DELETE FROM tblErrors WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%'");
-    // Only the limiter's rows for this test's own accounts.
+    // Only the limiter's rows for this test's own accounts. `pwcheck:` (#598,
+    // the password check on the switch-off and change pages) was missing until
+    // #1042 round 4: its rows outlived a run, so the SIXTH run on one database
+    // found Anna's password check limited and A13's control record unwritten.
     foreach (PEOPLE as $id) {
-        q('DELETE FROM tblApiRateLimits WHERE bucket LIKE ? OR bucket = ? OR bucket = ?', 'sss', ['totp\\_verify:' . $id . ':%', 'totp_verify_user:' . $id, 'totp_newcodes:' . $id]);
+        q('DELETE FROM tblApiRateLimits WHERE bucket LIKE ? OR bucket = ? OR bucket = ? OR bucket = ?', 'ssss', ['totp\\_verify:' . $id . ':%', 'totp_verify_user:' . $id, 'totp_newcodes:' . $id, 'pwcheck:' . $id]);
     }
     q('DELETE FROM tblTrustedDevices WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblTotpBackupCodes WHERE userID BETWEEN 922000 AND 922999');
@@ -1848,6 +1852,15 @@ head('K. A sign-in keeps nothing of somebody else\'s session, and all of the sam
 // session_regenerate_id() with this file still at 117 of 117.
 
 const STUB = 'p900stub:';
+// #1042 round 4: four more stub "codes", so every failure a callback can raise
+// is reached for real. The token request answers NOTHING (as a failed request
+// does), or an answer that is not a token answer; the key list cannot be
+// fetched; the token is not a token at all, so the real signature check
+// refuses it. Each is the real callback's own failure path from there on.
+const STUB_NO_ANSWER      = 'p1042-no-answer';
+const STUB_UNREADABLE     = 'p1042-unreadable';
+const STUB_NO_KEYS        = 'p1042-no-keys';
+const STUB_BAD_SIGNATURE  = 'p1042-bad-signature';
 
 /**
  * Every entry in a browser's session file, by name, as PHP's 'php' format holds
@@ -1980,9 +1993,16 @@ foreach ([
     "    public static function curlPost(string \$url, array \$data): ?string\n    {\n" => [1, "    public static function curlPost(string \$url, array \$data): ?string\n    {\n"
         . "        // TEST STUB written by tools/two-step-selftest.php into its scratch copy (#900).\n"
         . "        if (is_string(\$data['code'] ?? null) === true && str_starts_with(\$data['code'], '" . STUB . "') === true) {\n"
-        . "            return json_encode(['id_token' => substr(\$data['code'], " . strlen(STUB) . ")]);\n"
+        . "            \$stubToken = substr(\$data['code'], " . strlen(STUB) . ");\n"
+        . "            if (\$stubToken === '" . STUB_NO_ANSWER . "') {\n"
+        . "                return null;\n"
+        . "            }\n"
+        . "            if (\$stubToken === '" . STUB_UNREADABLE . "') {\n"
+        . "                return 'not a token answer';\n"
+        . "            }\n"
+        . "            return json_encode(['id_token' => \$stubToken]);\n"
         . "        }\n"],
-    '$jwksJson = file_get_contents($jwksUri);' => [2, '$jwksJson = str_starts_with($idToken, \'{\') ? \'{}\' : file_get_contents($jwksUri);'],
+    '$jwksJson = file_get_contents($jwksUri);' => [2, '$jwksJson = (str_starts_with($idToken, \'{\') || $idToken === \'' . STUB_BAD_SIGNATURE . '\') ? \'{}\' : ($idToken === \'' . STUB_NO_KEYS . '\' ? false : file_get_contents($jwksUri));'],
     '$payload = SimpleJWT::decode($idToken, $jwks, [' => [2, '$payload = str_starts_with($idToken, \'{\') ? json_decode($idToken, true) : SimpleJWT::decode($idToken, $jwks, ['],
 ] as $from => [$times, $to]) {
     $count   = 0;
@@ -3060,7 +3080,19 @@ head('M. #1042: a Microsoft sign-in that matches no account makes one only where
 setting('auth.sso.createAccounts', '1');               // remembered, so the clean-up puts it back exactly
 q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
 $ssoKey   = 'auth.sso.createAccounts';
-$ssoWords = 'No account on this portal matches this sign-in. Ask an administrator to invite you.';
+// #1042 round 4: every sentence below is the REAL code's, from the copy being
+// tried (`SsoSignInProblem` is the ONE place they are worded). M14 pins the
+// signed-out sentences word for word, so taking them from the code here
+// cannot hide a change to them.
+require_once $child . $sep . 'web' . $sep . '_core' . $sep . 'SsoNewAccounts.php';
+require_once $child . $sep . 'web' . $sep . '_core' . $sep . 'SsoSignInProblem.php';
+$said     = static fn (string $problem, string $provider, bool $signedIn): string => \Portal\Core\SsoSignInProblem::words($problem, $provider, $signedIn);
+$ssoWords = $said(\Portal\Core\SsoSignInProblem::NO_ACCOUNT, 'Microsoft', false);
+/** Whether a page shows these words, as the page escapes them. */
+$shows    = static fn (string $body, string $words): bool => str_contains($body, htmlspecialchars($words, ENT_QUOTES, 'UTF-8'));
+/** The words in a page's sign-in-problem box, unescaped ('' when there is no box). */
+$problemBox = static fn (string $body): string => preg_match('#id="sign-in-problem">(.*?)</div>#s', $body, $box) === 1
+    ? html_entity_decode(trim(strip_tags($box[1])), ENT_QUOTES, 'UTF-8') : '';
 /**
  * Xena's sign-in, in a new browser, with the provider stubs in for this one
  * sign-in only. Microsoft by default; 'google' sends the same new address the
@@ -3220,7 +3252,11 @@ $wrongState = static function (string $jar, int $ipLast, string $provider = 'ms3
 
     return req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => str_repeat('0', 32), 'code' => 'p1042-not-a-code']), null, ip($ipLast));
 };
-$stateWords = 'Invalid OAuth state. Please try signing in again.';
+// #1042 round 4: a signed-in member reads the SIGNED-IN sentence, never the
+// one written for somebody signing in ($stateOut), which must be absent.
+$stateWords  = $said(\Portal\Core\SsoSignInProblem::STATE, 'Microsoft', true);
+$stateWordsG = $said(\Portal\Core\SsoSignInProblem::STATE, 'Google', true);
+$stateOut    = $said(\Portal\Core\SsoSignInProblem::STATE, 'Microsoft', false);
 $saidOnce   = static function (string $jar, int $ipLast, string $path, string $words): bool {
     $entries = sessionEntries($jar);
 
@@ -3234,14 +3270,19 @@ $m09      = $wrongState($xenaIn, 200);
 $m09Page  = $m09['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(200)) : ['status' => 0, 'body' => ''];
 $m09Who   = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
 ok('M09 a member SIGNED IN by password whose Microsoft sign-in comes back with a wrong state is sent to the Account page, which says "' . $stateWords . '" - and it is said once, and she is still signed in as herself',
-    $xenaPw['status'] === 302 && $m09['status'] === 302 && $m09['location'] === '/account'
-    && $m09Page['status'] === 200 && str_contains($m09Page['body'], $stateWords) === true
-    && $m09Who === PEOPLE['xena'] && $saidOnce($xenaIn, 200, '/account', $stateWords) === true,
+    $m09Pass = $xenaPw['status'] === 302 && $m09['status'] === 302 && $m09['location'] === '/account'
+    && $m09Page['status'] === 200 && $shows($m09Page['body'], $stateWords) === true && $shows($m09Page['body'], $stateOut) === false
+    && $m09Who === PEOPLE['xena'] && $saidOnce($xenaIn, 200, '/account', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
     'sign-in ' . describe($xenaPw) . '; callback ' . describe($m09) . '; page ' . $m09Page['status'] . '; session person ' . $m09Who);
 
 // M10: the same signed-in member, with this organisation REFUSING new
 // accounts, and Microsoft sending the address that matches no account (the
-// state a restore leaves, M01). Nothing is made, and SHE is told why.
+// state a restore leaves, M01). Nothing is made, and SHE is told why - in
+// words true of somebody who HAS an account. Round 3 asserted D-185's
+// signed-out sentence here ("... Ask an administrator to invite you."), which
+// told a member to ask for an invitation that would make the very duplicate
+// D-185 exists to prevent; that sentence, and any invitation, must be absent.
+$m10Words = $said(\Portal\Core\SsoSignInProblem::NO_ACCOUNT, 'Microsoft', true);
 $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '0']);
 file_put_contents($scratchAuth, $stubbed);
 clearstatcache(true, $scratchAuth);
@@ -3255,19 +3296,20 @@ try {
 }
 $m10Page = $m10['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(201)) : ['status' => 0, 'body' => ''];
 $m10Who  = (int) (sessionEntries($xenaIn)['user_id'] ?? 0);
-ok('M10 the same SIGNED-IN member, with this organisation refusing new accounts, whose Microsoft sign-in matches no account: no account is made, she is sent to the Account page, which says "' . $ssoWords . '", once - and she is still signed in as herself',
+ok('M10 the same SIGNED-IN member, with this organisation refusing new accounts, whose Microsoft sign-in matches no account: no account is made, she is sent to the Account page, which says "' . $m10Words . '", once, and NOT the signed-out "' . $ssoWords . '" nor any word of an invitation - and she is still signed in as herself',
     $ownRow() === '0' && $m10State !== '' && $madeForXena() === [] && $m10['status'] === 302 && $m10['location'] === '/account'
-    && $m10Page['status'] === 200 && str_contains($m10Page['body'], $ssoWords) === true
-    && $m10Who === PEOPLE['xena'] && $saidOnce($xenaIn, 201, '/account', $ssoWords) === true,
+    && $m10Page['status'] === 200 && $shows($m10Page['body'], $m10Words) === true
+    && $problemBox($m10Page['body']) === $m10Words && $shows($m10Page['body'], $ssoWords) === false && stripos($problemBox($m10Page['body']), 'invit') === false
+    && $m10Who === PEOPLE['xena'] && $saidOnce($xenaIn, 201, '/account', htmlspecialchars($m10Words, ENT_QUOTES, 'UTF-8')) === true,
     'own row ' . var_export($ownRow(), true) . '; callback ' . describe($m10) . '; page ' . $m10Page['status'] . '; session person ' . $m10Who);
 
 // M11: the Google callback does the same for a signed-in member (its own
 // calls to oauthError(); the refusal there is M04b's).
 $m11     = $wrongState($xenaIn, 202, 'google');
 $m11Page = $m11['location'] === '/account' ? req($xenaIn, 'GET', '/account', null, ip(202)) : ['status' => 0, 'body' => ''];
-ok('M11 the GOOGLE callback with a wrong state sends the same signed-in member to the Account page, which says "' . $stateWords . '", once',
-    $m11['status'] === 302 && $m11['location'] === '/account' && str_contains($m11Page['body'], $stateWords) === true
-    && (int) (sessionEntries($xenaIn)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaIn, 202, '/account', $stateWords) === true,
+ok('M11 the GOOGLE callback with a wrong state sends the same signed-in member to the Account page, which says "' . $stateWordsG . '", once',
+    $m11Pass = $m11['status'] === 302 && $m11['location'] === '/account' && $shows($m11Page['body'], $stateWordsG) === true
+    && (int) (sessionEntries($xenaIn)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaIn, 202, '/account', htmlspecialchars($stateWordsG, ENT_QUOTES, 'UTF-8')) === true,
     'callback ' . describe($m11));
 $ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => 'follow']);
 
@@ -3295,8 +3337,8 @@ $m12Page = $m12['location'] === '/account/add-password' ? req($xenaSso, 'GET', '
 ok('M12 a member signed in by Microsoft with no password, sent from "Add a password" to sign in again, whose sign-in comes back with a wrong state is sent BACK to "Add a password", which says "' . $stateWords . '", once',
     $m12In['back']['status'] === 302 && $m12Ask['status'] === 200 && $m12Back === '/account/add-password'
     && $m12['status'] === 302 && $m12['location'] === '/account/add-password'
-    && $m12Page['status'] === 200 && str_contains($m12Page['body'], $stateWords) === true
-    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaSso, 203, '/account/add-password', $stateWords) === true,
+    && $m12Page['status'] === 200 && $shows($m12Page['body'], $stateWords) === true && $shows($m12Page['body'], $stateOut) === false
+    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && $saidOnce($xenaSso, 203, '/account/add-password', htmlspecialchars($stateWords, ENT_QUOTES, 'UTF-8')) === true,
     'sso sign-in ' . describe($m12In['back']) . '; page ' . $m12Ask['status'] . '; come-back ' . var_export($m12Back, true) . '; callback ' . describe($m12));
 
 // M13: an ORGANISATION cannot choose "allow" (only follow or refuse are
@@ -3313,6 +3355,259 @@ ok('M13 an organisation-level post of choice=1 ("allow") is refused: nothing is 
     'post ' . describe($m13) . '; own ' . var_export($ownRow(), true) . ', install ' . var_export($installRow(), true));
 $ssoPost($vicSso, 191, ['level' => 'installation', 'choice' => '1']);
 q("DELETE FROM tblSettings WHERE settingKey = 'auth.sso.createAccounts' AND siteID IS NOT NULL");
+
+// =============================================================================
+// M14-M29 (#1042 round 4): EVERY failure a callback can raise, worded for the
+// person reading it, and driven for a member who is signed in.
+// =============================================================================
+// The independent check of round 3 found the signed-in member being shown the
+// words written for somebody signing in, and two were untrue about them: D-185's
+// "No account ... Ask an administrator to invite you." (they HAVE an account),
+// and "This account has been deactivated" on their own working Account page
+// (it is ANOTHER account). `SsoSignInProblem` is now the ONE place both sets
+// are worded. M14-M16 pin the table and Auth.php's use of it; M17-M27 drive
+// every problem through the real callbacks for Xena, signed in by Microsoft
+// (M12's browser), and read the Account page's box; M28 drives the signed-out
+// side of the one sentence whose truth depends on who reads it; M29 requires
+// every problem in the table to have been driven signed in.
+$P = '\Portal\Core\SsoSignInProblem';
+// M14: the SIGNED-OUT words are exactly what the callbacks have always said
+// (round 4 changes the signed-in words only). Written out by hand on purpose:
+// deriving them from the class would prove only that it agrees with itself.
+$signedOutAlways = [
+    'too_many'       => 'Too many authentication attempts. Please try again later.',
+    'state'          => 'Invalid OAuth state. Please try signing in again.',
+    'no_code'        => 'Authorization code missing. Please try signing in again.',
+    'token_request'  => 'Token request failed. Please try signing in again.',
+    'token_response' => 'Invalid token response. Please try signing in again.',
+    'signing_keys'   => 'Unable to retrieve signing keys. Please try again later.',
+    'token_verify'   => 'Token verification failed. Please try signing in again.',
+    'no_email'       => 'Unable to determine user email from token.',
+    'no_identity'    => 'Unable to determine user identity from token.',
+    'domain'         => 'Your Google account is not from the allowed organisation.',
+    'switched_off'   => 'This account has been deactivated. Please contact your administrator.',
+    'no_account'     => 'No account on this portal matches this sign-in. Ask an administrator to invite you.',
+];
+$m14Wrong = [];
+foreach ($signedOutAlways as $problem => $words) {
+    foreach (['Microsoft', 'Google'] as $provider) {
+        if ($said($problem, $provider, false) !== $words) {
+            $m14Wrong[] = $problem . '/' . $provider . ': ' . $said($problem, $provider, false);
+        }
+    }
+}
+ok('M14 the table words exactly twelve problems, and for somebody NOT signed in each is still the sentence the callbacks have always shown (D-185\'s for no account), word for word',
+    $P::problems() === array_keys($signedOutAlways) && $m14Wrong === [],
+    'problems ' . implode(',', $P::problems()) . '; different: ' . implode(' | ', $m14Wrong));
+
+// M15: every SIGNED-IN sentence, for both providers, printed and judged. Each
+// must name the provider, say the sign-in could not be used with "your
+// account" (or, for too many attempts, was not tried), end by saying the
+// member is still signed in with nothing changed, and contain none of the
+// words that were untrue of a member: an invitation, "deactivated", "This
+// account", nor the signed-out sentence itself.
+$m15Wrong = [];
+foreach ($P::problems() as $problem) {
+    foreach (['Microsoft', 'Google'] as $provider) {
+        $w = $said($problem, $provider, true);
+        echo '      signed in, ' . str_pad($problem . '/' . $provider, 26) . ': ' . $w . "\n";
+        $fine = str_contains($w, $provider) === true && str_contains($w, '{') === false
+            && (str_contains($w, 'could not be used with your account') === true || ($problem === 'too_many' && str_contains($w, 'was not tried') === true))
+            && str_ends_with($w, ' You are still signed in, and nothing on your account has changed.') === true
+            && preg_match('/invit|deactivated|This account|OAuth|token/i', $w) === 0
+            && str_contains($w, $signedOutAlways[$problem] ?? "\0") === false;   // a problem M14's list lacks fails M14, not with a crash here
+        if ($fine === false) {
+            $m15Wrong[] = $problem . '/' . $provider;
+        }
+    }
+}
+$offWords = $said($P::SWITCHED_OFF, 'Microsoft', true);
+$noneWords = $said($P::NO_ACCOUNT, 'Microsoft', true);
+ok('M15 every one of the 24 signed-in sentences names the provider, says the sign-in could not be used with the member\'s account (or was not tried), ends "You are still signed in, and nothing on your account has changed." and holds no invitation, no "deactivated", no "This account" and no jargon; and the switched-off one says the address belongs to a DIFFERENT account, which the no-account one does not',
+    $m15Wrong === [] && str_contains($offWords, 'belongs to a different account on this portal, which is switched off') === true
+    && str_contains($noneWords, 'switched off') === false && str_contains($noneWords, 'different account') === false,
+    'wrong: ' . implode(', ', $m15Wrong));
+
+// M16: Auth.php names a problem at every call, by the class's constant, and
+// between them the calls name every problem in the table (read with PHP's
+// tokeniser, comments dropped, so a quoted call in a comment counts for
+// nothing). A callback left passing a sentence, or a problem nothing raises,
+// fails here.
+$m16Tokens = token_get_all((string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'Auth.php'));
+$m16Tokens = array_values(array_filter($m16Tokens, static fn ($t): bool => is_array($t) === false || in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true) === false));
+$m16Consts = (new ReflectionClass($P))->getConstants();
+$m16Calls  = 0;
+$m16Bad    = [];
+$m16Named  = [];
+foreach ($m16Tokens as $i => $t) {
+    if (is_array($t) === true && $t[0] === T_STRING && $t[1] === 'oauthError'
+        && ($m16Tokens[$i - 1][0] ?? null) === T_DOUBLE_COLON && ($m16Tokens[$i + 1] ?? null) === '(') {
+        $m16Calls++;
+        $cls = $m16Tokens[$i + 2] ?? null;
+        $sep2 = $m16Tokens[$i + 3] ?? null;
+        $name = $m16Tokens[$i + 4] ?? null;
+        if (is_array($cls) === true && $cls[1] === 'SsoSignInProblem' && is_array($sep2) === true && $sep2[0] === T_DOUBLE_COLON
+            && is_array($name) === true && array_key_exists($name[1], $m16Consts) === true && is_string($m16Consts[$name[1]]) === true) {
+            $m16Named[] = $m16Consts[$name[1]];
+        } else {
+            $m16Bad[] = 'line ' . ($t[2] ?? 0);
+        }
+    }
+}
+$m16Named = array_values(array_unique($m16Named));
+sort($m16Named);
+$m16All = $P::problems();
+sort($m16All);
+ok('M16 Auth.php calls oauthError() 20 times outside its own definition and every call names a problem by SsoSignInProblem\'s constant; between them they name all twelve',
+    $m16Calls === 20 && $m16Bad === [] && $m16Named === $m16All,
+    $m16Calls . ' call(s); not by constant: ' . implode(', ', $m16Bad) . '; named ' . implode(',', $m16Named));
+
+// The driven half. Xena is signed in by Microsoft in M12's browser; each
+// failure goes through the REAL start address and the REAL callback (with the
+// provider stubs in for that one request pair), and the Account page is read.
+// The wrong-state problem was driven by M09 (Microsoft) and M11 (Google), and
+// counts only if both passed; every other problem is counted by $judgeIn.
+$drivenIn = ($m09Pass === true && $m11Pass === true) ? ['state'] : [];
+// M12's own check loaded "Add a password" again, which (with no fresh proof
+// of sign-in) leaves its address as the come-back once more (#731). That is
+// right, and a failure would then rightly go back THERE; these checks are
+// about the Account page's link buttons, so the come-back is cleared first.
+putInSession($xenaSso, ['login_redirect' => null]);
+$failIn = static function (string $jar, int $ipLast, string $provider, callable $query) use ($scratchAuth, $stubbed, $authAsCopied): array {
+    file_put_contents($scratchAuth, $stubbed);
+    clearstatcache(true, $scratchAuth);
+    try {
+        $start = req($jar, 'GET', '/login/' . $provider, null, ip($ipLast));
+        $state = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $start['location'], $m) === 1 ? $m[1] : '';
+        $back  = req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query($query($state)), null, ip($ipLast));
+    } finally {
+        file_put_contents($scratchAuth, $authAsCopied);
+        clearstatcache(true, $scratchAuth);
+    }
+    $page = $back['location'] === '/account' ? req($jar, 'GET', '/account', null, ip($ipLast)) : ['status' => 0, 'body' => ''];
+
+    return ['back' => $back, 'page' => $page, 'who' => (int) (sessionEntries($jar)['user_id'] ?? 0)];
+};
+/**
+ * One signed-in failure judged: sent to the Account page, whose box holds
+ * EXACTLY the signed-in sentence for this problem and provider and not the
+ * signed-out one, said once, and still Xena's session. Records it as driven.
+ */
+$judgeIn = static function (array $r, string $problem, string $provider, int $ipLast) use ($xenaSso, $said, $problemBox, $shows, $saidOnce, &$drivenIn): array {
+    $in  = $said($problem, $provider, true);
+    $out = $said($problem, $provider, false);
+    $fine = $r['back']['status'] === 302 && $r['back']['location'] === '/account' && $r['page']['status'] === 200
+        && $problemBox($r['page']['body']) === $in && $shows($r['page']['body'], $out) === false
+        && $r['who'] === PEOPLE['xena'] && $saidOnce($xenaSso, $ipLast, '/account', htmlspecialchars($in, ENT_QUOTES, 'UTF-8')) === true;
+    if ($fine === true) {
+        $drivenIn[] = $problem;
+    }
+
+    return [$fine, $provider . ': callback ' . describe($r['back']) . ', box "' . mb_substr($problemBox($r['page']['body']), 0, 120) . '", session person ' . $r['who']];
+};
+$claimsFor = static fn (string $provider, string $email): array => $provider === 'ms365'
+    ? ['sub' => 'p1042r4-ms-' . md5($email), 'preferred_username' => $email, 'name' => 'Selftest two-step r4']
+    : ['sub' => 'p1042r4-g-' . md5($email), 'email' => $email, 'name' => 'Selftest two-step r4'];
+$wordsOf = ['ms365' => 'Microsoft', 'google' => 'Google'];
+/** A problem driven through both callbacks as one check. */
+$throughBoth = static function (string $problem, int $ipBase, callable $query) use ($failIn, $judgeIn, $xenaSso, $wordsOf): array {
+    $fine = true;
+    $why  = [];
+    foreach (['ms365', 'google'] as $n => $provider) {
+        [$ok, $detail] = $judgeIn($failIn($xenaSso, $ipBase + $n, $provider, static fn (string $state): array => $query($state, $provider)), $problem, $wordsOf[$provider], $ipBase + $n);
+        $fine  = $fine && $ok;
+        $why[] = $detail;
+    }
+
+    return [$fine, implode('; ', $why)];
+};
+
+// M17: too many failed sign-ins from this connection. The limiter counts
+// "LoginFailed" records by visitor address; enough are written for the two
+// addresses used (cleared at the end with every record from 198.51.100.x).
+foreach ([210, 211] as $limitedIp) {
+    for ($n = 0; $n < 30; $n++) {
+        q('INSERT INTO tblActivityLogs (activityType, activityDescription, visitorIP, userAgent) VALUES (?, ?, ?, ?)', 'ssss', ['LoginFailed', 'two-step-selftest: #1042 round 4 limiter fixture', ip($limitedIp), AGENT]);
+    }
+}
+[$ok, $why] = $throughBoth('too_many', 210, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . json_encode($claimsFor($provider, emailOf('xena')))]);
+ok('M17 too many failed sign-ins from this connection: a signed-in member is sent to the Account page, which says (Microsoft and Google) "' . $said($P::TOO_MANY, 'Microsoft', true) . '", once, and she is still signed in', $ok, $why);
+q("DELETE FROM tblActivityLogs WHERE activityType = 'LoginFailed' AND visitorIP IN (?, ?)", 'ss', [ip(210), ip(211)]);
+
+// M18: no authorisation code came back (cancelled at the provider).
+[$ok, $why] = $throughBoth('no_code', 212, static fn (string $state, string $provider): array => ['state' => $state]);
+ok('M18 no authorisation code (cancelled at the provider): the Account page says "' . $said($P::NO_CODE, 'Microsoft', true) . '" (and Google\'s), once', $ok, $why);
+
+// M19-M22: the token request answers nothing; it answers something that is
+// not a token answer; the key list cannot be fetched; the token fails the real
+// signature check.
+[$ok, $why] = $throughBoth('token_request', 214, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . STUB_NO_ANSWER]);
+ok('M19 the token request fails: the Account page says "' . $said($P::TOKEN_REQUEST, 'Microsoft', true) . '" (and Google\'s), once', $ok, $why);
+[$ok, $why] = $throughBoth('token_response', 216, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . STUB_UNREADABLE]);
+ok('M20 the token answer cannot be read: the Account page says "' . $said($P::TOKEN_RESPONSE, 'Microsoft', true) . '" (and Google\'s), once', $ok, $why);
+[$ok, $why] = $throughBoth('signing_keys', 218, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . STUB_NO_KEYS]);
+ok('M21 the signing keys cannot be fetched: the Account page says "' . $said($P::SIGNING_KEYS, 'Microsoft', true) . '" (and Google\'s), once', $ok, $why);
+[$ok, $why] = $throughBoth('token_verify', 220, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . STUB_BAD_SIGNATURE]);
+ok('M22 the token fails the real signature check: the Account page says "' . $said($P::TOKEN_VERIFY, 'Microsoft', true) . '" (and Google\'s), once', $ok, $why);
+
+// M23: Microsoft names no e-mail address. M24: Google names no subject.
+[$ok, $why] = $judgeIn($failIn($xenaSso, 222, 'ms365', static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode(['sub' => 'p1042r4-ms-noemail', 'name' => 'x'])]), 'no_email', 'Microsoft', 222);
+ok('M23 Microsoft names no e-mail address: the Account page says "' . $said($P::NO_EMAIL, 'Microsoft', true) . '", once', $ok, $why);
+[$ok, $why] = $judgeIn($failIn($xenaSso, 223, 'google', static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode(['email' => 'p1042r4.nosub@selftest.invalid', 'name' => 'x'])]), 'no_identity', 'Google', 223);
+ok('M24 Google names no subject: the Account page says "' . $said($P::NO_IDENTITY, 'Google', true) . '", once', $ok, $why);
+
+// M25: a Google account from an organisation this portal does not accept.
+setting('auth.google.hostedDomain', 'p1042r4-only.invalid');
+[$ok, $why] = $judgeIn($failIn($xenaSso, 224, 'google', static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode($claimsFor('google', 'p1042r4.domain@selftest.invalid'))]), 'domain', 'Google', 224);
+setting('auth.google.hostedDomain', '');
+ok('M25 a Google account from another organisation, where the portal accepts one only: the Account page says "' . $said($P::DOMAIN, 'Google', true) . '", once', $ok, $why);
+
+// M26: the sign-in names the address of a DIFFERENT account, which is switched
+// off (Zed's). Round 3 showed "This account has been deactivated" on Xena's own
+// Account page, as if HER account were switched off. Zed stays switched off,
+// is not linked, and the blocked attempt is recorded against HIM as always.
+q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [PEOPLE['zed']]);
+$zedBlockedBefore = (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'LoginBlocked'", 'i', [PEOPLE['zed']])['n'];
+[$ok, $why] = $throughBoth('switched_off', 225, static fn (string $state, string $provider): array => ['state' => $state, 'code' => STUB . json_encode($claimsFor($provider, emailOf('zed')))]);
+$zedAfter = one('SELECT isActive FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zed']]);
+ok('M26 a sign-in naming a DIFFERENT, switched-off account\'s address: the member\'s Account page says "' . $offWords . '" (and Google\'s), once, never "This account has been deactivated"; that account stays switched off and unlinked, and each attempt is recorded against it',
+    $ok && (int) ($zedAfter['isActive'] ?? 1) === 0
+    && (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['zed']])['n'] === 0
+    && (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'LoginBlocked'", 'i', [PEOPLE['zed']])['n'] === $zedBlockedBefore + 2,
+    $why);
+
+// M27: the D-185 refusal through GOOGLE for a signed-in member (M10 is
+// Microsoft's): nothing is made, and no invitation is suggested.
+$ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => '0']);
+[$ok, $why] = $judgeIn($failIn($xenaSso, 227, 'google', static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode($claimsFor('google', P1042_NEW_EMAIL))]), 'no_account', 'Google', 227);
+$ssoPost($vicSso, 191, ['level' => 'organisation', 'choice' => 'follow']);
+ok('M27 with this organisation refusing new accounts, a signed-in member\'s GOOGLE sign-in that matches no account makes nothing, and the Account page says "' . $said($P::NO_ACCOUNT, 'Google', true) . '", once, with no invitation',
+    $ok && $madeForXena() === [] && stripos($said($P::NO_ACCOUNT, 'Google', true), 'invit') === false, $why);
+
+// M28: somebody NOT signed in still reads what they always read about a
+// switched-off account - the signed-out side of the one sentence whose truth
+// depends on who reads it - through both callbacks, and is signed in nowhere.
+$m28Fine = true;
+$m28Why  = [];
+foreach (['ms365', 'google'] as $n => $provider) {
+    $outJar = newJar();
+    $r = $failIn($outJar, 229 + $n, $provider, static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode($claimsFor($provider, emailOf('zed')))]);
+    $loginBody = $r['back']['location'] === '/login' ? req($outJar, 'GET', '/login', null, ip(229 + $n))['body'] : '';
+    $fine = $r['back']['status'] === 302 && $r['back']['location'] === '/login'
+        && $problemBox($loginBody) === $signedOutAlways['switched_off'] && $shows($loginBody, $offWords) === false && signedIn($outJar, ip(229 + $n)) === false;
+    $m28Fine  = $m28Fine && $fine;
+    $m28Why[] = $provider . ': callback ' . describe($r['back']);
+}
+q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [PEOPLE['zed']]);
+ok('M28 somebody NOT signed in whose sign-in names a switched-off account is sent to the sign-in page, which still says "' . $signedOutAlways['switched_off'] . '" (both callbacks), and nobody is signed in',
+    $m28Fine, implode('; ', $m28Why));
+
+// M29: every problem in the table was driven for a signed-in member somewhere
+// above, so a problem added to the table without a driven check fails here.
+$m29Driven = array_values(array_unique($drivenIn));
+sort($m29Driven);
+ok('M29 every one of the twelve problems was driven for a SIGNED-IN member through a real callback and read back from the page',
+    $m29Driven === $m16All, 'driven: ' . implode(',', $m29Driven));
 
 
 // =============================================================================

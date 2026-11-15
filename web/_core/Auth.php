@@ -2245,7 +2245,7 @@ class Auth
 
         /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
         if (RateLimiter::isBlocked() === true) {
-            self::oauthError('Too many authentication attempts. Please try again later.', 429);
+            self::oauthError(SsoSignInProblem::TOO_MANY, 'Microsoft', 429);
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
@@ -2270,12 +2270,12 @@ class Auth
             || hash_equals($storedState, $_GET['state']) === false
         ) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid OAuth state parameter', '');
-            self::oauthError('Invalid OAuth state. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::STATE, 'Microsoft');
         }
 
         if (isset($_GET['code']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Authorization code missing from callback', '');
-            self::oauthError('Authorization code missing. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::NO_CODE, 'Microsoft');
         }
 
         // 🧹 Clear the OAuth state to prevent replay
@@ -2299,13 +2299,13 @@ class Auth
         ]);
 
         if ($tokenResp === null) {
-            self::oauthError('Token request failed. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_REQUEST, 'Microsoft');
         }
 
         $tokenData = json_decode($tokenResp, true);
         if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from MS365', '');
-            self::oauthError('Invalid token response. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_RESPONSE, 'Microsoft');
         }
 
         $idToken = $tokenData['id_token'];
@@ -2317,7 +2317,7 @@ class Auth
         $jwksJson = file_get_contents($jwksUri);
         if ($jwksJson === false) {
             Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from ' . $jwksUri, '');
-            self::oauthError('Unable to retrieve signing keys. Please try again later.');
+            self::oauthError(SsoSignInProblem::SIGNING_KEYS, 'Microsoft');
         }
 
         $jwks = json_decode($jwksJson, true);
@@ -2332,7 +2332,7 @@ class Auth
             ]);
         } catch (RuntimeException $ex) {
             Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
-            self::oauthError('Token verification failed. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_VERIFY, 'Microsoft');
         }
 
         /* ----------------------- 4. Extract user info ---------------------- */
@@ -2343,7 +2343,7 @@ class Auth
 
         if ($email === '') {
             Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email in ID token payload', '');
-            self::oauthError('Unable to determine user email from token.');
+            self::oauthError(SsoSignInProblem::NO_EMAIL, 'Microsoft');
         }
 
         /* ----------------------- 5. Find or create user -------------------- */
@@ -2378,7 +2378,7 @@ class Auth
                     //    column, never the e-mail address in the words — an
                     //    erasure empties the column and cannot reach words.
                     Logger::activity('LoginBlocked', 'MS365 sign-in attempt for deactivated account #' . $switchedOffId, $switchedOffId);
-                    self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
+                    self::oauthError(SsoSignInProblem::SWITCHED_OFF, 'Microsoft', 403);
                 }
 
                 // 🆕 May a Microsoft sign-in make a NEW account here? (#1042,
@@ -2556,7 +2556,7 @@ class Auth
 
         /* ----------------------- 0. Rate limit OAuth callbacks ------------- */
         if (RateLimiter::isBlocked() === true) {
-            self::oauthError('Too many authentication attempts. Please try again later.', 429);
+            self::oauthError(SsoSignInProblem::TOO_MANY, 'Google', 429);
         }
 
         /* ----------------------- 1. Validate OAuth state ------------------- */
@@ -2581,12 +2581,12 @@ class Auth
             || hash_equals($storedState, $_GET['state']) === false
         ) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_STATE', 'Invalid Google OAuth state parameter', '');
-            self::oauthError('Invalid OAuth state. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::STATE, 'Google');
         }
 
         if (isset($_GET['code']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'OAUTH_CODE', 'Google authorization code missing from callback', '');
-            self::oauthError('Authorization code missing. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::NO_CODE, 'Google');
         }
 
         // 🧹 Clear the OAuth state to prevent replay
@@ -2607,13 +2607,13 @@ class Auth
         ]);
 
         if ($tokenResp === null) {
-            self::oauthError('Token request failed. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_REQUEST, 'Google');
         }
 
         $tokenData = json_decode($tokenResp, true);
         if (json_last_error() !== JSON_ERROR_NONE || isset($tokenData['id_token']) === false) {
             Logger::errorPlatform('Auth', 'Error', 'TOKEN_RESPONSE', 'Invalid token response from Google', '');
-            self::oauthError('Invalid token response. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_RESPONSE, 'Google');
         }
 
         $idToken = $tokenData['id_token'];
@@ -2625,7 +2625,7 @@ class Auth
         $jwksJson = file_get_contents($jwksUri);
         if ($jwksJson === false) {
             Logger::errorPlatform('Auth', 'Error', 'JWKS_FETCH', 'Unable to retrieve JWKS from Google', '');
-            self::oauthError('Unable to retrieve signing keys. Please try again later.');
+            self::oauthError(SsoSignInProblem::SIGNING_KEYS, 'Google');
         }
 
         $jwks = json_decode($jwksJson, true);
@@ -2637,7 +2637,7 @@ class Auth
             ]);
         } catch (RuntimeException $ex) {
             Logger::errorPlatform('JWT', 'Error', 'VERIFY_FAIL', $ex->getMessage(), '');
-            self::oauthError('Token verification failed. Please try signing in again.');
+            self::oauthError(SsoSignInProblem::TOKEN_VERIFY, 'Google');
         }
 
         /* ----------------------- 4. Extract user info ---------------------- */
@@ -2648,7 +2648,7 @@ class Auth
 
         if ($email === '' || $sub === '') {
             Logger::errorPlatform('Auth', 'Error', 'NO_EMAIL', 'No email/sub in Google ID token', '');
-            self::oauthError('Unable to determine user identity from token.');
+            self::oauthError(SsoSignInProblem::NO_IDENTITY, 'Google');
         }
 
         // 🏢 Enforce hosted domain restriction if configured
@@ -2657,7 +2657,7 @@ class Auth
             $tokenHd = $payload['hd'] ?? '';
             if (strtolower($tokenHd) !== strtolower($requiredHd)) {
                 Logger::errorPlatform('Auth', 'Error', 'HD_MISMATCH', 'Google domain mismatch: expected ' . $requiredHd . ', got ' . $tokenHd, '');
-                self::oauthError('Your Google account is not from the allowed organisation.');
+                self::oauthError(SsoSignInProblem::DOMAIN, 'Google');
             }
         }
 
@@ -2687,7 +2687,7 @@ class Auth
                 if ($switchedOffId !== null) {
                     // #933: as in callbackMS365() above.
                     Logger::activity('LoginBlocked', 'Google sign-in attempt for deactivated account #' . $switchedOffId, $switchedOffId);
-                    self::oauthError('This account has been deactivated. Please contact your administrator.', 403);
+                    self::oauthError(SsoSignInProblem::SWITCHED_OFF, 'Google', 403);
                 }
 
                 // 🆕 May a Google sign-in make a NEW account here? (#1042,
@@ -4838,22 +4838,33 @@ class Auth
     }
 
     /**
-     * 🚫 Redirect to login with an error flash message.
-     * Used by OAuth callbacks to provide user-friendly error handling instead
-     * of bare echo+exit patterns.
+     * 🚫 A Microsoft or Google sign-in failed: say why, and send the browser
+     * to the page that will say it.
      *
-     * @param string $message User-facing error message
+     * The callbacks name the PROBLEM, never the words (#1042 round 4).
+     * `SsoSignInProblem::words()` is the ONE place they are worded, and it
+     * words them for the person this browser belongs to: somebody signing in
+     * reads what the sign-in page has always said; a member who is ALREADY
+     * signed in (sent here by the Account page or "Add a password") reads
+     * that the sign-in could not be used with THEIR account and why. Round 3
+     * showed them the signed-out words, which told a member with an account
+     * to ask for an invitation, and read "This account has been deactivated"
+     * about somebody else's account on their own Account page.
+     *
+     * @param string $problem  One of `SsoSignInProblem`'s constants.
+     * @param string $provider 'Microsoft' or 'Google' — this file's own words.
      * @param int    $httpCode Optional HTTP status code (default 400)
      * @return never
      */
-    private static function oauthError(string $message, int $httpCode = 400): never
+    private static function oauthError(string $problem, string $provider, int $httpCode = 400): never
     {
         self::ensureSession();
         http_response_code($httpCode);
+        $signedIn = self::check() === true;
         // #1042: under the sign-in problem's OWN key. It used to be the general
         // `flash_msg`, which the sign-in page never printed, so the person was
         // told nothing; see takeSignInProblem().
-        $_SESSION[self::SIGN_IN_PROBLEM_KEY] = $message;
+        $_SESSION[self::SIGN_IN_PROBLEM_KEY] = SsoSignInProblem::words($problem, $provider, $signedIn);
         // 👤 Somebody ALREADY SIGNED IN reaches these callbacks on purpose: the
         //    Account page's "link" buttons and "Add a password" (#731) both
         //    send them to login/ms365 or login/google. The sign-in page sends
@@ -4861,7 +4872,7 @@ class Auth
         //    them it would never be said (#1042 round 3). They go back to a
         //    page that reads it instead. Their session is still their own: no
         //    callback grants anything before the step that fails.
-        header('Location: ' . (self::check() === true ? self::signedInProblemPage() : Site::url('login')));
+        header('Location: ' . ($signedIn === true ? self::signedInProblemPage() : Site::url('login')));
         exit();
     }
 
@@ -4887,8 +4898,8 @@ class Auth
     /**
      * ❌ Why the last Microsoft or Google sign-in in this browser failed, or ''
      * (#1042). Taken out of the session as it is read, so it is said once.
-     * The ONE reader; only `oauthError()` writes it, always with this file's
-     * own words, never a visitor's.
+     * The ONE reader; only `oauthError()` writes it, always with
+     * `SsoSignInProblem`'s own words, never a visitor's.
      *
      * THREE PAGES ASK IT, and each reaches only the person the words are for.
      * The sign-in page asks it for somebody NOT signed in (`oauthError()`
@@ -4916,7 +4927,10 @@ class Auth
      * On a refusal: nobody is signed in (the callback has granted nothing yet
      * — `beginSessionFor()` and `$_SESSION['user_id']` come after the account
      * is found or made), nothing is created, the person reads
-     * `SsoNewAccounts::REFUSAL_WORDS`, and the refusal is recorded. The record
+     * `SsoSignInProblem::NO_ACCOUNT`'s words (D-185's sentence for somebody
+     * signing in; for a member already signed in, that the sign-in could not
+     * be used with their account and why, never "ask to be invited"), and
+     * the refusal is recorded. The record
      * names the provider and NOT the e-mail address the provider sent: an
      * activity description is fixed words (#933), and this address belongs to
      * nobody on the portal, so an erasure could never find it.
@@ -4935,7 +4949,7 @@ class Auth
             'A ' . $providerWords . ' sign-in matched no account, and new accounts by Microsoft or Google sign-in '
                 . 'are switched off here, so none was made'
         );
-        self::oauthError(SsoNewAccounts::REFUSAL_WORDS, 403);
+        self::oauthError(SsoSignInProblem::NO_ACCOUNT, $providerWords, 403);
     }
 
     /**
