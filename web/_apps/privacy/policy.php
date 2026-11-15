@@ -117,6 +117,12 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
     <li><strong>Records kept for security and as a history of changes</strong> can mention your account number, in what they describe or in a stored copy of a record that was changed: <span data-activity-log-retention="<?php echo htmlspecialchars($activityLogFacts['state'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ActivityLogRetention::privacyNoticeClause($activityLogFacts), ENT_QUOTES, 'UTF-8'); ?></span>; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too. What a record in the activity log says is kept as it was written for as long as the record is, and some give a person's full name or e-mail address as well as an account number.</li>
 </ul>
 
+<?php // 🌐 #1019 (D-178): the privacy notice names network addresses and why they are kept. The
+      //    same template as the Privacy & Data Protection page, under its own heading so the pinned
+      //    "Retention policy" section above is unchanged. ?>
+<h3>Network addresses</h3>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
+
 <h3>Contact</h3>
 <p>Data protection enquiries: <?php if ($contact !== ''): ?><a href="mailto:<?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?></a><?php else: ?><em>not configured — see your portal admin.</em><?php endif; ?></p>
 

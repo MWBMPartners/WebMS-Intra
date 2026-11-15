@@ -253,3 +253,13 @@ Two things the entry does not do for you, both read from
 
 Where one decision does not fit a table, a hand-written instruction in
 `GdprEraser::catalogue()` takes its place.
+
+A column that keeps a **network address**, raw or scrambled, also needs an
+`addressKept` sentence on its entry (#1019, D-178): one sentence a member reads,
+saying how long the address is kept and whether an erasure reaches it. The
+privacy pages print these sentences as they stand, through
+`Portal\Core\NetworkAddresses`. `check_network_address_periods.py` fails when an
+address-shaped column has none; where no keeping period is built yet the
+sentence says "No time limit is set yet" and the column goes on
+`tools/audit-checks/network_address_period_pending.txt`, and the check fails if
+the two disagree.

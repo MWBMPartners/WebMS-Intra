@@ -126,6 +126,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     privacy notice for what stays.
 </p>
 
+<?php // 🌐 #1019 (D-178): every place a network address is kept, and for how long, from the
+      //    personal-data catalogue through ONE template shared with the privacy policy. Its own
+      //    heading, so the pinned "Retention" section above is unchanged. ?>
+<h2 class="h4 mt-4">Network addresses</h2>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
+
 <h2 class="h4 mt-4">Your rights</h2>
 <ul>
     <li><strong>Access</strong> — request a copy of your data via

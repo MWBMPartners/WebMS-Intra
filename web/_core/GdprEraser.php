@@ -834,15 +834,30 @@ class GdprEraser
             //       says only what happens to the member's record.
             ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => ['counterpartyName', 'counterpartyContact'], 'reason' => 'the loan is kept so the asset\'s custody chain is intact — which item went out, when, and when it came back; who borrowed or lent it is detached, and so are the contact details typed about them'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
-            ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'changes you made to equipment records: the equipment\'s change history is kept for ever (the owner\'s decision D-116). Your account number is removed from these entries; a scrambled form of the network address each change came from stays, which this installation can still match against an address it is given, and what each entry recorded is kept as written, so it can still mention you'],
+            // 🌐 #938 (D-164): the scrambled network address on the person's
+            //    own asset changes is emptied too. It used to stay, and the
+            //    reason said so truthfully (#703 round 8): it is salted with
+            //    this installation's key, so whoever holds the key can match
+            //    it against an address. An "acted on it" column cannot
+            //    normally carry `nullCols` (the coverage test refuses it);
+            //    this column is on ACTOR_OWN_REQUEST_COLUMNS, which says why
+            //    it is the actor's own and nobody else's.
+            ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => ['ipHash'], 'reason' => 'changes you made to equipment records: the equipment\'s change history is kept for ever (the owner\'s decision D-116). Your account number and the scrambled form of the network address each change came from are removed from these entries; what each entry recorded is kept as written, so it can still mention you'],
             // #404 Phase 2 Pass 2 (#410). tblAssetScanLog rows are retained
             // for scan-volume analytics (item.php's sparkbar) even after
             // the scanning user is erased — only the actor attribution is
-            // detached, mirroring tblAssetAudit immediately above. The
-            // ipHash/userAgentHash columns are ALREADY salted-hash-only
-            // (never a raw IP/User-Agent — see AssetRegister::recordScan()),
-            // so there is no separate PII column here to null out.
-            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the record that a piece of equipment was scanned is kept for counting how often it is scanned; your account number is removed from it. A scrambled form of the network address and browser each scan came from is not removed, and this installation can still match it against an address it is given'],
+            // detached, mirroring tblAssetAudit immediately above.
+            // 🌐 #1065 (D-178): this used to say there was "no separate PII
+            //    column here to null out", because ipHash and userAgentHash
+            //    are salted hashes rather than the raw values. A salted hash
+            //    is still the person's: this installation's key matches it
+            //    against any address or browser it is given. So both are
+            //    emptied on the person's own scans now, on the same
+            //    ACTOR_OWN_REQUEST_COLUMNS ground as tblAssetAudit above. A
+            //    public scan made without signing in has no account number
+            //    and is not reached; it goes with the rest of the scan log
+            //    after `assets.scan_log_retention_days`.
+            ['table' => 'tblAssetScanLog',              'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => ['ipHash', 'userAgentHash'], 'reason' => 'the record that a piece of equipment was scanned is kept for counting how often it is scanned; your account number, and the scrambled form of the network address and browser each scan came from, are removed from it'],
             // #392 Phase 3 (#411/#412/#414). tblAssetKioskPins IS a hard
             // delete (not anonymise) — same rationale as tblAssetOwners
             // above: a PIN tied to an erased user is meaningless, and
@@ -1036,7 +1051,8 @@ class GdprEraser
             //    the account and the address the change came from both go" - true of the two columns,
             //    but silent that the history is kept for ever (D-116) and that what an entry recorded
             //    stays. The tblAssetAudit reason said "actor identity detached" while its `ipHash`
-            //    (AssetRegister::ipHash(), salted with this installation's key) is not emptied.
+            //    (AssetRegister::ipHash(), salted with this installation's key) was not emptied;
+            //    #938 (D-164) empties it now.
             ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'changes you made to records: the change history is kept for ever (the owner\'s decision D-116). Your account number and the network address each change came from are removed from these entries; which record changed, and what it held before and after, are kept as written, so an entry can still name you or give your account number (an entry about your own account, or your membership of an organisation, department, user group or role, has those values emptied by a separate step)'],
             ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
             // 🎁 #970 item 1: a gift the person recorded for THEMSELVES matches
@@ -1630,6 +1646,40 @@ class GdprEraser
         // a link column and NOT here), so erasing the typist must empty
         // nothing of it — which this list's guard on `nullCols` enforces.
         'placeEnteredByID',
+    ];
+
+    /**
+     * 🌐 The ONE list of columns that record the REQUEST the actor themselves
+     *    made — the scrambled network address and browser it came from — on a
+     *    table whose only account column is an "acted on it" one (#938,
+     *    #1065; D-164, D-178).
+     *
+     * `tools/gdpr-coverage-selftest.php` refuses any `nullCols` on an
+     * instruction matched by an ACTOR_COLUMNS column, and it is right to: a
+     * note or a contact detail on such a row is usually about somebody else,
+     * and `= NULL` on every row the actor touched would destroy it. These
+     * columns are the one shape where that reasoning does not hold. Each one
+     * is written by the SAME request that wrote the actor's number
+     * (`AssetRegister::audit()` and `AssetRegister::recordScan()` hash the
+     * address and browser of the request in hand), so on a row matched by the
+     * actor's number it is the actor's own request and nobody else's. That is
+     * why `tblAuditTrail.ipAddress` is emptied on its actor's rows already:
+     * its `userID` is the actor too, it is simply not on ACTOR_COLUMNS.
+     *
+     * One honest limit, said here because the column does not say it: a change
+     * made at a kiosk is attributed to the person who typed their PIN, and the
+     * address on that row is the kiosk's. Emptying it loses the organisation's
+     * kiosk address from that person's rows, which is no one else's personal
+     * data, and D-164 asks for every asset change the person made.
+     *
+     * Table => columns. The coverage test pins this list WHOLE, so a column
+     * cannot be added to it quietly to get past the guard.
+     *
+     * @var array<string, list<string>>
+     */
+    public const ACTOR_OWN_REQUEST_COLUMNS = [
+        'tblAssetAudit'   => ['ipHash'],
+        'tblAssetScanLog' => ['ipHash', 'userAgentHash'],
     ];
 
     /**

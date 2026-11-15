@@ -233,7 +233,8 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 252; // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5.
+const EXPECTED_CHECKS = 258; // #1019 added section Q's six: 252 + 6.
+                             // #1018 added B4c, #1015 B4d, O13b, O6b and its plant O6c: 247 + 5.
                              // MERGED (p982-land): both sides grew from 223,
                             // #982/#926 by 18 (to 241, the lines below) and
                             // #1017 by 6 (to 229, the next block): 223 + 18 + 6 = 247.
@@ -6245,6 +6246,105 @@ foreach ($p1012Plants as $label => [$rel, $swaps, $expect]) {
 $p1012Again = $p1012Observe();
 ok('P14 with every plant taken out again, the same observations are all green (#1012)', $p1012Again === [], implode('; ', $p1012Again));
 q('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?', 'si', [$p1012ZoneWas, ORG_A]);
+
+// =============================================================================
+head('Q. The privacy pages name every place a network address is kept, and for how long (#1019, D-178)');
+// =============================================================================
+// 🌐 D-178: the privacy notice names network addresses and why they are kept,
+//    and each place has a set keeping period. The sentences live in the
+//    personal-data catalogue (`addressKept`), are printed through
+//    Portal\Core\NetworkAddresses by ONE template, and both privacy pages draw
+//    it. These checks read what a visitor and a member RECEIVE, at both
+//    organisations, and compare it with the catalogue the running copy holds.
+//    Whether each sentence is TRUE is a person's job at review; the static
+//    gate check_network_address_periods.py pins that each address column HAS
+//    one and that "No time limit is set yet" agrees with its pending list.
+$q1019Visitor = $child . $sep . 'p1019-visitor.jar';
+$q1019Expected = static function () use ($plantFile): array {
+    $catalogue = require $plantFile('_core/personal-data-catalogue.php');
+    $out = [];
+    foreach ($catalogue as $entry) {
+        foreach ((array) ($entry['addressKept'] ?? []) as $words) {
+            $out[] = trim((string) preg_replace('/\s+/', ' ', (string) $words));
+        }
+    }
+
+    return $out;
+};
+$q1019Observe = static function () use ($jar, $q1019Visitor, $q1019Expected): array {
+    $expected = $q1019Expected();
+    $wrong    = [];
+    foreach ([['/privacy', 'h2'], ['/privacy/policy', 'h3']] as [$path, $level]) {
+        foreach ([[$q1019Visitor, ADDR_A, 'a visitor at A'], [$jar['cal'], ADDR_A, 'a member at A'], [$jar['admb'], ADDR_B, 'an administrator at B']] as [$who, $address, $label]) {
+            $page = req($who, 'GET', $path, null, $address);
+            if ($page['status'] !== 200 || str_contains((string) $page['body'], '</html>') === false) {
+                $wrong[] = $path . ' for ' . $label . ' did not answer a whole page (' . $page['status'] . ')';
+                continue;
+            }
+            $doc      = \Dom\HTMLDocument::createFromString((string) $page['body'], LIBXML_NOERROR);
+            $headings = 0;
+            foreach ($doc->querySelectorAll($level) as $h) {
+                $headings += trim((string) $h->textContent) === 'Network addresses' ? 1 : 0;
+            }
+            $listed = [];
+            foreach ($doc->querySelectorAll('[data-network-addresses="listed"] li') as $li) {
+                $listed[] = trim((string) preg_replace('/\s+/', ' ', (string) $li->textContent));
+            }
+            if ($headings !== 1) {
+                $wrong[] = $path . ' for ' . $label . ': ' . $headings . ' "Network addresses" headings';
+            }
+            if ($doc->querySelector('[data-network-addresses="unreadable"]') !== null) {
+                $wrong[] = $path . ' for ' . $label . ': says the list could not be read';
+            }
+            if ($listed !== $expected) {
+                $wrong[] = $path . ' for ' . $label . ': lists ' . count($listed) . ' places, the catalogue holds ' . count($expected);
+            }
+        }
+    }
+
+    return $wrong;
+};
+$q1019Words = $q1019Expected();
+ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, and eight saying no time limit is set yet',
+    count($q1019Words) >= 18
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Prayer requests keep the network address'))) === 1
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Equipment label scans keep a scrambled form'))) === 1
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 8,
+    count($q1019Words) . ' sentences');
+$q1019First = $q1019Observe();
+ok('Q2 the Privacy & Data Protection page and the privacy policy, for a visitor and a member at one organisation and an administrator at another, each show ONE "Network addresses" section listing exactly the catalogue\'s sentences, in order (#1019, D-178)',
+    $q1019First === [], implode('; ', $q1019First));
+$q1019Plants = [
+    'Q3 the template listing only the first place' => [
+        '_core/templates/network-addresses.php', ['foreach ($networkAddressPlaces as $networkAddressPlace):' => 'foreach (array_slice($networkAddressPlaces, 0, 1) as $networkAddressPlace):']],
+    'Q4 the privacy policy no longer drawing the section' => [
+        '_apps/privacy/policy.php', ["<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>" => '']],
+    'Q5 the list unreadable (the page must say so, never show an empty list)' => [
+        '_core/NetworkAddresses.php', ['$places = [];' => 'return [];']],
+];
+foreach ($q1019Plants as $label => [$rel, $swaps]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach ($swaps as $from => $to) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = [];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $q1019Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1019)',
+        $applied === true && $wrong !== [] && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+$q1019Again = $q1019Observe();
+ok('Q6 with every plant taken out again, both pages are whole again (#1019)', $q1019Again === [], implode('; ', $q1019Again));
+@unlink($q1019Visitor);
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

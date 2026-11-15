@@ -174,6 +174,21 @@ declare(strict_types=1);
  *             wherever it names the person. A person column left out is not
  *             looked at.
  *   period    for 'retain' only: how long, and under what obligation
+ *   addressKept
+ *             for every column that keeps a NETWORK ADDRESS, raw or scrambled
+ *             (#1019; the owner's decision D-178): column => one sentence a
+ *             member reads, saying how long it is kept and whether an erasure
+ *             reaches it. The privacy pages print these sentences as they are,
+ *             through Portal\Core\NetworkAddresses, so a sentence here is a
+ *             promise to the public and must be checked against the code that
+ *             clears the column (#706's rule for `period`).
+ *             tools/audit-checks/check_network_address_periods.py fails when a
+ *             column shaped like an address has no sentence here, and when a
+ *             sentence names a column that does not exist. Where NO keeping
+ *             period is set yet the sentence must say "No time limit is set
+ *             yet", and the column must be on that check's pending list,
+ *             network_address_period_pending.txt; the check fails both ways,
+ *             so the words and the list cannot disagree.
  */
 return [
     // =========================================================================
@@ -262,6 +277,12 @@ return [
                     . 'whatever this installation allows (#685). The organisation may choose "keep for ever" only '
                     . 'where the installation allows it too; otherwise the installation\'s own period applies',
         'columns'  => ['ipHash'],
+        'addressKept' => [
+            'ipHash' => 'Check-ins at the door made without signing in keep a scrambled form of the network address '
+                . 'they came from, used to count each device once. It is emptied after the number of days this '
+                . 'organisation sets for check-in details (90 unless changed), once the portal\'s scheduled '
+                . 'jobs have been set up. Nothing links it to an account, so an erasure cannot find it.',
+        ],
     ],
     'tblAnonymousCheckinDays' => [
         'decision' => 'not-personal',
@@ -438,6 +459,12 @@ return [
         // decision from the line straight after its name.)
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'sessionID', 'ipAddress', 'userAgent'],
+        'addressKept' => [
+            'ipAddress' => 'The record of your choices about the privacy notice and cookies keeps the network address each '
+                . 'choice was made from. No time limit is set yet: a choice made while signed in is kept until '
+                . 'your account is erased, which deletes it, and one made without signing in is kept with no end '
+                . 'date.',
+        ],
     ],
     'tblCountEnvelopes' => [
         'decision' => 'retain',
@@ -731,6 +758,11 @@ return [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['submitterID', 'submitterIP'],
+        'addressKept' => [
+            'submitterIP' => 'Answers to forms sent through a public link keep the network address each was sent from. No '
+                . 'time limit is set yet: an answer is kept until the organisation deletes it. They are not '
+                . 'linked to an account, so an erasure cannot find them.',
+        ],
     ],
     'tblGiftAidDeclaration' => [
         'decision' => 'retain',
@@ -762,6 +794,11 @@ return [
             'acceptedIP' => 'The network address the declaration was made from, kept as part of the evidence that '
                 . 'it was made. The whole declaration is kept because HMRC requires it, and the address '
                 . 'is part of what makes it stand up',
+        ],
+        'addressKept' => [
+            'acceptedIP' => 'Tax declarations keep the network address each was made from, as part of the declaration. It '
+                . 'is emptied, with your home address, at this organisation\'s keep-until date for giving '
+                . 'records; an erasure does not remove it before then.',
         ],
     ],
     'tblGivingEntry' => [
@@ -857,6 +894,11 @@ return [
             'displayName' => 'PERSONAL, AND UNREACHABLE - more so than it first looks. A chat sender has NO account at all: they are identified by `sessionToken`, which the schema calls an anonymous identity, and they type this name themselves. The table\'s only link to an account is `moderatedByID`, the MODERATOR, so an instruction that emptied this would blank the name a visitor typed from every message the erased moderator ever handled, while reaching nothing of the erased person\'s own. The owner chose on 1 November 2026 to keep it and record the limit rather than delete somebody else\'s data.',
             'senderIP' => 'PERSONAL, AND UNREACHABLE, for the same reason as displayName: the address belongs to whoever sent the message, who has no account, and the only account column on the row is the moderator\'s. Its own schema comment says it is kept for moderation audit.',
         ],
+        'addressKept' => [
+            'senderIP' => 'Live-stream chat messages keep the network address each was sent from, so misuse can be '
+                . 'moderated. No time limit is set yet. They are sent without signing in, so an erasure cannot '
+                . 'find them.',
+        ],
     ],
     'tblLocalAccounts' => [
         'decision' => 'erase',
@@ -934,6 +976,10 @@ return [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'createdIP'],
+        'addressKept' => [
+            'createdIP' => 'Password-reset requests keep the network address each was asked for from. No time limit is '
+                . 'set yet: a request is kept, even once used or expired, until your account is erased.',
+        ],
     ],
     'tblPathwayEnrolments' => [
         'decision' => 'erase',
@@ -988,6 +1034,12 @@ return [
         //    empties the SAME columns (GdprEraser::VISITOR_PRAYER_NULL_COLS;
         //    tools/gdpr-coverage-selftest.php fails if the two lists differ).
         //    A request sent with no e-mail address cannot be found at all.
+        'addressKept' => [
+            'submitterIP' => 'Prayer requests keep the network address each was sent from. No time limit is set yet. '
+                . 'Erasing your account removes it from the requests you sent from your account; a request sent '
+                . 'through the anonymous form loses it only when you ask the organisation, by the e-mail '
+                . 'address you gave with it.',
+        ],
     ],
     'tblProjectPledge' => [
         'decision' => 'erase',
@@ -1008,6 +1060,11 @@ return [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'ipHash'],
+        'addressKept' => [
+            'ipHash' => 'Plays of a recording keep a scrambled form of the network address each play came from, which '
+                . 'can be matched against an address. No time limit is set yet; an erasure deletes the plays '
+                . 'you made while signed in.',
+        ],
     ],
     'tblResourceBooking' => [
         'decision' => 'unlink',
@@ -1231,6 +1288,11 @@ return [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID', 'createdIP'],
+        'addressKept' => [
+            'createdIP' => 'Devices you chose to trust for two-step sign-in keep the network address each was trusted '
+                . 'from. No time limit is set yet: the record is kept, even once it has expired or been '
+                . 'removed, until your account is erased.',
+        ],
     ],
     'tblUserDepts' => [
         'decision' => 'erase',
@@ -1366,27 +1428,41 @@ return [
     'tblAssetAudit' => [
         'decision' => 'unlink',
         // The column was listed as `userID`; it is `actorUserID` (#535).
-        'reason'   => 'Who changed something in the asset register. The change history stays; the name goes.',
+        // 🌐 #938 (D-164): the scrambled network address on the person's own
+        //    changes is emptied now. Its old explanation here said it "cannot
+        //    be turned back into an address", which was untrue in the way
+        //    that matters: it is salted with this installation's key, so the
+        //    installation can match it against any address it is given.
+        'reason'   => 'Who changed something in the asset register. The change history stays; the name and the '
+                    . 'scrambled network address of the person\'s own changes go.',
         'columns'  => ['actorUserID', 'ipHash', 'changeSet'],
             'notEmptiedHere' => [
-            'ipHash' => 'A one-way fingerprint of the address a change was made from, not the address itself. '
-                . 'Kept as part of the equipment\'s own history; it cannot be turned back into an address',
             'changeSet' => 'What was changed about a piece of equipment. The organisation\'s record of its own '
                 . 'property',
+        ],
+        'addressKept' => [
+            'ipHash' => 'The equipment register\'s change history keeps a scrambled form of the network address '
+                . 'each change came from, which this installation can still match against an address. It is '
+                . 'kept for ever, as the change history is; an erasure removes it from the changes you made.',
         ],
     ],
     'tblAssetScanLog' => [
         'decision' => 'unlink',
         // The column was listed as `userID`; it is `actorUserID` (#535).
-        'reason'   => 'Who scanned an asset label. The scan history stays; the name goes.',
+        // 🌐 #1065 (D-178): the scrambled network address and browser of the
+        //    person's own scans are emptied now; their two explanations here
+        //    went, because the coverage test refuses an explanation for a
+        //    column that IS emptied. A public scan made without signing in
+        //    has no account number, so it is not reached and goes with the
+        //    rest of the log on its timer.
+        'reason'   => 'Who scanned an asset label. The scan history stays; the name, and the scrambled network '
+                    . 'address and browser of the person\'s own scans, go.',
         'columns'  => ['actorUserID', 'ipHash', 'userAgentHash'],
-            'notEmptiedHere' => [
-            'ipHash' => 'A one-way fingerprint of the address a label was scanned from. Kept so repeated '
-                . 'scanning can be seen; it cannot be turned back into an address. It does NOT last '
-                . 'indefinitely: AssetRegister::purgeExpiredScanLog() clears old rows from the nightly '
-                . 'asset job',
-            'userAgentHash' => 'A one-way fingerprint of the browser string, for the same purpose and with the same '
-                . 'limit',
+        'addressKept' => [
+            'ipHash' => 'Equipment label scans keep a scrambled form of the network address and browser each scan '
+                . 'came from, which this installation can still match. They are deleted with the scan record '
+                . 'after the number of days set for scan records (a year unless changed), once the portal\'s '
+                . 'scheduled jobs have been set up; an erasure removes them from your own scans sooner.',
         ],
     ],
     'tblAssetValueHistory' => [
@@ -1600,6 +1676,11 @@ return [
                     . ' number. A failed sign-in, for instance, keeps the sign-in name that was typed, which is'
                     . ' often an e-mail address (D-137). Records other people made can mention them too',
         'columns'  => ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
+        'addressKept' => [
+            'visitorIP' => 'The activity log keeps the network address each action came from for as long as the record '
+                . 'itself is kept: the period this page gives for the activity log. An erasure removes it from '
+                . 'your own records.',
+        ],
     ],
     'tblAnnouncements' => [
         'decision' => 'unlink',
@@ -1620,6 +1701,11 @@ return [
             'lastUsedIP' => 'The network address the key was last used from, kept so an administrator can see where '
                 . 'a key is being used. Not emptied: the key belongs to the installation rather than to a '
                 . 'person, and the record is what makes a stolen key noticeable',
+        ],
+        'addressKept' => [
+            'lastUsedIP' => 'Access keys that let other programs use the portal keep the network address each key was '
+                . 'last used from, replaced every time it is used. No time limit is set yet: it is kept while '
+                . 'the key\'s record exists.',
         ],
     ],
     'tblAssetKioskTokens' => [
@@ -1697,6 +1783,10 @@ return [
             'changeSet' => 'Emptied elsewhere with the two above. It is the whole set of changes as one piece '
                 . 'of machine-readable text, so it carries the same contents',
         ],
+        'addressKept' => [
+            'ipAddress' => 'The change history keeps the network address each change came from. It is kept for ever, as '
+                . 'the change history is; an erasure removes it from the changes you made.',
+        ],
     ],
     'tblErrors' => [
         'decision' => 'unlink',
@@ -1726,6 +1816,11 @@ return [
                 . 'detail beside it: the row is deleted outright by the nightly sweep once '
                 . '`errors.retentionDays` has passed — on an installation where that scheduled job '
                 . 'is set up and running, which is the same condition as the detail beside it (#715).',
+        ],
+        'addressKept' => [
+            'visitorIP' => 'Error records keep the network address a fault came from. They are deleted after the number '
+                . 'of days set for error records (a year unless changed), once the portal\'s scheduled jobs '
+                . 'have been set up; an erasure removes the address from your own error records sooner.',
         ],
     ],
     'tblEventHubResources' => [
@@ -2765,6 +2860,12 @@ return [
                     . 'two-factor limit, which an earlier version of this entry wrongly described as '
                     . 'covered. A row older than the period can change no answer the limiter gives.',
         'columns'  => ['bucket'],
+        'addressKept' => [
+            'bucket' => 'Limits on repeated attempts (signing in, resetting a password, sending a form) can keep a '
+                . 'one-way fingerprint of the network address. They are tidied away only when a later attempt '
+                . 'of the same kind happens, so one can stay for a long time. Nothing links them to an account, '
+                . 'so an erasure cannot find them.',
+        ],
     ],
     'tblLiveRateLimits' => [
         // #712, 2 November 2026, and migration 236. This entry used to record a
@@ -2791,6 +2892,11 @@ return [
                     . 'sent — about one send in 64, up to 500 rows at a time (#712). A row older than that '
                     . 'can change no answer the throttle gives.',
         'columns'  => ['senderFingerprint', 'sessionToken'],
+        'addressKept' => [
+            'senderFingerprint' => 'Limits that stop the live-stream chat being flooded keep a one-way fingerprint of the '
+                . 'network address. They are tidied away as later messages are sent, so one can stay longer '
+                . 'while the chat is quiet. Nothing links them to an account, so an erasure cannot find them.',
+        ],
     ],
     'tblTranscript' => [
         'decision' => 'retain',
@@ -2982,6 +3088,12 @@ return [
         'period'   => '`assets.found_report_retention_days`, 180 days unless the organisation changes it, '
                     . 'applied by AssetRegister::purgeExpiredFoundReports() from the nightly asset job',
         'columns'  => ['reporterName', 'reporterContact', 'message', 'ipHash'],
+        'addressKept' => [
+            'ipHash' => 'Reports that somebody has found a piece of the organisation\'s equipment keep a scrambled '
+                . 'form of the network address each came from. They are deleted after the number of days set '
+                . 'for them (180 unless changed), once the portal\'s scheduled jobs have been set up. The '
+                . 'person reporting need not have an account, so an erasure cannot find them.',
+        ],
     ],
     'tblContentTranslation' => [
         'decision' => 'retain',
