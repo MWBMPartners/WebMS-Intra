@@ -69,7 +69,7 @@
               "type": "string"
             },
             "url": {
-              "description": "A web address for them. This one IS written here, and is the product's own public source repository rather than any customer's address: openapi.php keeps it as the codebase's identity whatever brand is installed (#307). It is not a customer's domain, which is what the no-built-in-addresses rule (#500) forbids. NOTE: an installation whose `product.publisher` setting names a different company still shows this link beside that company's name — a known mismatch, found while building #821 and deliberately not decided there.",
+              "description": "The publisher's website: the \"Website\" link the API page shows beside their name. Deliberately NOT written in this file (#863, D-160): web/public_html/openapi.php fills it in when it serves the description, from the installation's `product.publisherUrl` setting (given during installation, and changeable by a global administrator in Admin, Settings), judged by Portal\\Core\\PublisherWebsite, and LEAVES IT OUT when that setting is empty or not a usable http(s) address. It used to be a fixed address here (the product's own source repository), so an installation whose publisher was another company showed that company's name linking to somebody else's site; and openapi.php removes any value this file might carry again, so a built-in address can never reach a developer's page.",
               "type": "string"
             },
             "email": {

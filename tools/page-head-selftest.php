@@ -1026,6 +1026,80 @@ if ($specAfter === null || $specAfter === $specBefore) {
     }
 }
 
+// -----------------------------------------------------------------------------
+// H06-H13. The publisher's "Website" link follows a setting, and is left out
+// when none is usable (#863, D-160). It used to be a fixed address written
+// into api-spec.json (the product's own source repository), so an
+// installation with another publisher showed that company's name linking to
+// somebody else's site. H06 reads the FILE; H07-H10 read the SERVED
+// description in each state the setting can be in; H11-H13 plant the two
+// faults the code exists to prevent and prove a check above sees each.
+// -----------------------------------------------------------------------------
+$siteWas     = $readSetting('product.publisherUrl');
+$plantedSite = 'https://publisher-' . bin2hex(random_bytes(3)) . '.example.org/about?who=us';
+$servedUrl   = static function () use ($get): ?string {
+    $doc = json_decode($get('/openapi.json'), true);
+    if (is_array($doc) === false) {
+        return '(not served)';
+    }
+    $contact = $doc['info']['contact'] ?? [];
+
+    return is_array($contact) === true && array_key_exists('url', $contact) === true ? (string) $contact['url'] : null;
+};
+if (is_array($specArr) === true && array_key_exists('url', (array) ($specArr['info']['contact'] ?? [])) === false) {
+    ok('H06', 'api-spec.json writes no address for the publisher\'s website: none is built in');
+} else {
+    bad('H06', 'api-spec.json still writes a fixed address for the publisher\'s website', (string) ($specArr['info']['contact']['url'] ?? ''));
+}
+$setSetting('product.publisherUrl', '');
+$u = $servedUrl();
+$u === null ? ok('H07', 'with the setting empty, the served contact carries no link at all') : bad('H07', 'with the setting empty, a link was still served', (string) $u);
+$setSetting('product.publisherUrl', $plantedSite);
+$u = $servedUrl();
+$u === $plantedSite ? ok('H08', 'with the setting given, the served link is exactly that address: "' . $u . '"') : bad('H08', 'the served link does not follow the setting', 'expected "' . $plantedSite . '", got ' . var_export($u, true));
+$unusable = [];
+foreach (['javascript:alert(1)', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
+    $setSetting('product.publisherUrl', $bad);
+    if ($servedUrl() !== null) {
+        $unusable[] = $bad;
+    }
+}
+$unusable === [] ? ok('H09', 'a stored value that is not a usable http(s) address (another scheme, a quote, a line break, a user name) is never served as a link')
+    : bad('H09', 'an unusable stored value was served as a link', json_encode($unusable));
+$setSetting('product.publisherUrl', '  Publisher.Example.org  ');
+$u = $servedUrl();
+$u === 'https://publisher.example.org' ? ok('H10', 'a bare host name, typed untidily, is served tidied as an https address') : bad('H10', 'a bare host name was not served as its tidied https address', var_export($u, true));
+
+$openapiFile   = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'openapi.php';
+$openapiBefore = (string) file_get_contents($openapiFile);
+$h11Plant = static function (string $id, string $pattern, string $replacement, string $what, string $setTo, callable $seesIt) use ($openapiFile, $openapiBefore, $setSetting): void {
+    $after = preg_replace($pattern, $replacement, $openapiBefore, 1, $count);
+    if ($after === null || $count !== 1) {
+        bad($id, 'could not plant the fault (' . $what . '): the line was not found in the copied openapi.php');
+        return;
+    }
+    file_put_contents($openapiFile, $after);
+    $setSetting('product.publisherUrl', $setTo);
+    $seesIt() === true ? ok($id, 'planted (' . $what . '), and the check above goes red on it')
+        : bad($id, 'planted (' . $what . '), and nothing noticed, so the check above proves nothing');
+    file_put_contents($openapiFile, $openapiBefore);
+};
+$h11Plant('H11', '#^\$publisherWebsite = PublisherWebsite::usable\(App::settings\(PublisherWebsite::SETTING\)\);$#m',
+    "\$publisherWebsite = 'https://github.com/MWBMPartners/WebMS-Intra';", 'a built-in address in place of the setting', '',
+    static fn (): bool => $servedUrl() !== null);
+$h11Plant('H12', '#^\$publisherWebsite = PublisherWebsite::usable\(App::settings\(PublisherWebsite::SETTING\)\);$#m',
+    "\$publisherWebsite = (string) App::settings(PublisherWebsite::SETTING);", 'the stored text served without being judged', 'javascript:alert(1)',
+    static fn (): bool => $servedUrl() !== null);
+$setSetting('product.publisherUrl', $plantedSite);
+(string) file_get_contents($openapiFile) === $openapiBefore && $servedUrl() === $plantedSite
+    ? ok('H13', 'openapi.php is back as it was, byte for byte, and serves the setting again')
+    : bad('H13', 'openapi.php was not restored, or does not serve the setting after the plants');
+if ($siteWas === null) {
+    $clearSetting('product.publisherUrl');
+} else {
+    $setSetting('product.publisherUrl', $siteWas);
+}
+
 // Put the two installation settings back exactly as they were: they are
 // seeded rows, so deleting them would change the database for the next test.
 foreach (['product.name' => $nameWas, 'product.publisher' => $publisherWas] as $key => $was) {

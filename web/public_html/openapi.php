@@ -35,6 +35,8 @@
 
 declare(strict_types=1);
 
+use Portal\Core\App;
+use Portal\Core\PublisherWebsite;
 use Portal\Core\Site;
 
 // 🏷️ Resolve the brand-aware fields.
@@ -80,14 +82,32 @@ if (isset($spec['info']) === false || is_array($spec['info']) === false) {
 }
 $spec['info']['title'] = $productName . ' REST API';
 
-// 📞 contact.name = active publisher; contact.url = product's own repo URL.
-//    The repo URL stays as the WebMS-Intra GitHub address (the codebase
-//    identity, regardless of brand) — see DEV_NOTES "Where the brand is NOT
-//    applied" for the same rationale used for the `[WebMS-Intra]` log prefix.
+// 📞 contact.name = the installation's publisher; contact.url = the
+//    publisher's website, from the installation's own setting, or NO link.
+//
+//    #863 (D-160): the link used to be the product's own source repository,
+//    fixed in api-spec.json, so an installation whose publisher was another
+//    company showed that company's name linking to somebody else's site. The
+//    owner decided the link follows a setting given during installation and
+//    is left out when none is set; no address is built in. The file no longer
+//    carries one, and any `url` it might carry again is removed here rather
+//    than served, so the served description can only ever link to what this
+//    installation chose.
+//
+//    Read through App::settings(), the same reading as the publisher's NAME
+//    above, so the name and the link always come from the same place.
+//    PublisherWebsite::usable() judges the stored text again on every read,
+//    because the general settings editor can store anything in the row.
 if (isset($spec['info']['contact']) === false || is_array($spec['info']['contact']) === false) {
     $spec['info']['contact'] = [];
 }
 $spec['info']['contact']['name'] = $productPublisher;
+$publisherWebsite = PublisherWebsite::usable(App::settings(PublisherWebsite::SETTING));
+if ($publisherWebsite !== '') {
+    $spec['info']['contact']['url'] = $publisherWebsite;
+} else {
+    unset($spec['info']['contact']['url']);
+}
 
 // 📡 Emit.
 header('Content-Type: application/json; charset=utf-8');

@@ -145,6 +145,11 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 //    file needs the database and the rest of the portal.
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Channel.php';
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PortalAddress.php';
+// 🌐 Portal\Core\PublisherWebsite (#863, D-160): the publisher's website, the
+//    "Website" link on the API page, also asked for on the Web addresses page.
+//    It uses nothing but PHP and PortalAddress::check() (required just above),
+//    so it loads alone. Required by hand: the installer has no autoloader.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PublisherWebsite.php';
 
 // 🌍 Portal\Core\Countries: the list of countries and the zones in each
 //    (#942, D-133), for the country and time zone the Web addresses page now
@@ -1953,6 +1958,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    made up, and a currency the portal cannot store is refused.
         $currency = \Portal\Core\Currency::fromPosted(installField('currency'));
         $zone    = trim(installField('timezone'));
+        // 🌐 The publisher's website (#863, D-160): may be left empty, which
+        //    means the API page shows the publisher's name with no link.
+        //    Judged by the one rule the API page itself applies on reading.
+        $publisherSite = \Portal\Core\PublisherWebsite::check(installField('publisher_website'));
         if ($checked['problem'] !== '') {
             $error = 'Nothing was saved. ' . $checked['problem'];
         } elseif ($checked['address'] === '') {
@@ -1971,6 +1980,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($zone !== '' && in_array($zone, timezone_identifiers_list(), true) === false) {
             $error = 'Nothing was saved. The time zone chosen is not one the installer knows. Choose one from the list, '
                    . 'or "Not chosen yet".';
+        } elseif ($publisherSite['problem'] !== '') {
+            $error = 'Nothing was saved. The publisher\'s website cannot be used: ' . $publisherSite['problem']
+                   . ' Or leave the box empty to show no link.';
         } else {
             $_SESSION['install_addresses'] = [
                 'address'  => $checked['address'],
@@ -1978,6 +1990,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'country'  => $country,
                 'timezone' => $zone,
                 'currency' => $currency,
+                'publisherUrl' => $publisherSite['address'],
             ];
             header('Location: ?step=5');
             exit();
@@ -2144,11 +2157,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    it fills an empty setting, may replace this run's own earlier
                 //    value, and keeps a currency a carried-on database already had.
                 $finishReport['currencyTyped'] = (string) ($addresses['currency'] ?? '');
+                // 🌐 The publisher's website (#863, D-160), by the same rule:
+                //    it fills the empty seeded row, may replace this run's own
+                //    earlier value, and keeps one a carried-on database had.
+                $finishReport['publisherUrlTyped'] = (string) ($addresses['publisherUrl'] ?? '');
                 foreach ([
                     'address' => [\Portal\Core\PortalAddress::SETTING, $finishReport['addressTyped']],
                     'support' => ['portal.support.email', $finishReport['supportTyped']],
                     'country' => [\Portal\Core\Countries::SETTING, $finishReport['countryTyped']],
                     'currency' => [\Portal\Core\Currency::SETTING, $finishReport['currencyTyped']],
+                    'publisherUrl' => [\Portal\Core\PublisherWebsite::SETTING, $finishReport['publisherUrlTyped']],
                 ] as $which => [$settingKey, $typedValue]) {
                     $ownEarlier = is_string($filledBefore[$settingKey] ?? null) === true ? $filledBefore[$settingKey] : null;
                     // The country is judged as the portal reads it (see
@@ -2940,6 +2958,7 @@ $installSupportOffered = '';
 $installCountryOffered = '';
 $installZoneOffered    = '';
 $installCurrencyOffered = '';
+$installPublisherSiteOffered = '';
 if ($installPage === 'addresses' || $installPage === 'finish') {
     $kept = is_array($_SESSION['install_addresses'] ?? null) === true ? $_SESSION['install_addresses'] : [];
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && installField('action') === 'web_addresses') {
@@ -2948,12 +2967,14 @@ if ($installPage === 'addresses' || $installPage === 'finish') {
         $installCountryOffered = strtoupper(trim(installField('country')));
         $installZoneOffered    = trim(installField('timezone'));
         $installCurrencyOffered = strtoupper(trim(installField('currency')));
+        $installPublisherSiteOffered = installField('publisher_website');
     } elseif ($kept !== []) {
         $installAddressOffered = (string) ($kept['address'] ?? '');
         $installSupportOffered = (string) ($kept['support'] ?? '');
         $installCountryOffered = (string) ($kept['country'] ?? '');
         $installZoneOffered    = (string) ($kept['timezone'] ?? '');
         $installCurrencyOffered = (string) ($kept['currency'] ?? '');
+        $installPublisherSiteOffered = (string) ($kept['publisherUrl'] ?? '');
     } else {
         $https  = strtolower(is_string($_SERVER['HTTPS'] ?? null) === true ? $_SERVER['HTTPS'] : '');
         $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
@@ -4227,7 +4248,7 @@ header('X-Robots-Tag: noindex, nofollow');
 <?php elseif ($installPage === 'addresses'): ?>
             <!-- STEP 4.5: web addresses (#500) -->
             <h2 class="h5 mb-3">Web addresses</h2>
-            <p>Two addresses the portal cannot work out for itself. Both can be changed later in Admin, Settings, Organisation.</p>
+            <p>Addresses the portal cannot work out for itself. The portal&rsquo;s address and the support address can be changed later in Admin, Settings, Organisation.</p>
 
             <form method="post" autocomplete="off">
                 <?php echo installTokenField(); ?>
@@ -4250,6 +4271,17 @@ header('X-Robots-Tag: noindex, nofollow');
                            value="<?php echo htmlspecialchars($installSupportOffered, ENT_QUOTES, 'UTF-8'); ?>" aria-describedby="support_email_help">
                     <div class="form-text" id="support_email_help">
                         Where people should write when they need help. It is shown on the Help page &ldquo;Getting Support&rdquo; and at the foot of e-mails the portal sends. With none, the Help page tells people to ask an administrator.
+                    </div>
+                </div>
+
+                <?php // 🌐 #863, D-160: the publisher's website, for the API page's "Website" link. Never filled in by the installer: no address is built in. ?>
+                <div class="mb-3">
+                    <label for="publisher_website" class="form-label">The publisher&rsquo;s website <span class="text-muted">(you may leave this empty)</span></label>
+                    <input type="text" inputmode="url" class="form-control" id="publisher_website" name="publisher_website"
+                           maxlength="<?php echo (int) \Portal\Core\PublisherWebsite::MAX_LENGTH; ?>" autocomplete="off" autocapitalize="none" spellcheck="false"
+                           value="<?php echo htmlspecialchars($installPublisherSiteOffered, ENT_QUOTES, 'UTF-8'); ?>" aria-describedby="publisher_website_help">
+                    <div class="form-text text-break" id="publisher_website_help">
+                        The page that describes this portal&rsquo;s programming interface (API) for developers names its publisher, <strong><?php echo htmlspecialchars($INSTALL_PRODUCT_PUBLISHER, ENT_QUOTES, 'UTF-8'); ?></strong>, with a &ldquo;Website&rdquo; link beside the name. Type the address that link should open, for example <code>https://www.example.org</code>. With none, the name is shown with no link. A global administrator can change it later in Admin, Settings (the setting <code>product.publisherUrl</code>).
                     </div>
                 </div>
 

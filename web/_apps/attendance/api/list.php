@@ -39,6 +39,17 @@ $siteId = Site::id();
 //    every member, and under D-114 it is how a caller knows which sessions
 //    are its own to delete. No headcount is returned to anybody here.
 //
+//    #930 (D-162): `updatedAt`, the moment a session was last changed, is
+//    left out for the same callers. It says WHEN a figure was corrected,
+//    though not to what or by whom, and the owner decided members see no
+//    "last changed" time on a past session. It is left out on every session
+//    for these callers, not only on those whose date has gone by, for the
+//    same reason `updatedByID` is: a session is recorded on or after its day,
+//    so nearly every row IS a past one, and telling past from future here
+//    would mean judging "today" on the organisation's clock for one field.
+//    `createdAt` stays — it is when the session was first recorded, which
+//    says nothing about a correction.
+//
 //    Administrators, holders of the permission, and API keys are unchanged:
 //    a key is an integration an administrator made, and one syncing sessions
 //    may rely on seeing deletions.
@@ -75,7 +86,7 @@ if ($stmt !== false) {
     $result = $stmt->get_result();
     while ($row = $result->fetch_assoc()) {
         if ($limited === true) {
-            unset($row['notes'], $row['updatedByID']);
+            unset($row['notes'], $row['updatedByID'], $row['updatedAt']);
         }
         $sessions[] = $row;
     }

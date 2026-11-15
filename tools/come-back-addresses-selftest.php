@@ -51,6 +51,12 @@
  * restore could), and a stored ftp:// address, which fails ONLY the
  * http-or-https rule — so the address is judged again whenever it is read.
  *
+ * The language switch (#910, D-161, part F): `?lang=` sends the browser back
+ * to the page it was on, and that path now goes through the same judge. A
+ * page whose query holds a time ("T10:30") comes back with its query; a path
+ * holding a backslash ends on the organisation's own front page — inside B,
+ * from the default organisation, and with one organisation only.
+ *
  * SAFETY
  * ------
  * - It writes rows, so it REFUSES unless the database's name starts with
@@ -98,7 +104,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 74;
+const EXPECTED = 80;
 
 function refuse(string $why): never
 {
@@ -748,6 +754,32 @@ $got = req($jarB, 'GET', B . '/newsletter/track/click?n=' . NEWS_B . '&r=0&l=' .
 ok('E01 under "' . B . '/", a newsletter\'s own link forwards to its address', $got['status'] === 302 && $got['location'] === 'https://example.com/other', said($got));
 $got = req($jarB, 'GET', B . '/newsletter/track/click?n=' . NEWS_B . '&r=0&u=' . rawurlencode('https://outside.example/'));
 ok('E02 under "' . B . '/", an old-style link naming an address is refused', $refused($got) === true, said($got));
+
+// =============================================================================
+// F. The language switch, ?lang= (#910, D-161)
+// =============================================================================
+// web/public_html/index.php answers ?lang=xx by sending the browser back to the
+// same page without that part. The page's path is the REQUEST's own, so it now
+// goes through Auth::safeRedirectUrl(). A browser never sends "/\..." (it turns
+// the backslash into a slash first), but curl does, which is the client this
+// guards against. Signed out, with a fresh cookie jar, so no account's stored
+// language is changed: the switch runs before any gate, for everybody.
+head('F. The language switch (?lang=) goes through the one judge');
+$jarF = $child . $sep . 'jar-lang-' . bin2hex(random_bytes(3)) . '.txt';
+$got  = req($jarF, 'GET', B . '/calendar?from=2026-06-01T10:30&lang=cy');
+ok('F01 inside B: back to the same page with its query, the time in it kept (its colon encoded), the lang part taken off',
+    $got['status'] === 302 && $got['location'] === B . '/calendar?from=2026-06-01T10%3A30', said($got));
+$got = req($jarF, 'GET', B . '/calendar?lang=cy');
+ok('F02 inside B: a page with nothing else in its query comes back with no "?"', $got['status'] === 302 && $got['location'] === B . '/calendar', said($got));
+$got = req($jarF, 'GET', B . '/\\outside.example?lang=cy');
+ok('F03 inside B: a path holding a backslash is refused, and ends on B\'s own front page with nothing of the query', $got['status'] === 302 && $got['location'] === $frontB, said($got));
+$got = req($jarF, 'GET', '/\\outside.example?x=1&lang=cy');
+ok('F04 the default organisation: "/\\outside.example" is refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
+setWay(false);
+$got = req($jarF, 'GET', '/calendar?from=2026-06-01T10:30&x=1&lang=cy');
+ok('F05 one organisation: back to the same page with its query', $got['status'] === 302 && $got['location'] === '/calendar?from=2026-06-01T10%3A30&x=1', said($got));
+$got = req($jarF, 'GET', '/\\outside.example?lang=cy');
+ok('F06 one organisation: "/\\outside.example" is refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
 
 // =============================================================================
 head('Summary');

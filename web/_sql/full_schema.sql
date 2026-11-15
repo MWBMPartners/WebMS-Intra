@@ -3584,6 +3584,17 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'product.publisher', 'MWBM Partners Ltd (t/a MWservices)',   'MWBM Partners Ltd (t/a MWservices)',   0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- 🌐 product.publisherUrl ships EMPTY (#863, D-160, migration 296): the
+--    publisher's website, shown as the "Website" link beside the publisher's
+--    name on the API page (/api-docs, from /openapi.json). The installer asks
+--    for it on its Web addresses page; empty means no link is shown. It
+--    replaces a fixed link to the product's own source repository that used
+--    to be written into web/_core/api-spec.json. Judged on every read by
+--    Portal\Core\PublisherWebsite.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'product.publisherUrl', '', '', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.i18n.minimum_coverage_for_switcher', '0', '0', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
@@ -11851,6 +11862,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('290_geocode_cache_keeps_no_add
 -- The `expenses/claim-pdf` address is written above, in the Expenses block of
 -- the routes; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('292_expense_claim_pdf_route.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 296_publisher_website_setting.sql (#863) ───────────────────────────
+-- The `product.publisherUrl` row is seeded above, beside the other product
+-- brand settings; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('296_publisher_website_setting.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

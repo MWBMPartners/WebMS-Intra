@@ -5023,14 +5023,20 @@ $rows   = data($answer)['sessions'] ?? [];
 $ids    = array_map(static fn (array $r): int => (int) ($r['sessionID'] ?? 0), $rows);
 $keys   = array_unique(array_merge([], ...array_map('array_keys', $rows)));
 ok(
-    'Q26. api/attendance/list as a member: no deleted session, no notes, no "who last changed it", and no figure',
+    'Q26. api/attendance/list as a member: no deleted session, no notes, no "who last changed it", no "when it was last changed" (D-162), and no figure',
     $answer['status'] === 200 && in_array(916691, $ids, true) === true && in_array(916612, $ids, true) === false
         && in_array('notes', $keys, true) === false && in_array('updatedByID', $keys, true) === false
+        && in_array('updatedAt', $keys, true) === false && in_array('createdAt', $keys, true) === true
         && str_contains($answer['body'], ATT_Q_MARK) === false && $qShowsFigure($answer['body'], [4322, 4319, 4317, 4316, 4318]) === false,
     'HTTP ' . $answer['status'] . '; keys: ' . implode(',', $keys) . '; has 916612: ' . var_export(in_array(916612, $ids, true), true)
 );
 $answer = $listAs('aco');
 $ids    = array_map(static fn (array $r): int => (int) ($r['sessionID'] ?? 0), data($answer)['sessions'] ?? []);
+// D-162 (#930): the holder of the permission still sees when each session
+// was last changed. Asked of EVERY row, so a reply that dropped the field for
+// everybody (which would satisfy Q26 above on its own) goes red here.
+$acoRows    = data($answer)['sessions'] ?? [];
+$acoHasWhen = $acoRows !== [] && array_filter($acoRows, static fn (array $r): bool => array_key_exists('updatedAt', $r) === false) === [];
 $liveCount = (int) one('SELECT COUNT(*) AS n FROM tblAttendanceSessions WHERE siteID = ? AND isDeleted = 0', 'i', [ORG_A])['n'];
 $allCount  = (int) one('SELECT COUNT(*) AS n FROM tblAttendanceSessions WHERE siteID = ?', 'i', [ORG_A])['n'];
 $counted   = (int) (data($listAs('mem'))['pagination']['totalItems'] ?? -1);
@@ -5040,8 +5046,9 @@ ok(
     'counted ' . $counted . '; not deleted ' . $liveCount . '; all ' . $allCount
 );
 ok(
-    'Q26b. …while the holder of the permission still gets every session with its notes, deleted ones included (unchanged)',
-    $answer['status'] === 200 && in_array(916612, $ids, true) === true && str_contains($answer['body'], ATT_Q_MARK . ' own note') === true,
+    'Q26b. …while the holder of the permission still gets every session with its notes and when it was last changed, deleted ones included (unchanged)',
+    $answer['status'] === 200 && in_array(916612, $ids, true) === true && str_contains($answer['body'], ATT_Q_MARK . ' own note') === true
+        && $acoHasWhen === true,
     'HTTP ' . $answer['status']
 );
 

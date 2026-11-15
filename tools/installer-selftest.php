@@ -192,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 158; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N14 (#942; N02b's traps were replaced by the installer's browser rule, a text pin and a browser test)
+const EXPECTED_CHECKS = 161; // + P01-P03 (#863, D-160); 136 + N01, N01b, N02, N03-N06, N06b, N07-N14 (#942; N02b's traps were replaced by the installer's browser rule, a text pin and a browser test)
 // 💷 + M01-M06 (#966, the currency): 158.
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
@@ -1522,6 +1522,14 @@ ok('I13 a bad address is refused in words and nothing is kept: a path, another s
 $badSupport = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => 'not an address']);
 ok('I14 a support address that is not an e-mail address is refused in words, and nothing is kept', page($badSupport) === 'addresses' && str_contains(message($badSupport), 'The support e-mail address is not an e-mail address') === true
     && page(req($owner, 'GET', '/?step=5')) === 'addresses', said($badSupport));
+// ---- #863, D-160: the publisher's website, the "Website" link on the API page. The box is offered EMPTY (no address
+// is built in), and a value that is not an http(s) web address is refused in words, with nothing kept.
+$publisherBox = preg_match('/<input[^>]*id="publisher_website"[^>]*>/', $addressPage['body'], $m) === 1 ? $m[0] : '';
+$badPublisher = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'publisher_website' => 'javascript:alert(1)']);
+ok('P01 the publisher\'s website box is offered empty, and "javascript:alert(1)" is refused in words, with nothing kept',
+    $publisherBox !== '' && str_contains($publisherBox, 'value=""') === true
+    && page($badPublisher) === 'addresses' && str_starts_with(message($badPublisher), 'Nothing was saved. The publisher\'s website cannot be used:') === true
+    && page(req($owner, 'GET', '/?step=5')) === 'addresses', $publisherBox . ' | ' . said($badPublisher));
 // ---- #942, D-133: the installer ASKS for the country, suggesting one from the browser's own time zone ----------
 // The page itself chooses NO country: the only "selected" in the country list is "Not chosen yet". The suggestion is
 // made by the page's script, in the browser, from the browser's time zone; nothing is fetched and nothing is sent.
@@ -1688,7 +1696,7 @@ ok('I36 a finish that stops at its LAST write (the database login cannot be writ
     page($stopped) === 'finish' && str_contains(message($stopped), 'the file that holds the database login could not be written') === true && names($authA) === '.htaccess, enc.key, install-code.php'
     && setting($databases['a'], 'portal.installed_version') === '' && setting($databases['a'], 'site.url') === 'https://mistyped.installer-selftest.invalid'
     && setting($databases['a'], 'portal.support.email') === 'mistyped@installer-selftest.invalid', said($stopped) . '; ' . names($authA) . '; ' . setting($databases['a'], 'site.url'));
-$corrected = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'fr', 'timezone' => 'Europe/Paris', 'currency' => 'eur']);
+$corrected = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'fr', 'timezone' => 'Europe/Paris', 'currency' => 'eur', 'publisher_website' => ' Publisher.Installer-Selftest.invalid/about ']);
 
 // An EMPTY file where the key file goes, as a failed upload leaves one: it is no key, and must not be kept as one.
 // (Emptied again here: the finish that stopped had written a key into it.)
@@ -1739,6 +1747,11 @@ $creds = is_file($authA . $sep . 'auth_creds.php') === true ? (require $authA . 
 ok('I27 the database login written is the one that was typed', $creds === ['db_host' => $dbLogin['host'], 'db_user' => $dbLogin['user'], 'db_pass' => $dbLogin['pass'], 'db_name' => $databases['a'], 'db_port' => $dbLogin['port']], json_encode(array_keys((array) $creds)));
 ok('I28 the database holds EXACTLY ONE site.url row, and it holds the address that was typed, tidied', setting($databases['a'], 'site.url') === ADDRESS_TYPED
     && count(q($databases['a'], "SELECT 1 FROM tblSettings WHERE settingKey = 'site.url'")) === 1, 'rows: ' . setting($databases['a'], 'site.url'));
+ok('P02 the publisher\'s website typed (untidily, with a page after the name) is stored installation-wide, tidied, in exactly one row (#863)',
+    setting($databases['a'], 'product.publisherUrl') === 'https://publisher.installer-selftest.invalid/about'
+    && count(q($databases['a'], "SELECT 1 FROM tblSettings WHERE settingKey = 'product.publisherUrl' AND siteID IS NULL")) === 1
+    && count(q($databases['a'], "SELECT 1 FROM tblSettings WHERE settingKey = 'product.publisherUrl' AND siteID IS NOT NULL")) === 0,
+    setting($databases['a'], 'product.publisherUrl'));
 ok('I29 and exactly one row for the support address, holding what was typed; the installed version is recorded', setting($databases['a'], 'portal.support.email') === SUPPORT_TYPED
     && count(q($databases['a'], "SELECT 1 FROM tblSettings WHERE settingKey = 'portal.support.email'")) === 1 && setting($databases['a'], 'portal.installed_version') === $version,
     setting($databases['a'], 'portal.support.email') . ' / ' . setting($databases['a'], 'portal.installed_version'));
@@ -2239,6 +2252,8 @@ ok('L16 an address the database ALREADY held is kept, not replaced by the one ty
 ok('L17 still one address row; no support address; no code file; the refuse file in _auth_keys', count(q($databases['b'], "SELECT 1 FROM tblSettings WHERE settingKey = 'site.url'")) === 1
     && setting($databases['b'], 'portal.support.email') === '' && names($authB) === '.htaccess, .installed, auth_creds.php, enc.key'
     && @file_get_contents($authB . $sep . '.htaccess') === $shippedRefuse, setting($databases['b'], 'site.url') . ' ; ' . names($authB));
+ok('P03 with no publisher\'s website typed, the setting stays empty, so the API page shows the name with no link (#863)',
+    setting($databases['b'], 'product.publisherUrl') === '', setting($databases['b'], 'product.publisherUrl'));
 $doneLine = static function (array $page, string $which): string {
     return preg_match('/data-done="' . $which . '"[^>]*>(.*?)<\/li>/s', $page['body'], $m) === 1
         ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))) : '(no such line)';

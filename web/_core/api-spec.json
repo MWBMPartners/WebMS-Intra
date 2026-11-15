@@ -8,9 +8,7 @@
       "name": "All Rights Reserved",
       "url": "https://github.com/MWBMPartners/WebMS-Intra"
     },
-    "contact": {
-      "url": "https://github.com/MWBMPartners/WebMS-Intra"
-    }
+    "contact": {}
   },
   "servers": [
     {
@@ -5866,7 +5864,7 @@
           "Attendance"
         ],
         "summary": "List attendance sessions for the current site (v1)",
-        "description": "Requires scope `attendance:read` (bearer) or an authenticated session. A signed-in caller who is not an administrator and does not hold the permission \"See the attendance totals\" is given only sessions that are not deleted, without `notes` and without `updatedByID` (#529, D-109). No headcount is returned to anybody here. **Legacy alias:** `GET /api/attendance/list`.",
+        "description": "Requires scope `attendance:read` (bearer) or an authenticated session. A signed-in caller who is not an administrator and does not hold the permission \"See the attendance totals\" is given only sessions that are not deleted, without `notes`, without `updatedByID` (#529, D-109) and without `updatedAt`, the moment a session was last changed (#930, D-162). No headcount is returned to anybody here. **Legacy alias:** `GET /api/attendance/list`.",
         "security": [
           {
             "bearerAuth": []

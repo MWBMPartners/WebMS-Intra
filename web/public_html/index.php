@@ -142,7 +142,27 @@ if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET[
     parse_str($parsed['query'] ?? '', $queryParams);
     unset($queryParams['lang']);
     $newQuery = http_build_query($queryParams);
-    $redirect = $path . ($newQuery !== '' ? '?' . $newQuery : '');
+    // 🛡️ #910 (D-161): the path comes from the REQUEST, so it goes through the
+    //    ONE judge, Auth::safeRedirectUrl(), like every other "come back to"
+    //    address (#620). It used to be written into the header as sent. A
+    //    browser cannot send a path that begins a second address, but any
+    //    other client can — `GET /\elsewhere.example?lang=cy` was answered
+    //    `Location: /\elsewhere.example`. A refused path goes to this
+    //    organisation's front page, and the query, which belonged to the
+    //    refused page, goes with it.
+    //
+    //    ONLY THE PATH is given to the judge, and that is deliberate for now.
+    //    The judge still refuses an address holding a letter-run and a colon
+    //    ANYWHERE, the query included, so `/calendar?from=2026-06-01T10:30`
+    //    would be sent to the front page ("T10:" reads as a scheme). The
+    //    other half of D-161 narrows the judge to the part before the first
+    //    "/", "?" or "#"; until that lands, handing it the query would break
+    //    the language switch on every such page. The query cannot choose
+    //    where the browser goes — everything after "?" stays on the page the
+    //    judged path names — and http_build_query() has percent-encoded every
+    //    value, so it adds no line break or "#" either.
+    $back     = Auth::safeRedirectUrl($path);
+    $redirect = $back . ($back === $path && $newQuery !== '' ? '?' . $newQuery : '');
     header('Location: ' . $redirect, true, 302);
     exit();
 }
