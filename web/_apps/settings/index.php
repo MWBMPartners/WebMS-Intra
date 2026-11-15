@@ -395,6 +395,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         //    installation's row would quietly move every organisation that
         //    follows it back to the built-in year. See
         //    GeocodeCacheRetention::lockedInGeneralEditor().
+        // 🚧 #989/#992: nor the rota swap limits and the largest online gift.
+        //    Deleting the installation's row would quietly move every
+        //    organisation that follows it to the built-in figure, with nothing
+        //    recorded. See MemberLimits::lockedInGeneralEditor().
+        if ($lockedKey !== null && \Portal\Core\MemberLimits::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is a member limit and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\MemberLimits::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
         if ($lockedKey !== null && \Portal\Core\GeocodeCacheRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
@@ -832,6 +848,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     // 🔒 And for how long remembered map answers are kept (#1037): set
                                     //    on the same page, by the same people.
                                     $geocodeCacheLocked = \Portal\Core\GeocodeCacheRetention::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And the member limits (#989, #992), set on Admin, Settings, Member limits.
+                                    $memberLimitsLocked = \Portal\Core\MemberLimits::lockedInGeneralEditor((string) $row['settingKey']);
                                     $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
                                     // #493 P3: WHICH page — the copied-in rule's or Admin, Public website — is
                                     // asked of the ONE place that decides it, never written here.
@@ -878,7 +896,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     $editLocked = $givingLocked === true || $organisationsLocked === true || $mailLocked === true
                                         || $versionLocked === true || $capabilityLocksLocked === true || $zoneLocked === true
                                         || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
-                                        || $geocodeCacheLocked === true
+                                        || $geocodeCacheLocked === true || $memberLimitsLocked === true
                                         || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
                                         || $transcriptLocked === true || $currencyLocked === true || $countryLocked === true || $rowRefusal !== null;
                                     $deleteLocked = $editLocked === true || $isGivingRule === true;
@@ -926,6 +944,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                  THEIR organisation's figure; the installation's is a global
                                                  administrator's, which the page itself enforces. */ ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Maintenance, Retention</a>
+                                    <?php elseif ($memberLimitsLocked === true): ?>
+                                        <?php /* An organisation's own figure by any of its administrators, the installation's by a global administrator; the page itself enforces which. */ ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/member-limits'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Member limits</a>
                                     <?php elseif ($registrationsLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Registration retention</a>
                                     <?php elseif ($givingLocked === true): ?>

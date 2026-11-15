@@ -376,40 +376,74 @@ final class RotaSwaps
             self::TARGET_NOT_HERE => 'That person is not a member of this organisation, so the request was not sent.',
             self::OPEN_NOT_ALLOWED => 'Open swap requests are switched off here. Please choose a person to ask.',
             self::UNKNOWN_ACTION  => 'That answer was not understood, so nothing was changed.',
-            self::OVER_OPEN_PER_DUTY => self::overLimitWords(self::OVER_OPEN_PER_DUTY, self::limits()['openPerDuty']),
-            self::OVER_PER_DAY       => self::overLimitWords(self::OVER_PER_DAY, self::limits()['perDay']),
+            // The numbered sentences are overLimitWords(), which needs the
+            // count; these two are only what a caller without one reads.
+            self::OVER_OPEN_PER_DUTY => 'You already have as many open requests waiting for this duty as this organisation allows, so another was not posted.',
+            self::OVER_PER_DAY       => 'You have made as many swap requests today as this organisation allows, so this one was not sent.',
             default               => 'The swap request could not be answered. Nothing was changed.',
         };
     }
 
     /**
      * 💬 What a member reads when a request would go over a limit (D-171: "a
-     * user friendly process", not a bare refusal). It says what the limit is,
-     * that nothing was sent, and what they CAN do now — the swap page draws
-     * the same words BEFORE anybody presses Send, so the refusal after a post
-     * is the rare case of two windows open at once.
+     * user friendly process", not a bare refusal). It says how many they have
+     * made (or have waiting) AND what the limit is — two numbers, never one
+     * standing for both — that nothing was sent, and what they CAN do now.
+     * The swap page draws the same words BEFORE anybody presses Send
+     * (`$beforeAsking`), so the refusal after a post is the rare case of two
+     * windows open at once.
+     *
+     * WHY TWO NUMBERS (round 1 of the independent check). The first version
+     * printed the LIMIT as the number made: "You have made {limit} swap
+     * requests today". That is true only when the count equals the limit.
+     * Lower the limit mid-day and a member who made 8 read "You have made 5";
+     * at a limit of 0 it said "You have made 0 … the most this organisation
+     * allows". The count is what `limitFacts()` read, the limit what
+     * `limits()` read, and each is printed as itself.
+     *
+     * A LIMIT OF 0 has its own sentence. The saves refuse 0, so it is reached
+     * only by a row written straight into the database, and then nobody may
+     * ask at all: "ask again tomorrow" and "withdraw it and post a new one"
+     * would both be untrue, so neither is said.
      *
      * It never says who set the limit: the installation's and the
      * organisation's figures may be set by different people
      * (`SettingLimit::refusalWords()` decided that first). And it never says
-     * withdrawing a request gives one back: a withdrawn request was already
-     * sent, so it still counts.
+     * withdrawing a request gives one back for the day: a withdrawn request was
+     * already sent, so it still counts.
+     *
+     * @param string $reason       `OVER_PER_DAY` or `OVER_OPEN_PER_DUTY`.
+     * @param int    $limit        The limit in force.
+     * @param int    $made         Requests made today (per day), or open requests waiting (per duty).
+     * @param bool   $beforeAsking True on the page before anything is posted.
      */
-    public static function overLimitWords(string $reason, int $limit, bool $beforeAsking = false): string
+    public static function overLimitWords(string $reason, int $limit, int $made, bool $beforeAsking = false): string
     {
+        $plural = static fn (int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
         if ($reason === self::OVER_PER_DAY) {
-            return 'You have made ' . $limit . ' swap request' . ($limit === 1 ? '' : 's')
-                . ' today, which is the most this organisation allows in one day, so '
+            if ($limit <= 0) {
+                return 'This organisation is not taking rota swap requests at the moment, so '
+                    . ($beforeAsking === true ? 'you cannot send one. ' : 'this one was not sent. ')
+                    . 'If this duty needs covering, ask whoever manages the rota to move it for you.';
+            }
+
+            return 'You have made ' . $plural($made, 'swap request', 'swap requests') . ' today, and this organisation allows '
+                . $limit . ' a day, so '
                 . ($beforeAsking === true ? 'you cannot send another today. ' : 'this one was not sent. ')
                 . 'You can ask again tomorrow. If this duty needs covering sooner, ask whoever manages the rota to move it for you.';
         }
         if ($reason === self::OVER_OPEN_PER_DUTY) {
-            return ($limit === 1
-                    ? 'You already have an open request waiting for this duty'
-                    : 'You already have ' . $limit . ' open requests waiting for this duty, which is the most this organisation allows')
-                . ($beforeAsking === true ? ', so another cannot be posted' : ', so another was not posted')
+            if ($limit <= 0) {
+                return 'Open swap requests cannot be posted here at the moment, so '
+                    . ($beforeAsking === true ? 'the open option is not offered. ' : 'this one was not posted. ')
+                    . 'You can ask one named person instead.';
+            }
+
+            return 'You have ' . $plural($made, 'open request', 'open requests') . ' waiting for this duty, and this organisation allows '
+                . $limit . ' at a time, so another '
+                . ($beforeAsking === true ? 'cannot be posted' : 'was not posted')
                 . ': everybody it would go to has already been offered this duty. '
-                . 'You can ask one named person instead, or withdraw the waiting request from your Duty Roster page and post a new one.';
+                . 'You can ask one named person instead, or withdraw a waiting request from your Duty Roster page and post a new one.';
         }
 
         return 'The swap request was not sent.';
@@ -444,7 +478,24 @@ final class RotaSwaps
      */
     public static function dayStartUtc(int $siteId): string
     {
-        return (new \DateTimeImmutable('today', new \DateTimeZone(Site::timezone($siteId))))
+        return self::dayStartUtcFor(Site::timezone($siteId), new \DateTimeImmutable('now'));
+    }
+
+    /**
+     * 🕛 The same, for a zone and a moment given — so the rule can be proved at
+     * a FIXED moment (both clock-change days of a zone that changes, and a zone
+     * whose clocks change AT midnight) rather than only "now", which no test
+     * can choose. `dayStartUtc()` is the only caller under `web/`.
+     *
+     * The first moment of the date `$now` has ON THAT ZONE'S CLOCK, in UTC.
+     * PHP's `setTime(0, 0)` lands on the first moment that exists when
+     * midnight itself is skipped (America/Santiago's spring change happens at
+     * 00:00, so its day starts at 01:00), which is the start of that day.
+     */
+    public static function dayStartUtcFor(string $zone, \DateTimeImmutable $now): string
+    {
+        return $now->setTimezone(new \DateTimeZone($zone))
+            ->setTime(0, 0)
             ->setTimezone(new \DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
     }
@@ -531,8 +582,10 @@ final class RotaSwaps
      * serialises the open requests for one duty. The counts are read after
      * both locks, so the second post waits and then counts the first.
      *
-     * @return array{swapID:int, reason:string}
+     * @return array{swapID:int, reason:string, made:int, limit:int}
      *         `swapID` is the new request's number, 0 when none was made.
+     *         `made` and `limit` are the count and the limit a limit refusal
+     *         was judged on (both 0 otherwise), for `overLimitWords()`.
      *         `reason` is '' when made; a limit code (`OVER_*`) when refused;
      *         `FAILED` when the database refused something before the commit
      *         (nothing was saved); `UNKNOWN` when the commit itself failed, so
@@ -560,11 +613,19 @@ final class RotaSwaps
                 $lock->close();
             }
 
-            $why = self::whyOverLimits($target === null, self::limitFacts($db, $siteId, $slotId, $askerId), self::limits());
+            $facts  = self::limitFacts($db, $siteId, $slotId, $askerId);
+            $limits = self::limits();
+            $why    = self::whyOverLimits($target === null, $facts, $limits);
             if ($why !== '') {
                 $db->rollback();
+                $perDay = $why === self::OVER_PER_DAY;
 
-                return ['swapID' => 0, 'reason' => $why];
+                return [
+                    'swapID' => 0,
+                    'reason' => $why,
+                    'made'   => $perDay === true ? $facts['sentToday'] : $facts['openWaiting'],
+                    'limit'  => $perDay === true ? $limits['perDay'] : $limits['openPerDuty'],
+                ];
             }
 
             $stmt = $db->prepare(
@@ -579,7 +640,7 @@ final class RotaSwaps
             $mayHaveCommitted = true;
             $db->commit();
 
-            return ['swapID' => $newId, 'reason' => ''];
+            return ['swapID' => $newId, 'reason' => '', 'made' => 0, 'limit' => 0];
         } catch (\Throwable $e) {
             try {
                 $db->rollback();
@@ -587,7 +648,7 @@ final class RotaSwaps
                 // The connection has gone; the server discards the transaction.
             }
 
-            return ['swapID' => 0, 'reason' => $mayHaveCommitted === true ? self::UNKNOWN : self::FAILED];
+            return ['swapID' => 0, 'reason' => $mayHaveCommitted === true ? self::UNKNOWN : self::FAILED, 'made' => 0, 'limit' => 0];
         }
     }
 

@@ -34,8 +34,12 @@
  * with the switch on). The page asks BEFORE drawing the form, so a member at
  * a limit is told what it is and what they can do instead, rather than typing
  * a message only to have it refused. `RotaSwaps::request()` asks again under
- * its locks; that answer is the one that counts, and a refused post keeps what
- * the member typed. A commit whose reply was lost says "we could not confirm",
+ * its locks; that answer is the one that counts. A refused post keeps what the
+ * member typed: back in the form when the form is still drawn (the per-duty
+ * limit), and — at the day's limit, where no form is drawn because nothing
+ * typed could be sent — shown read-only beneath the message, to copy. Every
+ * limit sentence prints the count made AND the limit, each as itself
+ * (`RotaSwaps::overLimitWords()`). A commit whose reply was lost says "we could not confirm",
  * never "not sent", because pressing Send again is how everybody came to be
  * e-mailed twice.
  *
@@ -138,7 +142,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Recorded as numbers only: who asked is the record's own
                 // person, and the typed message is never logged.
                 Logger::activity('RotaSwapLimitReached', 'Rota swap request refused: limit reached (' . $made['reason'] . ', duty #' . $slotId . ')');
-                $flash      = RotaSwaps::refusalWords($made['reason']);
+                // The count and the limit request() judged on, under its locks.
+                $flash      = RotaSwaps::overLimitWords($made['reason'], $made['limit'], $made['made']);
                 $flashType  = 'warning';
                 $flashLimit = $made['reason'];
             } elseif ($made['reason'] === RotaSwaps::UNKNOWN) {
@@ -193,6 +198,7 @@ if ($uStmt !== false) {
 //    that counts. When they cannot be read the form is drawn as usual and the
 //    save decides.
 $limits  = RotaSwaps::limits();
+$limitFacts = ['openWaiting' => 0, 'sentToday' => 0];
 $dayFull = false;
 $openFull = false;
 $leftToday = null;
@@ -227,7 +233,13 @@ $csrf = Auth::csrfToken();
                      typed into it could be sent, and the member is told what
                      they can do instead (D-171). */ ?>
             <?php if ($flashLimit !== RotaSwaps::OVER_PER_DAY): ?>
-            <p data-rota-swap-limit="per-day"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_PER_DAY, $limits['perDay'], true), ENT_QUOTES, 'UTF-8'); ?></p>
+            <p data-rota-swap-limit="per-day"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_PER_DAY, $limits['perDay'], $limitFacts['sentToday'], true), ENT_QUOTES, 'UTF-8'); ?></p>
+            <?php endif; ?>
+            <?php if ($keptMessage !== ''): ?>
+                <?php /* A post refused at the day's limit: there is no form to put the
+                         words back into, so they are shown to copy, not lost. */ ?>
+                <label class="form-label small" for="swap-kept">What you typed, so you can copy it</label>
+                <textarea id="swap-kept" class="form-control form-control-sm mb-2" rows="3" readonly data-rota-swap-kept="1"><?php echo htmlspecialchars($keptMessage, ENT_QUOTES, 'UTF-8'); ?></textarea>
             <?php endif; ?>
             <a href="<?php echo htmlspecialchars(Site::url('rota'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Back to the Duty Roster</a>
         <?php else: ?>
@@ -236,7 +248,7 @@ $csrf = Auth::csrfToken();
             <p class="small text-muted" data-rota-swap-left="<?php echo (int) $leftToday; ?>">You can make <?php echo (int) $leftToday; ?> more swap request<?php echo $leftToday === 1 ? '' : 's'; ?> today. Each one is e-mailed, and an open request goes to every member who has these e-mails switched on.</p>
         <?php endif; ?>
         <?php if ($openFull === true && $allowOpenSwap === true && $flashLimit !== RotaSwaps::OVER_OPEN_PER_DUTY): ?>
-            <p class="small" data-rota-swap-limit="open-per-duty"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_OPEN_PER_DUTY, $limits['openPerDuty'], true), ENT_QUOTES, 'UTF-8'); ?></p>
+            <p class="small" data-rota-swap-limit="open-per-duty"><?php echo htmlspecialchars(RotaSwaps::overLimitWords(RotaSwaps::OVER_OPEN_PER_DUTY, $limits['openPerDuty'], $limitFacts['openWaiting'], true), ENT_QUOTES, 'UTF-8'); ?></p>
         <?php endif; ?>
         <form method="post" action="<?php echo htmlspecialchars(Site::url('rota/swap') . '?slot=' . $slotId, ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

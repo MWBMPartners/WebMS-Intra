@@ -72,7 +72,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
-$limits = require __DIR__ . DIRECTORY_SEPARATOR . '_limits.php';
+$limits = \Portal\Core\MemberLimits::all();
 
 // A request chooses the TYPE of what it sends as well as the value, so every
 // posted field is asked whether it is a string first.

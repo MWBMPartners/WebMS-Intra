@@ -2283,12 +2283,28 @@ $scnPage = static function () use ($http, $httpOrg, $saveLimit, $setting, $giftK
         'instZero' => $instZeroOk, 'instSaved' => $instSaved,
         'detail' => var_export([$ownGift($site), $instGift()], true)];
 };
+/** The give form under a ceiling of 15.00: which quick amounts it offers, and whether it says the most. */
+$scnQuick = static function () use ($http, $setting, $giftKey, $db): array {
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL', 's', [$giftKey]);
+    $setting($giftKey, '1500', null);
+    $page = html_entity_decode((string) $http('GET', '/giving/give')['body'], ENT_QUOTES, 'UTF-8');
+    $setting($giftKey, '1000000', null);
+    preg_match_all('/data-amount="([0-9.]+)"/', $page, $m);
+
+    return [
+        'buttons' => $m[1] === ['10.00'],
+        'said'    => str_contains($page, 'and at most €15.00 online: for a larger gift, please contact the office.'),
+        'detail'  => 'quick amounts offered: ' . implode(', ', $m[1]),
+    ];
+};
 $o = $scnCeiling();
 check('O1 by default the online form takes up to €10,000.00 and refuses €10,000.01 before any payment row, saying what the most is', $o['default'], $o['detail']);
 check('O1b another organisation\'s own figure (1.00) does not reach this one', $o['otherOrg'], $o['detail']);
 check('O2 the installation\'s figure is the ceiling where the organisation has chosen none (5,000.00: 6,000.00 refused, 5,000.00 taken)', $o['inst'], $o['detail']);
 check('O3 an organisation\'s own LOWER figure is obeyed (3,000.00)', $o['ownLower'], $o['detail']);
 check('O4 an organisation\'s own figure ABOVE the installation\'s, written by hand, is held to the installation\'s', $o['ownAbove'], $o['detail']);
+$q = $scnQuick();
+check('O4b under a ceiling of €15.00 the give form offers only the €10 quick amount (20 and 50 would be turned away), and says the most before anybody presses Continue', $q['buttons'] && $q['said'], $q['detail']);
 $p = $scnPage();
 check('O5 the page REFUSES an organisation figure above the installation\'s, says the most, and stores nothing', $p['above'], $p['detail']);
 check('O6 0 is refused at the organisation\'s level: the ceiling cannot be switched off (D-172)', $p['zero'], $p['detail']);
@@ -2309,6 +2325,9 @@ $giftPlants = [
         static fn (): bool => $scnPage()['above']],
     'O13 the save no longer refuses below the least (0 accepted)' => ['_core/SettingLimit.php', ['if ($value !== null && $value < $min && ', 'if (false && '],
         static fn (): bool => $scnPage()['zero']],
+    'O16 the give form offering every quick amount whatever the ceiling' => ['_apps/giving/give.php',
+        ['array_filter([10, 20, 50], static fn (int $q): bool => $q * 100 <= $giftCeiling)', '[10, 20, 50]'],
+        static fn (): bool => $scnQuick()['buttons']],
     'O14 the global-administrator gate on the installation\'s figure removed' => ['_apps/admin/settings/member-limits/save.php', ["if (\$scope === 'global' && App::isRootAdmin() === false) {", 'if (false) {'],
         static fn (): bool => $scnPage()['globalRefused']],
 ];
@@ -2330,7 +2349,7 @@ foreach ($giftPlants as $name => [$file, $edit, $guard]) {
     check($name . ' — and green again once put back', $guard() === true);
 }
 $giftUntouched = true;
-foreach (['_apps/payments/checkout.php', '_core/Giving.php', '_core/SettingLimit.php', '_apps/admin/settings/member-limits/save.php'] as $file) {
+foreach (['_apps/payments/checkout.php', '_core/Giving.php', '_core/SettingLimit.php', '_apps/admin/settings/member-limits/save.php', '_apps/giving/give.php'] as $file) {
     $rel = str_replace('/', $sep, $file);
     $giftUntouched = $giftUntouched && (string) file_get_contents($copyWeb . $rel) === (string) file_get_contents($repo . $sep . 'web' . $sep . $rel);
 }

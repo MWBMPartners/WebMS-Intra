@@ -62,7 +62,7 @@ $siteId = Site::id();
 $mayChangeInstallationWide = App::isRootAdmin();
 
 /** @var array<string, array{key:string, default:int, hardMax:int, money:bool, min:int, label:string, help:string, inForce:int}> $limits */
-$limits = require __DIR__ . DIRECTORY_SEPARATOR . '_limits.php';
+$limits = \Portal\Core\MemberLimits::all();
 
 $orgCurrency     = Currency::ofSite();
 $installCurrency = Currency::ofInstallation();
