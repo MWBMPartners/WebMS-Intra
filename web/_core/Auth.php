@@ -1885,8 +1885,28 @@ class Auth
      * Only allows relative paths on the same origin. Rejects protocol-relative
      * URLs, backslash tricks, anything with a scheme and external hosts.
      *
+     * A SCHEME IS LOOKED FOR ONLY WHERE A BROWSER READS ONE (#910, D-161,
+     * 15 November 2026). A browser takes "name:" as a scheme only at the very
+     * start of an address, before its first "/", "?" or "#" (the WHATWG URL
+     * standard's scheme state). This judge used to refuse a letter-run and a
+     * colon ANYWHERE, so "/calendar?from=2026-06-01T10:30" was sent to the
+     * front page ("T10:" read as a scheme), and with it every sign-in
+     * `redirect` back to such a page and the language switch's return. The
+     * owner decided the judge looks only at the part before the first "/",
+     * "?" or "#". For an address this judge can accept, that part is EMPTY:
+     * the rule "must begin with a single /" below is checked on the decoded
+     * address, and decoding changes only "%" codes, so the address as sent
+     * (which is what is handed back) can then begin only with "/" or a "%"
+     * code — and a scheme must begin with a letter. That rule is what now
+     * keeps `javascript:`, `data:` and every other scheme out. So there is no separate scheme test
+     * any more — one that could never fire would only look like protection.
+     * If the leading-"/" rule is ever loosened, the scheme question comes back
+     * with it, and `tools/come-back-addresses-selftest.php` sends
+     * "javascript:alert(1)" to every judged page to say so.
+     *
      * TWO RULES WERE ADDED BY THE LINK SWEEP (#536). Every older rule is
-     * still here, in the same order, unchanged.
+     * still here, in the same order, unchanged — except the old scheme test,
+     * which #910 (D-161) replaced as described above.
      *
      * 1. NO TAB OR OTHER CONTROL CHARACTER, in any installation. A browser
      *    takes tabs and line breaks OUT of an address before reading it, so
@@ -1902,7 +1922,8 @@ class Auth
      *    and a person who belongs to both would be working in the wrong one
      *    straight after signing in, with nothing on the page to say so.
      *
-     * ONE RULE WAS ADDED BY #620, and every older rule is still here.
+     * ONE RULE WAS ADDED BY #620, and every older rule is still here (the
+     * scheme test was narrowed later, by #910).
      *
      * 3. NO "." OR ".." PART, in any installation, as sent or once decoded
      *    ("%2e%2e" is ".." to a browser). A browser works those out before
@@ -1980,7 +2001,9 @@ class Auth
         // 🔍 Decode the URL to catch encoded bypass attempts (%2F, %5C, etc.)
         $decoded = rawurldecode($url);
 
-        // 🚫 Must start with a single forward slash (relative path)
+        // 🚫 Must start with a single forward slash (relative path). This is
+        //    also the scheme rule (#910, D-161): a scheme can only stand before
+        //    the first "/", "?" or "#", and here nothing stands before it.
         if (str_starts_with($decoded, '/') === false) {
             return $fallback;
         }
@@ -2001,10 +2024,12 @@ class Auth
             return $fallback;
         }
 
-        // 🚫 Reject URLs containing a scheme (javascript:, data:, etc.)
-        if (preg_match('#[a-zA-Z][a-zA-Z0-9+\-.]*:#', $decoded) === 1) {
-            return $fallback;
-        }
+        // 🚫 (#910, D-161) No "letter-run and colon ANYWHERE" test here any
+        //    more. It refused "/calendar?from=2026-06-01T10:30" and every other
+        //    address with a time in it, while the only place a browser reads a
+        //    scheme is already covered by the leading-"/" rule above. See the
+        //    docblock. Do not put it back to "be safe": it is the cry-wolf
+        //    direction, and it sent people to the wrong page.
 
         // 🔍 Parse the URL — if it has a host component, it's an external redirect
         $parsed = parse_url($decoded);

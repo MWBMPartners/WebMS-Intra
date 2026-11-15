@@ -52,10 +52,12 @@
  * http-or-https rule — so the address is judged again whenever it is read.
  *
  * The language switch (#910, D-161, part F): `?lang=` sends the browser back
- * to the page it was on, and that path now goes through the same judge. A
- * page whose query holds a time ("T10:30") comes back with its query; a path
- * holding a backslash ends on the organisation's own front page — inside B,
- * from the default organisation, and with one organisation only.
+ * to the page it was on, and that whole address now goes through the same
+ * judge. A page whose query holds a time ("T10:30") comes back with its query
+ * (the judge looks for a scheme only before the first "/", "?" or "#", the
+ * other half of D-161, also pinned by A08/B05/C05 on the checkout page); a
+ * path holding a backslash ends on the organisation's own front page — inside
+ * B, from the default organisation, and with one organisation only.
  *
  * SAFETY
  * ------
@@ -104,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 80;
+const EXPECTED = 99; // +14 hostile cases over seven loops, A08, B05, C05, F07, F08 (#910)
 
 function refuse(string $why): never
 {
@@ -603,6 +605,11 @@ function hostile(string $prefix, ?string $other): array
     $list = [
         '"//outside.example/x"'                  => '//outside.example/x',
         '"https://outside.example/"'             => 'https://outside.example/',
+        // #910 (D-161): the judge no longer looks for a scheme anywhere but the
+        // start, where "must begin with /" now keeps every scheme out. These two
+        // go red if that rule is ever loosened.
+        '"javascript:alert(1)"'                  => 'javascript:alert(1)',
+        '"data:text/html,x"'                     => 'data:text/html,x',
         'a backslash ("/\\outside.example")'     => '/\\outside.example',
         'a tab before the slashes'               => "/\t/outside.example",
         'a ".." part leaving the organisation'   => $prefix . '/assets/../../outside',
@@ -629,6 +636,8 @@ foreach (hostile(B, A . '/giving/give') as $label => $address) {
     $got = checkoutGoesTo($jarB, B, $address);
     ok('A03 checkout refuses ' . $label . ': ends on B\'s own front page', $got['status'] === 302 && $got['location'] === $frontB, said($got));
 }
+$got = checkoutGoesTo($jarB, B, B . '/calendar?from=2026-06-01T10:30');
+ok('A08 checkout (#910, D-161): an address of B whose query holds a time ("T10:30", once read as a scheme) is followed', $got['status'] === 302 && $got['location'] === B . '/calendar?from=2026-06-01T10:30', said($got));
 $got = checkoutGoesTo($jarB, B, '/giving/give');
 ok('A04 checkout refuses an address with NO organisation\'s part from inside B (the default organisation\'s page)', $got['status'] === 302 && $got['location'] === $frontB, said($got));
 
@@ -649,6 +658,8 @@ head('B. The default organisation, with no part of its own');
 $jar1 = signIn('u1admin', '');
 $got  = checkoutGoesTo($jar1, '', '/giving/give');
 ok('B01 checkout: the page\'s own address WITHOUT an organisation\'s part is followed', $got['status'] === 302 && $got['location'] === '/giving/give', said($got));
+$got = checkoutGoesTo($jar1, '', '/calendar?from=2026-06-01T10:30');
+ok('B05 checkout (#910): from the default organisation, an address whose query holds a time is followed', $got['status'] === 302 && $got['location'] === '/calendar?from=2026-06-01T10:30', said($got));
 foreach (hostile('', B . '/giving/give') as $label => $address) {
     $got = checkoutGoesTo($jar1, '', $address);
     ok('B02 checkout refuses ' . $label . ': ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
@@ -669,6 +680,8 @@ setWay(false);
 $jarS = signIn('u1admin', '');
 $got  = checkoutGoesTo($jarS, '', '/projects/my-pledges');
 ok('C01 checkout: the page\'s own address is followed', $got['status'] === 302 && $got['location'] === '/projects/my-pledges', said($got));
+$got = checkoutGoesTo($jarS, '', '/calendar?from=2026-06-01T10:30');
+ok('C05 checkout (#910): with one organisation, an address whose query holds a time is followed', $got['status'] === 302 && $got['location'] === '/calendar?from=2026-06-01T10:30', said($got));
 foreach (hostile('', null) as $label => $address) {
     $got = checkoutGoesTo($jarS, '', $address);
     ok('C02 checkout refuses ' . $label . ': ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
@@ -759,8 +772,10 @@ ok('E02 under "' . B . '/", an old-style link naming an address is refused', $re
 // F. The language switch, ?lang= (#910, D-161)
 // =============================================================================
 // web/public_html/index.php answers ?lang=xx by sending the browser back to the
-// same page without that part. The page's path is the REQUEST's own, so it now
-// goes through Auth::safeRedirectUrl(). A browser never sends "/\..." (it turns
+// same page without that part. That address is the REQUEST's own, so it now
+// goes through Auth::safeRedirectUrl() WHOLE, query included — which works only
+// because the judge now looks for a scheme only before the first "/", "?" or
+// "#" (F01 and F05 are the time-in-the-query cases that prove it). A browser never sends "/\..." (it turns
 // the backslash into a slash first), but curl does, which is the client this
 // guards against. Signed out, with a fresh cookie jar, so no account's stored
 // language is changed: the switch runs before any gate, for everybody.
@@ -780,6 +795,12 @@ $got = req($jarF, 'GET', '/calendar?from=2026-06-01T10:30&x=1&lang=cy');
 ok('F05 one organisation: back to the same page with its query', $got['status'] === 302 && $got['location'] === '/calendar?from=2026-06-01T10%3A30&x=1', said($got));
 $got = req($jarF, 'GET', '/\\outside.example?lang=cy');
 ok('F06 one organisation: "/\\outside.example" is refused, and ends on the front page', $got['status'] === 302 && $got['location'] === '/', said($got));
+// A request chooses the TYPE as well as the value: a list in the query is
+// rebuilt by http_build_query() and judged with everything else.
+$got = req($jarF, 'GET', '/calendar?tag[]=a&lang=cy');
+ok('F07 one organisation: a list in the query comes back rebuilt, and the switch does not fall over', $got['status'] === 302 && $got['location'] === '/calendar?tag%5B0%5D=a', said($got));
+$got = req($jarF, 'GET', '/calendar?next=javascript:alert(1)&lang=cy');
+ok('F08 one organisation: scheme-shaped text in the QUERY is not a scheme, and comes back encoded on this page', $got['status'] === 302 && $got['location'] === '/calendar?next=javascript%3Aalert%281%29', said($got));
 
 // =============================================================================
 head('Summary');
