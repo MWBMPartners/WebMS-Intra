@@ -219,10 +219,24 @@ const PREMISE = `
          the row — only the row wrapping can save it
      S3  a `flex-column flex-md-row` header whose button group is too wide
          for a phone on its own — only the group wrapping can save it
+     S4  an icon beside a title-and-subtitle block: the <h1> is a
+         great-grandchild of the spread row, written the way the audit check
+         accepts it (the icon inside the <h1>, so the row is the grandparent)
    Each is ALSO drawn as a CONTROL with `flex-nowrap` on every flex box, and
    the control must overflow: a fixture narrow enough to fit without
    wrapping would prove nothing, and this is how that is known not to be
-   the case rather than assumed. */
+   the case rather than assumed.
+
+   ONE MORE, DRAWN WHOLE, THAT MUST *NOT* FIT: the shape the audit check
+   REFUSES (round 2 of its check). The icon and the title block sit in their
+   own `d-flex`, so the <h1> is a great-grandchild of the spread row. The
+   rule wraps that inner block and nothing else; the spread row and its
+   buttons stay on one line. The first version of the check passed it, and
+   this test was green too, because it drew only the inner block (the
+   outermost flex box within the rule's reach) — the row that overflows was
+   never drawn. Drawn whole it must overflow with the rule in place: if it
+   ever fits, the rule has been widened and the check's refusal is crying
+   wolf, so both should be looked at together. */
 const BUTTONS = ['Download', 'Statistics', 'Reconcile', 'Duplicate', 'Archive']
     .map((w) => `<a class="btn btn-outline-primary"><i class="fa-solid fa-gear me-1"></i>${w}</a>`).join('');
 const SYNTHETIC = [
@@ -237,6 +251,17 @@ const SYNTHETIC = [
     ['synthetic S3 (a column header)',
      `<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
         <div><h1 class="mb-1">Members</h1></div>
+        <div class="d-flex gap-2">${BUTTONS}</div></div>`],
+    ['synthetic S4 (icon beside a title block, icon inside the <h1>)',
+     `<div class="d-flex justify-content-between align-items-center mb-4">
+        <div><h1 class="mb-1"><i class="fa-solid fa-users me-2"></i>Reconciliation</h1><p class="text-muted mb-0">Every gift.</p></div>
+        <div class="d-flex gap-2">${BUTTONS}</div></div>`],
+];
+const REFUSED = [
+    ['refused shape (icon-and-title d-flex block, <h1> three levels inside the spread row)',
+     `<div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center"><i class="fa-solid fa-users fa-2x me-3"></i>
+          <div><h1 class="mb-1">Reconciliation</h1><p class="text-muted mb-0">Every gift.</p></div></div>
         <div class="d-flex gap-2">${BUTTONS}</div></div>`],
 ];
 const controlOf = (markup) => markup.replace(/class="d-flex/g, 'class="flex-nowrap d-flex');
@@ -288,6 +313,7 @@ ${headers.map((h) => `<div class="probe" data-where="${escapeAttr(h.where)}">\n$
 ${SYNTHETIC.map(([where, markup]) => `<div class="probe" data-where="${escapeAttr(where)}">\n${markup}\n</div>`).join('\n')}
 <div style="overflow: hidden">
 ${SYNTHETIC.map(([where, markup]) => `<div class="control" data-where="${escapeAttr(where)}">\n${controlOf(markup)}\n</div>`).join('\n')}
+${REFUSED.map(([where, markup]) => `<div class="refused" data-where="${escapeAttr(where)}">\n${markup}\n</div>`).join('\n')}
 </div>
 </div></main></body></html>`;
 
@@ -406,6 +432,18 @@ ${SYNTHETIC.map(([where, markup]) => `<div class="control" data-where="${escapeA
                 } else {
                     failed += 1;
                     console.log(`  ✗ ${width}px: ${c.where} FITS even when nothing may wrap, so it proves nothing — make it wider`);
+                }
+            }
+
+            /* The shape the audit check refuses, drawn whole WITH the rule:
+               it must still overflow, which is what makes the refusal earned. */
+            const refused = await browser.evaluate(MEASURE('.refused'));
+            for (const c of refused.headers) {
+                if (c.over > 0.5) {
+                    console.log(`  ✓ ${width}px: ${c.where} is ${c.over}px too wide even with the rule, so the check is right to refuse it`);
+                } else {
+                    failed += 1;
+                    console.log(`  ✗ ${width}px: ${c.where} FITS with the rule, so the check's refusal of it cries wolf — look at both`);
                 }
             }
 

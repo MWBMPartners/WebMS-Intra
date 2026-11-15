@@ -894,9 +894,9 @@ textarea:focus-visible,
    rows got onto so many pages by being copied from older ones. `:has()`
    matches the row by what it holds — the <h1> as a child, or as a grandchild
    inside a title-and-subtitle block — so a page written tomorrow in the same
-   shape is covered without touching it. (`:has()` is already relied on
-   above, for `.portal-data-list`. A browser without it simply keeps the old
-   behaviour; nothing breaks.)
+   shape is covered without touching it. (This stylesheet also uses `:has()`
+   for `.portal-data-list`, further down. A browser without `:has()` simply
+   keeps the old behaviour; nothing breaks.)
    WHAT IT DOES: below 768px the header row may wrap, so its buttons go onto
    a line under the title instead of off the screen, and a button group that
    is itself a `d-flex` (and is not the block holding the <h1>) may wrap

@@ -44,13 +44,33 @@ WHAT IT FAILS ON
        spacing are ignored; anything else is a change).
     2. A page's <h1> sits inside a header-shaped flex row (one that spreads
        its children apart, `justify-content-between`) that is its
-       great-grandparent or further up, with no flex box nearer -- the rule
-       cannot reach it. A row that only CENTRES one card (the sign-in pages'
-       `justify-content-center min-vh-100`) is not a header and is not
-       reported: one child has nothing to wrap.
-    3. The row (or the <h1>'s own flex parent) says `flex-nowrap`, or has a
-       `style=` that sets `flex-wrap` or `white-space` -- both win over the
-       rule, so the row could not wrap.
+       great-grandparent or further up -- the rule cannot reach that row, so
+       neither it nor its button group may wrap. This is reported EVEN WHEN a
+       flex box nearer the <h1> is in reach: an icon-and-title block
+       (`<div class="d-flex"><i></i><div><h1></h1><p></p></div></div>`)
+       inside the spread row wraps itself and nothing else, and the spread
+       row still runs off the screen (round 2 of the check measured one 207px
+       too wide at 320px, with every check here green). A row that only
+       CENTRES one card (the sign-in pages' `justify-content-center
+       min-vh-100`) is not a header and is not reported: one child has
+       nothing to wrap.
+    3. A flex box the rule does reach (the <h1>'s parent or grandparent)
+       cannot wrap after all:
+       * it says `flex-nowrap` -- Bootstrap's `!important` wins over the rule
+         at every width;
+       * it says `flex-sm-nowrap` -- the same, from 576px, so between 576 and
+         767px the row could not wrap;
+       * its `style=` sets `flex-wrap` to anything but `wrap` or
+         `wrap-reverse` (`nowrap`, or a keyword such as `initial` that comes
+         to the same thing), or sets the `flex-flow` shorthand without a
+         wrap value -- a shorthand puts every part it leaves out back to its
+         starting value, and flex-wrap's is `nowrap`. A style attribute wins
+         over the rule. `style="flex-wrap: wrap"` is NOT reported (it agrees
+         with the rule), and nor is `white-space`: that decides whether the
+         words INSIDE an item may break onto a second line, never whether
+         the row's items may, so `white-space: nowrap` on the row does not
+         stop it wrapping. The first version reported any style mentioning
+         either word, which cried wolf on both correct cases.
     4. A row is a column on the smallest phones but turns back into a row at
        576px (`flex-column` with `flex-sm-row`): the rule leaves columns
        alone, so between 576 and 767px that row could not wrap.
@@ -64,6 +84,13 @@ WHAT IT CANNOT SEE, said plainly
       JavaScript. It reads the markup outside `<?php ... ?>` blocks only.
     * A header made with an <h2>, or a flex row drawn by a class of the
       page's own instead of Bootstrap's `d-flex`.
+    * A flex row further than two levels up that does not spread its
+      children apart (`gap-3`, say, holding an icon and a title block) --
+      not reported, because the sign-in pages' centring row has the same
+      shape and is correct. Such a row is not drawn whole by the browser
+      test either: it draws the outermost flex box within reach.
+    * A button group inside the header that a page tells not to wrap
+      (`flex-nowrap` on the group rather than on the row).
     * A button group inside the header that is a `btn-group` or
       `d-inline-flex` rather than a `d-flex`: the rule wraps `d-flex` groups
       only, because a `btn-group` is a joined set of buttons whose borders
@@ -123,6 +150,31 @@ def classes(attrs: str) -> set[str]:
 def style(attrs: str) -> str:
     m = STYLE_ATTR.search(attrs)
     return m.group(2) if m else ""
+
+
+WRAPS = {"wrap", "wrap-reverse"}
+
+
+def style_stops_wrap(st: str) -> str | None:
+    """Why a style attribute stops a flex box wrapping, or None if it does not.
+
+    Judged by what each declaration DOES, not by which words it mentions:
+    `flex-wrap` to anything but wrap/wrap-reverse stops it (`nowrap`, and the
+    keywords `initial`, `unset`, `revert` come to `nowrap` too); a
+    `flex-flow` shorthand stops it unless it names a wrap value, because a
+    shorthand resets what it leaves out and flex-wrap starts as `nowrap`.
+    `white-space` is about the words inside an item and is ignored."""
+    for decl in st.split(";"):
+        if ":" not in decl:
+            continue
+        prop, value = decl.split(":", 1)
+        prop = prop.strip().lower()
+        words = value.lower().replace("!important", " ").split()
+        if prop == "flex-wrap" and words != [] and (len(words) != 1 or words[0] not in WRAPS):
+            return f"flex-wrap is {' '.join(words)}, not wrap"
+        if prop == "flex-flow" and words != [] and WRAPS.isdisjoint(words):
+            return f"flex-flow \"{' '.join(words)}\" names no wrap value, so flex-wrap goes back to nowrap"
+    return None
 
 
 def is_row(cls: set[str]) -> bool:
@@ -189,20 +241,26 @@ def scan_text(rel: str, src: str):
             flex = [(len(stack) - i, stack[i]) for i in range(len(stack) - 1, -1, -1)
                     if "d-flex" in classes(stack[i][1])]
             near = [(lvl, el) for lvl, el in flex if lvl <= 2]
+            # Only a row spreading its children apart is a page header.
+            # The first version counted ANY flex row further up, and cried
+            # wolf on five sign-in and public pages, where a
+            # `d-flex justify-content-center min-vh-100` row only centres
+            # one card on the screen: a row with one child has nothing to
+            # wrap onto a second line.
+            # The second version looked further up ONLY when no flex box was
+            # within reach, so an icon-and-title `d-flex` block inside the
+            # spread row hid it: the rule wrapped the block, the spread row
+            # and its buttons stayed on one line, and the header was 207px
+            # too wide at 320px with this check green (round 2 of the check).
+            # A far spread row is a fault whatever sits nearer.
+            far = [(lvl, el) for lvl, el in flex
+                   if lvl > 2 and is_row(classes(el[1])) and "justify-content-between" in classes(el[1])]
+            if far != []:
+                findings.append(
+                    f"{where}  the <h1> is {far[0][0]} levels inside a flex row "
+                    f"(class=\"{' '.join(sorted(classes(far[0][1][1])))}\"); the shared "
+                    "phone rule reaches only a parent or grandparent, so this row cannot wrap")
             if near == []:
-                # Only a row spreading its children apart is a page header.
-                # The first version counted ANY flex row further up, and cried
-                # wolf on five sign-in and public pages, where a
-                # `d-flex justify-content-center min-vh-100` row only centres
-                # one card on the screen: a row with one child has nothing to
-                # wrap onto a second line.
-                rows = [(lvl, el) for lvl, el in flex
-                        if is_row(classes(el[1])) and "justify-content-between" in classes(el[1])]
-                if rows != []:
-                    findings.append(
-                        f"{where}  the <h1> is {rows[0][0]} levels inside a flex row "
-                        f"(class=\"{' '.join(sorted(classes(rows[0][1][1])))}\"); the shared "
-                        "phone rule reaches only a parent or grandparent, so this row cannot wrap")
                 continue
             header_lvl, header_el = near[-1]  # the outermost within reach is the header row
             for lvl, el in near:
@@ -210,10 +268,13 @@ def scan_text(rel: str, src: str):
                 if "flex-nowrap" in cls:
                     findings.append(f"{where}  a flex box around the <h1> says flex-nowrap, "
                                     "which wins over the shared phone rule")
-                st = style(el[1]).lower()
-                if "flex-wrap" in st or "white-space" in st:
-                    findings.append(f"{where}  a flex box around the <h1> sets "
-                                    f"style=\"{style(el[1])}\", which wins over the shared phone rule")
+                if "flex-sm-nowrap" in cls:
+                    findings.append(f"{where}  a flex box around the <h1> says flex-sm-nowrap, "
+                                    "which wins over the shared phone rule from 576 to 767px")
+                why = style_stops_wrap(style(el[1]))
+                if why is not None:
+                    findings.append(f"{where}  a flex box around the <h1> has style=\"{style(el[1])}\": "
+                                    f"{why}, which wins over the shared phone rule")
                 if "flex-column" in cls and "flex-sm-row" in cls:
                     findings.append(f"{where}  flex-column with flex-sm-row is a row from 576px, "
                                     "where the shared phone rule (which leaves columns alone) "
@@ -278,6 +339,27 @@ def self_test() -> int:
          '<div class="d-flex justify-content-center min-vh-100"><div class="card"><div class="card-body"><h1>T</h1></div></div></div>', 0, 0),
         ("PLANT: a row again from 576px",
          '<div class="d-flex flex-column flex-sm-row"><h1>T</h1><a>B</a></div>', 1, 1),
+        ("PLANT: an icon-and-title d-flex block hides the spread row above it (round 2)",
+         '<div class="d-flex justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<div><h1>T</h1><p>S</p></div></div><div class="d-flex"><a>B</a></div></div>', 1, 1),
+        ("the same header with the icon inside the <h1>, so the row is its grandparent",
+         '<div class="d-flex justify-content-between"><div><h1><i></i>T</h1><p>S</p></div>'
+         '<div class="d-flex"><a>B</a></div></div>', 0, 1),
+        ("an icon-and-title d-flex block directly in the spread row, no subtitle wrapper",
+         '<div class="d-flex justify-content-between"><div class="d-flex align-items-center"><i></i>'
+         '<h1>T</h1></div><div class="d-flex"><a>B</a></div></div>', 0, 1),
+        ("a style that agrees with the rule (flex-wrap: wrap) is not reported",
+         '<div class="d-flex justify-content-between" style="flex-wrap: wrap"><h1>T</h1><a>B</a></div>', 0, 1),
+        ("white-space on the row is not reported: it does not stop items wrapping",
+         '<div class="d-flex justify-content-between" style="white-space: nowrap"><h1>T</h1><a>B</a></div>', 0, 1),
+        ("flex-flow naming wrap is not reported",
+         '<div class="d-flex" style="flex-flow: row wrap"><h1>T</h1><a>B</a></div>', 0, 1),
+        ("PLANT: flex-flow without a wrap value puts flex-wrap back to nowrap",
+         '<div class="d-flex" style="flex-flow: row"><h1>T</h1><a>B</a></div>', 1, 1),
+        ("PLANT: flex-wrap: initial comes to nowrap",
+         '<div class="d-flex" style="color: red; flex-wrap: initial !important"><h1>T</h1><a>B</a></div>', 1, 1),
+        ("PLANT: the row says flex-sm-nowrap",
+         '<div class="d-flex flex-sm-nowrap justify-content-between"><h1>T</h1><a>B</a></div>', 1, 1),
         ("PHP inside the row is not mistaken for a tag",
          '<div class="d-flex <?php echo $x; ?>"><h1><?= $t ?></h1><?php if ($a): ?><a>B</a><?php endif; ?></div>', 0, 1),
     ]
@@ -326,7 +408,8 @@ def main() -> int:
         print("A page header could not wrap on a phone (#848):")
         for item in findings:
             print("  " + item)
-        print("Keep the page's <h1> a child or grandchild of its flex row, with no flex-nowrap, and keep")
+        print("Keep the page's <h1> a child or grandchild of its flex row (an icon goes inside the <h1>,")
+        print("not in a d-flex block of its own), with no flex-nowrap or flex-sm-nowrap, and keep")
         print("the rule in portal.css. tools/page-headers-wrap-selftest.mjs measures it in a browser.")
         return 1
     own = sum(1 for h in headers if h["isRow"] and h["wrapsOnItsOwn"] is False)
