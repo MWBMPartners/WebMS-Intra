@@ -251,14 +251,17 @@ $payload = [
         //    you are an administrator there, whether the membership is
         //    active, and when you joined. The erasure deletes these rows, and
         //    the copy only ever named the table inside another entry's
-        //    sub-select, so they were handed over nowhere. The organisation's
-        //    NAME is given only while the organisation is switched on: the
-        //    copy already never names an organisation the person cannot open
-        //    (D-151, section O of tools/erasure-pages-selftest.php), and a
-        //    switched-off one is such an organisation; its number is given.
+        //    sub-select, so they were handed over nowhere. Each row NAMES its
+        //    organisation, whatever state that organisation is in: it is the
+        //    member's OWN membership, as their roles, groups and departments
+        //    above name theirs. (A draft withheld the name of a switched-off
+        //    organisation, reading D-151 as "never name an organisation the
+        //    person cannot open". D-151 is narrower: it is about a worker's
+        //    records about OTHER people in an organisation they have left -
+        //    those are counted, not listed. The coordinator's ruling, #1018
+        //    check round 3.)
         'organisationMemberships' => $fetchUserRows(
-            'SELECT us.`siteID`, CASE WHEN s.`isActive` = 1 THEN s.`siteName` ELSE NULL END AS `siteName`, '
-            . 'us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt` '
+            'SELECT us.`siteID`, s.`siteName`, us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt` '
             . 'FROM `tblUserSites` us LEFT JOIN `tblSites` s ON s.`siteID` = us.`siteID` WHERE us.`userID` = ? ORDER BY us.`siteID`'
         ),
         // 🌐 #813 — your own choice to have the organisation's words
