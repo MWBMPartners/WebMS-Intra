@@ -46,8 +46,10 @@
  * was always http(s), so it was never a script, but it was not what the
  * person typed and the header said it was refused); a beginning such as
  * `javascript:alert(1)` or `mailto:` that is not a name and port at all; a
- * host whose last part is all digits ("x.1", "example.123"), unless it is a
- * whole IPv4 address ("192.0.2.10"); a user name or password; a host name that is not plain letters, digits,
+ * host whose last part is a number — all digits, or "0x" and hex digits, as
+ * a browser counts one ("x.1", "example.123", "0x7f.0x0.0x0.0x1",
+ * "https://0x7f000001") — unless it is a whole dotted IPv4 address
+ * ("192.0.2.10"); a user name or password; a host name that is not plain letters, digits,
  * hyphens and dots; anything over 255 characters; and, after the host name,
  * any character an address may not carry unencoded (quotes, angle brackets
  * and the like).
@@ -139,11 +141,18 @@ final class PublisherWebsite
         if ($scheme === '' && str_contains($host, '.') === false) {
             return $refuse('Type the website address in full, beginning with https://, for example https://www.example.org. A name with no dot in it is not a website\'s address.');
         }
-        //    And a name whose last part is all digits ("x.1", "example.123")
-        //    cannot be a real host: no top-level domain is a number. Only a
-        //    whole IPv4 address ("192.0.2.10") ends in digits legitimately.
+        //    And a name whose last part is a NUMBER cannot be a real host: no
+        //    top-level domain is a number. "A number" is the browser's own
+        //    meaning (the WHATWG URL standard's "ends in a number"): all
+        //    digits, OR "0x" followed by hex digits. Digits alone missed
+        //    "0x7f.0x0.0x0.0x1" and "https://0x7f000001", which a browser
+        //    reads as 127.0.0.1 (round 4 of #910's check), and "example.0x10",
+        //    which a browser cannot read at all. Only a whole dotted IPv4
+        //    address ("192.0.2.10") ends in a number legitimately; a name that
+        //    merely BEGINS with "0x" ("0xample.org") is unaffected.
         $lastLabel = substr($host, (int) strrpos('.' . $host, '.'));
-        if (ctype_digit($lastLabel) === true && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+        $isNumber  = preg_match('/^(?:[0-9]+|0x[0-9a-f]*)$/i', $lastLabel) === 1;
+        if ($isNumber === true && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
             return $refuse('That is not a website address: the part after the last dot is a number. Type the address in full, for example https://www.example.org');
         }
 

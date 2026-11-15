@@ -1063,7 +1063,7 @@ $unusable = [];
 // "https://javascript:1" and the like.
 // 'javascript.:1', 'a.' and '80.' met a dot rule judged before the closing dot
 // was tidied away (round 3); 'x.1' and 'example.123' end in a number.
-foreach (['javascript:alert(1)', 'javascript:1', 'javascript:443/alert(1)', 'vbscript:8080', 'data:80/x', 'javascript.:1', 'a.', '80.', 'x.1', 'example.123', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
+foreach (['javascript:alert(1)', 'javascript:1', 'javascript:443/alert(1)', 'vbscript:8080', 'data:80/x', 'javascript.:1', 'a.', '80.', 'x.1', 'example.123', '0x7f.0x0.0x0.0x1', 'https://0x7f000001', 'example.0x10', 'https://2130706433', 'ftp://files.example.org', 'https://example.org/"><script>', "https://example.org\r\nX: y", 'https://user@example.org'] as $bad) {
     $setSetting('product.publisherUrl', $bad);
     if ($servedUrl() !== null) {
         $unusable[] = $bad;
@@ -1083,6 +1083,16 @@ $u === 'https://publisher.example.org' ? ok('H10c', 'a full name with its closin
 $setSetting('product.publisherUrl', '192.0.2.10');
 $u = $servedUrl();
 $u === 'https://192.0.2.10' ? ok('H10d', 'a whole IPv4 address is still accepted, although its last part is a number') : bad('H10d', 'a whole IPv4 address was not served', var_export($u, true));
+// #910 round 4: "0x" + hex counts as a number for the LAST part only; a name
+// that merely begins with "0x", or a short real top-level domain, still passes.
+$stillFine = [];
+foreach (['0xample.org' => 'https://0xample.org', 'x.io' => 'https://x.io'] as $typed => $want) {
+    $setSetting('product.publisherUrl', $typed);
+    if ($servedUrl() !== $want) {
+        $stillFine[] = $typed;
+    }
+}
+$stillFine === [] ? ok('H10e', 'a name beginning "0x" ("0xample.org") and a short real ending ("x.io") are still served') : bad('H10e', 'a legitimate name was refused', json_encode($stillFine));
 
 $openapiFile   = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'openapi.php';
 $openapiBefore = (string) file_get_contents($openapiFile);

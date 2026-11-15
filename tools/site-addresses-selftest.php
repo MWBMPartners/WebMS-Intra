@@ -178,8 +178,8 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 119; // + S16b, S17b, S26b-S26g, S27b-S27d (#910)
-const EXPECTED_NO_CRAWL = 109;
+const EXPECTED_FULL     = 121; // + S16b, S17b, S26b-S26i, S27b-S27d (#910)
+const EXPECTED_NO_CRAWL = 111;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never
@@ -1204,6 +1204,11 @@ if ($only === []) {
         'S26e a time and ".." behind an encoded "?"'             => B . '/T10:30x%3F/%2e%2e/%2e%2e/' . KEY_A . '/account',
         'S26f ".." with a space at the end, which a browser trims' => B . '/.. ',
         'S26g a raw line break in the query'                     => B . "/account?a=\r\nX: y",
+        // #910 round 4: B's own part ENCODED. The server reads the RAW first
+        // part and never decodes it, so either would put the person in the
+        // default organisation; only the judge's as-sent reading refuses them.
+        'S26h B\'s part with its first letter encoded'           => '/%' . strtoupper(bin2hex(KEY_B[0])) . substr(KEY_B, 1) . '/account',
+        'S26i B\'s part followed by an encoded "/"'              => B . '%2Faccount',
     ];
     foreach ($refused as $label => $address) {
         $went = sentTo($jarMember, B, $address);

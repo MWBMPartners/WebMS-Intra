@@ -106,7 +106,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 225; // + twelve more hostile cases over seven loops in round 3 (#910)
+const EXPECTED = 236; // + twelve more hostile cases over seven loops in round 3 (#910)
 
 function refuse(string $why): never
 {
@@ -635,6 +635,10 @@ function hostile(string $prefix, ?string $other): array
         'plain ".." behind an encoded "?"'       => $prefix . '/x%3F/../../outside',
         'a time and ".." behind an encoded "?"'  => $prefix . '/T10:30x%3F/%2e%2e/%2e%2e/outside',
         '".." with a space after it, at the end' => $prefix . '/.. ',
+        // #910 round 4: DEL (0x7F) is in the control class on purpose — never in
+        // a real address, and refusing it costs nothing. Pinned so the class
+        // cannot lose it unnoticed.
+        'a raw DEL after "?"'                    => $prefix . '/x?a=' . "\x7F",
         'a backslash ("/\\outside.example")'     => '/\\outside.example',
         'a tab before the slashes'               => "/\t/outside.example",
         'a ".." part leaving the organisation'   => $prefix . '/assets/../../outside',
@@ -642,6 +646,15 @@ function hostile(string $prefix, ?string $other): array
     ];
     if ($other !== null) {
         $list['another organisation\'s address (' . $other . ')'] = $other;
+    }
+    // #910 round 4: the organisation's own part ENCODED. Site::detectFromPath()
+    // reads the RAW first part and never decodes it, so "/%73elftest-cb-b/x"
+    // or "/selftest-cb-b%2Fx" would land in the default organisation. Only the
+    // judge's AS-SENT reading of the first part refuses these.
+    if ($prefix !== '') {
+        $first = substr($prefix, 1);
+        $list['this organisation\'s part with its first letter encoded'] = '/%' . strtoupper(bin2hex($first[0])) . substr($first, 1) . '/x';
+        $list['this organisation\'s part followed by an encoded "/"']   = $prefix . '%2Fx';
     }
 
     return $list;

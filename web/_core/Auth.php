@@ -2095,17 +2095,21 @@ class Auth
         //    "//" and backslash rules above keep another host out.
 
         // 🚫 Reject a "." or ".." part, in every set-up (rule 3 above), in the
-        //    path AS SENT and in the path ONCE DECODED. The decoded path is NOT
-        //    cut again at a "?" or "#" it holds: those came from "%3F" and
-        //    "%23", which a browser does not read as the end of the path. The
-        //    first version cut it, so "/north/x%3F/%2e%2e/%2e%2e/south/p" was
-        //    judged only as far as "/north/x" while a browser walked out to
-        //    "/south/p" (round 3 of #910's check; older than #910).
-        foreach ([$pathSent, $pathDecoded] as $form) {
-            $parts = explode('/', $form);
-            if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
-                return $fallback;
-            }
+        //    path ONCE DECODED — which covers the path as sent too: decoding
+        //    leaves every raw "." and "/" where it was and can only ADD a "/"
+        //    (from "%2F"), so a "." or ".." part as sent is still one once
+        //    decoded. A second test of the path as sent therefore changed no
+        //    answer over millions of addresses (round 4 of #910's check) and
+        //    was removed rather than left to look like protection.
+        //    The decoded path is NOT cut again at a "?" or "#" it holds: those
+        //    came from "%3F" and "%23", which a browser does not read as the end
+        //    of the path. The first version cut it, so
+        //    "/north/x%3F/%2e%2e/%2e%2e/south/p" was judged only as far as
+        //    "/north/x" while a browser walked out to "/south/p" (round 3 of
+        //    #910's check; older than #910).
+        $parts = explode('/', $pathDecoded);
+        if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
+            return $fallback;
         }
 
         // 🏢 Reject an address that leaves this organisation (rule 2 above),
@@ -2232,8 +2236,24 @@ class Auth
         $firsts = [];
         foreach ([$pathSent, $pathDecoded] as $form) {
             // Each form is already the path only (nothing after a RAW "?" or
-            // "#" chooses the organisation). It is deliberately not cut again:
-            // a "?" or "#" in the decoded path came from "%3F" or "%23".
+            // "#" chooses the organisation). It is not cut again at a "?" or
+            // "#" the decoding produced. That choice IS visible — cutting
+            // would refuse more, e.g. "/south%3Fx/p" from the default
+            // organisation — but refusing those is not needed: the server
+            // reads the RAW first part ("south%3Fx", no organisation), and the
+            // "." / ".." rule has already refused any dot part behind it.
+            //
+            // THE AS-SENT FORM IS THE ONE THAT MATTERS here: Site's own
+            // detectFromPath() reads the RAW first part and never decodes it,
+            // so "/%6eorth/x" or "/north%2Fx" from inside "north" would put the
+            // person in the default organisation. Both are pinned by
+            // tools/come-back-addresses-selftest.php and site-addresses.
+            //
+            // The "." / ".." test below is a DELIBERATE SECOND LINE that no
+            // test can tell apart from its absence today: safeRedirectUrl()
+            // refuses such a part before calling this. It stays because this
+            // helper's answer would be wrong without it if it were ever called
+            // first ("/north/../south/x" judged by "north" alone).
             $parts = explode('/', ltrim($form, '/'));
             if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
                 return false;
