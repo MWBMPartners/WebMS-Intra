@@ -1184,7 +1184,8 @@ $seed(REQ_B_ASK, ORG_B, ADMB, 'pending_confirmation', null);
 // figure whatever state the database arrives in, not only after that one test.
 // #1019: the network-address period too, for the same reason (the privacy
 // pages print it, and section Q7 changes it IN PLACE and puts it back; a run
-// stopped part-way through Q7 is repaired here by the next run).
+// stopped part-way through Q7 is protected here by the next run forcing 365; after a SIGKILL the value from
+// before the kill is not recovered, which harms nothing because every run forces 365).
 foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365',
     'privacy.networkAddressDays' => '365'] as $key => $value) {
     $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
