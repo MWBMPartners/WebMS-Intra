@@ -327,8 +327,10 @@ if ($action === 'update') {
     //    would have let that one through. Steps 7 and 8 refuse an erased
     //    account too (row 3a of AccountGuard::decide()); this is the first
     //    of the two locks, not the only one.
-    if (AccountGuard::checkNotErased($userID, 'edit account #' . $userID) !== AccountGuard::ALLOW) {
-        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+    $neverChanged = AccountGuard::checkNotErased($userID, 'edit account #' . $userID);
+    if ($neverChanged !== AccountGuard::ALLOW) {
+        // #1064 round 5: the verdict's own words (erased, or merged away).
+        $_SESSION['flash_msg']  = AccountGuard::message($neverChanged, AccountGuard::REACH_ACCOUNT);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/users'));
         exit();
@@ -730,23 +732,52 @@ if ($action === 'update') {
     //    point has written anything.
     App::beginTransaction();
     try {
+        // 🔒 #1064 round 7: asked AGAIN, under the account row's lock, inside
+        //    this transaction (#647's rule). The AccountGuard checks above ran
+        //    before it: a save begun while a merge was completing waited on the
+        //    merge's lock here and then wrote a real address, Active and a
+        //    password over the account the merge had just closed (measured by
+        //    the independent check). Now it is refused and nothing is written.
+        if (\Portal\Core\AccountMerge::mergedAwayUnderLock($mysqli, (int) $userID) === true) {
+            App::rollback();
+            AccountGuard::logRefusal('edit account #' . (int) $userID, AccountGuard::MERGED, 'merged', (int) $userID);
+            $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_ACCOUNT);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('admin/users'));
+            exit();
+        }
+        // 🔑 #1064 (D-190): changing SOMEBODY ELSE's e-mail address chooses where
+        //    their reset link goes, so it is recorded as their way in being
+        //    changed by somebody else. It is written FIRST in the SET list on
+        //    purpose: MySQL applies a SET left to right, so `emailAddress` here
+        //    is still the OLD address. Nothing is recorded when the address does
+        //    not change, or when an administrator edits their own account.
+        //    D-200, round 6: the address being REPLACED is added to the
+        //    account's list of earlier addresses, by the ONE fragment
+        //    (AccountMerge::rememberReplacedAddressSql()), whoever changes it, so
+        //    a merge's start notice reaches every address the account has held.
+        //    The old single "address before the first change by somebody else"
+        //    missed the person's own later change. Emptied by an erasure.
+        $markWayIn = ((int) ($_SESSION['user_id'] ?? 0)) !== (int) $userID ? 1 : 0;
+        $wayInSql  = \Portal\Core\AccountMerge::rememberReplacedAddressSql()
+            . '`signInChangedByOtherAtUtc` = IF(? = 1 AND NOT (`emailAddress` <=> ?), UTC_TIMESTAMP(), `signInChangedByOtherAtUtc`), ';
         if ($actorGlobal === true) {
             $stmt = $mysqli->prepare(
-                'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ?, '
+                'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, '
                 . 'isActive = ?, isAdmin = ?, isRootAdmin = ? WHERE userID = ?'
             );
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('sssiiii', $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
+            $stmt->bind_param('sissssiiii', $emailAddress, $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
         } else {
             $stmt = $mysqli->prepare(
-                'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ?, isActive = ? WHERE userID = ?'
+                'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, isActive = ? WHERE userID = ?'
             );
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('sssii', $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
+            $stmt->bind_param('sissssii', $emailAddress, $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
         }
         $stmt->execute();
         $stmt->close();

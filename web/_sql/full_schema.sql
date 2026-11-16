@@ -342,6 +342,8 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     -- the same statement as the password; Auth::endSessionOfInactiveAccount()
     -- ends one carrying any other number. A number, not a time: see the migration.
     `signInVersion` BIGINT NOT NULL DEFAULT 0 COMMENT 'Goes up by a RANDOM amount every time the password is reset, changed or set by an administrator (#598, D-104, D-108), so a number never comes back after a restore. A browser session carrying any other number is ended on its next request. Written only by Auth::endOtherSessionsOf().',
+    `signInChangedByOtherAtUtc` DATETIME DEFAULT NULL COMMENT 'A MOMENT IN UTC: when somebody OTHER than this account last chose its way in - set its password (Auth::storeHash) or changed its e-mail address (admin users page). Never cleared by the account itself. A merge refuses an agreement from an account whose way in was changed by somebody else recently (#1064, D-190)',
+    `earlierEmails` MEDIUMTEXT DEFAULT NULL COMMENT 'Every e-mail address this account has held before its current one, as a JSON list, oldest first, appended on every change by anybody (AccountMerge::rememberReplacedAddressSql). A merge request start notice is sent to each, so a person whose address somebody else replaced is still told (#1064, D-200). MEDIUMTEXT so no number of changes can fill it. Emptied by an erasure when the request closes (GdprEraser::closeRequest)',
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
     KEY `idx_user_calendar_token` (`calendarToken`)
@@ -812,6 +814,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimPayments` (
     `paidByID`     INT            DEFAULT NULL             COMMENT 'FK to tblUsers.userID — treasury user who processed payment',
     `addedAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the payment record was created',
     PRIMARY KEY (`payID`),
+    KEY `idx_payments_paid_by` (`paidByID`),
     KEY `idx_payments_claim` (`claimID`),
     CONSTRAINT `fk_payments_claim` FOREIGN KEY (`claimID`)
         REFERENCES `tblExpenseClaims` (`claimID`) ON DELETE CASCADE
@@ -1313,6 +1316,12 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `roomID`             INT           DEFAULT NULL COMMENT 'Optional room within venueID — tblVenueRooms.roomID; NULL = whole venue (#436)',
 
     PRIMARY KEY (`eventID`),
+
+    KEY `idx_event_submitted_by` (`submittedByID`),
+
+    KEY `idx_event_status_changed_by` (`statusChangedByID`),
+
+    KEY `idx_event_moderated_by` (`moderatedByID`),
     UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`),
     KEY `idx_event_series`   (`seriesID`),
     KEY `idx_event_category` (`categoryID`),
@@ -1444,6 +1453,7 @@ CREATE TABLE IF NOT EXISTS `tblEventRSVPs` (
     `createdAt`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`    DATETIME    DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`rsvpID`),
+    KEY `idx_rsvp_user` (`userID`),
     UNIQUE KEY `uq_event_user`     (`eventID`, `userID`),
     KEY        `idx_event_response` (`eventID`, `response`),
     KEY        `idx_event_rsvp_status` (`eventID`, `status`, `createdAt`)
@@ -1836,6 +1846,7 @@ CREATE TABLE IF NOT EXISTS `tblWorkflowSteps` (
     `timeoutHours`  INT          DEFAULT NULL COMMENT 'Auto-escalate after N hours',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`stepID`),
+    KEY `idx_wfstep_assignee` (`assigneeType`, `assigneeValue`),
     KEY `idx_wfstep_workflow` (`workflowID`),
     CONSTRAINT `fk_wfstep_workflow` FOREIGN KEY (`workflowID`) REFERENCES `tblWorkflows` (`workflowID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -5574,8 +5585,10 @@ CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
     `claimedAt`        DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC, not a time on the server clock: when a run of this request was started, refreshed while the run is still going. Written and compared with UTC_TIMESTAMP() only. Empty means no run is going.',
     `reasonRetained`   TEXT         DEFAULT NULL,
     `notes`            TEXT         DEFAULT NULL,
+    `replacedEmail`    VARCHAR(255) DEFAULT NULL COMMENT 'The address the account held when the erasure replaced it with a made-up one, kept so a later run of the same request can still search the send log and the mail queue by it (the account row no longer holds it, and the address may have changed after the request was filed). Written by the erasure''s account step; emptied with the rest of the person''s details when the request closes (#1064 round 11)',
     `subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT 'Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address, filed by an administrator to reach the event suggestions and anonymous-form prayer requests sent with it, whether or not the address also belongs to an account (#964, D-140; #1009, D-176); it reaches only this organisation''s event suggestions, anonymous-form prayer requests and approval e-mails for that address, and nothing found through an account',
     PRIMARY KEY (`requestID`),
+    KEY `idx_er_user` (`userID`),
     KEY `idx_er_status` (`status`),
     KEY `idx_er_due`    (`dueBy`),
     CONSTRAINT `fk_er_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
@@ -6945,6 +6958,7 @@ CREATE TABLE IF NOT EXISTS `tblExternalAudienceMembers` (
     `createdByID` INT DEFAULT NULL COMMENT 'Who added this entry; emptied, never cascaded, if that account is removed.',
     `createdAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`audienceMemberID`),
+    KEY `idx_extaud_kind_ref` (`kind`, `refID`),
     UNIQUE KEY `uq_extaud_owner_member` (`ownerType`,`ownerID`,`kind`,`refID`),
     KEY `idx_extaud_feed` (`feedID`),
     KEY `idx_extaud_user` (`userID`),
@@ -7305,6 +7319,8 @@ CREATE TABLE IF NOT EXISTS `tblKidCheckins` (
     `checkedOutByName`  VARCHAR(255) DEFAULT NULL COMMENT 'The name of the helper who checked the child out, written at check-out. KEPT when that helper is erased, by decision D-111 of the owner (#703, migration 272)',
     `pickupName`        VARCHAR(120) DEFAULT NULL,
     PRIMARY KEY (`checkinID`),
+    KEY `idx_kc_checked_out_by` (`checkedOutByID`),
+    KEY `idx_kc_checked_in_by` (`checkedInByID`),
     KEY `idx_kc_child`     (`childID`, `checkedInAt`),
     KEY `idx_kc_open`      (`checkedOutAt`),
     CONSTRAINT `fk_kc_child` FOREIGN KEY (`childID`) REFERENCES `tblKidProfiles`(`childID`) ON DELETE CASCADE,
@@ -11957,6 +11973,65 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('295_network_address_period.sql
 -- The `product.publisherUrl` row is seeded above, beside the other product
 -- brand settings; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('296_publisher_website_setting.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 297_account_merge_preview.sql (#1064, D-185) ───────────────────────
+-- The address of Admin, Users, Merge two accounts: a preview that counts what
+-- merging a duplicate account would move and changes nothing. The permission it
+-- needs, `accounts.merge`, is declared in code (Portal\Core\Capabilities) and
+-- needs no row until an organisation re-points it.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/users/merge', 'admin/users/merge.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('297_account_merge_preview.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 299_account_merge_requests.sql (#1064, D-190) ──────────────────────
+-- A merge completes only when the person agrees from BOTH accounts. The request
+-- and its two sides; the same text as the migration, which must agree.
+CREATE TABLE IF NOT EXISTS `tblAccountMergeRequest` (
+    `requestID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL COMMENT 'The organisation the administrator started the request in',
+    `requestedByID`    INT          DEFAULT NULL COMMENT 'The administrator who started it. Never one of the two accounts (refused)',
+    `requestedAtUtc`   DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when it was started',
+    `expiresAtUtc`     DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC: after this nobody can agree to it (AccountMerge::REQUEST_DAYS)',
+    `notBeforeUtc`     DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC: nobody can agree to it before this, 7 days after the start notice was sent (D-200, AccountMerge::WAIT_DAYS)',
+    `status`           ENUM('waiting','completed','cancelled') NOT NULL DEFAULT 'waiting' COMMENT 'waiting: open. completed: merged. cancelled: by either account or an administrator',
+    `browserTokenHash` CHAR(64)     DEFAULT NULL COMMENT 'SHA-256 of the random token the FIRST agreement put in a cookie; the token itself is never stored. Emptied on completion',
+    `movedSignIns`     TINYINT(1)   DEFAULT NULL COMMENT 'Whether the person ticked to bring the duplicate''s Microsoft or Google sign-ins and passkeys. NULL until completed',
+    `cancelledBy`      ENUM('person','administrator') DEFAULT NULL COMMENT 'Who cancelled it, when it was cancelled',
+    `finishedAtUtc`    DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC: when it was completed or cancelled',
+    PRIMARY KEY (`requestID`),
+    KEY `idx_amr_site_status` (`siteID`, `status`),
+    CONSTRAINT `fk_amr_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_amr_requester` FOREIGN KEY (`requestedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='A request to merge two accounts that belong to one person; completes only when the person agrees from both (#1064, D-190)';
+
+CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
+    `sideID`          INT        NOT NULL AUTO_INCREMENT,
+    `requestID`       INT        NOT NULL COMMENT 'The request this side belongs to',
+    `userID`          INT        NOT NULL COMMENT 'One of the two accounts',
+    `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
+    `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
+    `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied when that erasure request closes (GdprEraser::closeRequest), never earlier, so a retried run can still search by it',
+    `formerEarlierEmails` MEDIUMTEXT DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the JSON list of addresses it had held before its last one (tblUsers.earlierEmails), to which start notices went. Kept for the same reason as formerEmail and emptied at the same point, when the erasure request closes; the account row''s own list is emptied at merge',
+    PRIMARY KEY (`sideID`),
+    UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
+    UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),
+    KEY `idx_ams_user` (`userID`),
+    CONSTRAINT `fk_ams_request` FOREIGN KEY (`requestID`) REFERENCES `tblAccountMergeRequest` (`requestID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ams_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The two accounts of a merge request, and when each agreed (#1064)';
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/users/merge/start',  'admin/users/merge-start.php',  1),
+    ('admin/users/merge/cancel', 'admin/users/merge-cancel.php', 1),
+    ('account/merge',            'account/merge.php',            1),
+    ('account/merge/save',       'account/merge-save.php',       1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('299_account_merge_requests.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 298_member_limits.sql (#989, #992; D-171, D-172) ───────────────────

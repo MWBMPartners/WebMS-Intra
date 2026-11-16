@@ -594,7 +594,10 @@ return [
                     . 'address and notes are cleared from it as the last step, once everything else has succeeded. '
                     . 'On other people\'s requests that this person handled as an administrator, only who handled '
                     . 'it is cleared.',
-        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID'],
+        // `replacedEmail` (#1064 round 11): the address the account held when
+        //    the erasure replaced it, so a retried run can still search by it.
+        //    Cleared by the same last step as the rest.
+        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID', 'replacedEmail'],
     ],
     'tblErasureReviewDecisions' => [
         'decision' => 'unlink',
@@ -1383,6 +1386,28 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
     ],
+    // 🔀 #1064 (D-190): a request to merge two accounts of one person. A side row
+    //    names one of the two accounts and when that account agreed, so it is
+    //    the person's own and goes with them. The request row itself names only
+    //    the administrator who started it, as an actor.
+    'tblAccountMergeSide' => [
+        // 🔀 #1064 (D-199): not the generic walk, which would DELETE the row by
+        //    account number and lose the map a retried erasure needs to find what
+        //    was merged into the account (DEDICATED_STEP_TABLES). The two address
+        //    columns are emptied by GdprEraser::closeRequest(), when the request
+        //    closes, because the mail steps search by them (round 9).
+        'decision' => 'unlink',
+        'reason'   => 'Names one of a person\'s two accounts in a request to merge them, and when they agreed; on the duplicate\'s row, the e-mail address it held when it was merged and every one it had held before that. All of them are emptied; which account was merged into which stays, as two account numbers',
+        'columns'  => ['formerEmail', 'formerEarlierEmails', 'userID'],
+        'notEmptiedHere' => [
+            'userID' => 'Kept on purpose: it is how an erasure, including a retried one, finds the accounts merged into the one being erased (D-199). It is an account number, and the account it names is emptied by the same erasure.',
+        ],
+    ],
+    'tblAccountMergeRequest' => [
+        'decision' => 'unlink',
+        'reason'   => 'Only records which administrator asked for a merge. The request stays; the name goes',
+        'columns'  => ['requestedByID'],
+    ],
     'tblUserTranslationPref' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
@@ -1518,10 +1543,15 @@ return [
         // were not cleared, until 11 October 2026: an erased account kept its
         // photo and the biography its owner had written.
         'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone with no name on it. Most records that point at it lose the account NUMBER. SOME keep it on purpose: the person\'s expense claims, their own DBS checks, their tax declarations, an approval step given to them by name and the record of each giving statement issued to them. Some keep their name as well: gifts kept for tax (or every gift, where an organisation keeps them all), offering envelopes that will become such gifts, their tax declarations and a giving statement\'s file at an organisation keeping their name, where every gift on it is kept or its period cannot be told from it - with any home address held for them, in tblGivingKeptDonors, until the organisation\'s keep-until date if it has confirmed one, or longer while a hold is on - and the pastoral visits, care cases, DBS checks or children\'s check-ins they made, which keep their name beside the number (the owner\'s decisions D-016, D-110, D-111). Separately, records kept for security and as a history of changes can mention the number, in what they describe or in a stored copy of a changed record: the activity log (tblActivityLogs), deleted by the nightly clear-out after audit.retentionDays for the organisation it was recorded under (365 days unless changed) if that scheduled job has been set up - and where that period is for ever, which is so only where the installation keeps the log for ever and the organisation has not chosen a number of days of its own, nothing deletes it; the change history of records (tblAuditTrail, tblAssetAudit), which nothing clears; and rate-limit records (tblApiRateLimits), tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither list is every place the number may be written: free text typed about the person can mention it too. Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
-        'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words', 'phoneNumber', 'displayPhone'],
+        // `earlierEmails` (#1064, D-200; round 6): every address the account has
+        //    held before its current one, as a JSON list; a merge's start notice goes
+        //    to each. Emptied by an erasure when the request closes (round 9: see
+        //    notEmptiedHere).
+        'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words', 'phoneNumber', 'displayPhone', 'earlierEmails'],
         'notEmptiedHere' => [
             'avatarPath' => 'Emptied elsewhere, on purpose: GdprEraser::eraseProfileImages() reads this column to find the file, deals with the file, and only then empties both columns in one statement of its own. Emptying it from this instruction instead would throw away the only record of where the file is and leave the image on disk.',
             'displayPhoto' => 'Emptied elsewhere, with avatarPath, by GdprEraser::eraseProfileImages() - after the file itself is dealt with, for the same reason.',
+            'earlierEmails' => 'Emptied elsewhere, on purpose: by GdprEraser::closeRequest(), when the request closes. The erasure searches the mail queue and the send log by each address in it, so emptying it from this instruction would let a run that failed part-way go back for another run with the addresses already gone, and that run would never search by them (#1064 round 9).',
         ],
     ],
     'tblVenueAgreements' => [

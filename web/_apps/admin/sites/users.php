@@ -82,8 +82,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    cannot be got half right (AccountGuard's docblock).
     $postedUserId = (int) ($_POST['userID'] ?? 0);
     if (in_array($action, ['add', 'remove', 'toggle_admin', 'toggle_root_admin'], true) === true
-        && AccountGuard::checkNotErased($postedUserId, 'change organisation #' . $siteId . ' membership of account #' . $postedUserId) !== AccountGuard::ALLOW) {
-        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+        && ($neverChanged = AccountGuard::checkNotErased($postedUserId, 'change organisation #' . $siteId . ' membership of account #' . $postedUserId)) !== AccountGuard::ALLOW) {
+        // #1064 round 5: the verdict's own words (erased, or merged away).
+        $_SESSION['flash_msg']  = AccountGuard::message($neverChanged, AccountGuard::REACH_ACCOUNT);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/sites/users') . '?site=' . $siteId, true, 302);
         exit();

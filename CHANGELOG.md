@@ -4,6 +4,32 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Merging two accounts that belong to one person (#1064; D-185, D-190, D-191, D-199, D-200, D-201)
+
+- **Merging two accounts that belong to one person (#1064; D-185, D-190, D-191, D-199, D-200, D-201).** An administrator
+  with the "Merge two accounts" permission (Admin → Users → Merge two accounts) sees, as counts only, what a merge
+  would do and asks the person to agree. Both addresses are told at once, and so is any address an administrator
+  replaced. Nobody can agree for 7 days after that notice; either account can cancel at any time. The merge
+  happens only when the person signs in to BOTH accounts, one after the other in the same browser, and confirms; it
+  cannot be undone. Until both have agreed, neither account is shown anything about the other except its number.
+  What is live moves to the account that stays: the person's own records, gifts and pledges, memberships, choices
+  (the stricter one kept), what they are currently assigned to, and the records they manage (loans they asked for,
+  photos they uploaded, tasks, saved reports, recording notes, attendance sessions, room bookings and rota-swap
+  requests), and the move is logged (D-201). The activity log, the change history and the other records of who did,
+  approved or was sent something stay exactly as written under the duplicate's number, and a new activity entry
+  records the merge; the person's data copy, "My data" and an erasure all include those records. Differing
+  replies or roles, and money records on both, stop the merge; a Microsoft/Google sign-in or passkey moves only if
+  ticked; a password never moves. The duplicate is closed, never deleted, and can never be changed or switched back
+  on by anybody. An account whose password or e-mail address somebody else changed in the 90 days before the
+  request, or since, cannot agree; a new request is needed after that. Ten indexes are added so a merge does not
+  hold up other people's work. The notice goes to every address either account has held, so a person whose address
+  somebody else replaced is still told, including an address another account holds now (D-200). A merged account's
+  records go back only with a whole-database restore. A save that meets a merge in progress is refused, not written
+  over the closed account, and an erasure of the surviving account also empties anything written onto the closed
+  one.
+  Migrations 297 and 299.
+- Open: #1097 (an address changed during an erasure run is not searched by that run). Codex has not reviewed this.
+
 ### The privacy pages name every outside company (#808; D-158, D-195)
 
 - **Privacy pages name every outside company (#808; D-158, D-195).** Both privacy pages gain an "Outside

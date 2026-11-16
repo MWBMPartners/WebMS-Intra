@@ -441,6 +441,7 @@ final class ErasureReview
         $siteId    = self::siteOfRequest($db, $requestId, $problems);
         $decisions = self::decisionsFor($db, $requestId, $problems);
         $canCount  = self::decisionsTableExists($db);
+        $ids       = self::personNumbers($db, $userId, $problems);
 
         foreach (self::markedColumns() as $table => $columns) {
             $links = self::linkColumnsOf($table);
@@ -481,7 +482,7 @@ final class ErasureReview
                     $keyColumn,
                     (string) $column,
                     $links,
-                    $userId,
+                    $ids,
                     $siteColumn,
                     $siteId,
                     $requestId,
@@ -497,7 +498,7 @@ final class ErasureReview
                     $keyColumn,
                     (string) $column,
                     $links,
-                    $userId,
+                    $ids,
                     $siteColumn,
                     $siteId,
                     $requestId,
@@ -571,6 +572,7 @@ final class ErasureReview
 
         $siteId   = self::siteOfRequest($db, $requestId, $problems);
         $canCount = self::decisionsTableExists($db);
+        $ids      = self::personNumbers($db, $userId, $problems);
 
         foreach (self::markedColumns() as $table => $columns) {
             $links = self::linkColumnsOf($table);
@@ -596,7 +598,7 @@ final class ErasureReview
                     $keyColumn,
                     (string) $column,
                     $links,
-                    $userId,
+                    $ids,
                     $siteColumn,
                     $siteId,
                     $requestId,
@@ -1181,12 +1183,16 @@ final class ErasureReview
      * @param list<string> $links      Account columns to match on.
      * @param string       $siteColumn '' when the table records no organisation.
      */
-    private static function holdingWhere(string $table, array $links, string $column, string $siteColumn): string
+    private static function holdingWhere(string $table, array $links, string $column, string $siteColumn, int $numbers = 1): string
     {
         $q     = '`' . $table . '`.';
         $parts = [];
+        // #1064 round 6: each account column is compared with EVERY number of
+        // the person's (their own and each merged into it), one placeholder
+        // each, bound by holdingValues() in the same order.
+        $marks = implode(', ', array_fill(0, max(1, $numbers), '?'));
         foreach ($links as $link) {
-            $parts[] = $q . '`' . $link . '` = ?';
+            $parts[] = $q . '`' . $link . '` IN (' . $marks . ')';
         }
         $sql = '(' . implode(' OR ', $parts) . ') '
             . 'AND ' . $q . '`' . $column . '` IS NOT NULL AND ' . $q . '`' . $column . '` <> \'\'';
@@ -1204,9 +1210,14 @@ final class ErasureReview
      *
      * @return list<int>
      */
-    private static function holdingValues(array $links, int $userId, string $siteColumn, int $siteId): array
+    private static function holdingValues(array $links, array $ids, string $siteColumn, int $siteId): array
     {
-        $values = array_fill(0, count($links), $userId);
+        $values = [];
+        foreach ($links as $ignored) {
+            foreach ($ids as $id) {
+                $values[] = (int) $id;
+            }
+        }
         if ($siteColumn !== '') {
             $values[] = $siteId;
         }
@@ -1266,15 +1277,15 @@ final class ErasureReview
         string $keyColumn,
         string $column,
         array $links,
-        int $userId,
+        array $ids,
         string $siteColumn,
         int $siteId,
         int $requestId,
         bool $canCount,
         array &$problems
     ): array {
-        $where  = self::holdingWhere($table, $links, $column, $siteColumn);
-        $values = self::holdingValues($links, $userId, $siteColumn, $siteId);
+        $where  = self::holdingWhere($table, $links, $column, $siteColumn, count($ids));
+        $values = self::holdingValues($links, $ids, $siteColumn, $siteId);
 
         try {
             // The total, with nothing joined and nothing limited.
@@ -1356,7 +1367,7 @@ final class ErasureReview
         string $keyColumn,
         string $column,
         array $links,
-        int $userId,
+        array $ids,
         string $siteColumn,
         int $siteId,
         int $requestId,
@@ -1364,8 +1375,8 @@ final class ErasureReview
         array &$problems
     ): array {
         $rows   = [];
-        $where  = self::holdingWhere($table, $links, $column, $siteColumn);
-        $values = self::holdingValues($links, $userId, $siteColumn, $siteId);
+        $where  = self::holdingWhere($table, $links, $column, $siteColumn, count($ids));
+        $values = self::holdingValues($links, $ids, $siteColumn, $siteId);
         $q      = '`' . $table . '`.';
 
         $select = [$q . '`' . $keyColumn . '`', $q . '`' . $column . '`'];
@@ -1407,7 +1418,7 @@ final class ErasureReview
                 $rows[] = [
                     'rowKey'    => (int) $row[0],
                     'text'      => (string) $row[1],
-                    'matchedBy' => self::matchedBy($row, $links, $userId),
+                    'matchedBy' => self::matchedBy($row, $links, $ids),
                 ];
             }
             $stmt->close();
@@ -1428,20 +1439,47 @@ final class ErasureReview
     }
 
     /**
+     * 🔀 Every account number of this person's: their own, and each account
+     *    merged into it (#1064 round 6, following chains). History kept under
+     *    a merged-away number by D-199 holds the person's words just as rows
+     *    under their own number do, and the erasure's walk reaches both; the
+     *    review must offer both, or a request closes over lines nobody saw
+     *    (#724's rule). The ONE place the list is built for this class.
+     *
+     * @param list<string> $problems Added to when the merges cannot be read.
+     *
+     * @return list<int>
+     */
+    private static function personNumbers(mysqli $db, int $userId, array &$problems): array
+    {
+        try {
+            return array_values(array_unique(array_merge([$userId], AccountMerge::mergedInto($db, $userId))));
+        } catch (\Throwable $e) {
+            // "Could not tell which accounts were merged into this one" must
+            // refuse, never read as "none were" (#647's rule).
+            $problems[] = 'the accounts merged into this one could not be read (database error '
+                . (string) ($e instanceof \mysqli_sql_exception ? (int) $e->getCode() : 0) . ')';
+
+            return [$userId];
+        }
+    }
+
+    /**
      * Which of the account columns on one fetched row really name this person.
      * Column 0 is the key and column 1 is the text, so the links start at 2 —
      * written once because three callers read the same row shape.
      *
      * @param list<mixed>  $row
      * @param list<string> $links
+     * @param list<int>    $ids   The person's account numbers (personNumbers()).
      *
      * @return list<string>
      */
-    private static function matchedBy(array $row, array $links, int $userId): array
+    private static function matchedBy(array $row, array $links, array $ids): array
     {
         $matchedBy = [];
         foreach ($links as $n => $link) {
-            if ($row[2 + $n] !== null && (int) $row[2 + $n] === $userId) {
+            if ($row[2 + $n] !== null && in_array((int) $row[2 + $n], $ids, true) === true) {
                 $matchedBy[] = $link;
             }
         }
@@ -1506,8 +1544,13 @@ final class ErasureReview
         foreach ($links as $link) {
             $select[] = $q . '`' . $link . '`';
         }
-        $where  = self::holdingWhere($table, $links, $column, $siteColumn);
-        $values = self::holdingValues($links, $userId, $siteColumn, $siteId);
+        $numbersProblems = [];
+        $ids    = self::personNumbers($db, $userId, $numbersProblems);
+        if ($numbersProblems !== []) {
+            return null;
+        }
+        $where  = self::holdingWhere($table, $links, $column, $siteColumn, count($ids));
+        $values = self::holdingValues($links, $ids, $siteColumn, $siteId);
         $values[] = $rowKey;
 
         try {
@@ -1530,7 +1573,7 @@ final class ErasureReview
             return null;
         }
 
-        $matchedBy = self::matchedBy($row, $links, $userId);
+        $matchedBy = self::matchedBy($row, $links, $ids);
         $actedOnly = true;
         foreach ($matchedBy as $matched) {
             if (in_array($matched, GdprEraser::ACTOR_COLUMNS, true) === false) {

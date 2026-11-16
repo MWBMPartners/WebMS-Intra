@@ -75,8 +75,10 @@ if ($userId <= 0 || $siteId <= 0) {
 //    page leaves erased accounts out; this refuses a hand-made request too.
 //    Asked before anything else about the account, so the person is told
 //    the real reason.
-if (AccountGuard::checkNotErased($userId, 'place account #' . $userId . ' into an organisation') !== AccountGuard::ALLOW) {
-    $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+$neverChanged = AccountGuard::checkNotErased($userId, 'place account #' . $userId . ' into an organisation');
+if ($neverChanged !== AccountGuard::ALLOW) {
+    // #1064 round 5: the verdict's own words (erased, or merged away).
+    $_SESSION['flash_msg']  = AccountGuard::message($neverChanged, AccountGuard::REACH_ACCOUNT);
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/users/unplaced'), true, 302);
     exit();
