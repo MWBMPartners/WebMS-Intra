@@ -4530,9 +4530,11 @@ $p = $plant('_core/Mailer.php', "\$contentHtml = (\$contentIsText === false && s
     "\$contentHtml = (self::looksLikeHtml(\$content) === true)", $scnLinkName);
 check('P125 with the branded wrapper still guessing (only send() told), the link is still sent live: BOTH halves of the option are needed',
     [$p['applied'], str_contains((string) (($p['result']['first message'] ?? [])['html'] ?? ''), '<a href="https://evil.example/login">')], [true, true]);
+// (#1081, D-197: the approval statement gained a second line, the
+// confirmation for a suggestion cancelled earlier; the plant follows it.)
 $p = $plant('_apps/admin/calendar/moderate.php',
-    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\" AND `isDeleted` = 0'\n    );\n} else {",
-    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\"'\n    );\n} else {", $scnDeleted);
+    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\" AND `isDeleted` = 0 '\n        . '  AND (? = 1 OR NOT '",
+    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\" '\n        . '  AND (? = 1 OR NOT '", $scnDeleted);
 check('P126 with Approve no longer refusing a deleted suggestion, pressing it publishes a row nobody can see (E18 goes red)',
     [$p['applied'], $p['result']['state'] ?? null], [true, ['approved', 'published']]);
 $p = $plant('_apps/admin/calendar/moderation.php', "AND `e`.`submissionStatus` = ? AND `e`.`isDeleted` = 0 '", "AND `e`.`submissionStatus` = ? '", $scnDeleted);

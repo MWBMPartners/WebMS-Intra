@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventSuggestions;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -39,7 +40,14 @@ $rows = [];
 $stmt = $mysqli->prepare(
     'SELECT `e`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `e`.`endDateTime`, `e`.`locationName`, `e`.`description`, '
     . '       `e`.`submitterName`, `e`.`submitterEmail`, `e`.`submittedAt`, '
-    . '       COALESCE(`u`.`fullName`, `e`.`submitterName`, "Anonymous") AS `submitterDisplay` '
+    . '       COALESCE(`u`.`fullName`, `e`.`submitterName`, "Anonymous") AS `submitterDisplay`, '
+    // ⚠️ D-197, D-198 (#1081): was it cancelled or postponed earlier? The same
+    //    clause the approval handler asks inside its own statement, so the
+    //    page and the handler cannot disagree about which suggestions need a
+    //    confirmation; the status and the kept marks are read as well, for the
+    //    words that say WHICH (`EventSuggestions::earlierStatuses()`).
+    . '       `e`.`status`, `e`.`' . implode('`, `e`.`', EventSuggestions::WARN_IF_EVER) . '`, '
+    . '       ' . EventSuggestions::cancelledOrPostponedEarlierSql('e') . ' AS `needsConfirm` '
     . 'FROM `tblEvents` `e` '
     . 'LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `e`.`submittedByID` '
     // 🗑️ #859 round 1: a deleted suggestion is left out. It used to be listed
@@ -143,10 +151,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="portal-data-row-aside">
                     <?php if ($filter === 'pending'): ?>
+                        <?php $needsConfirm = (int) $r['needsConfirm'] === 1; ?>
+                        <?php $earlier = EventSuggestions::earlierStatuses($r); ?>
+                        <?php if ($needsConfirm === true): ?>
+                            <?php // ⚠️ D-197, D-198: said BEFORE the press, naming which; the box is part of the Approve form below. ?>
+                            <div class="alert alert-warning small py-2 mb-2" data-cancelled-earlier="<?php echo (int) $r['eventID']; ?>"><?php echo htmlspecialchars(EventSuggestions::earlierStatusWarning($earlier), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
                         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                             <input type="hidden" name="eventID" value="<?php echo (int) $r['eventID']; ?>">
                             <input type="hidden" name="action" value="approve">
+                            <?php if ($needsConfirm === true): ?>
+                                <?php // The handler asks the row itself; this box only answers it. `required` is a courtesy, not the guard. ?>
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="checkbox" required
+                                           name="<?php echo htmlspecialchars(EventSuggestions::CONFIRM_FIELD, ENT_QUOTES, 'UTF-8'); ?>" value="1"
+                                           id="confirm-earlier-<?php echo (int) $r['eventID']; ?>">
+                                    <label class="form-check-label small" for="confirm-earlier-<?php echo (int) $r['eventID']; ?>"><?php echo htmlspecialchars(EventSuggestions::earlierStatusConfirmLabel($earlier), ENT_QUOTES, 'UTF-8'); ?></label>
+                                </div>
+                            <?php endif; ?>
                             <button type="submit" class="btn btn-success btn-sm"><i class="fa-solid fa-check me-1"></i>Approve</button>
                         </form>
                         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/calendar/moderate'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
