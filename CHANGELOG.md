@@ -4,6 +4,39 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An error's words, the anonymous form, and a fuller data copy (#1007, #990, #1044, #1063; D-174, D-176, D-184)
+
+- **An error's own words keep no e-mail address (#1007, #990; D-174).** Before an error's code, title or detail is
+  stored on the Errors page, sent in an alert e-mail or forwarded to an outside error monitor, every e-mail address
+  in it becomes "[address]" (`Logger::withoutAddresses()`, the one place; linear even with the pattern JIT off).
+- **PHP's own error log gets less (#990).** When the database cannot take a record, Logger's line in PHP's log
+  carries the record's kind and numbers only: never an activity record's words, the network address or the page
+  address. An error's line keeps its title and where it happened, addresses removed; the database's own reason
+  is cleaned too.
+- **Activity records stop copying an error's words (#990).** The Google test e-mail, the Microsoft Graph token test
+  (cURL failure; the OAuth error code is kept only when it is shaped like one), the backup page's three failure lines,
+  a failed push to a channel, and the demo-data page's load and wipe failures now write fixed words; the reason goes
+  to the Errors page, cleaned. The administrator pressing the button is still shown it in full.
+- **The anonymous prayer form names nobody, in every record of the request (#1044).** `Logger::errorNamingNobody()`
+  writes an Errors-page line with no account, network address, browser or headers. The anonymous form now calls
+  `Logger::promiseAnonymity()` at its top, so for the rest of that request every error line (its own, PrayerChain's,
+  Mailer's, PHP's) and every activity record names nobody. Captcha's bot-check failures on such a form name nobody
+  too.
+- **A member's full data copy now holds every kind of record the erasure deletes with them (#1063).** 24 kinds were
+  added. Other people's account numbers, notes an administrator or worker wrote (the offboarding reason included) and
+  secrets are left out, each said beside its block. A text that confirmed a phone number is recorded with the code
+  masked (`Sms::VERIFICATION_TEXT_KEPT`), so neither the copy nor the administrators' text log holds a working code;
+  a prayer-chain text's words (another member's request) are left out of the copy. Seven kinds that can grow without
+  limit (the activity history among them) are cut to the newest 5,000 rows, and the file says so in words (`shortened`). Two kinds are named as left out
+  with their reason (`notInDataCopy`): spare sign-in codes and rows a restore is keeping.
+
+- **Checked:** error-words 30, data-copy 3 (63 blocks, each with another person's rows to leak), erasure-pages 287,
+  held-texts 122, gdpr-eraser 318, gdpr-coverage 113, backup-page 353 and every audit script green on MySQL 8.0.36.
+  Four rounds of independent check (personal data and erasure); the last three found the portal sound and only
+  gaps in a test, closed under D-064. **Not run:** Turnstile, hCaptcha and reCAPTCHA v2 over HTTP; the alert
+  e-mail and the outside error monitor (none configured in tests); MariaDB; MySQL 8.4. Codex has not reviewed this.
+  Open: #1087 (about 166 `error_log(getMessage())` calls in 42 files still write an error's own words to PHP's log).
+
 ### The API description's publisher link, attendance timestamps, and the language switch's return address (#863, #930, #910; D-160, D-161, D-162)
 
 ---------------------------------------------------------------------------
