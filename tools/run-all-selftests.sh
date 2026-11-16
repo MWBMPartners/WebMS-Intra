@@ -286,6 +286,8 @@ two-step|tools/two-step-selftest.php|selftest_twostep|web:two-step SELFTEST_WEB_
 live-chat-moderation|tools/live-chat-moderation-selftest.php|selftest_livechat|web:live-chat SELFTEST_WEB_PORT=9760
 go-live-button|tools/go-live-button-selftest.php|selftest_golive|web:go-live SELFTEST_WEB_PORT=9762
 activity-log|tools/activity-log-selftest.php|selftest_activitylog|web:activity-log SELFTEST_WEB_PORT=9770
+error-words|tools/error-words-selftest.php|selftest_errwords|
+data-copy|tools/data-copy-selftest.php|selftest_datacopy|
 scheduled-jobs|tools/scheduled-jobs-selftest.php|selftest_scheduledjobs|web:scheduled-jobs SELFTEST_WEB_PORT=9893
 portal-check|tools/portal-check-selftest.php|selftest_portalcheck|
 mail-pages|tools/mail-pages-selftest.php|selftest_mailpages|web:mail-pages SELFTEST_WEB_PORT=9580

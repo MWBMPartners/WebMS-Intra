@@ -40,6 +40,14 @@ use Portal\Core\PrayerChain;
 use Portal\Core\RateLimiter;
 use Portal\Core\Site;
 
+// 🕶️ #1044: this form PROMISES the sender anonymity, so every record made for
+//    the rest of this request names nobody - this page's own Errors-page lines
+//    (a statement that would not run), PrayerChain's and Mailer's (reached
+//    after the request is saved), and anything PHP itself reports. Said once,
+//    here, before anything is recorded; check_activity_naming_nobody.py
+//    requires it to stay before this page's first record.
+Logger::promiseAnonymity();
+
 // 🛡️ Only POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ' . Site::url('prayer-requests/anonymous'), true, 302);
