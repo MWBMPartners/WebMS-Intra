@@ -172,8 +172,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     and carries what the portal needs from page to page (such as the token that stops other websites
     sending forms in your name, and your language if you change it); the "trust this device" cookie for
     two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the
-    cookie notice, kept for a year. Choices such as light or dark display are kept in your browser's
-    own storage, not in a cookie, and are not sent to the portal.
+    cookie notice, kept for a year. Your browser's own storage (not a cookie) also holds, for this portal:
+    your light or dark display, colour-blind-safe colours, reading mode, and whether you dismissed the offer
+    to install the portal as an app, none of which is sent to the portal; the calendar view you last used,
+    which the calendar puts into the page address and so is sent to the portal; a code for the livestream
+    page in the current tab, sent to the portal while you watch and with each chat message, so that it can
+    count who is watching and tell your messages apart; forms you send
+    while offline, kept until you are back online and then sent; and copies of pages, so they can be shown
+    when you are offline.
     The portal sets no tracking or analytics cookies of its own.
     <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the
           //    Outside companies section, which lists companies the reader's browser contacts

@@ -67,7 +67,8 @@ compared without regard to capitals, and a name may hold accented letters.
 A host is found in four shapes:
   - after `//`, `\\/\\/` (JavaScript and JSON escaping) or `%2F%2F` (an address
     inside another address), with or without the scheme, and with `*.`,
-    `{s}.`, `{$x}.` or `${x}.` in front;
+    `{s}.`, `{$x}.` or `${x}.` in front; and, with `http://` or `https://`
+    in front, an internet-number address or a punycode name (round 7);
   - as a quoted piece that BEGINS with a dot (`'.cloudflarestream.com/'`),
     which is how an address is glued together around somebody's own part,
     unless its last part is a file ending (`.html.php`);
@@ -103,8 +104,18 @@ WHAT THIS CANNOT SEE, said plainly
    host name in a quoted string ending in a top-level name not in
    REAL_TOP_LEVEL (`'pixel.tracker.xyz'` -- a host written with `//` is read
    whatever its ending); a host inside a base64 `data:` address, or any other
-   encoding but percent-encoding; and a page rule built in pieces
-   (`'img-' . 'src ' . $x`).
+   encoding but percent-encoding; a page rule built in pieces
+   (`'img-' . 'src ' . $x`); and an internet-number address (an "IP
+   address") or a punycode name written WITHOUT `http://` or `https://`
+   in front, as a bare string.
+6. Round 7 of the check planted `<img src="https://198.51.100.7/pixel.gif">`
+   and `https://xn--80ak6aa92e.xn--p1ai/p.gif` and both passed green, because
+   the top-level-name rule wanted letters only. Both are read now (the
+   ADDRESS_LITERAL shape below), when written with a scheme. An address in a
+   range kept for documentation or for the machine itself (127.x, 10.x, ::1,
+   192.0.2.x, 198.51.100.x, 203.0.113.x) gets NO automatic pass: a browser
+   still tries to load it, and a test address that ships is a fault, so it
+   must be listed like any other host.
 
 RUN IT
 ------
@@ -478,6 +489,14 @@ TOP = r"[^\W\d_]{2,}"
 HOST_AFTER_SLASHES = re.compile(
     r"(?:https?(?::|%3a))?(?://|\\/\\/|%2f%2f)(?:\{[^}\s]*\}\.|\$\{[^}\s]*\}\.|\*\.)?"
     r"((?:" + LABEL + r"\.)+" + TOP + r")(?![\w-])")
+# Round 7: an address written as an internet number (IPv4, or IPv6 in square
+# brackets) or with a punycode label (`xn--`, how a name in another alphabet is
+# spelt on the wire), which the top-level-name rule above cannot match. Only
+# with a scheme in front, so a version number such as `//1.2.3.4` in prose is
+# not read as an address.
+ADDRESS_LITERAL = re.compile(
+    r"https?(?::|%3a)(?://|\\/\\/|%2f%2f)"
+    r"(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|(?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
 GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
 WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
 QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"|`([^`\\]*)`")
@@ -645,6 +664,13 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
     for rel, (code, strings) in code_texts(web).items():
         low = code.lower()
         for match in HOST_AFTER_SLASHES.finditer(low):
+            line_start = low.rfind("\n", 0, match.start()) + 1
+            before = low[max(line_start, match.start() - 200):match.start()]
+            found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
+                          low.count("\n", 0, match.start()) + 1))
+        for match in ADDRESS_LITERAL.finditer(low):
+            if any(match.start() >= m.start() and match.end() <= m.end() for m in HOST_AFTER_SLASHES.finditer(low, max(0, match.start() - 8), match.end())):
+                continue  # already read by the ordinary shape (a name with a letters-only ending)
             line_start = low.rfind("\n", 0, match.start()) + 1
             before = low[max(line_start, match.start() - 200):match.start()]
             found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
@@ -956,6 +982,20 @@ def self_test() -> int:
         append("_core/Translation.php", "\n$h = '\napi.nlstart.com';\n"),
         "_core/Translation.php (line %d) names the outside host api.nlstart.com"
         % (line_after("_core/Translation.php") + 2))
+    run("S45 an internet-number address loaded as a picture fails",
+        append("_core/templates/footer.php", '<img src="https://198.51.100.7/pixel.gif">\n'),
+        new + " 198.51.100.7")
+    run("S46 a punycode address fails",
+        append("_core/templates/footer.php", '<img src="https://xn--80ak6aa92e.xn--p1ai/p.gif">\n'),
+        new + " xn--80ak6aa92e.xn--p1ai")
+    run("S47 an IPv6 address in square brackets fails",
+        append("_core/templates/footer.php", '<img src="https://[2001:db8::7]/p.gif">\n'),
+        new + " [2001:db8::7]")
+    run("S48 the machine's own address (127.0.0.1) gets no automatic pass",
+        append("_core/templates/footer.php", '<?php $u = "http://127.0.0.1/hook"; ?>\n'),
+        new + " 127.0.0.1")
+    run("S49 a version number after // in page text is NOT read as an address",
+        append("_core/templates/footer.php", '<p>see //1.2.3.4 notes</p>\n'), None)
     # S44: one written host read by two shapes on one line (a page-rule source that is also a whole quoted
     # host name) is reported ONCE. Counted here rather than through run(), which only asks "is it there".
     checks += 1

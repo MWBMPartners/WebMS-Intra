@@ -181,8 +181,8 @@ final class OutsideServices
             'name'       => 'Profile pictures from Gravatar',
             'company'    => 'Gravatar (run by Automattic)',
             'sends'      => 'A scramble of the e-mail address of the member whose picture is shown, which Gravatar '
-                          . 'can match to that member, with the internet address and browser of whoever is looking and '
-                          . 'the time, every time a page shows that picture. A member\'s picture is fetched for somebody '
+                          . 'can match to that member, with the internet address and browser of whoever is looking, '
+                          . 'this portal\'s web address and the time, every time a page shows that picture. A member\'s picture is fetched for somebody '
                           . 'else only when that member allows it and the person looking has not switched it off.',
             'imgSources' => ['https://www.gravatar.com'],
             'maxLevel'   => self::ON,
@@ -192,8 +192,8 @@ final class OutsideServices
             'name'       => 'Your photo from the account you sign in with',
             'company'    => 'Google (the photo stays on its servers)',
             'sends'      => 'An address on Google\'s servers that belongs to the shown member\'s photo alone, with the '
-                          . 'internet address and browser of whoever is looking and the time, every time a page shows '
-                          . 'that picture. A member\'s photo is fetched for somebody else only when that member allows '
+                          . 'internet address and browser of whoever is looking, this portal\'s web address and the time, '
+                          . 'every time a page shows that picture. A member\'s photo is fetched for somebody else only when that member allows '
                           . 'it and the person looking has not switched it off.',
             'imgSources' => ['https://*.googleusercontent.com'],
             'maxLevel'   => self::ON,
@@ -209,7 +209,7 @@ final class OutsideServices
             'company'    => 'OpenStreetMap',
             'sends'      => 'Which map squares to draw, which tells OpenStreetMap roughly where the member lives '
                           . '(to about 110 metres), or exactly where a small group meets, together with the '
-                          . 'internet address of whoever is looking. A map of a member\'s home is shown only when '
+                          . 'internet address and browser of whoever is looking and this portal\'s web address. A map of a member\'s home is shown only when '
                           . 'BOTH the member shown and the person looking allow it; a map of a group\'s meeting '
                           . 'place only when that place\'s named host agreed to it, or it is marked as not '
                           . 'anybody\'s home, and the person looking allows it.',
@@ -317,24 +317,26 @@ final class OutsideServices
                          . 'an event is held is whatever its organiser typed, and can be somebody\'s home: its map is '
                          . 'drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
             'sends'     => 'Which map squares to draw, which tells OpenStreetMap the area around the place, together '
-                         . 'with your internet address and browser.',
+                         . 'with your internet address, your browser and this portal\'s web address.',
             'why'       => 'To show where the place is.',
             'hosts'     => ['.tile.openstreetmap.org'],
         ],
         'embeddedContent' => [
             'name'      => 'Videos, designs and pictures shown inside a page',
-            'companies' => 'Whichever company holds the video or design: YouTube (Google), Vimeo, Facebook (Meta), '
-                         . 'Twitch, Cloudflare (its video service, Cloudflare Stream) or Canva. On the noticeboard, '
-                         . 'also any website a poster\'s picture or video is taken from.',
+            'companies' => 'Whichever company holds the video or design: YouTube (Google), Vimeo, Cloudflare (its '
+                         . 'video service, Cloudflare Stream) or Canva. On the noticeboard, also any website a poster\'s '
+                         . 'picture or video is taken from.',
             'from'      => 'browser',
-            'when'      => 'When you open a page that shows one -- a livestream, an event\'s own page with a video on it, '
-                         . 'or the noticeboard.',
-            'sends'     => 'Your internet address, your browser, and which video or design you are looking at. The '
+            'when'      => 'When you open a page that shows one: an event\'s hub page (where its videos are kept), or '
+                         . 'the noticeboard. The livestream page also puts the player of YouTube, Vimeo, Facebook (Meta) '
+                         . 'or Twitch into the page, but the portal\'s own page rules currently stop your browser '
+                         . 'loading it there, so nothing is fetched from that company on that page.',
+            'sends'     => 'Your internet address, your browser, this portal\'s web address, and which video or design '
+                         . 'you are looking at. The '
                          . 'video or design is drawn by that company\'s own player, from its own website, inside this '
                          . 'page, so your browser deals with that company directly, under your browser\'s own settings. '
-                         . 'On an event\'s own page a YouTube video uses the address Google calls its "privacy-enhanced '
-                         . 'mode", and a Vimeo video asks Vimeo not to track you; a livestream uses the company\'s '
-                         . 'ordinary player. What each company does with what it receives is described in its own '
+                         . 'A YouTube video uses the address Google calls its "privacy-enhanced mode", and a Vimeo '
+                         . 'video asks Vimeo not to track you. What each company does with what it receives is described in its own '
                          . 'privacy notice.',
             'why'       => 'The video or design is kept by that company, so your browser has to fetch it from there.',
             'hosts'     => ['www.youtube-nocookie.com', 'www.youtube.com', 'player.vimeo.com', 'www.facebook.com',
@@ -359,7 +361,8 @@ final class OutsideServices
             'when'      => 'Only if it is switched on. It is shown on some forms, such as signing in, resetting a '
                          . 'password, and the forms anybody can fill in without an account.',
             'sends'     => 'Your browser fetches the check from the company and runs it inside the page, so the company '
-                         . 'receives your internet address and browser; what the check looks at in the page is described '
+                         . 'receives your internet address, your browser and this portal\'s web address; what the check '
+                         . 'looks at in the page is described '
                          . 'in the company\'s own privacy notice. When you send the form, this portal\'s server sends the '
                          . 'company the check\'s answer and your internet address, to ask whether you passed.',
             'why'       => 'To stop automatic programs from flooding the forms or guessing passwords.',
@@ -370,12 +373,16 @@ final class OutsideServices
             'companies' => 'Only if this portal\'s administrator has switched it on: a monitoring service of their '
                          . 'choosing, such as Sentry or GlitchTip.',
             'from'      => 'server',
-            'when'      => 'When something goes wrong while a page is being made for you. The administrator can '
-                         . 'choose to send only a share of these reports.',
-            'sends'     => 'Your account number if you are signed in, the address of the page, the description your '
-                         . 'browser gives of itself, and the fault\'s own message, which can quote what was being '
-                         . 'handled. Not your internet address. On a form that promises not to name you, such as the '
-                         . 'anonymous prayer form, neither your account number nor your browser\'s description is sent.',
+            'when'      => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, '
+                         . 'or when an e-mail cannot be sent. The administrator can choose to send only a share of these '
+                         . 'reports.',
+            'sends'     => 'The address of the page, the description the asking browser or program gives of itself, and '
+                         . 'the fault\'s own message with any e-mail addresses taken out, which can still quote what was '
+                         . 'being handled. An account number only for a few kinds of fault: a refused or blocked attempt '
+                         . 'to change an account (the number of whoever tried), and a daily e-mail about imported events '
+                         . 'that could not be sent (the number of the administrator it was for). Never your internet '
+                         . 'address. On a form that promises not to name you, such as the anonymous prayer form, '
+                         . 'neither an account number nor the browser\'s description is sent.',
             'why'       => 'So that the people running this portal hear about faults and can fix them.',
             'hosts'     => [],
         ],
@@ -444,7 +451,7 @@ final class OutsideServices
             'from'      => 'both',
             'when'      => 'When you choose to sign in with that account.',
             'sends'     => 'Your browser is sent to the company\'s own sign-in page, so it receives your internet address, '
-                         . 'your browser and what you type there. Afterwards this portal\'s server collects from the '
+                         . 'your browser, this portal\'s web address and what you type there. Afterwards this portal\'s server collects from the '
                          . 'company your name, your e-mail address, the account\'s own identifier and, where the company '
                          . 'has one, the address of your photo on its servers.',
             'why'       => 'So that you can sign in with an account you already have.',
@@ -482,8 +489,8 @@ final class OutsideServices
             'when'      => 'When you pay for something through the portal.',
             'sends'     => 'This portal\'s server tells the company the amount, the currency, a short description of '
                          . 'what is being paid for and this portal\'s own reference number. Your browser is then sent to '
-                         . 'the company\'s own payment page, which receives your internet address and browser and what '
-                         . 'you type there. The portal never sees your card details. Afterwards the company sends this '
+                         . 'the company\'s own payment page, which receives your internet address, your browser, this '
+                         . 'portal\'s web address and what you type there. The portal never sees your card details. Afterwards the company sends this '
                          . 'portal a message about the payment, which can carry the name, e-mail address and billing or '
                          . 'delivery address you gave it; the portal keeps that message whole for the period this '
                          . 'installation sets (90 days unless it is changed), and then the nightly clear-out empties it, '
@@ -522,7 +529,7 @@ final class OutsideServices
             'from'      => 'both',
             'when'      => 'When somebody uploads a video to an event.',
             'sends'     => 'This portal\'s server asks Cloudflare for an upload address, sending no personal details; the '
-                         . 'uploader\'s browser then sends the video file itself, with their internet address and browser.',
+                         . 'uploader\'s browser then sends the video file itself, with their internet address, their browser and this portal\'s web address.',
             'why'       => 'To keep and play the video.',
             'hosts'     => ['api.cloudflare.com', 'upload.videodelivery.net', 'upload.cloudflarestream.com'],
         ],
@@ -532,7 +539,8 @@ final class OutsideServices
             'companies' => 'AssemblyAI, or OpenAI',
             'from'      => 'server',
             'when'      => 'When a recording that somebody asked to have written out is processed.',
-            'sends'     => 'The recording\'s sound, which includes the voices of whoever speaks on it.',
+            'sends'     => 'The recording itself: the whole audio or video file, so the pictures of everybody filmed as '
+                         . 'well as the voices of whoever speaks.',
             'why'       => 'To turn the speech into text.',
             'hosts'     => ['api.assemblyai.com', 'api.openai.com'],
         ],
