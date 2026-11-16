@@ -45,7 +45,19 @@
  * The two blocks written as a closure that calls $fetchUserRows()
  * (`importedEventNotices` and `demoDataRegister`) are judged here too.
  *
- * WHAT IT CANNOT SEE, said plainly: the blocks built without $fetchUserRows()
+ * And every table gets a SECOND row, somebody else's (THEIRS): every column
+ * the block matches on names that person, and its numbers, days and words are
+ * its own. A block that returns any of it has stopped narrowing to the member
+ * (`OR 1 = 1`, a dropped join condition). Every column a block matches the
+ * member's number against must hold an account number, so matching it
+ * against `siteID` fails too.
+ *
+ * WHAT IT CANNOT SEE, said plainly: a block matching on the WRONG account
+ * column (`grantedByID` where `userID` was meant): both rows name their own
+ * person in every column the block matches on, so the wrong one looks right;
+ * a block whose join to a parent table pulls in another person's row through
+ * a column the second row does not set apart (one that is neither matched on
+ * nor a plain number); the blocks built without $fetchUserRows()
  * - the two mail blocks (driven by part Q9 of mail-queue-selftest.php), and
  * the three asked of GdprEraser helpers (driven by sections O and P of
  * erasure-pages-selftest.php); an account-number column named in
@@ -73,6 +85,9 @@ declare(strict_types=1);
 const ME    = 918801;
 const OTHER = 918802;
 const MARK_NUMBER = 4242; // the number every non-account column of a marker row holds
+// #1063 check round 3: a SECOND row in every table, belonging to somebody else.
+const THEIRS        = 918803; // the person the second row belongs to
+const THEIRS_NUMBER = 4343;   // the number every non-account column of the second row holds
 const PAGE  = __DIR__ . '/../web/_apps/auth/account/data-export.php';
 // Columns that hold words ANOTHER person wrote, by this test's judgement.
 const OTHER_WORDS = [
@@ -198,8 +213,14 @@ $isAccountColumn = static fn (string $table, string $col): bool => isset($userLi
     || preg_match('/(ByID|UserID)$|^(userID|donorID|viewerID|assignedToID)$/', $col) === 1;
 
 /** One row for one table: every column given a value by the rules above. */
-$rowFor = static function (string $table, array $matchCols) use ($columnsOf, $isAccountColumn): array {
-    $row = [];
+$rowFor = static function (string $table, array $matchCols, bool $theirs = false) use ($columnsOf, $isAccountColumn): array {
+    // The marker row is ME's; the SECOND row ($theirs) is THEIRS: every column
+    // the block matches on names that other person, every other number is
+    // THEIRS_NUMBER (so its own tables join to each other), every day is
+    // 2025-07-08 and every word is "theirs".
+    $who    = $theirs === true ? THEIRS : ME;
+    $number = $theirs === true ? THEIRS_NUMBER : MARK_NUMBER;
+    $row    = [];
     foreach ($columnsOf($table) as $c) {
         $col  = (string) $c['COLUMN_NAME'];
         $type = strtolower((string) $c['DATA_TYPE']);
@@ -208,11 +229,11 @@ $rowFor = static function (string $table, array $matchCols) use ($columnsOf, $is
             continue;
         }
         if (in_array($col, $matchCols, true) === true) {
-            $row[$col] = ME;
+            $row[$col] = $who;
         } elseif (isset(FIXED[$full]) === true) {
-            $row[$col] = FIXED[$full];
+            $row[$col] = FIXED[$full] === ME ? $who : FIXED[$full];
         } elseif ($c['COLUMN_KEY'] === 'PRI' && str_contains((string) $c['EXTRA'], 'auto_increment') === true) {
-            $row[$col] = MARK_NUMBER;
+            $row[$col] = $number;
         } elseif ($type === 'tinyint') {
             $row[$col] = $isAccountColumn($table, $col) === true ? OTHER : 1;
         } elseif (in_array($type, ['int', 'bigint', 'smallint', 'mediumint'], true) === true) {
@@ -220,13 +241,13 @@ $rowFor = static function (string $table, array $matchCols) use ($columnsOf, $is
             // table alike, is MARK_NUMBER: so the tables of one block join to
             // each other's marker rows, and a block handing over only numbers
             // is still seen to hand over its marker row.
-            $row[$col] = $isAccountColumn($table, $col) === true ? OTHER : MARK_NUMBER;
+            $row[$col] = $isAccountColumn($table, $col) === true ? OTHER : $number;
         } elseif (in_array($type, ['decimal', 'float', 'double'], true) === true) {
             $row[$col] = 1;
         } elseif (in_array($type, ['date'], true) === true) {
-            $row[$col] = '2026-01-02';
+            $row[$col] = $theirs === true ? '2025-07-08' : '2026-01-02';
         } elseif (in_array($type, ['datetime', 'timestamp'], true) === true) {
-            $row[$col] = '2026-01-02 03:04:05';
+            $row[$col] = $theirs === true ? '2025-07-08 09:10:11' : '2026-01-02 03:04:05';
         } elseif ($type === 'time') {
             $row[$col] = '03:04:05';
         } elseif ($type === 'year') {
@@ -239,9 +260,10 @@ $rowFor = static function (string $table, array $matchCols) use ($columnsOf, $is
         } elseif (in_array($type, ['binary', 'varbinary', 'blob', 'tinyblob', 'mediumblob', 'longblob'], true) === true) {
             $row[$col] = 'x';
         } else {
-            $word = in_array($full, OTHER_WORDS, true) === true ? 'OTHERWORDS' : (in_array($full, SECRETS, true) === true ? 'SECRETVAL' : 'mine');
-            $max  = (int) ($c['CHARACTER_MAXIMUM_LENGTH'] ?? 0);
-            $row[$col] = $max > 0 && strlen($word) > $max ? substr('mine', 0, $max) : $word;
+            $plain = $theirs === true ? 'theirs' : 'mine';
+            $word  = $theirs === true ? $plain : (in_array($full, OTHER_WORDS, true) === true ? 'OTHERWORDS' : (in_array($full, SECRETS, true) === true ? 'SECRETVAL' : $plain));
+            $max   = (int) ($c['CHARACTER_MAXIMUM_LENGTH'] ?? 0);
+            $row[$col] = $max > 0 && strlen($word) > $max ? substr($plain, 0, $max) : $word;
         }
     }
 
@@ -264,10 +286,27 @@ foreach ($blocks as $key => $sql) {
         $wrong[] = $key . ': its tables or the column it matches on could not be read from its SQL';
         continue;
     }
+    // The value bound to every ? is the member's ACCOUNT NUMBER, so a column
+    // the block matches it against must hold an account number. A block
+    // matching it against `siteID` (or any other column) would hand over
+    // whatever row happens to carry that number (#1063 check round 3).
+    foreach ($matchCols as $col) {
+        $holdsAccount = false;
+        foreach ($tables as $table) {
+            foreach ($columnsOf($table) as $c) {
+                if ((string) $c['COLUMN_NAME'] === $col && $isAccountColumn($table, $col) === true) {
+                    $holdsAccount = true;
+                }
+            }
+        }
+        if ($holdsAccount === false) {
+            $wrong[] = $key . ': it matches the member\'s account number against `' . $col . '`, which does not hold an account number';
+        }
+    }
     $db->begin_transaction();
     try {
-        foreach ($tables as $table) {
-            $row  = $rowFor($table, $matchCols);
+        foreach (array_merge(array_map(static fn ($t) => [$t, false], $tables), array_map(static fn ($t) => [$t, true], $tables)) as [$table, $theirs]) {
+            $row  = $rowFor($table, $matchCols, $theirs);
             $cols = array_keys($row);
             // REPLACE, so an existing row with the same key (the member's own
             // tblUsers row) is overwritten with the markers, never kept.
@@ -277,7 +316,7 @@ foreach ($blocks as $key => $sql) {
             $ins->bind_param(str_repeat('s', count($vals)), ...array_map('strval', $vals));
             $ins->execute();
             if ($ins->affected_rows < 1) {
-                $wrong[] = $key . ': its marker row in ' . $table . ' was not written';
+                $wrong[] = $key . ': its ' . ($theirs === true ? 'second (somebody else\'s)' : 'marker') . ' row in ' . $table . ' was not written';
             }
         }
         $run   = $db->prepare($sql);
@@ -310,6 +349,17 @@ foreach ($blocks as $key => $sql) {
             $wrong[] = $key . ': it handed over no marker row (' . count($rows) . ' row(s) of something else), so it was not judged';
         }
         $markerBlocks += array_filter($rows, $isMarker) === [] ? 0 : 1;
+        // The SECOND row is somebody else's: a block that hands over any of it
+        // has stopped narrowing to the member asking (#1063 check round 3).
+        foreach ($rows as $r) {
+            foreach ($r as $col => $value) {
+                $v = (string) $value;
+                if ($value !== null && ($v === 'theirs' || $v === (string) THEIRS || $v === (string) THEIRS_NUMBER || str_starts_with($v, '2025-07-08') === true)) {
+                    $wrong[] = $key . ' hands over a row belonging to SOMEBODY ELSE (' . $col . ')';
+                    break 2;
+                }
+            }
+        }
         foreach ($rows as $r) {
             foreach ($r as $col => $value) {
                 if ($value === null) {
@@ -351,7 +401,7 @@ dc_check('calendarToken may be handed over because only its SHA-256 fingerprint 
         && str_contains($ical, "SET calendarToken = ? WHERE userID = ?") === true);
 
 // ── Tidy ────────────────────────────────────────────────────────────────────
-$db->query('DELETE FROM `tblUsers` WHERE `userID` IN (' . ME . ', ' . OTHER . ')');
+$db->query('DELETE FROM `tblUsers` WHERE `userID` IN (' . ME . ', ' . OTHER . ', ' . THEIRS . ')');
 
 echo "\n" . str_repeat('=', 78) . "\n";
 printf("%d passed, %d failed (%d blocks judged, %d of them on their marker row)\n", $passes, $failures, $checked, $markerBlocks);
