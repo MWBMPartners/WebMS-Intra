@@ -118,7 +118,11 @@ final class AccountMerge
     public const BY_TREATMENT = [
         // 🚚 LIVE state of the person, and nothing else (D-199 applied
         //    consistently, round 5 of #1064). Every record of who DID, decided,
-        //    recorded or was SENT something at a past moment stays (KEEP below).
+        //    recorded or was SENT something at a past moment stays (KEEP below),
+        //    EXCEPT where the portal uses "who made it" to decide who may see or
+        //    change the record: those move, and the move is logged as its own
+        //    entry (D-201, the owner, 16 November 2026; the ownership group at
+        //    the end of this list).
         self::MOVE => [
             // records ABOUT the person, or that belong to them: their own claim, form response, prayer
             // request, booking, card, device, milestone, child's profile, care case, safeguarding check,
@@ -196,6 +200,10 @@ final class AccountMerge
         //    created, changed, approved, decided, recorded, counted, moderated
         //    or was sent something. 121 columns that had been moving now stay
         //    (119 since round 6 moved two of them back as ownership).
+        //    D-201 (the owner, 16 November 2026): the one exception is a
+        //    "who made it" number the portal uses to decide who may see or
+        //    change the record; those are in MOVE's ownership group. The
+        //    activity log and the change history are never rewritten.
         //    The costs, said once here: a list a page draws by "who made it"
         //    (an announcement's author, a workflow the person started) does not
         //    show the kept account the rows made as the duplicate; and an
@@ -364,10 +372,11 @@ final class AccountMerge
         // ⚠️ TRUE SINCE D-199, and only since: round 2 of this package moved
         //    these rows while this sentence said they were never rewritten.
         self::KEEP => ['History, left exactly as it is',
-            'The record of who made, changed, approved, decided, recorded or was sent something, and when, keeps the '
-            . 'account number it was made under and is never rewritten. '
-            . 'A new entry records that those earlier actions are now the account that stays. If the person later asks '
-            . 'for their details to be erased, these are erased with them.'],
+            'The activity log, the change history and the other records of who did, approved, decided, recorded or was '
+            . 'sent something keep the account number they were made under and are never rewritten. (Records the person '
+            . 'manages, such as their loans, photos, tasks and bookings, move instead.) A new entry records that those '
+            . 'earlier actions are now the account that stays. If the person later asks for their details to be erased, '
+            . 'these are erased with them.'],
         self::SIGN_IN_IF_TICKED => ['Microsoft or Google sign-ins and passkeys',
             'These move only if the person ticks the box when they confirm. Otherwise they are deleted with the duplicate.'],
         self::SIGN_IN_DROPPED => ['Other ways of signing in, which are never moved',
@@ -390,12 +399,18 @@ final class AccountMerge
      *    preview (round 6: until then only comments said it). The first line is
      *    the heading; each further line is one cost, in plain words. Printed by
      *    `templates/merge-counts.php`, so both previews show the same words.
+     *    Round 7: the person AND the administrator read them, so they speak of
+     *    "the person" and never "you".
      */
     public const HISTORY_COSTS = [
-        'What stays under the old account number',
-        'The record of who made, changed, approved, decided, recorded or was sent something stays under the old account '
-            . 'number and is never rewritten. It is still counted as yours: in a copy of your data, in "what we hold about '
-            . 'you", and if you ask for your details to be erased. Three things follow from that.',
+        'What moves, and what stays under the old account number',
+        'The records the person manages move to the account that stays, and the move is written in the activity log: '
+            . 'loans they asked for, photos they uploaded, tasks they created, their saved reports and recording notes, '
+            . 'attendance sessions they created, their room bookings and their rota-swap requests. The activity log, the '
+            . 'change history and the other records of who did, approved, decided, recorded or was sent something stay '
+            . 'under the old account number and are never rewritten. They are still counted as the person\'s: in a copy '
+            . 'of their data, in what the portal says it holds about them, and if they ask for their details to be '
+            . 'erased. Three things follow.',
         'Lists that show what somebody made (an announcement\'s author, a workflow somebody started) will not show the '
             . 'account that stays the things made under the old number.',
         'An approval given under the old number is not counted as the account that stays: if a claim needs that '
@@ -1415,9 +1430,11 @@ final class AccountMerge
             $addresses,
             'Two of your accounts have been merged',
             "Account {$dupId} has been merged into account {$keptId}, after you signed in to both and agreed.\n\n"
-            . "What was account {$dupId}'s now belongs to account {$keptId}: the records about you, what you belong to, "
-            . "what you have been given to do, and your gifts and choices. The record of what was done under account "
-            . "{$dupId} stays under that number and is never rewritten, but it is still counted as yours. Account "
+            . "Account {$dupId}'s records about you, what you belong to, what you have been given to do, your gifts and "
+            . "choices, and the records you manage (loans you asked for, photos you uploaded, tasks, saved reports, "
+            . "recording notes, attendance sessions you created, room bookings and rota-swap requests) have moved to "
+            . "account {$keptId}, and the move is written in the activity log. Account {$dupId}'s activity log and change "
+            . "history stay under its number and are never rewritten; they are still counted as yours. Account "
             . "{$dupId} is closed. This cannot be undone. If you did not do this, contact whoever looks after the "
             . "portal for your organisation straight away.\n",
             $siteId
@@ -1670,7 +1687,13 @@ final class AccountMerge
         foreach (self::all($db, 'SELECT `emailAddress`, `earlierEmails` FROM `tblUsers` WHERE `userID` IN (?, ?)', $keptId, $dupId) as $row) {
             $candidates = [(string) $row['emailAddress']];
             if ($withEarlier === true) {
-                $candidates = array_merge($candidates, self::addressList($row['earlierEmails'] ?? null));
+                // Round 7: never an earlier address SOMEBODY ELSE holds now;
+                // the notice would tell a stranger about these two accounts.
+                $earlier    = self::addressList($row['earlierEmails'] ?? null);
+                $candidates = array_merge($candidates, array_values(array_diff(
+                    $earlier,
+                    self::heldByOthers($db, $earlier, [$keptId, $dupId])
+                )));
             }
             foreach ($candidates as $address) {
                 if (filter_var($address, FILTER_VALIDATE_EMAIL) !== false && in_array($address, $out, true) === false) {
@@ -1786,6 +1809,83 @@ final class AccountMerge
     }
 
     /**
+     * 📧 Which of these addresses another account holds NOW (round 7). An
+     *    address an account gave up can be taken by somebody else, and mail to
+     *    it from then on is theirs: an erasure must not search it, and a merge
+     *    notice must not go there. Compared without capitals, as the address
+     *    column's own collation does. `$personIds` are the person's own account
+     *    numbers (and, for a notice, both accounts of the merge). Answers the
+     *    addresses as given.
+     *
+     * @param list<string> $addresses
+     * @param list<int>    $personIds
+     *
+     * @return list<string>
+     */
+    public static function heldByOthers(mysqli $db, array $addresses, array $personIds): array
+    {
+        if ($addresses === []) {
+            return [];
+        }
+        $ids  = $personIds === [] ? [0] : array_values(array_map('intval', $personIds));
+        $held = [];
+        foreach (self::bound(
+            $db,
+            'SELECT LOWER(`emailAddress`) AS `a` FROM `tblUsers` WHERE LOWER(`emailAddress`) IN ('
+                . implode(', ', array_fill(0, count($addresses), '?')) . ') AND `userID` NOT IN ('
+                . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            array_merge(array_map(static fn (string $a): string => mb_strtolower($a), array_values($addresses)), $ids)
+        )->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+            $held[(string) $row['a']] = true;
+        }
+
+        return array_values(array_filter($addresses, static fn (string $a): bool => isset($held[mb_strtolower($a)])));
+    }
+
+    /**
+     * 🔒 Is this account merged away? Asked UNDER A LOCK by a writer about to
+     *    change the account row (round 7; #647's rule: the check and the write
+     *    in one transaction). Call it INSIDE that transaction, before the
+     *    UPDATE. It locks the account row first, so a merge in progress, which
+     *    holds that lock until it commits, is waited for; then it reads the
+     *    merge record with a LOCKING read, which sees what the merge committed
+     *    (a plain read could answer from a snapshot taken before it). True
+     *    means: roll back and refuse. Asking AccountGuard before the
+     *    transaction is not enough: a save begun before the merge committed
+     *    would wait on the merge's lock and then write over the closed account.
+     */
+    public static function mergedAwayUnderLock(mysqli $db, int $userId): bool
+    {
+        self::one($db, 'SELECT `userID` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE', $userId);
+        $row = self::one(
+            $db,
+            'SELECT COUNT(*) AS `n` FROM `tblAccountMergeSide` `mas` JOIN `tblAccountMergeRequest` `mar` '
+            . "ON `mar`.`requestID` = `mas`.`requestID` WHERE `mas`.`userID` = ? AND `mas`.`side` = 'duplicate' "
+            . "AND `mar`.`status` = 'completed' FOR UPDATE",
+            $userId
+        );
+
+        return (int) ($row['n'] ?? 0) > 0;
+    }
+
+    /**
+     * 🚩 Accounts the merge record says were merged into this one (chains
+     *    followed) but which are no longer as the merge closed them (round 7).
+     *    Nothing in the portal can reopen one any more, so only a hand-written
+     *    change gets here; an erasure must not then skip it in silence, because
+     *    its old records may be the person's or may be somebody else's now.
+     *
+     * @return list<int>
+     */
+    public static function reopenedInto(mysqli $db, int $survivor): array
+    {
+        return array_values(array_diff(
+            array_keys(self::mergedIntoWithAddresses($db, $survivor, false)),
+            array_keys(self::mergedIntoWithAddresses($db, $survivor))
+        ));
+    }
+
+    /**
      * The account a merged-away account's records now belong to, following a
      * chain of merges forward (D into K, then K into L, answers L); null when
      * the account was never merged away. Asked before an erasure files or runs
@@ -1843,7 +1943,7 @@ final class AccountMerge
      *
      * @return array<int, list<string>> duplicate number => recorded addresses
      */
-    public static function mergedIntoWithAddresses(mysqli $db, int $survivor): array
+    public static function mergedIntoWithAddresses(mysqli $db, int $survivor, bool $onlyClosed = true): array
     {
         $found = [];
         $todo  = [$survivor];
@@ -1856,7 +1956,7 @@ final class AccountMerge
                 . "JOIN `tblAccountMergeSide` k ON k.`requestID` = r.`requestID` AND k.`side` = 'kept' "
                 . "JOIN `tblAccountMergeSide` d ON d.`requestID` = r.`requestID` AND d.`side` = 'duplicate' "
                 . 'JOIN `tblUsers` u ON u.`userID` = d.`userID` '
-                . "WHERE r.`status` = 'completed' AND k.`userID` = ? AND " . self::stillClosedSql('u'),
+                . "WHERE r.`status` = 'completed' AND k.`userID` = ?" . ($onlyClosed === true ? ' AND ' . self::stillClosedSql('u') : ''),
                 $next
             ) as $row) {
                 $dup = (int) $row['dup'];

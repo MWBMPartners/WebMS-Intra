@@ -254,6 +254,8 @@ if (isset($_GET['error']) === true) {
         'name'         => 'Full name is required.',
         'email'        => 'A valid email address is required.',
         'email_taken'  => 'That email address is already in use by another account.',
+        // #1064 round 7: the account was merged into another while this was saving.
+        'merged'       => 'Nothing was saved: this account has just been merged into another one. Sign in to that account instead.',
         'pw_current'   => 'Current password is incorrect.',
         // #598 item 5: five wrong current passwords in 15 minutes, counted
         // for the account across this card and "switch off 2FA".

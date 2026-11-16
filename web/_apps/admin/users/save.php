@@ -732,6 +732,20 @@ if ($action === 'update') {
     //    point has written anything.
     App::beginTransaction();
     try {
+        // 🔒 #1064 round 7: asked AGAIN, under the account row's lock, inside
+        //    this transaction (#647's rule). The AccountGuard checks above ran
+        //    before it: a save begun while a merge was completing waited on the
+        //    merge's lock here and then wrote a real address, Active and a
+        //    password over the account the merge had just closed (measured by
+        //    the independent check). Now it is refused and nothing is written.
+        if (\Portal\Core\AccountMerge::mergedAwayUnderLock($mysqli, (int) $userID) === true) {
+            App::rollback();
+            AccountGuard::logRefusal('edit account #' . (int) $userID, AccountGuard::MERGED, 'merged', (int) $userID);
+            $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_ACCOUNT);
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('admin/users'));
+            exit();
+        }
         // 🔑 #1064 (D-190): changing SOMEBODY ELSE's e-mail address chooses where
         //    their reset link goes, so it is recorded as their way in being
         //    changed by somebody else. It is written FIRST in the SET list on

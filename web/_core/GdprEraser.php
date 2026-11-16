@@ -2309,6 +2309,20 @@ class GdprEraser
                     $otherAddresses[] = $address;
                 }
             }
+            // 🚫 Round 7: NEVER an address another account holds NOW. An
+            //    address the person gave up can be taken by somebody else, and
+            //    mail to it is then indistinguishable from theirs: searching it
+            //    destroyed a different person's waiting mail and send-log line
+            //    (measured by the independent check, for people never merged).
+            //    Such an address is left out, and a line says so.
+            $takenAddresses = AccountMerge::heldByOthers($db, $otherAddresses, array_merge([$userId], array_keys($mergedIn)));
+            $otherAddresses = array_values(array_diff($otherAddresses, $takenAddresses));
+            // 🚩 Round 7: an account the merge record says was merged into this
+            //    one but which is no longer as the merge closed it. Only a
+            //    hand-written change can do that now; its old records may be
+            //    this person's or somebody else's, so it is a FAILED step that
+            //    says which account, never a silent skip.
+            $reopenedIn = AccountMerge::reopenedInto($db, $userId);
         } catch (\Throwable $e) {
             throw self::stopped($db, $requestId, $e);
         }
@@ -2373,6 +2387,13 @@ class GdprEraser
             foreach ($otherAddresses as $formerAddress) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $formerAddress));
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $formerAddress));
+            }
+            if ($takenAddresses !== []) {
+                $taken = count($takenAddresses);
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::noteAddressesTaken($db, $requestId, $taken));
+            }
+            if ($reopenedIn !== []) {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::refuseReopenedMerge($db, $requestId, $reopenedIn));
             }
             if ($mergedIn !== []) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMergeRecords($requestId, array_keys($mergedIn)));
@@ -2501,6 +2522,49 @@ class GdprEraser
             //    and running the request again is still the right answer.
             'handWorkOnly' => self::$onlyHandWorkLeft,
         ];
+    }
+
+    /**
+     * 🚫 The line written when an earlier address of this person's is held by
+     *    another account now (#1064 round 7). A count, never the address.
+     */
+    private static function noteAddressesTaken(\mysqli $db, int $requestId, int $taken): string
+    {
+        self::logAudit(
+            $db,
+            $requestId,
+            'skip',
+            'tblEmailLog',
+            null,
+            $taken . ' address(es) this person held before are another account\'s now, so the send log and the mail '
+            . 'queue were not searched by them: mail to those addresses cannot be told from mail to whoever holds them now'
+        );
+
+        return self::STEP_UNCHANGED;
+    }
+
+    /**
+     * 🚩 The failed step when an account merged into this one has been changed
+     *    since (#1064 round 7). Account numbers only. Not recorded as hand work:
+     *    `self::$onlyHandWorkLeft` has ONE writer by a standing rule (#710), so
+     *    this stays an ordinary failure until a person has looked.
+     *
+     * @param list<int> $reopened
+     */
+    private static function refuseReopenedMerge(\mysqli $db, int $requestId, array $reopened): string
+    {
+        self::logAudit(
+            $db,
+            $requestId,
+            'failed',
+            'tblAccountMergeSide',
+            null,
+            'account(s) #' . implode(', #', $reopened) . ' were merged into this one, but have been changed since, so '
+            . 'they may be somebody else\'s now: nothing under their numbers was erased. A person must look at them '
+            . 'before this request can be completed'
+        );
+
+        return self::STEP_FAILED;
     }
 
     /**
