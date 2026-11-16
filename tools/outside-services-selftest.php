@@ -2693,7 +2693,7 @@ $wantSaid = [
     'qrTracking'        => 'so the phone of anybody who scans it goes to CueRCode first, which receives its internet address and browser.',
     'lookupsAboutNobody' => 'Nothing about you or anybody else.',
     // ✋ #993: the exchange-rate fetch, pinned WHOLE in each of the four columns it changed.
-    'lookupsAboutNobody#rates' => 'For the exchange rates, nothing at all: only the request for the published list.',
+    'lookupsAboutNobody#rates' => 'For the exchange rates, nothing about anybody: only the request for the published list, which carries this server\'s internet address and the product\'s name.',
     'lookupsAboutNobody#bank'  => 'and the European Central Bank (its daily list of exchange rates).',
     'lookupsAboutNobody#daily' => 'and, about once a day while the installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of exchange rates.',
     'lookupsAboutNobody#why'   => 'and to compare spending with outside companies against spending limits.',

@@ -676,8 +676,9 @@ final class OutsideServices
                          . 'installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of '
                          . 'exchange rates.',
             'sends'     => 'Only what is being looked up: the calendar\'s address, the hymn searched for, the barcode. '
-                         . 'Nothing about you or anybody else. For the exchange rates, nothing at all: only the request '
-                         . 'for the published list.',
+                         . 'Nothing about you or anybody else. For the exchange rates, nothing about anybody: only '
+                         . 'the request for the published list, which carries this server\'s internet address and the '
+                         . 'product\'s name.',
             'why'       => 'To bring that information into the portal, and to compare spending with outside companies '
                          . 'against spending limits.',
             'hosts'     => ['www.ecb.europa.eu'],

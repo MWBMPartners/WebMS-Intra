@@ -279,6 +279,10 @@ final class SafeFetch
      *                           refused.
      *   httpsOnly             — refuse plain http, from the first address on.
      *   accept                — the Accept header sent.
+     *   purpose               — what the download is for, said in the User-Agent after the
+     *                           product's name ("<product> calendar import"). A short label of
+     *                           letters and spaces; so a fetch that is not a calendar import
+     *                           does not call itself one (#993).
      *   deadline              — a `microtime(true)` moment. No request runs
      *                           past it, across every hop together.
      */
@@ -290,6 +294,7 @@ final class SafeFetch
         'httpsOnly'             => false,
         'accept'                => '*/*',
         'deadline'              => null,
+        'purpose'               => 'calendar import',
     ];
 
     /**
@@ -384,7 +389,9 @@ final class SafeFetch
      */
     public static function hasTestStandIn(string $host): bool
     {
-        return self::$testResolverOverride !== null && isset(self::$testResolverOverride[$host]) === true;
+        // The SAME judgement get() acts on (a stand-in with no usable address is no stand-in), so
+        // this can never say "yes" while a request still looks the real name up.
+        return self::testOverrideFor($host) !== null;
     }
 
     // =========================================================================
@@ -1172,6 +1179,9 @@ final class SafeFetch
         if (is_string($o['accept']) === false || $o['accept'] === '' || preg_match('/[\x00-\x1F\x7F]/', $o['accept']) === 1) {
             throw new \InvalidArgumentException($who . ': option "accept" must be a single line of text.');
         }
+        if (is_string($o['purpose']) === false || preg_match('/^[A-Za-z][A-Za-z ]{0,38}[A-Za-z]$/', $o['purpose']) !== 1) {
+            throw new \InvalidArgumentException($who . ': option "purpose" must be a short label of letters and spaces.');
+        }
         if ($o['deadline'] !== null && is_float($o['deadline']) === false && is_int($o['deadline']) === false) {
             throw new \InvalidArgumentException($who . ': option "deadline" must be a microtime(true) moment or null.');
         }
@@ -1353,7 +1363,7 @@ final class SafeFetch
             ) {
                 return null;
             }
-        } elseif (curl_setopt($handle, CURLOPT_USERAGENT, self::userAgent()) === false) {
+        } elseif (curl_setopt($handle, CURLOPT_USERAGENT, self::userAgent($o['purpose'])) === false) {
             return null;
         }
         if ($connectTo !== [] && curl_setopt($handle, CURLOPT_CONNECT_TO, $connectTo) === false) {
@@ -1390,10 +1400,10 @@ final class SafeFetch
      * administrator setting and a line break in a header would start a new
      * header.
      */
-    private static function userAgent(): string
+    private static function userAgent(string $purpose): string
     {
         $name = preg_replace('/[\x00-\x1F\x7F]/', '', Site::productName()) ?? '';
-        return trim($name . ' calendar import');
+        return trim($name . ' ' . $purpose);
     }
 
     /**

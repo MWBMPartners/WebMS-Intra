@@ -391,6 +391,7 @@ $uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PA
 $real = (string) file_get_contents($dir . '/fixture.xml');
 if ($uri === '/count') { echo (string) file_get_contents($dir . '/count.txt'); return true; }
 file_put_contents($dir . '/count.txt', (string) ((int) file_get_contents($dir . '/count.txt') + 1));
+file_put_contents($dir . '/ua.txt', (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
 header('Content-Type: text/xml');
 switch ($uri) {
     case '/ok': echo $real; break;
@@ -534,12 +535,22 @@ check('E6d5 a file dated two days ahead is REFUSED (future-date): one day too fa
 // Back to the real file's day for what follows.
 run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13'");
 run($db, "UPDATE `tblExchangeRate` SET `perEuro` = 1.1052 WHERE `rateCurrency` = 'USD'");
-// status() with ONE hand-made future-dated row among good ones.
+// status(): the "Rates held" figure counts the list it names, and the day edges are pinned.
 run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ?', 's', [$todayUtc]);
 run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2099-01-01' WHERE `rateCurrency` = 'JPY'");
+run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ? WHERE `rateCurrency` = ?', 'ss', [gmdate('Y-m-d', time() - 40 * 86400), 'CHF']);
 $st = ExchangeRates::status($db);
-check('E6d6 one rate dated 2099 does not make every rate read "too old": the newest SANE day is shown, fresh, and the one future row is counted (not used)',
-    is_array($st) === true && $st['rateDate'] === $todayUtc && $st['fresh'] === true && $st['futureRows'] === 1 && $st['count'] === 29, json_encode($st));
+check('E6d6 one rate dated 2099 and one 40 days old: the newest SANE day is shown, fresh; the list has 27 currencies (29 less the two); the future row and the old row are each counted apart, and neither is in the figure',
+    is_array($st) === true && $st['rateDate'] === $todayUtc && $st['fresh'] === true && $st['count'] === 27 && $st['futureRows'] === 1 && $st['olderRows'] === 1, json_encode($st));
+run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ?', 's', [$todayUtc]);
+run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ? WHERE `rateCurrency` = ?', 'ss', [$tomorrowUtc, 'JPY']);
+$st = ExchangeRates::status($db);
+check('E6d7 a rate dated exactly TOMORROW (which rate() uses) is not "future": no future rows, and it is the newest day shown (the list of tomorrow has just that one rate, the 28 others are older)',
+    is_array($st) === true && $st['futureRows'] === 0 && $st['rateDate'] === $tomorrowUtc && $st['count'] === 1 && $st['olderRows'] === 28, json_encode($st));
+run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ? WHERE `rateCurrency` = ?', 'ss', [$dayAfterUtc, 'JPY']);
+$st = ExchangeRates::status($db);
+check('E6d8 a rate dated two days ahead IS future: counted as one future row, and the shown day is today with 28 in its list',
+    is_array($st) === true && $st['futureRows'] === 1 && $st['rateDate'] === $todayUtc && $st['count'] === 28 && $st['olderRows'] === 0, json_encode($st));
 run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13'");
 
 // The net under the tests: the REAL address is never fetched from a selftest_ database.
@@ -552,6 +563,32 @@ $notBlocked = ExchangeRates::refresh($db);
 unset(SafeFetch::$testResolverOverride['www.ecb.europa.eu']);
 check('E6f ...but when the test points the bank\'s name at its own stand-in, the guard steps aside (the stand-in here is a closed port, so the answer is "unreachable", not "test-blocked")',
     $notBlocked === 'unreachable', $notBlocked);
+
+// A database failure while storing is its OWN word, not "unreadable" (the reply was fine).
+$before = rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`');
+run($db, 'RENAME TABLE `tblExchangeRate` TO `zzExchangeRateAway`');
+$gotStore = ExchangeRates::refreshFrom($db, $url('/ok'), false);
+run($db, 'RENAME TABLE `zzExchangeRateAway` TO `tblExchangeRate`');
+$problemStored = rows($db, 'SELECT `lastProblem` FROM `tblExchangeRateFetch` WHERE `fetchID` = 1')[0]['lastProblem'];
+check('E6g when the DATABASE cannot store a good reply the word is "not-saved" (recorded as the last problem), never "unreadable", and the page words say so',
+    $gotStore === 'not-saved' && $problemStored === 'not-saved' && rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`') === $before
+    && str_contains(ExchangeRates::problemWords('not-saved'), 'could not be saved') === true, $gotStore);
+
+// What the request says it is, and what the notice may claim it carries.
+ExchangeRates::refreshFrom($db, $url('/ok'), false);
+$agent = (string) file_get_contents($work . '/ua.txt');
+check('E6h the bank is told this is an exchange-rate fetch ("... exchange rates"), never a calendar import, and the label carries no web address',
+    str_ends_with($agent, ' exchange rates') === true && str_contains($agent, 'calendar import') === false && str_contains($agent, '://') === false, $agent);
+
+// One judgement about a stand-in: an entry with no usable address is NO stand-in.
+SafeFetch::$testResolverOverride['www.ecb.europa.eu'] = ['ips' => ['not-an-address']];
+$standIn  = SafeFetch::hasTestStandIn('www.ecb.europa.eu');
+$blockedInvalid = ExchangeRates::refresh($db);
+SafeFetch::$testResolverOverride['www.ecb.europa.eu'] = ['ips' => ['127.0.0.1'], 'port' => 9];
+$standInGood = SafeFetch::hasTestStandIn('www.ecb.europa.eu');
+unset(SafeFetch::$testResolverOverride['www.ecb.europa.eu']);
+check('E6i a stand-in entry with no usable address does not count (hasTestStandIn says no, and the net still blocks); one with a real address does',
+    $standIn === false && $blockedInvalid === 'test-blocked' && $standInGood === true, json_encode([$standIn, $blockedInvalid, $standInGood]));
 
 // Failures leave every rate untouched and say why in one fixed word.
 $snapshot = rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`');
@@ -1018,6 +1055,18 @@ $putRate('USD', '1.1052', $old);
 $putRate('GBP', '0.83559', $old);
 check('F24 once they are too old the page says so ("too old to use") and stops showing them as the rate in force',
     str_contains($page($httpRoot)['body'], 'data-rates-fresh="stale"') === true && str_contains($page($httpRoot)['body'], 'fetched from the European Central Bank') === false);
+$wipe();
+
+// The "Rates held" line names only the rates of the list it describes (measured over HTTP by the round-3 check).
+$wipe();
+$putRate('USD', '1.1052', $today);
+$putRate('GBP', '0.83559', $today);
+$putRate('JPY', '176.83', $old);
+$putRate('CHF', '0.9266', '2099-01-01');
+$view = $page($httpRoot)['body'];
+check('F24b with two rates today, one 40 days old and one dated 2099, the page says "2 currencies", counts the future row and the older row apart, and never calls the 2099 one fresh',
+    preg_match('/>\s*2 currencies, the bank/', $view) === 1 && str_contains($view, 'data-rates-future="1"') === true
+    && str_contains($view, 'data-rates-older="1"') === true && preg_match('/4 currencies/', $view) !== 1);
 $wipe();
 
 // The general settings editor.

@@ -265,6 +265,7 @@ final class ExchangeRates
             'maxRedirects'          => 2,
             'httpsOnly'             => $httpsOnly,
             'accept'                => 'application/xml, text/xml',
+            'purpose'               => 'exchange rates',
         ]);
         if ($answer['ok'] !== true) {
             $word = $answer['capped'] === true ? 'capped'
@@ -317,9 +318,10 @@ final class ExchangeRates
             } catch (\Throwable $ignored) {
             }
             error_log('Exchange rates: could not store the fetched rates: ' . get_class($problem));
-            self::touchFetchRow($db, 'problem', 'unreadable');
+            // A DATABASE failure, not a bad reply: its own word, so the page does not blame the file.
+            self::touchFetchRow($db, 'problem', 'not-saved');
 
-            return 'unreadable';
+            return 'not-saved';
         }
         self::touchFetchRow($db, 'success');
 
@@ -745,7 +747,7 @@ final class ExchangeRates
     /**
      * What the page shows about the fetch. Null parts mean "never" or "none".
      *
-     * @return array{lastSuccessUtc:?string, lastAttemptUtc:?string, problem:string, rateDate:?string, fresh:bool, count:int, futureRows:int}|null
+     * @return array{lastSuccessUtc:?string, lastAttemptUtc:?string, problem:string, rateDate:?string, fresh:bool, count:int, olderRows:int, futureRows:int}|null
      */
     public static function status(\mysqli $db): ?array
     {
@@ -757,9 +759,22 @@ final class ExchangeRates
             // The newest SANE day: a row dated more than a day ahead (a wrong date that got in
             // by hand) is not used by rate() and must not make every other rate read "too old".
             $row = $db->query(
-                'SELECT MAX(CASE WHEN `rateDate` <= UTC_DATE() + INTERVAL 1 DAY THEN `rateDate` END) AS `d`, COUNT(*) AS `n`, '
+                'SELECT MAX(CASE WHEN `rateDate` <= UTC_DATE() + INTERVAL 1 DAY THEN `rateDate` END) AS `d`, '
                 . 'COALESCE(SUM(`rateDate` > UTC_DATE() + INTERVAL 1 DAY), 0) AS `f` FROM `tblExchangeRate`'
             )->fetch_assoc();
+            // The count is of THAT day's list only: a currency the bank stopped publishing keeps an old
+            // row, and a row dated ahead is not in any list, so neither is "held" in the sense the page says.
+            $inList = 0;
+            $older  = 0;
+            if ($row['d'] !== null) {
+                $stmt = $db->prepare('SELECT COALESCE(SUM(`rateDate` = ?), 0) AS `n`, COALESCE(SUM(`rateDate` < ?), 0) AS `o` FROM `tblExchangeRate`');
+                $stmt->bind_param('ss', $row['d'], $row['d']);
+                $stmt->execute();
+                $counts = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $inList = (int) $counts['n'];
+                $older  = (int) $counts['o'];
+            }
         } catch (\Throwable $ignored) {
             return null;
         }
@@ -771,7 +786,8 @@ final class ExchangeRates
             'problem'        => $state['problem'],
             'rateDate'       => $date,
             'fresh'          => $date !== null && self::isFresh($date),
-            'count'          => (int) $row['n'],
+            'count'          => $inList,
+            'olderRows'      => $older,
             'futureRows'     => (int) $row['f'],
         ];
     }
@@ -787,6 +803,7 @@ final class ExchangeRates
             'no-xml'      => 'this server\'s PHP cannot read XML files',
             'refused'     => 'the address could not be used: its name could not be found, or it points at a private or internal network',
             'future-date' => 'the file was dated more than a day in the future, so it was not used',
+            'not-saved'   => 'the rates were fetched but could not be saved in the database',
             'test-blocked' => 'a test database may not contact the real bank',
             'unreachable' => 'the bank\'s website could not be reached',
             default       => 'an unknown problem',

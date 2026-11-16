@@ -204,7 +204,10 @@ $ratesCard = static function (string $title, string $scope, ?array $rows, bool $
                     <div class="row py-1 border-bottom small" data-rates-problem="<?php echo $e($status['problem']); ?>"><div class="col-md-4 text-muted">The last try failed because</div><div class="col-md-8"><?php echo $e(ExchangeRates::problemWords($status['problem'])); ?></div></div>
                 <?php endif; ?>
                 <?php if ($status['futureRows'] > 0): ?>
-                    <div class="row py-1 border-bottom small" data-rates-future="<?php echo (int) $status['futureRows']; ?>"><div class="col-md-4 text-muted">Rates dated in the future</div><div class="col-md-8"><?php echo (int) $status['futureRows']; ?> rate(s) carry a date more than a day ahead, so they are not used. The next fetch replaces them.</div></div>
+                    <div class="row py-1 border-bottom small" data-rates-future="<?php echo (int) $status['futureRows']; ?>"><div class="col-md-4 text-muted">Rates dated in the future</div><div class="col-md-8"><?php echo (int) $status['futureRows']; ?> rate(s) carry a date more than a day ahead, so they are not used. Only a later fetch that includes the same currency (while fetching is on) replaces one; a currency the bank does not publish stays until it is removed from the database.</div></div>
+                <?php endif; ?>
+                <?php if ($status['olderRows'] > 0): ?>
+                    <div class="row py-1 border-bottom small" data-rates-older="<?php echo (int) $status['olderRows']; ?>"><div class="col-md-4 text-muted">Older rates kept</div><div class="col-md-8"><?php echo (int) $status['olderRows']; ?> rate(s) are from an earlier list (a currency the bank no longer publishes, perhaps). They are kept, and used only while they are fresh.</div></div>
                 <?php endif; ?>
                 <div class="row py-1 small"><div class="col-md-4 text-muted">Rates held</div><div class="col-md-8" data-rates-fresh="<?php echo $status['fresh'] === true ? 'fresh' : 'stale'; ?>">
                     <?php if ($status['rateDate'] === null): ?>
