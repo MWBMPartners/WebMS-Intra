@@ -329,10 +329,10 @@ final class OutsideServices
             'from'      => 'browser',
             'when'      => 'When you open a page that shows one: an event\'s hub page (where its videos are kept), or '
                          . 'the noticeboard. The livestream page also puts the player of YouTube, Vimeo, Facebook (Meta) '
-                         . 'or Twitch into the page, but the portal\'s own page rules currently stop your browser '
-                         . 'loading it there, so nothing is fetched from that company on that page.',
-            'sends'     => 'Your internet address, your browser, this portal\'s web address, and which video or design '
-                         . 'you are looking at. The '
+                         . 'or Twitch into the page, but the portal currently tells your browser not to load it there, '
+                         . 'so nothing is fetched from that company on that page.',
+            'sends'     => 'Your internet address, your browser, which video or design you are looking at, and this '
+                         . 'portal\'s web address unless the page has been set to send none. The '
                          . 'video or design is drawn by that company\'s own player, from its own website, inside this '
                          . 'page, so your browser deals with that company directly, under your browser\'s own settings. '
                          . 'A YouTube video uses the address Google calls its "privacy-enhanced mode", and a Vimeo '
@@ -352,6 +352,19 @@ final class OutsideServices
             'sends'     => 'Your internet address, your browser, and the address of this portal. Nothing you type is sent.',
             'why'       => 'So that your browser can use a copy of the code it may already have, which makes pages faster.',
             'hosts'     => ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
+        ],
+        'fontConnection' => [
+            'name'      => 'A connection to Google\'s font service, on the noticeboard',
+            'companies' => 'Google (Google Fonts)',
+            'from'      => 'browser',
+            'when'      => 'When you open the noticeboard. Its script tells your browser to get ready to fetch fonts '
+                         . 'from Google, so the browser looks up Google\'s font servers and opens a connection to '
+                         . 'them. The portal tells your browser not to fetch the fonts themselves, and gives the '
+                         . 'noticeboard its own copy of them instead.',
+            'sends'     => 'Your internet address and the time. Nothing is asked for over the connection.',
+            'why'       => 'The noticeboard\'s script was written to use Google\'s fonts; the portal supplies its own '
+                         . 'copy instead, but the script still opens the connection.',
+            'hosts'     => ['fonts.googleapis.com', 'fonts.gstatic.com'],
         ],
         'robotCheck' => [
             'name'      => 'The check that you are not a robot',
@@ -376,13 +389,14 @@ final class OutsideServices
             'when'      => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, '
                          . 'or when an e-mail cannot be sent. The administrator can choose to send only a share of these '
                          . 'reports.',
-            'sends'     => 'The address of the page, the description the asking browser or program gives of itself, and '
-                         . 'the fault\'s own message with any e-mail addresses taken out, which can still quote what was '
-                         . 'being handled. An account number only for a few kinds of fault: a refused or blocked attempt '
-                         . 'to change an account (the number of whoever tried), and a daily e-mail about imported events '
-                         . 'that could not be sent (the number of the administrator it was for). Never your internet '
-                         . 'address. On a form that promises not to name you, such as the anonymous prayer form, '
-                         . 'neither an account number nor the browser\'s description is sent.',
+            'sends'     => 'The whole address of the page, including anything after a question mark, which can include '
+                         . 'what somebody typed into a search box, such as a name; the description the asking browser '
+                         . 'or program gives of itself; and the fault\'s own message with any e-mail addresses taken '
+                         . 'out. That message can include account numbers (of the person acting, or of the person '
+                         . 'acted on), request numbers and other details of what was being handled. Never your '
+                         . 'internet address. For a fault on a form that promises not to name you, such as the '
+                         . 'anonymous prayer form, the report leaves out the browser\'s description and the separate '
+                         . 'account-number field.',
             'why'       => 'So that the people running this portal hear about faults and can fix them.',
             'hosts'     => [],
         ],

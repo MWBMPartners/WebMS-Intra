@@ -2637,7 +2637,7 @@ $e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 //    the list being tested would pass on a list that had quietly lost an entry.
 $wantGroups = [
     'switchable'   => ['gravatar', 'providerPhoto', 'memberMap'],
-    'named'        => ['what3words', 'addressLookup', 'placeMaps', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'],
+    'named'        => ['what3words', 'addressLookup', 'placeMaps', 'embeddedContent', 'sharedLibraries', 'fontConnection', 'robotCheck', 'errorMonitoring'],
     'organisation' => ['signIn', 'email', 'textMessages', 'payments', 'videoMeetings', 'videoUploads', 'transcription', 'translation', 'pushNotifications',
                        'webhooks', 'offsiteBackup', 'qrTracking', 'lookupsAboutNobody'],
 ];
@@ -2645,7 +2645,7 @@ $wantGroups = [
 //    the first version said "from this portal's own server" of sign-in and payments).
 $wantFrom = [
     'what3words' => 'server', 'addressLookup' => 'server', 'placeMaps' => 'browser', 'embeddedContent' => 'browser',
-    'sharedLibraries' => 'browser', 'robotCheck' => 'both', 'errorMonitoring' => 'server',
+    'sharedLibraries' => 'browser', 'fontConnection' => 'browser', 'robotCheck' => 'both', 'errorMonitoring' => 'server',
     'signIn' => 'both', 'email' => 'server', 'textMessages' => 'server', 'payments' => 'both', 'videoMeetings' => 'both',
     'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'both',
     'webhooks' => 'server', 'offsiteBackup' => 'server', 'qrTracking' => 'both', 'lookupsAboutNobody' => 'server',
@@ -2668,6 +2668,11 @@ $wantSaid = [
     'what3words'      => 'For a home, the three words name the home itself.',
     'robotCheck'      => 'sends the company the check\'s answer and your internet address',
     'errorMonitoring' => 'Never your internet address.',
+    'errorMonitoring#address' => 'The whole address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name;',
+    'errorMonitoring#message' => 'That message can include account numbers (of the person acting, or of the person acted on), request numbers and other details of what was being handled.',
+    'fontConnection#sends' => 'Your internet address and the time. Nothing is asked for over the connection.',
+    'fontConnection#when'  => 'When you open the noticeboard. Its script tells your browser to get ready to fetch fonts from Google, so the browser looks up Google\'s font servers and opens a connection to them. The portal tells your browser not to fetch the fonts themselves, and gives the noticeboard its own copy of them instead.',
+    'embeddedContent#web2' => 'and this portal\'s web address unless the page has been set to send none.',
     'placeMaps'       => 'and can be somebody\'s home: its map is drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
     'signIn'          => 'Your browser is sent to the company\'s own sign-in page',
     'payments'        => 'Your browser is then sent to the company\'s own payment page',
@@ -2701,13 +2706,11 @@ $wantSaid = [
     'providerPhoto#viewer' => 'An address on Google\'s servers that belongs to the shown member\'s photo alone, with the internet address and browser of whoever is looking, this portal\'s web address and the time, every time a page shows that picture. A member\'s photo is fetched for somebody else only when that member allows it and the person looking has not switched it off.',
     'addressLookup#contact' => 'Every request to OpenStreetMap also carries this portal\'s privacy contact e-mail address (or, if none is set, the address the portal sends e-mail from), as OpenStreetMap asks: the organisation\'s address, not yours.',
     'sharedLibraries#api'  => 'The API guide (the page describing how other programs can talk to the portal) does too, unless this portal is set to use its own copy.',
-    'errorMonitoring#anonymous' => 'On a form that promises not to name you, such as the anonymous prayer form, neither an account number nor the browser\'s description is sent.',
+    'errorMonitoring#anonymous' => 'For a fault on a form that promises not to name you, such as the anonymous prayer form, the report leaves out the browser\'s description and the separate account-number field.',
     // ✋ Round 7 of the check: each changed sentence pinned WHOLE.
-    'errorMonitoring#account' => 'An account number only for a few kinds of fault: a refused or blocked attempt to change an account (the number of whoever tried), and a daily e-mail about imported events that could not be sent (the number of the administrator it was for).',
     'errorMonitoring#when' => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, or when an e-mail cannot be sent.',
     'transcription#file'   => 'The recording itself: the whole audio or video file, so the pictures of everybody filmed as well as the voices of whoever speaks.',
-    'embeddedContent#livestream' => 'The livestream page also puts the player of YouTube, Vimeo, Facebook (Meta) or Twitch into the page, but the portal\'s own page rules currently stop your browser loading it there, so nothing is fetched from that company on that page.',
-    'embeddedContent#web'  => 'Your internet address, your browser, this portal\'s web address, and which video or design you are looking at.',
+    'embeddedContent#livestream' => 'The livestream page also puts the player of YouTube, Vimeo, Facebook (Meta) or Twitch into the page, but the portal currently tells your browser not to load it there, so nothing is fetched from that company on that page.',
     'memberMap#web'        => 'together with the internet address and browser of whoever is looking and this portal\'s web address.',
     'placeMaps#web'        => 'with your internet address, your browser and this portal\'s web address.',
     'robotCheck#web'       => 'so the company receives your internet address, your browser and this portal\'s web address;',
@@ -2760,8 +2763,22 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
     }
     check("V05 {$what}: the opening does not claim every company learns your internet address",
         str_contains((string) preg_replace('/\s+/', ' ', $body), 'the company learns the server\'s address, not yours, unless the entry says that yours is passed on') === true);
-    check("V05e {$what}: the opening says every company a browser contacts learns this portal's web address, and what that can say about you (#808 round 7)",
-        str_contains((string) preg_replace('/\s+/', ' ', $body), 'and, with this portal\'s usual settings, this portal\'s web address (its name, not the page you are on), because that is how the internet works. So the company can tell that somebody using this portal is looking. This portal belongs to an organisation, such as a church, so that alone can say something about you, for example about your beliefs.') === true);
+    // ✋ Round 8: EVERY clause of the opening paragraph, each by its own check.
+    $openingClauses = [
+        'Some parts of this portal use another company\'s service.',
+        'Each entry below says what that company receives, and who contacts it.',
+        'When <strong>your browser</strong> fetches something from a company, the company also learns your internet address (the number that identifies your connection, which can show roughly where you are).',
+        'It also learns your browser\'s description of itself: the program and its version, your computer\'s or phone\'s operating system and often the kind of device, and the languages it is set to prefer.',
+        'With this portal\'s usual settings it also learns this portal\'s web address (its name, not the page you are on).',
+        'So the company can tell that somebody using this portal is looking.',
+        'This portal belongs to an organisation, such as a church, so that alone can say something about you, for example about your beliefs.',
+        'When only <strong>this portal\'s own server</strong> contacts it, the company learns the server\'s address, not yours, unless the entry says that yours is passed on.',
+        'Where both do, both apply.',
+    ];
+    foreach ($openingClauses as $i => $clause) {
+        check("V05f {$what}: opening clause " . ($i + 1) . ' is there whole: "' . mb_substr($clause, 0, 60) . '…"',
+            str_contains((string) preg_replace('/\s+/', ' ', $body), $clause) === true);
+    }
     check("V05b {$what}: the second list is headed as the owner decided (D-195)", str_contains($body, '<strong>Only if this organisation uses it.</strong>') === true);
     check("V05c {$what}: the second list's opening says who sets each one up, and that an installation-wide one covers every organisation (#808 round 4)",
         str_contains((string) preg_replace('/\s+/', ' ', $body), 'Each entry below says who sets it up: this organisation for itself, or whoever runs this whole installation, in which case it covers the members of every organisation on the installation, whether or not this organisation chose it. Ask the organisation which are in use.') === true);
@@ -2779,7 +2796,7 @@ check('V06d the privacy policy\'s Financial records point says, whole, that the 
     str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy/policy')['body']),
         'your name and the link to you are removed. The one exception for a payment is the payment company\'s own message about it, which can hold the name, e-mail address and billing or delivery address you gave that company: an erasure does not reach it, and it is kept until the nightly clear-out empties it, after 90 days unless this installation has chosen another period or to keep them for ever, and only once that scheduled job has been set up (see Outside companies, below).') === true);
 check('V06e the Privacy page lists the cookies the portal really sets, and the sign-in details it really keeps (#808 round 6)',
-    str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy')['body']), 'The portal sets only the cookies it needs to work: a session cookie, which keeps you signed in and carries what the portal needs from page to page (such as the token that stops other websites sending forms in your name, and your language if you change it); the "trust this device" cookie for two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the cookie notice, kept for a year. Your browser\'s own storage (not a cookie) also holds, for this portal: your light or dark display, colour-blind-safe colours, reading mode, and whether you dismissed the offer to install the portal as an app, none of which is sent to the portal; the calendar view you last used, which the calendar puts into the page address and so is sent to the portal; a code for the livestream page in the current tab, sent to the portal while you watch and with each chat message, so that it can count who is watching and tell your messages apart; forms you send while offline, kept until you are back online and then sent; and copies of pages, so they can be shown when you are offline.') === true
+    str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy')['body']), 'The portal sets only the cookies it needs to work: a session cookie, which keeps you signed in and carries what the portal needs from page to page (such as the token that stops other websites sending forms in your name, and your language if you change it); the "trust this device" cookie for two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the cookie notice, kept for a year. Your browser\'s own storage (not a cookie) also holds, for this portal: your light or dark display, colour-blind-safe colours, reading mode, and whether you dismissed the offer to install the portal as an app, none of which is sent to the portal; the calendar view you last used, which the calendar puts into the page address and so is sent to the portal; a code for the livestream page in the current tab, sent to the portal while you watch and with each chat message, so that it can count who is watching and tell your messages apart; forms you send while offline, kept until you are back online and then sent; copies of pages, so they can be shown when you are offline; and, on the noticeboard, the poster size and reduced-motion choice you set there, which are not sent to the portal.') === true
     && str_contains(req('', 'GET', '/privacy')['body'], 'the identifier that company gives your account, and the name, e-mail address and (where it has one) photo address it returns.') === true
     && str_contains(req('', 'GET', '/privacy')['body'], 'We use only the cookies the portal needs to work (to keep you signed in, to remember a trusted device if you ask, and to remember this answer), and no tracking cookies of our own.') === true);
 check('V06c the Privacy page\'s Cookies section points at the companies the browser contacts itself',

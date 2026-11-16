@@ -178,8 +178,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     which the calendar puts into the page address and so is sent to the portal; a code for the livestream
     page in the current tab, sent to the portal while you watch and with each chat message, so that it can
     count who is watching and tell your messages apart; forms you send
-    while offline, kept until you are back online and then sent; and copies of pages, so they can be shown
-    when you are offline.
+    while offline, kept until you are back online and then sent; copies of pages, so they can be shown
+    when you are offline; and, on the noticeboard, the poster size and reduced-motion choice you set there,
+    which are not sent to the portal.
     The portal sets no tracking or analytics cookies of its own.
     <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the
           //    Outside companies section, which lists companies the reader's browser contacts

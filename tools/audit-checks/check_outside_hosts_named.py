@@ -105,9 +105,10 @@ WHAT THIS CANNOT SEE, said plainly
    REAL_TOP_LEVEL (`'pixel.tracker.xyz'` -- a host written with `//` is read
    whatever its ending); a host inside a base64 `data:` address, or any other
    encoding but percent-encoding; a page rule built in pieces
-   (`'img-' . 'src ' . $x`); and an internet-number address (an "IP
-   address") or a punycode name written WITHOUT `http://` or `https://`
-   in front, as a bare string.
+   (`'img-' . 'src ' . $x`); an internet-number address (an "IP address")
+   written as a bare string with no `//` in front; and a punycode name, or
+   an address written as one large number, with no `http://` or `https://`
+   in front. (Round 8 closed `//198.51.100.7/` and `https://3325256711/`.)
 6. Round 7 of the check planted `<img src="https://198.51.100.7/pixel.gif">`
    and `https://xn--80ak6aa92e.xn--p1ai/p.gif` and both passed green, because
    the top-level-name rule wanted letters only. Both are read now (the
@@ -193,9 +194,12 @@ WHOLE_FILES: dict[str, str] = {
         "The source documents behind each country's suggested keeping period, shown as links an "
         "administrator may follow.",
     "public_html/assets/noticeboard/noticeboard.noeval.js":
-        "Generated from dc-runtime, which is not in this repository. Its unpkg.com and Google Fonts "
-        "addresses are refused by the noticeboard page's rule and never reached (the page loads its own "
-        "React copy first); its QR fallback is guarded by check_no_outside_qr_service.py.",
+        "Generated from dc-runtime, which is not in this repository. Its unpkg.com React addresses are never "
+        "reached (the page loads its own React copy first). Its Google Fonts STYLESHEET is refused by the page "
+        "rule, but its two <link rel=\"preconnect\"> tags ARE acted on: measured in headless Edge (#808 round 8), "
+        "the browser looks up and connects to fonts.googleapis.com and fonts.gstatic.com. So those two hosts "
+        "are NAMED (OutsideServices::NAMED['fontConnection']) and on the privacy pages, and rule E finds them "
+        "in this file. Its QR fallback is guarded by check_no_outside_qr_service.py.",
     "public_html/assets/noticeboard/noticeboard.css":
         "Generated with the noticeboard bundle. Its Google Fonts import is refused by the page rule, which "
         "allows fonts and styles from no Google host; fonts-selfhost.css supplies the faces.",
@@ -315,6 +319,12 @@ PER_FILE: dict[str, dict[str, int]] = {
     },
     'dashboard.hcaptcha.com': {
         '_apps/admin/captcha/index.php': 1,
+    },
+    'fonts.googleapis.com': {
+        '_core/OutsideServices.php': 1,
+    },
+    'fonts.gstatic.com': {
+        '_core/OutsideServices.php': 1,
     },
     'fcm.googleapis.com': {
         '_core/OutsideServices.php': 1,
@@ -496,7 +506,12 @@ HOST_AFTER_SLASHES = re.compile(
 # not read as an address.
 ADDRESS_LITERAL = re.compile(
     r"https?(?::|%3a)(?://|\\/\\/|%2f%2f)"
-    r"(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|(?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
+    r"(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|\d{8,10}|(?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
+# Round 8: the same internet-number address with NO scheme (`//198.51.100.7/`), which a page loads as
+# readily. Only when what follows is a path, a port, a query or a closing quote, so a version number in
+# prose (`//1.2.3.4 notes`) is not read as an address.
+ADDRESS_LITERAL_NO_SCHEME = re.compile(
+    r"(?<![\w:%])(?://|\\/\\/)(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3})(?=[/:?#'\"`])")
 GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
 WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
 QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"|`([^`\\]*)`")
@@ -668,7 +683,7 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
             before = low[max(line_start, match.start() - 200):match.start()]
             found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
                           low.count("\n", 0, match.start()) + 1))
-        for match in ADDRESS_LITERAL.finditer(low):
+        for match in list(ADDRESS_LITERAL.finditer(low)) + list(ADDRESS_LITERAL_NO_SCHEME.finditer(low)):
             if any(match.start() >= m.start() and match.end() <= m.end() for m in HOST_AFTER_SLASHES.finditer(low, max(0, match.start() - 8), match.end())):
                 continue  # already read by the ordinary shape (a name with a letters-only ending)
             line_start = low.rfind("\n", 0, match.start()) + 1
@@ -782,10 +797,16 @@ def check(web: Path, per_file: dict[str, dict[str, int]] | None = None) -> list[
                     "   MORE (or a file not listed) is a new use of that company: check the privacy pages still "
                     "say what is true, then change the number here on purpose. FEWER means a use has gone."
                     % (rel, entry, have.get(rel, 0), want.get(rel, 0)))
+    # Round 8: a disclosed host may be named ONLY inside a WHOLE_FILES file (the noticeboard bundle's Google
+    # Fonts connection). Such a file is not read as code, so rule E looks for the host's plain text in it.
+    whole_texts = {rel: (web / rel).read_text(encoding="utf-8", errors="ignore").lower()
+                   for rel in WHOLE_FILES if (web / rel).is_file()}
     for entry in sorted(owners):
         files = seen.get(entry, set())
         if disclosed_lists.get(entry) in ("NAMED", "USED_BY_ORGANISATION"):
             files = files - {OUTSIDE}
+            bare = entry.lstrip(".")
+            files = files | {rel for rel, text in whole_texts.items() if bare in text}
         if files == set():
             problems.append("✗ %s is listed (%s) but no code under web/ names it%s. Remove it on purpose; a list "
                             "that says more than is true reads as coverage."
@@ -994,6 +1015,15 @@ def self_test() -> int:
     run("S48 the machine's own address (127.0.0.1) gets no automatic pass",
         append("_core/templates/footer.php", '<?php $u = "http://127.0.0.1/hook"; ?>\n'),
         new + " 127.0.0.1")
+    run("S50 an internet-number address with no scheme (//198.51.100.7/) fails",
+        append("_core/templates/footer.php", '<img src="//198.51.100.7/pixel.gif">\n'),
+        new + " 198.51.100.7")
+    run("S51 an address written as one large number (https://3325256711/) fails",
+        append("_core/templates/footer.php", '<img src="https://3325256711/pixel.gif">\n'),
+        new + " 3325256711")
+    run("S52 a disclosed host named only inside a WHOLE_FILES file still counts as named",
+        replace("public_html/assets/noticeboard/noticeboard.noeval.js", "fonts.gstatic.com", "fonts.example.invalid"),
+        "fonts.gstatic.com is listed")
     run("S49 a version number after // in page text is NOT read as an address",
         append("_core/templates/footer.php", '<p>see //1.2.3.4 notes</p>\n'), None)
     # S44: one written host read by two shapes on one line (a page-rule source that is also a whole quoted

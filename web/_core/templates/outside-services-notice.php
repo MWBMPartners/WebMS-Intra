@@ -63,15 +63,16 @@ $outsideFromWords = [
 ?>
 <div data-outside-services-notice="1">
 <p>
-    Some parts of this portal use another company's service. Each entry below says what that company receives,
-    and who contacts it. When <strong>your browser</strong> contacts a company, the company also learns your
-    internet address (the number that identifies your connection, which can show roughly where you are), your
-    browser (the program you are reading this in, its version, and the languages it is set to prefer) and, with
-    this portal's usual settings, this portal's web address (its name, not the page you are on), because that is
-    how the internet works. So the company can tell that somebody using this portal is looking. This portal
-    belongs to an organisation, such as a church, so that alone can say something about you, for example about
-    your beliefs. When only <strong>this portal's own server</strong> contacts it, the company learns the server's
-    address, not yours, unless the entry says that yours is passed on. Where both do, both apply.
+    <?php // 🧾 #808 round 8: one sentence per clause, each pinned by its own check (V05f). ?>
+    Some parts of this portal use another company's service.
+    Each entry below says what that company receives, and who contacts it.
+    When <strong>your browser</strong> fetches something from a company, the company also learns your internet address (the number that identifies your connection, which can show roughly where you are).
+    It also learns your browser's description of itself: the program and its version, your computer's or phone's operating system and often the kind of device, and the languages it is set to prefer.
+    With this portal's usual settings it also learns this portal's web address (its name, not the page you are on).
+    So the company can tell that somebody using this portal is looking.
+    This portal belongs to an organisation, such as a church, so that alone can say something about you, for example about your beliefs.
+    When only <strong>this portal's own server</strong> contacts it, the company learns the server's address, not yours, unless the entry says that yours is passed on.
+    Where both do, both apply.
 </p>
 <p>
     <strong>You can switch these three on or off for yourself</strong>, where this portal allows them at all, on
