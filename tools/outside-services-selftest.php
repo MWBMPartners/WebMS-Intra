@@ -2668,7 +2668,11 @@ $wantSaid = [
     'what3words'      => 'For a home, the three words name the home itself.',
     'robotCheck'      => 'sends the company the check\'s answer and your internet address',
     'errorMonitoring' => 'Never your internet address.',
-    'errorMonitoring#address' => 'The whole address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name;',
+    'errorMonitoring#address' => 'The whole address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name or an e-mail address;',
+    // ✋ Round 9: each changed sentence pinned WHOLE.
+    'errorMonitoring#field' => 'Three kinds of report also carry, in a field of its own, the portal\'s own account number for a person (a number, never a name): a refused attempt to change an account, and a refused attempt to give an account an e-mail address another account already has (the number of whoever tried); and a daily e-mail about imported events that could not be sent (the number of the administrator it was for).',
+    'pushNotifications#contact' => 'Each one the server sends also carries, in a signed header, the contact address this installation gave for its notifications (an e-mail or web address), as the notification standard asks, so the company can tell which portal is sending to your device.',
+    'sharedLibraries#web' => 'Your internet address, your browser, and this portal\'s web address. Nothing you type is sent.',
     'errorMonitoring#message' => 'That message can include account numbers (of the person acting, or of the person acted on), request numbers and other details of what was being handled.',
     'fontConnection#sends' => 'Your internet address and the time. Nothing is asked for over the connection.',
     'fontConnection#when'  => 'When you open the noticeboard. Its script tells your browser to get ready to fetch fonts from Google, so the browser looks up Google\'s font servers and opens a connection to them. The portal tells your browser not to fetch the fonts themselves, and gives the noticeboard its own copy of them instead.',
@@ -2706,7 +2710,7 @@ $wantSaid = [
     'providerPhoto#viewer' => 'An address on Google\'s servers that belongs to the shown member\'s photo alone, with the internet address and browser of whoever is looking, this portal\'s web address and the time, every time a page shows that picture. A member\'s photo is fetched for somebody else only when that member allows it and the person looking has not switched it off.',
     'addressLookup#contact' => 'Every request to OpenStreetMap also carries this portal\'s privacy contact e-mail address (or, if none is set, the address the portal sends e-mail from), as OpenStreetMap asks: the organisation\'s address, not yours.',
     'sharedLibraries#api'  => 'The API guide (the page describing how other programs can talk to the portal) does too, unless this portal is set to use its own copy.',
-    'errorMonitoring#anonymous' => 'For a fault on a form that promises not to name you, such as the anonymous prayer form, the report leaves out the browser\'s description and the separate account-number field.',
+    'errorMonitoring#anonymous' => 'For a fault on a form that promises not to name you, such as the anonymous prayer form, the report leaves out the browser\'s description and that account-number field.',
     // ✋ Round 7 of the check: each changed sentence pinned WHOLE.
     'errorMonitoring#when' => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, or when an e-mail cannot be sent.',
     'transcription#file'   => 'The recording itself: the whole audio or video file, so the pictures of everybody filmed as well as the voices of whoever speaks.',
@@ -2792,6 +2796,72 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
         $body !== '' && str_contains($wholePage, 'No third-party tracking') === false && str_contains($wholePage, 'can recognise you') === false
         && str_contains($wholePage, 'sets Google') === false);
 }
+// ✋ V09, round 9: the error-reports entry NAMES which reports carry an account number, so the set
+//    of callers that fill that field is pinned here by PHP's own tokeniser over every file under
+//    web/. A new caller naming a person (the 6th argument of Logger::errorPlatform(), the 7th of
+//    errorPlatformForSite()) turns this red, and the sentence must then be reconsidered.
+$accountFieldCallers = [];
+$webDir = $repo . $sep . 'web';
+$walkErr = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webDir, FilesystemIterator::SKIP_DOTS));
+foreach ($walkErr as $errFile) {
+    $errPath = (string) $errFile;
+    if (substr($errPath, -4) !== '.php') {
+        continue;
+    }
+    $toks = token_get_all((string) file_get_contents($errPath));
+    $n = count($toks);
+    for ($i = 0; $i < $n; $i++) {
+        if (is_array($toks[$i]) === false || $toks[$i][0] !== T_STRING
+            || in_array($toks[$i][1], ['errorPlatform', 'errorPlatformForSite'], true) === false) {
+            continue;
+        }
+        $j = $i - 1;
+        while ($j >= 0 && is_array($toks[$j]) === true && $toks[$j][0] === T_WHITESPACE) {
+            $j--;
+        }
+        if ($j < 0 || is_array($toks[$j]) === false || $toks[$j][0] !== T_DOUBLE_COLON) {
+            continue;
+        }
+        $k = $i + 1;
+        while ($k < $n && is_array($toks[$k]) === true && $toks[$k][0] === T_WHITESPACE) {
+            $k++;
+        }
+        if ($k >= $n || $toks[$k] !== '(') {
+            continue;
+        }
+        $depth = 0;
+        $args = 1;
+        $empty = true;
+        for ($m = $k; $m < $n; $m++) {
+            $text = is_array($toks[$m]) === true ? $toks[$m][1] : $toks[$m];
+            if ($text === '(' || $text === '[' || $text === '{') {
+                $depth++;
+                continue;
+            }
+            if ($text === ')' || $text === ']' || $text === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    break;
+                }
+                continue;
+            }
+            if ($depth === 1 && $text === ',') {
+                $args++;
+            }
+            if ($depth >= 1 && trim($text) !== '') {
+                $empty = false;
+            }
+        }
+        $want = $toks[$i][1] === 'errorPlatform' ? 6 : 7;
+        if ($empty === false && $args >= $want) {
+            $accountFieldCallers[] = str_replace($sep, '/', substr($errPath, strlen($webDir) + 1));
+        }
+    }
+}
+sort($accountFieldCallers);
+check('V09 exactly the three callers the error-reports entry names fill the account-number field (tokenised, round 9)',
+    $accountFieldCallers === ['_core/AccountGuard.php', '_core/AccountGuard.php', '_core/ImportNotifier.php'],
+    implode(', ', $accountFieldCallers));
 check('V06d the privacy policy\'s Financial records point says, whole, that the payment company\'s message is the exception an erasure does not reach (#808 round 3)',
     str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy/policy')['body']),
         'your name and the link to you are removed. The one exception for a payment is the payment company\'s own message about it, which can hold the name, e-mail address and billing or delivery address you gave that company: an erasure does not reach it, and it is kept until the nightly clear-out empties it, after 90 days unless this installation has chosen another period or to keep them for ever, and only once that scheduled job has been set up (see Outside companies, below).') === true);

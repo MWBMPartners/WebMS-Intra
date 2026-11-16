@@ -108,7 +108,10 @@ WHAT THIS CANNOT SEE, said plainly
    (`'img-' . 'src ' . $x`); an internet-number address (an "IP address")
    written as a bare string with no `//` in front; and a punycode name, or
    an address written as one large number, with no `http://` or `https://`
-   in front. (Round 8 closed `//198.51.100.7/` and `https://3325256711/`.)
+   in front. (Round 8 closed `//198.51.100.7/` and `https://3325256711/`;
+   round 9 replaced the list of number spellings with one rule, NUM_HOST.)
+   Also unseen: a name with no dot at all (`https://intranet/`), which a
+   browser looks up like any other name.
 6. Round 7 of the check planted `<img src="https://198.51.100.7/pixel.gif">`
    and `https://xn--80ak6aa92e.xn--p1ai/p.gif` and both passed green, because
    the top-level-name rule wanted letters only. Both are read now (the
@@ -501,17 +504,41 @@ HOST_AFTER_SLASHES = re.compile(
     r"((?:" + LABEL + r"\.)+" + TOP + r")(?![\w-])")
 # Round 7: an address written as an internet number (IPv4, or IPv6 in square
 # brackets) or with a punycode label (`xn--`, how a name in another alphabet is
-# spelt on the wire), which the top-level-name rule above cannot match. Only
-# with a scheme in front, so a version number such as `//1.2.3.4` in prose is
-# not read as an address.
+# spelt on the wire), which the top-level-name rule above cannot match.
+#
+# Round 9: a browser reads an internet number in MANY spellings, all meaning the
+# same machine: `198.51.100.7`, one large number `3325256711`, hexadecimal
+# `0xc6336407`, octal `0306.051.0144.07`, shortened `198.51.25607`, with a
+# trailing dot, a port, or a user name in front (`u:p@`). Rounds 7 and 8 closed
+# the spellings each check handed over, and round 9 handed over four more. So
+# the rule is no longer a list of spellings: a host is read as an internet
+# number when it is made ONLY of number-like parts -- each part either digits
+# (decimal or, with a leading zero, octal) or `0x` and hex digits -- one to four
+# parts joined by dots, optionally ending in a dot. A part of letters alone
+# (`cafe`, `deadbeef`) is NOT number-like, because a browser does not read it
+# as a number without `0x`, so ordinary names are untouched.
+#   NUM_PART   one number-like part
+#   NUM_HOST   one to four parts
+#   USERINFO   a user name (and password) before an `@`
+#   PORT       `:` and digits after the host
+# Each piece is a name of its own so the self-test can switch each off and show
+# the case it handles go red.
+NUM_PART = r"(?:0x[0-9a-f]*|\d+)"
+NUM_HOST = NUM_PART + r"(?:\." + NUM_PART + r"){0,3}"
+USERINFO = r"(?:[^@/\s'\"`<>]+@)?"
+PORT = r"(?::\d+)?"
+TRAILING_DOT = r"\.?"
 ADDRESS_LITERAL = re.compile(
-    r"https?(?::|%3a)(?://|\\/\\/|%2f%2f)"
-    r"(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3}|\d{8,10}|(?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
+    r"https?(?::|%3a)(?://|\\/\\/|%2f%2f)" + USERINFO
+    + r"(\[[0-9a-f:.]+\]|" + NUM_HOST + r")" + TRAILING_DOT + PORT + r"(?=[/?#'\"`\s<>\\]|$)"
+    + r"|https?(?::|%3a)(?://|\\/\\/|%2f%2f)" + USERINFO
+    + r"((?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
 # Round 8: the same internet-number address with NO scheme (`//198.51.100.7/`), which a page loads as
 # readily. Only when what follows is a path, a port, a query or a closing quote, so a version number in
 # prose (`//1.2.3.4 notes`) is not read as an address.
 ADDRESS_LITERAL_NO_SCHEME = re.compile(
-    r"(?<![\w:%])(?://|\\/\\/)(\[[0-9a-f:.]+\]|\d{1,3}(?:\.\d{1,3}){3})(?=[/:?#'\"`])")
+    r"(?<![\w:%])(?://|\\/\\/)" + USERINFO + r"(\[[0-9a-f:.]+\]|" + NUM_HOST + r")" + TRAILING_DOT + PORT
+    + r"(?=[/?#'\"`])")
 GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
 WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
 QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"|`([^`\\]*)`")
@@ -688,7 +715,7 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
                 continue  # already read by the ordinary shape (a name with a letters-only ending)
             line_start = low.rfind("\n", 0, match.start()) + 1
             before = low[max(line_start, match.start() - 200):match.start()]
-            found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
+            found.append((rel, (match.group(1) or match.group(2) or ''), LOAD_CONTEXT.search(before) is not None,
                           low.count("\n", 0, match.start()) + 1))
         for pattern, group in ((CSP_DIRECTIVE, 1), (CSP_EXTRA, 2)):
             for match in pattern.finditer(low):
@@ -1026,6 +1053,23 @@ def self_test() -> int:
         "fonts.gstatic.com is listed")
     run("S49 a version number after // in page text is NOT read as an address",
         append("_core/templates/footer.php", '<p>see //1.2.3.4 notes</p>\n'), None)
+    run("S53 a hexadecimal address (https://0xc6336407/) fails",
+        append("_core/templates/footer.php", '<img src="https://0xc6336407/p.gif">\n'), new + " 0xc6336407")
+    run("S54 an octal address (https://0306.051.0144.07/) fails",
+        append("_core/templates/footer.php", '<img src="https://0306.051.0144.07/p.gif">\n'), new + " 0306.051.0144.07")
+    run("S55 a shortened address (https://198.51.25607/) fails",
+        append("_core/templates/footer.php", '<img src="https://198.51.25607/p.gif">\n'), new + " 198.51.25607")
+    run("S56 an address with a trailing dot (https://198.51.100.17./) fails",
+        append("_core/templates/footer.php", '<img src="https://198.51.100.17./p.gif">\n'), new + " 198.51.100.17")
+    run("S57 an address with a port (https://198.51.100.18:8443/) fails",
+        append("_core/templates/footer.php", '<img src="https://198.51.100.18:8443/p.gif">\n'), new + " 198.51.100.18")
+    run("S58 an address with a user name in front (https://u:p@198.51.100.19/) fails",
+        append("_core/templates/footer.php", '<img src="https://u:p@198.51.100.19/p.gif">\n'), new + " 198.51.100.19")
+    run("S59 a hexadecimal address with no scheme (//0xc6336408/) fails",
+        append("_core/templates/footer.php", '<img src="//0xc6336408/p.gif">\n'), new + " 0xc6336408")
+    run("S60 a version number in a path, a decimal in a query, and numbers after // in prose stay green",
+        append("_core/templates/footer.php",
+               '<a href="https://www.example.org/v1.2.3/?n=1.5&m=2.0">x</a><p>//1.5 seconds, //10 items</p>\n'), None)
     # S44: one written host read by two shapes on one line (a page-rule source that is also a whole quoted
     # host name) is reported ONCE. Counted here rather than through run(), which only asks "is it there".
     checks += 1

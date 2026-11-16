@@ -349,7 +349,7 @@ final class OutsideServices
             'when'      => 'On the portal\'s ordinary pages: your browser fetches the page\'s layout and icons from them, and on some '
                          . 'pages its maps and charts. The API guide (the page describing how other programs can talk '
                          . 'to the portal) does too, unless this portal is set to use its own copy.',
-            'sends'     => 'Your internet address, your browser, and the address of this portal. Nothing you type is sent.',
+            'sends'     => 'Your internet address, your browser, and this portal\'s web address. Nothing you type is sent.',
             'why'       => 'So that your browser can use a copy of the code it may already have, which makes pages faster.',
             'hosts'     => ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
         ],
@@ -389,14 +389,26 @@ final class OutsideServices
             'when'      => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, '
                          . 'or when an e-mail cannot be sent. The administrator can choose to send only a share of these '
                          . 'reports.',
+            // 🔍 #808 round 9: ErrorMonitor::currentUrl() takes out only a scheduled job's token, so a
+            //    search typed into ?q= (admin/users invites "name, email, or username") reaches the monitor
+            //    WITH any e-mail address in it; the address sentence says so (D-174's residual, recorded in
+            //    the package's notes; the code fix is outside this package, which must not touch Logger's
+            //    error recording). The account-number field is filled by exactly three callers, tokenised
+            //    and pinned by V09 of tools/outside-services-selftest.php: AccountGuard (twice) and
+            //    ImportNotifier (once).
             'sends'     => 'The whole address of the page, including anything after a question mark, which can include '
-                         . 'what somebody typed into a search box, such as a name; the description the asking browser '
-                         . 'or program gives of itself; and the fault\'s own message with any e-mail addresses taken '
-                         . 'out. That message can include account numbers (of the person acting, or of the person '
-                         . 'acted on), request numbers and other details of what was being handled. Never your '
-                         . 'internet address. For a fault on a form that promises not to name you, such as the '
-                         . 'anonymous prayer form, the report leaves out the browser\'s description and the separate '
-                         . 'account-number field.',
+                         . 'what somebody typed into a search box, such as a name or an e-mail address; the '
+                         . 'description the asking browser or program gives of itself; and the fault\'s own message '
+                         . 'with any e-mail addresses taken out. That message can include account numbers (of the '
+                         . 'person acting, or of the person acted on), request numbers and other details of what was '
+                         . 'being handled. Three kinds of report also carry, in a field of its own, the portal\'s own '
+                         . 'account number for a person (a number, never a name): a refused attempt to change an '
+                         . 'account, and a refused attempt to give an account an e-mail address another account '
+                         . 'already has (the number of whoever tried); and a daily e-mail about imported events that '
+                         . 'could not be sent (the number of the administrator it was for). Never your internet '
+                         . 'address. For a fault on a form that promises not to name you, such as the anonymous '
+                         . 'prayer form, the report leaves out the browser\'s description and that account-number '
+                         . 'field.',
             'why'       => 'So that the people running this portal hear about faults and can fix them.',
             'hosts'     => [],
         ],
@@ -583,7 +595,10 @@ final class OutsideServices
             'sends'     => 'Your browser registers with that company and stays in touch with it, so the company receives '
                          . 'your internet address and browser. This portal\'s server then sends it the address your '
                          . 'browser gave for notifications and each notification, scrambled so that only your browser '
-                         . 'can read it.',
+                         . 'can read it. Each one the server sends also carries, in a signed header, the contact '
+                         . 'address this installation gave for its notifications (an e-mail or web address), as the '
+                         . 'notification standard asks, so the company can tell which portal is sending to your '
+                         . 'device.',
             'why'       => 'To deliver the notification to your device.',
             'hosts'     => ['fcm.googleapis.com', 'push.services.mozilla.com', 'push.apple.com', 'notify.windows.com'],
         ],
