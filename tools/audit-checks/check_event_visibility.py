@@ -185,7 +185,7 @@ FILE_ALLOWLIST: dict[str, str] = {
     # 🔀 #1064: names tblEvents' account columns in a list, and COUNTS rows
     # naming a duplicate account for the merge preview. Never reads or shows
     # what an event says.
-    "_core/AccountMerge.php": "lists tblEvents' account-number columns and counts rows naming an account for the merge preview; shows no event",
+    "_core/AccountMerge.php": "lists tblEvents' account-number columns, counts rows naming an account for the merge preview, and re-points those columns when the person completes a merge; never shows an event to anybody",
     # 🧒 #816: lists the events whose OWN registration period is longer than a
     # ceiling a global administrator is trying to set, so the refusal can name
     # them. Imported and soft-deleted events are included ON PURPOSE, because the

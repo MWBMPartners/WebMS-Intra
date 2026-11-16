@@ -45,6 +45,13 @@ WHAT IT CANNOT SEE, SAID PLAINLY
     this check only proves each one listed still exists. A NEW one of that kind
     is invisible here.
   * An account number inside JSON or free text.
+  * A column with NO foreign key whose declaration this reader does not parse:
+    one written without backticks (`  userID INT`), or a whole CREATE TABLE on
+    one line (a declaration is read only at the start of an indented line or
+    after ADD [COLUMN]). Every declaration in the install script today is
+    backticked on its own line; the real-database half of the test
+    (tools/account-merge-selftest.php, section A) reads information_schema and
+    is what would catch such a column.
   * Whether a TREATMENT is right. That is a person's judgement, and whether a
     column inside a unique key is marked to handle a clash is asked of a real
     database by tools/account-merge-selftest.php.

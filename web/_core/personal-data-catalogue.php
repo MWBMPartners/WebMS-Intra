@@ -1371,6 +1371,20 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
     ],
+    // 🔀 #1064 (D-190): a request to merge two accounts of one person. A side row
+    //    names one of the two accounts and when that account agreed, so it is
+    //    the person's own and goes with them. The request row itself names only
+    //    the administrator who started it, as an actor.
+    'tblAccountMergeSide' => [
+        'decision' => 'erase',
+        'reason'   => 'Names one of a person\'s two accounts in a request to merge them, and when they agreed',
+        'columns'  => ['userID'],
+    ],
+    'tblAccountMergeRequest' => [
+        'decision' => 'unlink',
+        'reason'   => 'Only records which administrator asked for a merge. The request stays; the name goes',
+        'columns'  => ['requestedByID'],
+    ],
     'tblUserTranslationPref' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

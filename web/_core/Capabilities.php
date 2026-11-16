@@ -1064,26 +1064,25 @@ final class Capabilities
         //    that does not fall open for a global administrator.
         self::ACCOUNTS_MERGE => [
             'label' => 'Merge two accounts',
-            'opens' => 'Admin, Users, Merge two accounts: choosing two accounts that belong to one person and '
-                . 'seeing how many of each kind of record would move from the duplicate to the account that '
-                . 'stays. Only counts are shown, never what the records say. The merge itself is not available '
-                . 'yet. The permission is needed in every organisation either account belongs to.',
+            'opens' => 'Admin, Users, Merge two accounts: choosing two accounts that belong to one person, seeing '
+                . 'how many of each kind of record would move from the duplicate to the account that stays, and '
+                . 'asking the person to agree. Only counts are shown, never what the records say. The merge '
+                . 'happens only when the person signs in to both accounts and confirms. The permission is needed '
+                . 'in every organisation either account belongs to.',
             'standard' => ['data_controller'],
-            // ⚠️ FALSE, PROVISIONALLY, AND IT DEPARTS FROM D-017's DEFAULT ON
-            //    PURPOSE. D-017 has a global administrator fall open everywhere
-            //    except the erasure review (#724), whose reason applies here with
-            //    more force: an installation's administrator and an
-            //    organisation's may be different parties, and a merge into an
-            //    account the installation's administrator controls would hand
-            //    them a member's records. Whether this stays false is owner
-            //    question 2 on #1064; the safer direction is the recoverable one,
-            //    because an organisation can give the role to anybody it trusts.
+            // ⚠️ FALSE, AND IT DEPARTS FROM D-017's DEFAULT ON PURPOSE: the owner
+            //    decided it on 16 November 2026 (D-191). The installation's
+            //    administrator and an organisation's may be different parties, and
+            //    a merge exposes every record of both accounts, so — as with the
+            //    erasure review (#724) — the organisation must give it.
             'globalAdminFallsOpen' => false,
             'organisationMayRepoint' => true,
             'emptyMeans' => 'Nobody in this organisation will be able to open the merge page or see what a merge '
                 . 'would move. No record is changed by this. Any administrator can name a role here again on this page.',
             'askedAt' => [
                 'web/_apps/admin/users/merge.php',
+                'web/_apps/admin/users/merge-start.php',
+                'web/_apps/admin/users/merge-cancel.php',
                 'web/_apps/admin/users/index.php',
                 'web/_core/AccountMerge.php',
             ],

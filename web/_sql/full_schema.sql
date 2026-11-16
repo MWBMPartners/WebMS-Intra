@@ -11919,6 +11919,51 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VAL
 INSERT INTO `tblMigrations` (`filename`) VALUES ('297_account_merge_preview.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 299_account_merge_requests.sql (#1064, D-190) ──────────────────────
+-- A merge completes only when the person agrees from BOTH accounts. The request
+-- and its two sides; the same text as the migration, which must agree.
+CREATE TABLE IF NOT EXISTS `tblAccountMergeRequest` (
+    `requestID`        INT          NOT NULL AUTO_INCREMENT,
+    `siteID`           INT          NOT NULL COMMENT 'The organisation the administrator started the request in',
+    `requestedByID`    INT          DEFAULT NULL COMMENT 'The administrator who started it. Never one of the two accounts (refused)',
+    `requestedAtUtc`   DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when it was started',
+    `expiresAtUtc`     DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC: after this nobody can agree to it (AccountMerge::REQUEST_DAYS)',
+    `status`           ENUM('waiting','completed','cancelled') NOT NULL DEFAULT 'waiting' COMMENT 'waiting: open. completed: merged. cancelled: by either account or an administrator',
+    `browserTokenHash` CHAR(64)     DEFAULT NULL COMMENT 'SHA-256 of the random token the FIRST agreement put in a cookie; the token itself is never stored. Emptied on completion',
+    `movedSignIns`     TINYINT(1)   DEFAULT NULL COMMENT 'Whether the person ticked to bring the duplicate''s Microsoft or Google sign-ins and passkeys. NULL until completed',
+    `cancelledBy`      ENUM('person','administrator') DEFAULT NULL COMMENT 'Who cancelled it, when it was cancelled',
+    `finishedAtUtc`    DATETIME     DEFAULT NULL COMMENT 'A MOMENT IN UTC: when it was completed or cancelled',
+    PRIMARY KEY (`requestID`),
+    KEY `idx_amr_site_status` (`siteID`, `status`),
+    CONSTRAINT `fk_amr_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_amr_requester` FOREIGN KEY (`requestedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='A request to merge two accounts that belong to one person; completes only when the person agrees from both (#1064, D-190)';
+
+CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
+    `sideID`          INT        NOT NULL AUTO_INCREMENT,
+    `requestID`       INT        NOT NULL COMMENT 'The request this side belongs to',
+    `userID`          INT        NOT NULL COMMENT 'One of the two accounts',
+    `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
+    `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
+    PRIMARY KEY (`sideID`),
+    UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
+    UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),
+    KEY `idx_ams_user` (`userID`),
+    CONSTRAINT `fk_ams_request` FOREIGN KEY (`requestID`) REFERENCES `tblAccountMergeRequest` (`requestID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_ams_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The two accounts of a merge request, and when each agreed (#1064)';
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/users/merge/start',  'admin/users/merge-start.php',  1),
+    ('admin/users/merge/cancel', 'admin/users/merge-cancel.php', 1),
+    ('account/merge',            'account/merge.php',            1),
+    ('account/merge/save',       'account/merge-save.php',       1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+INSERT INTO `tblMigrations` (`filename`) VALUES ('299_account_merge_requests.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── from 298_member_limits.sql (#989, #992; D-171, D-172) ───────────────────
 -- tblRotaSwapRequest.createdAtUtc is written above, in the table itself. A
 -- fresh install holds no requests for the migration to leave empty. Here: the
