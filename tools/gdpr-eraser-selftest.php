@@ -645,9 +645,16 @@ const ACCOUNT_AFTER_ERASURE = [
 // account off (`isActive` above), and `Auth::endSessionOfInactiveAccount()`
 // ends any session of an inactive account on its next request, whatever
 // number the session carries.
+//
+// `signInChangedByOtherAtUtc` (#1064, migration 299) joined on 16 November
+// 2026, found by the whole-suite run. It is only the MOMENT somebody other than
+// the account last chose its way in, which the account merge reads; it holds no
+// name, address or number of anybody, and an erased account can never agree to
+// a merge anyway (it is switched off and refused as erased).
 const ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE = [
     'userID', 'createdAt', 'sabbathHonour', 'visibilityName', 'visibilityRoles', 'visibilityEmail', 'visibilityPhone',
     'visibilityAddress', 'visibilityCoords', 'visibilityBio', 'visibilityPhoto', 'signInVersion',
+    'signInChangedByOtherAtUtc',
 ];
 
 // Person columns section 4c could not put a made-up row in, so it says nothing
