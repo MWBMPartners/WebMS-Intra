@@ -293,6 +293,12 @@ if (($job['task'] ?? '') === 'page') {
     define('PORTAL_ROOT', (string) $job['root']);
     $mysqli = connect((string) $job['zone']);
     $mysqli->query('SET timestamp = ' . (int) $job['timestamp']);
+    // The job's third step fetches the day's exchange rates (#993) while the
+    // installation's switch is on, and a fresh database has it ON. This test is
+    // about texts, so it switches the fetch off in the database the page reads:
+    // it must never reach the real bank. (ExchangeRates::refresh() also refuses
+    // the real address from any database named selftest_..., as a net under this.)
+    $mysqli->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'exchangeRates.fetch' AND `siteID` IS NULL");
     $SETTINGS = (array) $job['settings'];
     \Portal\Core\App::init($mysqli, $SETTINGS);
     \Portal\Core\Site::reset();

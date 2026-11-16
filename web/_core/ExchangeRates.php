@@ -94,6 +94,9 @@ final class ExchangeRates
     /** The file is about 1.5 KB; anything past this is not the file. */
     public const MAX_BYTES = 65536;
 
+    /** How many rates the last successful refreshFrom() found in the file (not the table's size). */
+    private static int $lastStored = 0;
+
     /**
      * The currencies the outside companies bill in. Package B replaces this
      * with the price list's own set; here it only drives the page's table.
@@ -169,6 +172,10 @@ final class ExchangeRates
                 || preg_match('/[1-9]/', $rate) !== 1) {
                 continue;
             }
+            // A currency written twice is a malformed file, not a choice of which to believe.
+            if (isset($rates[$code]) === true) {
+                return 'unreadable';
+            }
             $rates[$code] = $rate;
         }
         if ($rates === []) {
@@ -204,7 +211,37 @@ final class ExchangeRates
     /** Fetch the bank's real file now. '' when it worked, else a reason word. */
     public static function refresh(\mysqli $db): string
     {
+        // A NET UNDER THE TESTS (#993 check, round 1). A self-test database is
+        // named selftest_..., and no real installation's is. A test that runs
+        // the job or this method against such a database, with the bank's real
+        // address and no stub standing in for it (SafeFetch's test override for
+        // that host), must never reach the real bank: it would make CI depend on
+        // an outside company and store real rates in a test. The switch is the
+        // first guard (each test turns it off); this is the one that holds when
+        // a test forgot. It records the same fixed problem word a refusal does.
+        if (self::isSelfTestDatabase($db) === true && isset(SafeFetch::$testResolverOverride[(string) parse_url(self::SOURCE_URL, PHP_URL_HOST)]) === false) {
+            self::touchFetchRow($db, 'attempt');
+            self::touchFetchRow($db, 'problem', 'test-blocked');
+            if (getenv('EXCHANGE_RATES_BLOCK_LOG') !== false) {
+                @file_put_contents((string) getenv('EXCHANGE_RATES_BLOCK_LOG'), "blocked\n", FILE_APPEND);
+            }
+
+            return 'test-blocked';
+        }
+
         return self::refreshFrom($db, self::SOURCE_URL, true);
+    }
+
+    /** Is this connection's database one a self-test made (its name starts selftest_)? */
+    private static function isSelfTestDatabase(\mysqli $db): bool
+    {
+        try {
+            $row = $db->query('SELECT DATABASE() AS `d`')->fetch_assoc();
+
+            return str_starts_with((string) ($row['d'] ?? ''), 'selftest_') === true;
+        } catch (\Throwable $ignored) {
+            return false;
+        }
     }
 
     /**
@@ -241,18 +278,28 @@ final class ExchangeRates
 
             return $parsed;
         }
+        // A file dated more than a day ahead of now (UTC) is not the bank's
+        // list: stored, it would sit above every real day's date for good, so
+        // no later file could replace it. Refused and recorded as a PROBLEM.
+        if ($parsed['date'] > gmdate('Y-m-d', time() + 86400)) {
+            self::touchFetchRow($db, 'problem', 'future-date');
+
+            return 'future-date';
+        }
         try {
             $db->begin_transaction();
-            // rateDate is assigned LAST on purpose: MySQL applies the
-            // assignments left to right, so the two before it still see the
-            // OLD date and an older file never replaces a newer rate.
+            // A rate is replaced when the file's day is not older than the held
+            // one. A held day more than a day ahead of now is replaceable too,
+            // so a wrong date that got in some other way (a hand-typed row, an
+            // old bug) can never lock rates out for good.
+            $same = '(VALUES(`rateDate`) >= `rateDate` OR `rateDate` > UTC_DATE() + INTERVAL 1 DAY)';
             $stmt = $db->prepare(
                 'INSERT INTO `tblExchangeRate` (`rateCurrency`, `perEuro`, `rateDate`, `fetchedAtUtc`) '
                 . 'VALUES (?, ?, ?, UTC_TIMESTAMP()) '
                 . 'ON DUPLICATE KEY UPDATE '
-                . '`perEuro` = IF(VALUES(`rateDate`) >= `rateDate`, VALUES(`perEuro`), `perEuro`), '
-                . '`fetchedAtUtc` = IF(VALUES(`rateDate`) >= `rateDate`, VALUES(`fetchedAtUtc`), `fetchedAtUtc`), '
-                . '`rateDate` = IF(VALUES(`rateDate`) >= `rateDate`, VALUES(`rateDate`), `rateDate`)'
+                . '`perEuro` = IF(' . $same . ', VALUES(`perEuro`), `perEuro`), '
+                . '`fetchedAtUtc` = IF(' . $same . ', VALUES(`fetchedAtUtc`), `fetchedAtUtc`), '
+                . '`rateDate` = IF(' . $same . ', VALUES(`rateDate`), `rateDate`)'
             );
             foreach ($parsed['perEuro'] as $code => $rate) {
                 $code = (string) $code;
@@ -261,6 +308,7 @@ final class ExchangeRates
             }
             $stmt->close();
             $db->commit();
+            self::$lastStored = count($parsed['perEuro']);
         } catch (\Throwable $problem) {
             try {
                 $db->rollback();
@@ -323,8 +371,8 @@ final class ExchangeRates
 
                 return $result;
             }
-            $count = $db->query('SELECT COUNT(*) AS `n` FROM `tblExchangeRate`');
-            $result['stored'] = $count === false ? 0 : (int) ($count->fetch_assoc()['n'] ?? 0);
+            // What the FILE held, as the docblock says: not the table's size.
+            $result['stored'] = self::$lastStored;
         } catch (\Throwable $problem) {
             error_log('Exchange rates: the daily fetch stopped: ' . get_class($problem));
             $result['error'] = 1;
@@ -729,7 +777,9 @@ final class ExchangeRates
             'capped'      => 'the reply was far bigger than the real file, so it was refused',
             'unreadable'  => 'the reply could not be read as the bank\'s list of rates',
             'no-xml'      => 'this server\'s PHP cannot read XML files',
-            'refused'     => 'the portal refused to contact the address',
+            'refused'     => 'the address could not be used: its name could not be found, or it points at a private or internal network',
+            'future-date' => 'the file was dated more than a day in the future, so it was not used',
+            'test-blocked' => 'a test database may not contact the real bank',
             'unreachable' => 'the bank\'s website could not be reached',
             default       => 'an unknown problem',
         };

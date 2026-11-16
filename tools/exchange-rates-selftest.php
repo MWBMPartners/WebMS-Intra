@@ -155,6 +155,8 @@ foreach ([
 $mixed = ExchangeRates::parseEcb($oneRate("<Cube currency='usd' rate='1.1'/><Cube currency='GBP' rate='0.8'/><Cube currency='JPY' rate='1,5'/>"));
 check('A6 a lower-case code and a bad rate are skipped; the good line in the same file is kept',
     is_array($mixed) === true && array_keys($mixed['perEuro']) === ['GBP'], is_array($mixed) === true ? json_encode($mixed) : (string) $mixed);
+check('A6b a currency written twice in one file refuses the whole file (a duplicate is a malformed file, not a choice of the last)',
+    ExchangeRates::parseEcb($oneRate("<Cube currency='USD' rate='1.1'/><Cube currency='GBP' rate='0.8'/><Cube currency='USD' rate='9.9'/>")) === 'unreadable');
 check('A7 an impossible date (2026-02-30) refuses the whole file',
     ExchangeRates::parseEcb($oneRate("<Cube currency='USD' rate='1.1'/>", '2026-02-30')) === 'unreadable');
 check('A8 a date that is not a date refuses the whole file',
@@ -346,6 +348,11 @@ check('D3 5,000,000 millionths of a euro is 553 hundredths of a dollar (552.6, r
 $direct = ['kind' => 'direct', 'a' => '2000', 'b' => '1', 'source' => 'entered-organisation', 'asOf' => $today];
 check('D4 a typed rate of 2000: one pound (1,000,000 millionths) is 200,000 hundredths',
     ExchangeRates::toHundredths($db, 1000000, $direct) === 200000);
+$point6 = ['kind' => 'direct', 'a' => '0.6', 'b' => '1', 'source' => 'entered-organisation', 'asOf' => $today];
+check('D4b a typed rate with a fractional answer rounds UP: 1,550 millionths at 0.6 is 0.093 of a hundredth, so 1 (never 0)',
+    ExchangeRates::toHundredths($db, 1550, $point6) === 1, (string) ExchangeRates::toHundredths($db, 1550, $point6));
+check('D4c ...and just above a whole number rounds up to the next: 16,666 millionths at 0.6 is 0.99996 so 1, 16,667 is 1.00002 so 2',
+    ExchangeRates::toHundredths($db, 16666, $point6) === 1 && ExchangeRates::toHundredths($db, 16667, $point6) === 2);
 $inverse = ['kind' => 'cross', 'a' => '1', 'b' => '2000', 'source' => 'entered-organisation', 'asOf' => $today];
 check('D5 turned over: one naira (1,000,000 millionths) is 0.05 of a hundredth, rounded UP to 1', ExchangeRates::toHundredths($db, 1000000, $inverse) === 1);
 $same = ['kind' => 'same', 'a' => '1', 'b' => '1', 'source' => 'same', 'asOf' => $today];
@@ -393,6 +400,8 @@ switch ($uri) {
         echo str_replace(["time='2026-11-13'", "currency='USD' rate='1.1052'"], ["time='2026-11-14'", "currency='USD' rate='1.2'"], $real); break;
     case '/nousd':  // a file that has lost the dollar line, same day
         echo preg_replace("#<Cube currency='USD' rate='[^']*'/>#", '', $real); break;
+    case '/future':  // a file dated in 2099
+        echo str_replace("time='2026-11-13'", "time='2099-01-01'", $real); break;
     case '/500': http_response_code(500); echo 'boom'; break;
     case '/big': echo str_repeat('x', 200000); break;
     case '/junk': echo 'this is not xml'; break;
@@ -483,6 +492,42 @@ $problem = ExchangeRates::refreshFrom($db, $url('/nousd'), false);
 $usd = rows($db, "SELECT `perEuro`, `rateDate` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
 check('E6 a file that has lost a currency leaves that currency\'s old row alone (USD still 1.2)', $problem === '' && $plain((string) $usd['perEuro']) === '1.2');
 
+// A file dated far in the future is refused AND recorded as a problem, never stored.
+$snapshotBefore = rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`');
+$successBefore  = rows($db, 'SELECT `lastSuccessUtc` FROM `tblExchangeRateFetch` WHERE `fetchID` = 1')[0]['lastSuccessUtc'];
+$got = ExchangeRates::refreshFrom($db, $url('/future'), false);
+$row = rows($db, 'SELECT `lastProblem`, `lastSuccessUtc` FROM `tblExchangeRateFetch` WHERE `fetchID` = 1')[0];
+check('E6b a file dated 2099-01-01 is REFUSED ("future-date"), recorded as the last problem, the last success is NOT moved, and every rate is untouched',
+    $got === 'future-date' && $row['lastProblem'] === 'future-date' && $row['lastSuccessUtc'] === $successBefore
+    && rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`') === $snapshotBefore, $got);
+// A date that DID get in some other way (a hand-typed row) must not lock rates out for good.
+run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2099-01-01', `perEuro` = 9.9 WHERE `rateCurrency` = 'USD'");
+$got = ExchangeRates::refreshFrom($db, $url('/ok'), false);
+$usd = rows($db, "SELECT `perEuro`, `rateDate` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
+check('E6c a rate held with a date in 2099 is REPLACED by the next real file (USD back to 1.1052, 2026-11-13): a wrong date cannot lock rates out for good',
+    $got === '' && $plain((string) $usd['perEuro']) === '1.1052' && $usd['rateDate'] === '2026-11-13', json_encode($usd));
+$tomorrowFile = ExchangeRates::refreshFrom($db, $url('/ok'), false);
+check('E6d a held date a day or less ahead is NOT treated as wrong: an older file still does not replace it',
+    (function () use ($db, $url, $plain): bool {
+        run($db, "UPDATE `tblExchangeRate` SET `rateDate` = ?, `perEuro` = 7.5 WHERE `rateCurrency` = 'USD'", 's', [gmdate('Y-m-d')]);
+        ExchangeRates::refreshFrom($db, $url('/ok'), false);
+        $u = rows($db, "SELECT `perEuro` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
+        run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13', `perEuro` = 1.1052 WHERE `rateCurrency` = 'USD'");
+
+        return $plain((string) $u['perEuro']) === '7.5';
+    })() === true && $tomorrowFile === '');
+
+// The net under the tests: the REAL address is never fetched from a selftest_ database.
+$before = $stubCount();
+$blocked = ExchangeRates::refresh($db);
+check('E6e refresh() against a selftest_ database with no stub standing in for the bank refuses ("test-blocked") and makes no request',
+    $blocked === 'test-blocked' && $stubCount() === $before && rows($db, 'SELECT `lastProblem` FROM `tblExchangeRateFetch` WHERE `fetchID` = 1')[0]['lastProblem'] === 'test-blocked', $blocked);
+SafeFetch::$testResolverOverride['www.ecb.europa.eu'] = ['ips' => ['127.0.0.1'], 'port' => 9];
+$notBlocked = ExchangeRates::refresh($db);
+unset(SafeFetch::$testResolverOverride['www.ecb.europa.eu']);
+check('E6f ...but when the test points the bank\'s name at its own stand-in, the guard steps aside (the stand-in here is a closed port, so the answer is "unreachable", not "test-blocked")',
+    $notBlocked === 'unreachable', $notBlocked);
+
 // Failures leave every rate untouched and say why in one fixed word.
 $snapshot = rows($db, 'SELECT * FROM `tblExchangeRate` ORDER BY `rateCurrency`');
 $cases = ['/500' => 'http', '/big' => 'capped', '/junk' => 'unreadable', '/doctype' => 'unreadable'];
@@ -546,8 +591,10 @@ $setFetchTimes('19 HOUR', '19 HOUR');
 $out = ExchangeRates::refreshIfDue($db, $url('/ok'));
 check('E15 switched on, 19 hours after a success: NOT due, no request', $out['skipped'] === 1 && $out['ran'] === 0 && $stubCount() === $before, json_encode($out));
 $setFetchTimes('21 HOUR', '21 HOUR');
+$putRate('ZZZ', '1.5', $today);   // a row the file does not hold: the table is 30 rows, the file 29
 $out = ExchangeRates::refreshIfDue($db, $url('/ok'));
-check('E16 21 hours after a success: due, exactly one request, and 29 rates reported',
+run($db, "DELETE FROM `tblExchangeRate` WHERE `rateCurrency` = 'ZZZ'");
+check('E16 21 hours after a success: due, exactly one request, and 29 reported: the number in the FILE, not the size of the table (30 with a stray row)',
     $out['ran'] === 1 && $out['error'] === 0 && $out['stored'] === 29 && $stubCount() === $before + 1, json_encode($out));
 $setFetchTimes(null, null);
 $out = ExchangeRates::refreshIfDue($db, $url('/ok'));
@@ -983,6 +1030,23 @@ check('G5 with the rates step unable to start (its records unreadable) the job S
     $job['status'] === 200 && is_array($json) === true && ($json['status'] ?? '') === 'ok' && ($json['ratesError'] ?? null) === 1 && ($json['ratesRan'] ?? null) === 0,
     $job['status'] . ' ' . mb_substr($job['body'], 0, 300));
 check('G6 and the mail step still did its own work: its own numbers are in the same answer', is_array($json) === true && array_key_exists('sent', $json) === true && array_key_exists('waiting', $json) === true);
+// The page's OWN catch (for what the class cannot catch, such as a class file lost from a half-finished
+// upload): make refreshIfDue() throw out of the class in the test server's copy of web/.
+$copyOfClass = $child . $sep . 'web' . $sep . '_core' . $sep . 'ExchangeRates.php';
+$classText   = (string) file_get_contents($copyOfClass);
+$needle      = "        \$result = ['ran' => 0, 'stored' => 0, 'error' => 0, 'skipped' => 0];\n        try {";
+if (str_contains($classText, $needle) === false) {
+    refuse('could not find the start of refreshIfDue() in the copy, to make it throw');
+}
+file_put_contents($copyOfClass, str_replace($needle, "        throw new \\RuntimeException('planted by the self-test');\n" . $needle, $classText));
+$setting('exchangeRates.fetch', '1');
+$job  = $callJob();
+file_put_contents($copyOfClass, $classText);
+$json = json_decode($job['body'], true);
+check('G5b when the rates step THROWS out of the class, the page\'s own catch holds: HTTP 200, status ok (the mail step\'s), ratesError 1, ratesRan 0, and the mail step\'s numbers are still in the answer',
+    $job['status'] === 200 && is_array($json) === true && ($json['status'] ?? '') === 'ok' && ($json['ratesError'] ?? null) === 1 && ($json['ratesRan'] ?? null) === 0
+    && array_key_exists('sent', $json) === true, $job['status'] . ' ' . mb_substr($job['body'], 0, 300));
+$setting('exchangeRates.fetch', '0');
 $wrong = $httpJob('GET', '/cron/mail-queue', [], ['Authorization: Bearer wrong-' . $jobToken]);
 check('G7 a wrong token still gets 403 and no rates fields (the step sits after the token gate)',
     $wrong['status'] === 403 && str_contains($wrong['body'], 'rates') === false, $wrong['status'] . ' ' . $wrong['body']);
