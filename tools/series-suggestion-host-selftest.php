@@ -1472,6 +1472,13 @@ $sectionB = static function (): void {
     // wipe the mark it already has.
     $sugMarked = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion marked draft', '2027-07-31 15:00:00', 'draft', 'pending', null);
     q('UPDATE `tblEvents` SET `cancelledWhileWaiting` = 1 WHERE `eventID` = ?', 'i', [$sugMarked]);
+    // Round 3 of the check: the same for the POSTPONED mark (D-198), and one
+    // carrying BOTH marks, each on its own day. Every mark is a column of its
+    // own, so each needs a fixture that holds it and nothing else.
+    $sugPMarked = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion postpone-marked draft', '2027-08-07 15:00:00', 'draft', 'pending', null);
+    q('UPDATE `tblEvents` SET `postponedWhileWaiting` = 1 WHERE `eventID` = ?', 'i', [$sugPMarked]);
+    $sugBoth = hiddenDate(ORG_A, $seriesA, 'P847 B suggestion both-marked draft', '2027-08-14 15:00:00', 'draft', 'pending', null);
+    q('UPDATE `tblEvents` SET `cancelledWhileWaiting` = 1, `postponedWhileWaiting` = 1 WHERE `eventID` = ?', 'i', [$sugBoth]);
     $jarA  = signIn(AADMIN, ORG_A);
     $jarB  = signIn(BADMIN, ORG_B);
     $pageA = '/calendar/manage/series-edit?seriesID=' . $seriesA;
@@ -1525,6 +1532,14 @@ $sectionB = static function (): void {
     $st = hiddenState($sugMarked);
     check('B10 an ALREADY-marked suggestion brought back as a draft keeps its mark (nothing clears it)',
         (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && (int) ($st['cancelledWhileWaiting'] ?? 0) === 1, json_encode($st));
+    $bringBack($jarA, $pageA, $seriesA, $sugPMarked);
+    $st = hiddenState($sugPMarked);
+    check('B10b D-198: an already POSTPONE-marked suggestion brought back as a draft keeps that mark',
+        (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && (int) ($st['postponedWhileWaiting'] ?? 0) === 1, json_encode($st));
+    $bringBack($jarA, $pageA, $seriesA, $sugBoth);
+    $st = hiddenState($sugBoth);
+    check('B10c one carrying BOTH marks keeps both',
+        (int) ($st['isDeleted'] ?? 1) === 0 && (int) ($st['cancelledWhileWaiting'] ?? 0) === 1 && (int) ($st['postponedWhileWaiting'] ?? 0) === 1, json_encode($st));
 
     // Organisation B: A's administrator cannot reach B's date; B's own can.
     $bringBack($jarA, $pageA, $seriesB, $sugB);
@@ -1968,6 +1983,11 @@ $plants = [
     ['P38', '_core/HiddenSeriesDates.php', "\$marks[]  = (\$suggestion === true && (string) \$row['status'] === \$markStatus) ? 1 : 0;", '$marks[]  = 0;', $sectionB, 'B01b', 'bringing one back losing the fact that it was cancelled'],
     // Round 2 of the check.
     ['P42', '_core/HiddenSeriesDates.php', "'` = GREATEST(`' . \$markColumn . '`, ?)'", "'` = ?'", $sectionB, 'B10', 'bringing one back wiping a mark it already had'],
+    // Round 3 of the check: each column on its own, the other kept right.
+    ['P42b', '_core/HiddenSeriesDates.php', "\$markSql .= ', `' . \$markColumn . '` = GREATEST(`' . \$markColumn . '`, ?)';",
+        "\$markSql .= ', `' . \$markColumn . '` = ' . (\$markColumn === 'postponedWhileWaiting' ? '?' : 'GREATEST(`' . \$markColumn . '`, ?)');", $sectionB, 'B10b', 'the POSTPONED mark alone wiped on bring-back'],
+    ['P42c', '_core/HiddenSeriesDates.php', "\$markSql .= ', `' . \$markColumn . '` = GREATEST(`' . \$markColumn . '`, ?)';",
+        "\$markSql .= ', `' . \$markColumn . '` = ' . (\$markColumn === 'cancelledWhileWaiting' ? '?' : 'GREATEST(`' . \$markColumn . '`, ?)');", $sectionB, 'B10c', 'the CANCELLED mark alone wiped on a both-marked suggestion'],
     ['P43', '_apps/admin/calendar/moderate.php', 'EventCancelReason::write($mysqli, $siteId, [$eventId], false, null);', '', $sectionM, 'M04d', 'an approved suggestion keeping its old cancellation reason'],
     ['P44', '_apps/admin/calendar/moderate.php', '$confirmed  = (is_string($confirmRaw) === true && $confirmRaw === \'1\') ? 1 : 0;', '$confirmed  = (string) $confirmRaw === \'1\' ? 1 : 0;', $sectionM, 'M10b', 'the posted box cast to text whatever its type'],
     ['P45', '_core/SmallGroups.php', "if ((array_values(\$outcome['noLeader'])[0] ?? '') === self::UNNAMED_GROUP) {", 'if (str_starts_with($start, self::UNNAMED_GROUP) === true) {', $sectionN, 'N13', 'a real group name beginning "a small group" capitalised'],
