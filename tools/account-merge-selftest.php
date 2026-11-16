@@ -1425,6 +1425,83 @@ check('I17c ...and leaves it closed as a merged account: switched off, no admini
         . "AND `fullName` = '" . M::CLOSED_NAME . "' AND `emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid')") === 1
     && in_array($wd, M::mergedInto($db, $wk), true));
 
+// 🔁 ROUND 9 (the independent check's probe, made a test): a run that FAILS
+//    part-way must leave every address it searches by for the next run. Before
+//    round 9 the walk emptied the person's earlier-address list and the merge
+//    step emptied a merged-in account's recorded addresses whether or not the
+//    searches had succeeded, so run 2 never searched by them and closed as "none
+//    failed" with the mail still in the send log. Both kinds of address, each
+//    with a send-log line the first run cannot change (a trigger refuses it) and
+//    the second can; each list also holds one address another account holds now.
+$rP  = $user('RetryPerson'); $member($rP, $siteA);
+$rO  = $user('RetryOther');  $member($rO, $siteA);
+$rK  = $user('RetryKept');   $member($rK, $siteA);
+$rD  = $user('RetryDup');    $member($rD, $siteA);
+$rO2 = $user('RetryOther2'); $member($rO2, $siteA);
+$freeA   = 'retry-free-' . $tag . '@selftest.invalid';
+$takenA  = 'retry-taken-' . $tag . '@selftest.invalid';
+$takenA2 = 'retry-taken2-' . $tag . '@selftest.invalid';
+$rdOwn   = 'retrydup-' . $tag . '@selftest.invalid';
+$rMerged = $merge($rK, $rD, false);
+$db->query("UPDATE `tblUsers` SET `emailAddress` = '{$takenA}' WHERE `userID` = {$rO}");
+$db->query("UPDATE `tblUsers` SET `emailAddress` = '{$takenA2}' WHERE `userID` = {$rO2}");
+$db->query("UPDATE `tblUsers` SET `earlierEmails` = JSON_ARRAY('{$freeA}', '{$takenA}') WHERE `userID` = {$rP}");
+$db->query("UPDATE `tblAccountMergeSide` SET `formerEarlierEmails` = JSON_ARRAY('{$takenA2}') WHERE `userID` = {$rD}");
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+foreach ([$freeA, $rdOwn] as $a) {
+    $insert('tblEmailLog', ['toRecipients' => $a, 'subject' => 'Retry mail ' . $tag, 'errorDetail' => '', 'errorCode' => ''], $third);
+}
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
+$retryLines = static fn (string $a): int => n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$a}%' AND `subject` = 'Retry mail {$tag}'");
+$failOnce = "CREATE TRIGGER `am_selftest_retry` BEFORE UPDATE ON `tblEmailLog` FOR EACH ROW BEGIN IF OLD.`toRecipients` LIKE '%{$freeA}%' "
+    . "OR OLD.`toRecipients` LIKE '%{$rdOwn}%' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'transient'; END IF; END";
+$retryBefore = $retryLines($freeA) === 1 && $retryLines($rdOwn) === 1;
+$retried = [];
+foreach (['person' => $rP, 'merged' => $rK] as $kind => $who) {
+    $db->query($failOnce);
+    $rid = (int) GdprEraser::fileRequest($siteA, $who, true)['requestID'];
+    $run1 = GdprEraser::execute($rid, $who, $adminA);
+    $db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+    $run2 = GdprEraser::execute($rid, $who, $adminA);
+    $retried[$kind] = ['rid' => $rid, 'run1' => $run1, 'run2' => $run2];
+}
+check('I18 premise: the merge completed, both lines exist, and run 1 FAILED on each (the send log refused to change)',
+    $rMerged === 'completed' && $retryBefore === true
+    && ($retried['person']['run1']['failed'] ?? 0) >= 1 && ($retried['merged']['run1']['failed'] ?? 0) >= 1, json_encode($retried));
+check('I18b ...run 2 searched by the person\'s own earlier address again, and the send-log line is gone',
+    ($retried['person']['run2']['failed'] ?? -1) === 0 && $retryLines($freeA) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$retried['person']['rid']} AND `status` = 'completed'") === 1,
+    json_encode($retried['person']['run2']));
+check('I18c ...and by the merged-in account\'s recorded address again, and that line is gone too',
+    ($retried['merged']['run2']['failed'] ?? -1) === 0 && $retryLines($rdOwn) === 0, json_encode($retried['merged']['run2']));
+check('I18d ...and each run-2 closing line still says one address was NOT searched (another account holds it now)',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` IN ({$retried['person']['rid']}, {$retried['merged']['rid']}) "
+        . "AND `action` = 'completed' AND `details` LIKE '%1 address(es) this person held before are another account''s now%'") === 2);
+check('I18e ...and only at that close are the remembered addresses emptied: the list, the merged-in account\'s addresses',
+    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$rP} AND `earlierEmails` IS NULL") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblAccountMergeSide` WHERE `userID` = {$rD} AND `formerEmail` IS NULL AND `formerEarlierEmails` IS NULL") === 1);
+
+// 🖼️ ROUND 9 (polish): a photo written onto a closed account goes FILE FIRST.
+//    Its value names a file the eraser will not delete (not an image in the
+//    uploads folder), so the step fails; the column must still name it, so the
+//    next run can find it. With the file dealt with, the next run empties it.
+$pk = $user('PhotoRetryKept'); $member($pk, $siteA);
+$pd = $user('PhotoRetryDup');  $member($pd, $siteA);
+$pMerged = $merge($pk, $pd, false);
+$stray = 'stray-' . $tag . '.txt';
+file_put_contents($photoRoot . $sep . $stray, 'not an image');
+$db->query("UPDATE `tblUsers` SET `avatarPath` = '{$stray}' WHERE `userID` = {$pd}");
+$pReq  = (int) GdprEraser::fileRequest($siteA, $pk, true)['requestID'];
+$pRun1 = GdprEraser::execute($pReq, $pk, $adminA);
+$pKept = n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$pd} AND `avatarPath` = '{$stray}'");
+@unlink($photoRoot . $sep . $stray);
+$pRun2 = GdprEraser::execute($pReq, $pk, $adminA);
+check('I19 a photo file on a closed account that cannot be dealt with FAILS the run and leaves the column naming it for the next run',
+    $pMerged === 'completed' && ($pRun1['failed'] ?? 0) >= 1 && $pKept === 1, json_encode($pRun1));
+check('I19b ...and once the file is gone, the next run empties it and closes',
+    ($pRun2['failed'] ?? -1) === 0 && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$pd} AND `avatarPath` IS NULL") === 1,
+    json_encode($pRun2));
+
 // =============================================================================
 echo "E. The pages over HTTP\n";
 // =============================================================================
