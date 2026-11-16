@@ -3263,6 +3263,13 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   not exist. The record is DEV_NOTES.md, "Who sees the attendance figures (#529)".
   `AttendanceWalkins` is the ONE place that decides which walk-in a grid row is, by the database's own comparison;
   never key a walk-in by its typed name in PHP (#655, test `tools/attendance-walkins-selftest.php`).
+- **Merging two accounts (#1064; D-190, D-191, D-199, D-200, D-201).** `Portal\Core\AccountMerge` is the ONE place that
+  decides and does a merge; every account-number column is in `BY_TREATMENT` (hard gate
+  `check_account_merge_columns.py`; test `tools/account-merge-selftest.php`). Only live state moves; every record of
+  who did or was told something stays (records the person manages move, logged: D-201), and anything reading or erasing a person's records asks
+  `AccountMerge::mergedInto()`. A merged-away account is never changed again (`AccountGuard` row 3b, from
+  `AccountMerge::mergedAwaySql()`). Only the person, signed in to both accounts in one browser, at least 7 days after
+  the notice, completes it.
 - **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place
   that decides whether a member's details may go to an outside company (Gravatar, a sign-in
   provider's photo, an OpenStreetMap map of a member's home), and the ONLY file under `web/` that may

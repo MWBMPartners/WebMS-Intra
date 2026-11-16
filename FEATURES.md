@@ -2382,3 +2382,7 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Privacy & Data Protection page and privacy policy: "Outside companies" section, worded only by
   `OutsideServices::SERVICES`, `::NAMED` and `::USED_BY_ORGANISATION` through
   `templates/outside-services-notice.php`.
+
+- Merge two accounts: administrator preview and request; the person's confirmation (`/account/merge`, linked from
+  the Account page while a request waits), from 7 days after the notice. Permission `accounts.merge` (Data
+  Controller; never falls open, D-191). A merged-away account shows "Merged into another account, cannot be changed".

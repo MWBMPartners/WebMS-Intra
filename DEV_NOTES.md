@@ -24830,3 +24830,121 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   The privacy notice now says so. Not fixed in #808 because that package must not touch Logger's error recording,
   and `Logger::withoutAddresses()` applied to a whole address cut `/admin/users?q=bob@example.com` to
   `/admin/[address]` (measured), so the fix needs its own design. Raised as #1096.
+
+### Merging two accounts (#1064)
+
+- `Portal\Core\AccountMerge` is the ONE place: `BY_TREATMENT`, `POLYMORPHIC` (4), `REFUSE_WHEN`, `CLASH_RULES`,
+  `whyNotAllowed()` (FACTS), `factsFor()`, `preview()`, `ownCounts()`, `start()`, `agree()`, `cancel()`,
+  `isSecondStep()`, `mergedInto()` / `mergedIntoWithAddresses()`, `survivorOf()`, `mergedAwaySql()`,
+  `stillClosedSql()`.
+- **D-201 (the owner, 16 November 2026):** a "who made it" number the portal uses to decide who may see or change a
+  record moves to the survivor, logged as `AccountsMergedRecordsMoved`; the activity log and change history are never
+  rewritten (D-199 stands for them). Every page and e-mail says both, and lists the kinds moved.
+- **Addresses another account holds now:** `AccountMerge::heldByOthers()` (capitals ignored). An erasure never
+  searches such an address (it would destroy the new holder's mail; measured by the check for people never merged),
+  writes one line saying it skipped some, and says so again in the report's closing line. **Known cost:** the request
+  still closes as "none failed", because no further run could search that address safely; the closing line is what
+  stops it reading as everything reached. A merge's start notice DOES go to such an address (D-200, the owner's
+  decision): round 7 filtered it out without asking, round 8 reverted that, and `account-merge-selftest.php` I14d pins
+  that the notice reaches it.
+- **Writing onto a closed account (round 8).** Two defences. (1) The backstop: `GdprEraser::eraseMergeRecords()`
+  empties every still-closed merged-in account row's personal columns, read from the account's own erasure
+  instruction in `catalogue()` (so the two cannot drift), plus both photo columns (the file first, through
+  `eraseProfileImages()`) and the earlier-address list, keeping the merged marker and
+  `AccountMerge::CLOSED_NAME` (I17). (2) Re-checks under the account row's lock (`AccountMerge::mergedAwayUnderLock()`,
+  inside the writer's own transaction) on the administrator's page (J16), the person's account page (J18), the
+  directory page (J17), the users API and rehire (neither driven by a test); the Microsoft and Google callbacks that
+  match by address no longer switch on a row carrying the merged marker (not driven: no test can drive a real
+  sign-in). Self-only writers (two-step, language, calendar key, notification choices) rely on the backstop. Every
+  writer of `tblUsers` was found two ways (`grep` and a PHP-tokeniser walk), 25 statements, listed in the design.
+  `mergedAwayUnderLock()`'s second read is a locking read by choice: the plain-read variant was planted and J16-J18
+  stayed green, which is expected (a plain read takes its snapshot at the transaction's first plain read).
+- A merged-in account found reopened fails the erasure step (`reopenedInto()`), never a silent skip; not hand-work,
+  because hand-work has one writer (#710).
+- **D-199 applied consistently.** Only live state moves (45 columns: records about or belonging to the person, money
+  about them, current assignments, and six columns the portal uses as ownership: four creators, a loan's requester and
+  a photo's uploader). Every "who did it" or "who was told" column stays (139). A second activity entry
+  (`AccountsMergedRecordsMoved`) names what moved, with counts. Find ownership by searching for comparisons in PHP
+  as well as SQL: round 5 searched SQL only and missed two. `tools/account-merge-selftest.php` A10 pins the moved "who did it"-shaped
+  columns by name. Costs: lists drawn by "who made it" do not show the kept account its rows made as the duplicate;
+  an approval given as the duplicate makes a mandatory approver be asked again; a held text for the duplicate is
+  refused when due. All three are printed in every preview (`AccountMerge::HISTORY_COSTS`). A workflow's outcome
+  e-mail follows a merged-away starter to the survivor.
+- **A merged-away account is never changed again:** `AccountGuard` row 3b (`MERGED`) and `checkNotErased()`, from
+  `AccountMerge::mergedAwaySql()` (the merge's own record, never the account row). Readers follow only a duplicate
+  still as the merge closed it (`stillClosedSql()`). `GdprEraser::fileRequest()` refuses a merged-away number, and
+  `execute()` refuses a hand-written request for one, each naming the account to use (`survivorOf()`).
+- **The erasure review follows the merge:** `ErasureReview::personNumbers()` is the one list of a person's numbers
+  for every review question (count, page, `record()`), so a closed request has no undecided line under a merged-in
+  number (#724). `closeRequest()` clears `processedByID` for merged-in numbers too.
+- **Erasure follows the merge:** one interleaved catalogue walk (each instruction for the account, then each
+  merged-in number) so #709's parent-table guard is not tripped; the mail queue and send log searched by every
+  recorded address (`formerEmail`, `formerEarlierEmails`, `earlierEmails`); statement PDFs named by a
+  merged-in number found by `statementFilesOf()` and judged by the survivor's records.
+- **The addresses an erasure searches by go only at the close (round 9).** `GdprEraser::closeRequest()` is the one
+  place `tblUsers.earlierEmails` and `tblAccountMergeSide.formerEmail` / `formerEarlierEmails` are emptied by an
+  erasure, in the close's transaction. Emptied by a step, a run that failed anywhere went back without them, and the
+  next run never searched by them and closed as "none failed" with the mail still in the send log (the independent
+  check measured it on MySQL 8.0.36 and MariaDB 11.4, for a never-merged person too; present since round 6). The
+  list is in the catalogue's `notEmptiedHere`, not the account instruction. A failed run's line ("everything on it
+  unchanged, and every address it searches by is still recorded") is now true. Tests I18-I18e; I19 for a photo on a
+  closed account, whose file now goes first.
+- **The address the erasure itself replaces is kept on the request (round 11).** The erasure's account step first
+  writes the account's current address to `tblErasureRequest.replacedEmail` (new column, migration 299, VARCHAR(255)
+  so it always fits), in the same step; every later run searches by it; `closeRequest()` empties it with the rest of
+  the request's details. Without it, an address that changed after the request was filed was lost to a failed run
+  (I20-I20c). Round 10 appended it to the account's list instead, and an account whose list was nearly full (TEXT,
+  65,535 bytes) could then never be erased ("Data too long", measured by the check on MySQL and MariaDB); the erasure
+  no longer writes to the list at all (I20a), and both lists are MEDIUMTEXT now (I22: a list of 2,401 addresses, over
+  88 KB, erased cleanly). An address change while an erasure request is open is NOT refused: a new rule for members,
+  not asked for.
+- **Never search the request's own address once another account holds it (round 11).** On a later run the main
+  address comes from the request, and it can have passed to another account in between; it is now judged by
+  `AccountMerge::heldByOthers()` like every earlier address, skipped, and counted in the closing line (I20d). The same
+  rule as round 7, applied to the one address it had missed.
+- **Round 12: every open request's kept address, and never a made-up one.** An account can have two open requests
+  (`fileRequest()` allows it; `closeRequest()` closes the others). Every run reads `replacedEmail` from EVERY request for
+  the account (`GdprEraser::replacedAddressesOf()`), so a run of request 2 searches by the address request 1's run
+  kept (I24); the keep step refuses ANY made-up `deleted-…` address, not only this request's, so a kept real address is
+  never overwritten (three runs, fail-fail-succeed, I23; two requests, I24). A main address skipped because another
+  account holds it is recorded by two truthful "skip" lines, never "no email address is known" (I20e). Addresses are
+  de-duplicated whatever their capitals, so one is never counted twice (I25). Both lists are pinned MEDIUMTEXT (A12).
+- **Known limits, every version:** an address that changes DURING a run, between the mail steps and the account step,
+  is not searched by that run (the account step keeps it, so a later run of an open request would, but a run that
+  closes does not come back); and a replaced address that fails PHP's e-mail check is dropped silently, exactly as
+  `AccountMerge::addressList()` drops one from a list.
+- **The shared fragment reads an unreadable stored list as empty.** `rememberReplacedAddressSql()` treats a value
+  that is not valid JSON as an empty list (`JSON_CONTAINS()` on it is an error); JSON that is not a list (`{}`, `"x"`,
+  `[1,2]`) gets the address appended and reads, through `addressList()`, as that address alone (I21).
+- **The closing line names only what is true of every emptied address (round 10):** "The record of the addresses held
+  before by this account and any merged into it is emptied (N row(s))." It used to say they were ones "the mail steps
+  searched by", directly after saying some were not (I14h).
+- **Guards:** `gdpr-coverage-selftest.php` section 10b asks `closeRequest()`'s code for the two emptying statements
+  (presence only; check 10 maps `tblAccountMergeSide` to `eraseMergeRecords()` only to keep the walk off the table, and
+  that step deals with the merged-in account rows). That the addresses go only at the close is driven by
+  `account-merge-selftest.php` I18e and I20c; no other suite exercises it. The 10b label says exactly that: presence
+  only.
+- **Never run clean on MariaDB (pre-existing, not caused here):** `account-merge-selftest.php` and
+  `gdpr-eraser-selftest.php`; their made-up rows break MariaDB's JSON constraints. Both are run on MySQL only.
+- The two-sided proof: the #731 proof per agreement; a browser token (SHA-256 stored; cookie `__Host-` on https,
+  SameSite Strict) carries the first agreement across the sign-in as the other account.
+- **D-200:** `notBeforeUtc` (7 days after the notice) refuses every agreement before it, asked again at completion.
+  `tblUsers.earlierEmails` is every address the account has held, appended by `AccountMerge::rememberReplacedAddressSql()`
+  (the ONE fragment; first in the SET list, because MySQL applies a SET left to right) on the administrator's page and
+  the person's own page; the notice goes to each. The merge copies the duplicate's list to the side row and empties it.
+- **Restore:** `tblAccountMergeSide` and `tblAccountMergeRequest` are on `DbBackup::WHOLE_DATABASE_ONLY`.
+- **Who chose an account's way in:** `tblUsers.signInChangedByOtherAtUtc`, written by `Auth::markWayInChangedByOther()`
+  and by `admin/users/save.php` on an e-mail change. Nothing the account's own session does clears it.
+- Completion: one transaction; both rows locked lower number first; every refusal re-asked with the REQUESTER as
+  actor; clash rows locked before a copy is deleted; same-or-refuse deletes only where the copies still agree; money
+  never deleted; error 1062 becomes `MergeRefused`; a LOCKING re-count of every live column.
+- **Indexes:** ten added in migration 299 and the install script. Measured on a million RSVP rows: the locking count
+  went from 1.424 s to 0.000 s, and an unrelated person's RSVP from waiting 2.955 s to 0.000 s.
+- Testing traps: a race test must ASSERT the worker is asleep inside the merge (the process list shows the trigger's
+  `DO SLEEP(n)`, not the UPDATE); a new row naming the kept account waits on the merge's account lock through its
+  foreign-key check, so only a writer touching no account row can race; a global administrator must choose an
+  organisation (`/site/switch`) before admin pages answer; the offboarding app is off in a fresh install.
+- `NotifyPrefs::stricterInsideTransaction()`: never call `NotifyPrefs::merge()` inside another transaction.
+- Limits: a row written naming the duplicate after the commit names a closed account; a NEW polymorphic column is
+  invisible to the text gate; lock order is not pinned; the clash-row lock is not observable by a test; a sign-in
+  callback racing a merge can still link to the closed account and start a session that ends at the next request.
