@@ -106,7 +106,8 @@
  *   tblPushSubscriptions  (notification devices, without their address or keys)
  *   tblReadingPlanEnrollment, tblUserMilestone, tblUserTours
  *   tblRecordingPlay      (recordings you played, with the scrambled address)
- *   tblSmsMessage         (texts sent to you; a sign-in code is masked, and a
+ *   tblSmsMessage         (texts sent to you; the code in a text that
+ *                          confirmed your phone number is masked, and a
  *                          prayer-chain text's words are left out)
  *   tblCareAccessLog      (when you opened a pastoral care file, nothing else)
  *   tblVisitor            (your visitor record from before you had an account,
@@ -166,7 +167,7 @@ if ($userId <= 0) {
  * newsletters, event answers, care files opened. Each such query asks for one
  * more than this, so the page can tell "exactly this many" from "more", and
  * `shortened` in the file says, in words, which kinds were cut. The activity
- * history keeps its own older limit of 5,000 and is not listed there.
+ * history is one of them: it was cut at 5,000 rows silently before #1063.
  */
 const DATA_COPY_ROWS_PER_KIND = 5000;
 
@@ -206,6 +207,13 @@ $payload = [
         // added to the strip list below — visibilityCoords is the
         // subject's own datum, and the coordinates/W3W are exactly the
         // kind of PII this export exists to surface).
+        //
+        // 📅 `calendarToken` IS handed over, on purpose (#1063 check round 2):
+        //    it holds only a SHA-256 fingerprint of your calendar feed's token
+        //    (Ical::ensureUserToken()), which cannot be turned back into a
+        //    working feed address. tools/data-copy-selftest.php pins that the
+        //    token is stored only as a fingerprint; if that ever changed, it
+        //    would have to be stripped here like `totpSecret`.
         'user' => $fetchUserRows(
             'SELECT * FROM tblUsers WHERE userID = ? LIMIT 1',
             ['totpSecret']
@@ -246,7 +254,7 @@ $payload = [
         //    550 call sites — it would miss cases while looking as though it
         //    had not, which is worse than leaving the field out.
         'activityLogs' => $fetchUserRows(
-            'SELECT logID, activityType, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT 5000'
+            'SELECT logID, activityType, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         'expenseClaims' => $fetchUserRows(
             // tblExpenseClaims uses `userID` not `submittedByID`
@@ -934,7 +942,7 @@ $payload = [
 
 // ✂️ #1063: a kind cut to its newest DATA_COPY_ROWS_PER_KIND rows says so,
 //    in words, rather than looking complete.
-foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened'] as $kind) {
+foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened', 'activityLogs'] as $kind) {
     if (count($payload['data'][$kind]) > DATA_COPY_ROWS_PER_KIND) {
         $payload['data'][$kind]   = array_slice($payload['data'][$kind], 0, DATA_COPY_ROWS_PER_KIND);
         $payload['shortened'][$kind] = 'Only the newest ' . number_format(DATA_COPY_ROWS_PER_KIND)

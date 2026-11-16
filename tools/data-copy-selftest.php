@@ -32,10 +32,23 @@
  * Then every value the block hands over is read: another person's number, or
  * either marker, fails the block - naming the column.
  *
- * WHAT IT CANNOT SEE, said plainly: a block written as a closure (the mail
- * blocks, the imported-event notices, the demo-data list, and the ones asked
- * of GdprEraser helpers), which the page builds by other means and section 6
- * of erasure-pages-selftest.php drives; an account-number column named in
+ * Each block's list of fields the page strips after the query (the
+ * second argument of $fetchUserRows(), such as the `user` block's
+ * `totpSecret`) is stripped here too, exactly as the page does. Every
+ * marker row is WRITTEN with REPLACE, never INSERT IGNORE: a row that already
+ * exists (the member's own tblUsers row, which this test must create first)
+ * would otherwise keep its real values, and the block would be judged over a
+ * row holding no markers at all - that is how the first version of this test
+ * could not fail for the `user` block (check round 2 of #1063). And a block
+ * passes only if at least one row it handed over is the marker row.
+ *
+ * The two blocks written as a closure that calls $fetchUserRows()
+ * (`importedEventNotices` and `demoDataRegister`) are judged here too.
+ *
+ * WHAT IT CANNOT SEE, said plainly: the blocks built without $fetchUserRows()
+ * - the two mail blocks (driven by part Q9 of mail-queue-selftest.php), and
+ * the three asked of GdprEraser helpers (driven by sections O and P of
+ * erasure-pages-selftest.php); an account-number column named in
  * none of the shapes above and not linked to tblUsers; another person's words
  * in a column not on OTHER_WORDS (that list is this test's own judgement, and
  * a new free-text column must be judged and added); and whether a block's
@@ -59,6 +72,7 @@ declare(strict_types=1);
 
 const ME    = 918801;
 const OTHER = 918802;
+const MARK_NUMBER = 4242; // the number every non-account column of a marker row holds
 const PAGE  = __DIR__ . '/../web/_apps/auth/account/data-export.php';
 // Columns that hold words ANOTHER person wrote, by this test's judgement.
 const OTHER_WORDS = [
@@ -75,7 +89,9 @@ const SECRETS = [
 // A value fixed for one column, where the block's own rule depends on it: a
 // prayer-chain text's words are another member's request (D-016), so the
 // block must leave its body out.
-const FIXED = ['tblSmsMessage.category' => 'prayer_assignment'];
+// The demo-data list is joined to the member by table name and row number,
+// so its marker row must name the member's own tblUsers row.
+const FIXED = ['tblSmsMessage.category' => 'prayer_assignment', 'tblDemoDataRegister.tableName' => 'tblUsers', 'tblDemoDataRegister.rowID' => ME];
 
 $passes   = 0;
 $failures = 0;
@@ -107,7 +123,11 @@ if (preg_match('/^const DATA_COPY_ROWS_PER_KIND = (\d+);/m', $source, $limitHit)
     define('DATA_COPY_ROWS_PER_KIND', (int) $limitHit[1]);
 }
 $blocks = [];
-preg_match_all("/'(\w+)' => \\\$fetchUserRows\(/", $source, $starts, PREG_OFFSET_CAPTURE);
+$strips = [];
+// A block either calls $fetchUserRows( straight after its name, or is a
+// closure whose body returns $fetchUserRows( (importedEventNotices,
+// demoDataRegister). Both are found; the call that follows the name is read.
+preg_match_all("/'(\w+)' => (?:\\\$fetchUserRows\(|\(static function \(\) use \(\\\$fetchUserRows\): array \{\s*try \{\s*return \\\$fetchUserRows\()/", $source, $starts, PREG_OFFSET_CAPTURE);
 foreach ($starts[1] as $i => [$key]) {
     $open  = $starts[0][$i][1] + strlen($starts[0][$i][0]);
     $depth = 1;
@@ -139,9 +159,13 @@ foreach ($starts[1] as $i => [$key]) {
     $expr = (string) preg_replace('~^\s*//[^\n]*\n~m', '', $expr);
     // The page's own expression: string pieces and the row limit, nothing else.
     $blocks[$key] = (string) eval('return ' . $expr . ';');
+    // The fields the page strips from each row afterwards (a literal list).
+    $second       = $end === null ? '' : trim(substr($source, $end + 1, ($j - 1) - ($end + 1)));
+    $strips[$key] = $second === '' ? [] : (array) eval('return ' . $second . ';');
 }
 dc_check('premise: the page\'s blocks are found and read (more than 40, and the ones #1063 added among them)',
-    count($blocks) > 40 && isset($blocks['eventsYouCoordinate'], $blocks['textMessagesSentToYou'], $blocks['yourVisitorRecord']),
+    count($blocks) > 40 && isset($blocks['eventsYouCoordinate'], $blocks['textMessagesSentToYou'], $blocks['yourVisitorRecord'],
+        $blocks['demoDataRegister'], $blocks['importedEventNotices']) && ($strips['user'] ?? null) === ['totpSecret'],
     count($blocks) . ' found');
 
 // ── The two people ──────────────────────────────────────────────────────────
@@ -188,9 +212,15 @@ $rowFor = static function (string $table, array $matchCols) use ($columnsOf, $is
         } elseif (isset(FIXED[$full]) === true) {
             $row[$col] = FIXED[$full];
         } elseif ($c['COLUMN_KEY'] === 'PRI' && str_contains((string) $c['EXTRA'], 'auto_increment') === true) {
-            $row[$col] = 1;
-        } elseif (in_array($type, ['int', 'bigint', 'smallint', 'mediumint', 'tinyint'], true) === true) {
+            $row[$col] = MARK_NUMBER;
+        } elseif ($type === 'tinyint') {
             $row[$col] = $isAccountColumn($table, $col) === true ? OTHER : 1;
+        } elseif (in_array($type, ['int', 'bigint', 'smallint', 'mediumint'], true) === true) {
+            // Every other number, the row's own key and every link to another
+            // table alike, is MARK_NUMBER: so the tables of one block join to
+            // each other's marker rows, and a block handing over only numbers
+            // is still seen to hand over its marker row.
+            $row[$col] = $isAccountColumn($table, $col) === true ? OTHER : MARK_NUMBER;
         } elseif (in_array($type, ['decimal', 'float', 'double'], true) === true) {
             $row[$col] = 1;
         } elseif (in_array($type, ['date'], true) === true) {
@@ -220,8 +250,9 @@ $rowFor = static function (string $table, array $matchCols) use ($columnsOf, $is
 
 // ── Each block in its own world ─────────────────────────────────────────────
 $db->query('SET SESSION foreign_key_checks = 0');
-$wrong   = [];
-$checked = 0;
+$wrong        = [];
+$checked      = 0;
+$markerBlocks = 0;
 foreach ($blocks as $key => $sql) {
     $outer = (string) preg_replace('/\(\s*SELECT[^()]*\)/i', ' ', $sql);
     preg_match_all('/\b(?:FROM|JOIN)\s+`?(tbl\w+)`?/i', $outer, $t);
@@ -238,11 +269,16 @@ foreach ($blocks as $key => $sql) {
         foreach ($tables as $table) {
             $row  = $rowFor($table, $matchCols);
             $cols = array_keys($row);
-            $sqlI = 'INSERT IGNORE INTO `' . $table . '` (`' . implode('`, `', $cols) . '`) VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')';
+            // REPLACE, so an existing row with the same key (the member's own
+            // tblUsers row) is overwritten with the markers, never kept.
+            $sqlI = 'REPLACE INTO `' . $table . '` (`' . implode('`, `', $cols) . '`) VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')';
             $ins  = $db->prepare($sqlI);
             $vals = array_values($row);
             $ins->bind_param(str_repeat('s', count($vals)), ...array_map('strval', $vals));
             $ins->execute();
+            if ($ins->affected_rows < 1) {
+                $wrong[] = $key . ': its marker row in ' . $table . ' was not written';
+            }
         }
         $run   = $db->prepare($sql);
         $marks = substr_count($sql, '?');
@@ -250,9 +286,30 @@ foreach ($blocks as $key => $sql) {
         $run->bind_param(str_repeat('i', count($me)), ...$me);
         $run->execute();
         $rows = $run->get_result()->fetch_all(MYSQLI_ASSOC);
-        if ($rows === []) {
-            $wrong[] = $key . ': its query found nothing in a world built for it, so it could not be judged';
+        // The page strips these fields from each row after the query.
+        foreach ($rows as &$stripped) {
+            foreach ($strips[$key] ?? [] as $field) {
+                unset($stripped[$field]);
+            }
         }
+        unset($stripped);
+        // A row is the MARKER row when it carries a value only the marker row
+        // has: the fixed moment or day, or a marker word. A block that judged
+        // no marker row judged nothing.
+        $isMarker = static function (array $r): bool {
+            foreach ($r as $v) {
+                $v = (string) $v;
+                if ($v === 'mine' || $v === (string) MARK_NUMBER || str_starts_with($v, '2026-01-02') === true || str_contains($v, 'OTHERWORDS') === true || str_contains($v, 'SECRETVAL') === true) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        if (array_filter($rows, $isMarker) === []) {
+            $wrong[] = $key . ': it handed over no marker row (' . count($rows) . ' row(s) of something else), so it was not judged';
+        }
+        $markerBlocks += array_filter($rows, $isMarker) === [] ? 0 : 1;
         foreach ($rows as $r) {
             foreach ($r as $col => $value) {
                 if ($value === null) {
@@ -278,11 +335,24 @@ foreach ($blocks as $key => $sql) {
 }
 $db->query('SET SESSION foreign_key_checks = 1');
 dc_check('every $fetchUserRows() block of the data copy, run against a world where another person\'s number, words and secrets sit in every other column, hands over none of them (#1063)',
-    $wrong === [] && $checked === count($blocks), implode("\n        ", $wrong));
+    $wrong === [] && $checked === count($blocks) && $markerBlocks === count($blocks), implode("\n        ", $wrong));
+
+// 📅 tblUsers.calendarToken is handed over in the `user` block ON PURPOSE: the
+//    column holds only a SHA-256 fingerprint of the feed token
+//    (Ical::ensureUserToken() stores hash('sha256', ...) and the feed looks a
+//    token up by hashing what it is given), and a fingerprint cannot be turned
+//    back into a working feed address. This pins that reason: if the token
+//    were ever stored as it is, the copy would hand over a working address,
+//    so the `user` block would then have to strip it.
+$ical = (string) file_get_contents(__DIR__ . '/../web/_core/Ical.php');
+dc_check('calendarToken may be handed over because only its SHA-256 fingerprint is stored: Ical stores and looks up hash(\'sha256\', ...) of the token, never the token itself',
+    substr_count($ical, "\$hash      = hash('sha256', \$plaintext);") === 1 && substr_count($ical, "\$hash = hash('sha256', \$plaintext);") === 1
+        && substr_count($ical, "\$stmt->bind_param('si', \$hash, \$userId);") === 1
+        && str_contains($ical, "SET calendarToken = ? WHERE userID = ?") === true);
 
 // ── Tidy ────────────────────────────────────────────────────────────────────
 $db->query('DELETE FROM `tblUsers` WHERE `userID` IN (' . ME . ', ' . OTHER . ')');
 
 echo "\n" . str_repeat('=', 78) . "\n";
-printf("%d passed, %d failed (%d blocks judged)\n", $passes, $failures, $checked);
-exit($failures === 0 && $passes === 2 ? 0 : 1);
+printf("%d passed, %d failed (%d blocks judged, %d of them on their marker row)\n", $passes, $failures, $checked, $markerBlocks);
+exit($failures === 0 && $passes === 3 ? 0 : 1);

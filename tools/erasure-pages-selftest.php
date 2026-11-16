@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 286; // #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 287; // #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -6881,6 +6881,17 @@ ok('R6 a member with 5,001 recordings played is handed the newest 5,000, and the
         && isset($r1063Heavy['shortened']['textMessagesSentToYou']) === false,
     json_encode([count((array) ($r1063Heavy['data']['recordingsPlayed'] ?? [])), $r1063Heavy['shortened'] ?? null]));
 ok('R7 and that copy comes back within ten seconds', $r1063Took < 10.0, round($r1063Took, 2) . ' s');
+// The activity history was cut at 5,000 rows SILENTLY before #1063's check
+// round 2; it now says so, like the six other kinds.
+$r1063LogMark = (int) $db->query('SELECT COALESCE(MAX(`logID`), 0) FROM `tblActivityLogs`')->fetch_row()[0];
+$db->query("INSERT INTO `tblActivityLogs` (`siteID`, `userID`, `activityType`, `activityDescription`) WITH RECURSIVE `n` (`i`) AS (SELECT 1 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 5001) "
+    . 'SELECT ' . ORG_A . ', ' . FAY . ", 'R1063Heavy', 'r1063' FROM `n`");
+$r1063Logs = json_decode(req($jar['fay'], 'GET', '/account/data-export')['body'], true);
+ok('R8 a member with more than 5,000 activity records is handed the newest 5,000, and the copy says in words that the rest are not shown (#1063 round 2)',
+    count((array) ($r1063Logs['data']['activityLogs'] ?? [])) === 5000
+        && str_contains((string) ($r1063Logs['shortened']['activityLogs'] ?? ''), 'Only the newest 5,000') === true,
+    json_encode([count((array) ($r1063Logs['data']['activityLogs'] ?? [])), $r1063Logs['shortened'] ?? null]));
+$db->query('DELETE FROM `tblActivityLogs` WHERE `logID` > ' . $r1063LogMark . " AND `activityType` = 'R1063Heavy'");
 $db->query('DELETE FROM `tblRecordingPlay` WHERE `userID` = ' . FAY);
 $r1063Clear();
 
