@@ -57,11 +57,11 @@ $hasAwsSec   = ((string) ($settings['aws']['secret'] ?? '')) !== '';
 $awsRegion   = (string) ($settings['aws']['region'] ?? 'eu-west-1');
 
 $sentToday   = Sms::sentTodayCount($siteId);
-$monthSpend  = Sms::monthSpendPence($siteId);
+$spendLines = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'sms'));
 
 $recent = [];
 $stmt = $db->prepare(
-    'SELECT m.messageID, m.recipientNumber, m.body, m.category, m.status, m.costPence, m.createdAt, m.sentAt, '
+    'SELECT m.messageID, m.recipientNumber, m.body, m.category, m.status, m.costCurrency, m.costMillionths, m.createdAt, m.sentAt, '
     . '       u.fullName '
     . 'FROM tblSmsMessage m LEFT JOIN tblUsers u ON u.userID = m.recipientUserID '
     . 'WHERE m.siteID = ? ORDER BY m.createdAt DESC LIMIT 50'
@@ -103,7 +103,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="col-md-4">
         <div class="card"><div class="card-body">
             <div class="small text-muted">This month's spend</div>
-            <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($monthSpend / 100, 2); ?></div>
+            <div class="h4"><?php echo htmlspecialchars($spendLines['spent'], ENT_QUOTES, 'UTF-8'); ?></div>
         </div></div>
     </div>
     <div class="col-md-4">
@@ -210,7 +210,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $m['category'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-3 text-truncate" title="<?php echo htmlspecialchars((string) $m['body'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(mb_substr((string) $m['body'], 0, 80), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-1"><span class="badge bg-<?php echo $cls; ?>"><?php echo htmlspecialchars((string) $m['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
-                        <div class="col-md-1 text-end small text-muted"><?php echo $m['costPence'] !== null ? 'p' . (int) $m['costPence'] : '—'; ?></div>
+                        <div class="col-md-1 text-end small text-muted"><?php echo htmlspecialchars(\Portal\Core\ProviderSpend::spendWords($m['costCurrency'] === null ? null : (string) $m['costCurrency'], $m['costMillionths'] === null ? null : (int) $m['costMillionths']), ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                 <?php endforeach; ?>
             </div>

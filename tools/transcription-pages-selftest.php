@@ -243,6 +243,8 @@ function removeWorld(): void
     $db->query('SET FOREIGN_KEY_CHECKS = 0');
     q('DELETE FROM tblTranscriptSearch WHERE siteID IN (?, ?)', 'ii', [ORG, OTHER]);
     q('DELETE FROM tblTranscript WHERE recordingID BETWEEN 921100 AND 921199');
+    // 💱 #993: the month's money is in its own table, in the company's own currency.
+    q("DELETE FROM tblProviderSpend WHERE service = 'transcription' AND siteID IN (?, ?)", 'ii', [ORG, OTHER]);
     q('DELETE FROM tblRecordingPlay WHERE recordingID BETWEEN 921100 AND 921199');
     q('DELETE FROM tblRecordingNote WHERE recordingID BETWEEN 921100 AND 921199');
     q('DELETE FROM tblRecording WHERE siteID IN (?, ?)', 'ii', [ORG, OTHER]);
@@ -516,7 +518,7 @@ function transcriptRow(int $recordingId): ?array
         //    is not a quirk of this test: writing it bare is exactly how the
         //    statement in `processQueue()` that SAVES a finished transcript came
         //    to be unable to run at all, which this run found.
-        'SELECT transcriptID, provider, status, startedAt, queuedAt, generatedAt, errorMsg, costPence, `fullText` '
+        'SELECT transcriptID, provider, status, startedAt, queuedAt, generatedAt, errorMsg, costMillionths, `fullText` '
         . 'FROM tblTranscript WHERE recordingID = ? LIMIT 1',
         'i',
         [$recordingId]
@@ -594,6 +596,25 @@ function transcriptionRowsNow(): array
         'SELECT settingID, settingKey, settingValue FROM tblSettings '
         . "WHERE siteID IS NULL AND settingKey LIKE 'transcription.%' ORDER BY settingID"
     );
+}
+
+/**
+ * 💱 #993: put this month's transcription spend for one organisation at an exact
+ * figure, in US dollars (the installation's currency for this run), as `$hundredths`
+ * of a dollar. It writes the record the limit really reads (`tblProviderSpend`);
+ * until #993 this test put the figure in a column of the transcript row, which an
+ * erasure deletes. 0 clears it. The same currency needs no exchange rate.
+ */
+function spendUsd(int $site, int $hundredths): void
+{
+    q("DELETE FROM tblProviderSpend WHERE siteID = ? AND service = 'transcription' AND monthStartUtc = ?", 'is', [$site, gmdate('Y-m-01')]);
+    if ($hundredths > 0) {
+        q(
+            "INSERT INTO tblProviderSpend (siteID, monthStartUtc, service, costCurrency, costMillionths) VALUES (?, ?, 'transcription', 'USD', ?)",
+            'isi',
+            [$site, gmdate('Y-m-01'), $hundredths * 10000]
+        );
+    }
 }
 
 /** Set an INSTALLATION-WIDE setting for this run, remembering what it was. */
@@ -1315,12 +1336,20 @@ q('DELETE FROM tblTranscript WHERE recordingID = ?', 'i', [REC_FILE]);
 // =============================================================================
 head('J. The monthly budget, and which of the two levels wins');
 
-/** What the pages say is in force, read off the admin page. */
-$budgetInForce = static function () use (&$jar, $adminPage): string {
+/**
+ * What the admin page says each level allows, read off the page (#993): the
+ * installation's figure and, where the organisation has a row of its own, ITS
+ * figure, each in its own currency. The two are never merged into one number.
+ */
+$limitsShown = static function () use (&$jar, $adminPage): array {
     $body = text(req($jar['global'], 'GET', $adminPage)['body']);
 
-    return preg_match('/of \$([\d,]+\.\d\d)/', $body, $m) === 1 ? $m[1] : '(not shown)';
+    return [
+        'installation' => preg_match('/The installation\'s limit: \$([\d,]+\.\d\d) a month/', $body, $m) === 1 ? $m[1] : '(not shown)',
+        'organisation' => preg_match('/This organisation\'s own limit: \$([\d,]+\.\d\d) a month/', $body, $o) === 1 ? $o[1] : null,
+    ];
 };
+$budgetInForce = static fn (): string => $limitsShown()['installation'];
 
 clearSiteSetting(ORG, 'transcription.monthCapPence');
 installSetting('transcription.monthCapPence', '5000');
@@ -1328,17 +1357,30 @@ ok('J01 with only the installation\'s figure, that is what is in force', $budget
 
 // 🏢 An organisation may hold itself to LESS.
 siteSetting(ORG, 'transcription.monthCapPence', '1000');
-ok('J02 an organisation may hold itself to less than the installation allows', $budgetInForce() === '10.00', 'showed ' . $budgetInForce());
+ok('J02 an organisation may hold itself to less than the installation allows: its OWN figure ($10.00) is shown beside the installation\'s ($50.00), each in its own currency',
+    $limitsShown() === ['installation' => '50.00', 'organisation' => '10.00'], json_encode($limitsShown()));
+spendUsd(ORG, 1500);   // $15.00: over the organisation's own $10.00, under the installation's $50.00
+$ownReached = req($jar['global'], 'GET', $recPage);
+ok('J02b and spending $15.00 reaches the ORGANISATION\'s own $10.00 although the installation allows $50.00: no button is offered',
+    preg_match('#<form[^>]+action="[^"]*recordings/transcribe"#', $ownReached['body']) !== 1
+    && str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'This organisation\'s own monthly limit has been reached') === true);
+spendUsd(ORG, 0);
 
 // 🚧 And may NEVER give itself more. This is the boundary between two parties:
 //    the installation's administrator may be a different person entirely.
 siteSetting(ORG, 'transcription.monthCapPence', '2000000');
-ok('J03 an organisation asking for more is held to the installation\'s figure', $budgetInForce() === '50.00', 'showed ' . $budgetInForce());
+spendUsd(ORG, 6000);   // $60.00: over the installation's $50.00, far under the organisation's own (cut at the hard maximum)
+$stillHeld = req($jar['global'], 'GET', $recPage);
+ok('J03 an organisation asking for MORE is still held to the installation\'s figure: $60.00 is over the installation\'s $50.00, so no button is offered although the organisation\'s own row is far higher',
+    $budgetInForce() === '50.00' && preg_match('#<form[^>]+action="[^"]*recordings/transcribe"#', $stillHeld['body']) !== 1,
+    json_encode($limitsShown()));
 ok(
-    'J04 and the number is attributed honestly, so nobody sets it again',
-    str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'the installation allows') === true,
-    'the page shows a figure the organisation did not choose and does not say why'
+    'J04 and each figure is attributed to its level, so nobody sets it again believing it is the other',
+    str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'The installation\'s limit: $50.00') === true
+    && str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'This organisation\'s own limit:') === true,
+    'the page shows a figure and does not say whose it is'
 );
+spendUsd(ORG, 0);
 
 // 🏢 THE CASE THAT WAS GOT WRONG IN EventRecurrence AND CAUGHT BY A CHECK:
 //    an installation RAISING its limit, with the organisation having chosen
@@ -1365,11 +1407,12 @@ clearSiteSetting(ORG, 'transcription.monthCapPence');
 
 // 💳 Spending up to the budget stops the button, with the reason.
 q(
-    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, costPence, generatedAt) '
-    . "VALUES (?, 'openai', 'completed', 'spent words', 6000, NOW())",
+    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, generatedAt) '
+    . "VALUES (?, 'openai', 'completed', 'spent words', NOW())",
     'i',
     [REC_SPEND]
 );
+spendUsd(ORG, 6000);
 $spentPage = req($jar['global'], 'GET', $recPage);
 ok(
     'J07 with the budget used up, no button is offered',
@@ -1413,6 +1456,7 @@ ok(
 );
 
 q('DELETE FROM tblTranscript WHERE recordingID = ?', 'i', [REC_SPEND]);
+spendUsd(ORG, 0);
 
 // =============================================================================
 // 🅺 K. The "Process next" button is in a form of its OWN
@@ -1501,15 +1545,15 @@ head('L. The admin page and the sweep stay inside the organisation');
 
 // Give the other organisation a waiting row and a finished, charged-for one.
 q(
-    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, costPence, generatedAt) '
-    . "VALUES (?, 'local', 'completed', 'other org words', 4200, NOW())",
+    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, generatedAt) '
+    . "VALUES (?, 'local', 'completed', 'other org words', NOW())",
     'i',
     [REC_OTHER]
 );
 q('DELETE FROM tblTranscript WHERE recordingID = ?', 'i', [REC_FILE]);
 q("INSERT INTO tblTranscript (recordingID, provider, status) VALUES (?, 'local', 'queued')", 'i', [REC_FILE]);
 // The other organisation's waiting row, so the sweep has something it must not take.
-q("UPDATE tblTranscript SET status = 'queued', costPence = NULL, generatedAt = NULL WHERE recordingID = ?", 'i', [REC_OTHER]);
+q("UPDATE tblTranscript SET status = 'queued', generatedAt = NULL WHERE recordingID = ?", 'i', [REC_OTHER]);
 
 $ourAdmin = req($jar['global'], 'GET', $adminPage);
 $ourText  = text($ourAdmin['body']);
@@ -1536,21 +1580,23 @@ ok(
 //    another's spending — and, because the budget is checked against it, one
 //    busy organisation would stop every other one transcribing anything.
 q(
-    "UPDATE tblTranscript SET status = 'completed', `fullText` = 'other org words', costPence = 4200, generatedAt = NOW() "
+    "UPDATE tblTranscript SET status = 'completed', `fullText` = 'other org words', generatedAt = NOW() "
     . 'WHERE recordingID = ?',
     'i',
     [REC_OTHER]
 );
+spendUsd(OTHER, 4200);   // the OTHER organisation has really spent $42.00
 $spendText = text(req($jar['global'], 'GET', $adminPage)['body']);
 ok(
     'L04 the month\'s spend excludes the other organisation',
-    preg_match('/This month \$0\.00/', $spendText) === 1 && str_contains($spendText, '£') === false,
+    str_contains($spendText, 'This month nothing yet') === true && str_contains($spendText, '£') === false,
     'the spend shown includes another organisation: ' . mb_substr((string) (preg_match('/This month.{0,40}/', $spendText, $m) === 1 ? $m[0] : '?'), 0, 60)
 );
 
 // 🏭 The sweep itself. Put the other organisation's row back to waiting, press
 //    our button, and the other organisation's row must be untouched.
-q("UPDATE tblTranscript SET status = 'queued', costPence = NULL, generatedAt = NULL, startedAt = NULL WHERE recordingID = ?", 'i', [REC_OTHER]);
+q("UPDATE tblTranscript SET status = 'queued', generatedAt = NULL, startedAt = NULL WHERE recordingID = ?", 'i', [REC_OTHER]);
+spendUsd(OTHER, 0);
 q("UPDATE tblTranscript SET status = 'queued', startedAt = NULL WHERE recordingID = ?", 'i', [REC_FILE]);
 
 $runPage2 = req($jar['global'], 'GET', $adminPage);
@@ -1974,11 +2020,12 @@ installSetting('transcription.assemblyai.apiKey', 'unused-by-this-run');
 //    is the check inside the sweep, not the one on the page.
 q('DELETE FROM tblTranscript WHERE recordingID BETWEEN 921100 AND 921199');
 q(
-    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, costPence, generatedAt) '
-    . "VALUES (?, 'local', 'completed', 'already spent', 9000, NOW())",
+    'INSERT INTO tblTranscript (recordingID, provider, status, `fullText`, generatedAt) '
+    . "VALUES (?, 'local', 'completed', 'already spent', NOW())",
     'i',
     [REC_SPEND]
 );
+spendUsd(ORG, 9000);
 q("INSERT INTO tblTranscript (recordingID, provider, status) VALUES (?, 'local', 'queued')", 'i', [REC_FILE]);
 installSetting('transcription.monthCapPence', '5000');
 
@@ -2032,7 +2079,7 @@ installSetting('transcription.monthCapPence', '5000');
 clearSiteSetting(ORG, 'transcription.monthCapPence');
 installSetting('transcription.monthCapPence', '999999999');
 $hardCapText = text(req($jar['global'], 'GET', $adminPage)['body']);
-ok('R10 the figure in force is the hard maximum in code', str_contains($hardCapText, 'of $5,000.00') === true, 'showed: ' . mb_substr((string) (preg_match('/of \$[\d,\.]+/', $hardCapText, $m) === 1 ? $m[0] : '?'), 0, 40));
+ok('R10 the figure in force is the hard maximum in code', str_contains($hardCapText, 'The installation\'s limit: $5,000.00 a month') === true, 'showed: ' . mb_substr((string) (preg_match('/The installation.s limit: [^;.]+/', $hardCapText, $m) === 1 ? $m[0] : '?'), 0, 60));
 ok(
     'R11 and the organisation is NOT blamed for a figure it never chose',
     str_contains($hardCapText, 'asked for more') === false,
@@ -2044,9 +2091,10 @@ ok(
 siteSetting(ORG, 'transcription.monthCapPence', '2000000');
 installSetting('transcription.monthCapPence', '5000');
 ok(
-    'R12 while an organisation that really did ask for more IS told so (R11 is not vacuous)',
-    str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'asked for more') === true,
-    'the attribution line never appears at all, so R11 proves nothing'
+    'R12 while an organisation that has a figure of its own IS shown it, on a line of its own (R11 is not vacuous: the line that would name it exists and is simply absent when there is no row)',
+    str_contains(text(req($jar['global'], 'GET', $adminPage)['body']), 'This organisation\'s own limit:') === true
+    && str_contains($hardCapText, 'This organisation\'s own limit:') === false,
+    'the organisation\'s own figure is never shown, so R11 proves nothing'
 );
 clearSiteSetting(ORG, 'transcription.monthCapPence');
 

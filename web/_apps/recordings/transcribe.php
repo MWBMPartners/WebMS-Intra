@@ -46,6 +46,7 @@ use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
+use Portal\Core\ProviderSpend;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Transcription;
@@ -109,11 +110,9 @@ $reason = Transcription::whyNotQueueable([
     'hasMedia'      => ($rec['filePath'] !== null && (string) $rec['filePath'] !== ''),
     'providerReady' => Transcription::providerIsReady($settings),
     'stillRunning'  => $state !== null && $state['stillRunning'] === true,
-    // 💳 The installation's own layer, read ON ITS OWN: for a limit the
-    //    installation's value caps the organisation's, and the merged
-    //    $SETTINGS cannot tell the two apart (#668).
-    'capPence'      => Transcription::capFrom(App::settings(), InstallationSettings::layer()),
-    'spentPence'    => Transcription::monthSpendPence($siteId),
+    // 💳 ONE question for both levels, in each level's own currency, with
+    //    "no exchange rate" refusing (#993, D-192, D-194, #668).
+    'moneyRefusal'  => ProviderSpend::whyRefused(App::db(), $siteId, 'transcription', ProviderSpend::currencyOf('transcription', (string) ($settings['provider'] ?? 'openai'))),
 ]);
 
 if ($reason !== '') {

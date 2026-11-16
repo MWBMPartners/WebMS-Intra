@@ -5018,7 +5018,8 @@ CREATE TABLE IF NOT EXISTS `tblSmsMessage` (
     `status`           ENUM('queued','sent','delivered','failed') NOT NULL DEFAULT 'queued',
     `provider`         VARCHAR(30)  NOT NULL DEFAULT 'twilio',
     `providerRef`      VARCHAR(100) DEFAULT NULL,
-    `costPence`        INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `errorMsg`         VARCHAR(255) DEFAULT NULL,
     `sentAt`           DATETIME     DEFAULT NULL,
     `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5260,7 +5261,8 @@ CREATE TABLE IF NOT EXISTS `tblTranscript` (
     `fullText`     MEDIUMTEXT   DEFAULT NULL,
     `jsonSegments` MEDIUMTEXT   DEFAULT NULL,
     `durationSec`  INT          DEFAULT NULL,
-    `costPence`    INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `errorMsg`     VARCHAR(255) DEFAULT NULL,
     `queuedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- ⏱️ When this recording was handed to the transcription company, on
@@ -5349,7 +5351,8 @@ CREATE TABLE IF NOT EXISTS `tblContentTranslation` (
                         COMMENT 'SHA-256 of the exact original words this translation was made from (#799, migration 256). A cached row is served only while this matches the words in the source row now, so an edited original is translated afresh. NULL means the words are unknown (a row cached before migration 256), and such a row is never served.',
     `provider`          VARCHAR(30)  NOT NULL DEFAULT 'anthropic',
     `qualityScore`      TINYINT      DEFAULT NULL,
-    `costPence`         INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `siteID`            INT          DEFAULT NULL
                         COMMENT 'The organisation whose content this was, so a monthly budget can be told apart from another organisation''s (#765, migration 250). NULL means the source row has gone and it cannot be attributed without guessing, which would move money between two parties'' budgets. No foreign key on purpose: a cascade would delete the spending record when an organisation is removed, and what an installation was charged should outlive the organisation that caused it.',
     `translatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5425,10 +5428,20 @@ CREATE TABLE IF NOT EXISTS `tblTranslationUsage` (
     `siteID`        INT  NOT NULL COMMENT 'The organisation whose members asked for these translations. Never empty: a key with an empty part does not hold (#487), and a row nobody owns would count against nobody',
     `monthStartUtc` DATE NOT NULL COMMENT 'The first day of the calendar month, IN UTC, that these requests were made in',
     `calls`         INT  NOT NULL DEFAULT 0 COMMENT 'How many requests were sent to the translation company this month, counted just BEFORE each is sent, whether or not an answer then came back (#762). A request never sent, because no key is set or the provider is unknown, is not counted',
-    `costPence`     INT  NOT NULL DEFAULT 0 COMMENT 'What the translation company reported those requests cost, in pence. LibreTranslate reports nothing, so on that route this stays 0 and only `calls` can limit use',
     PRIMARY KEY (`siteID`, `monthStartUtc`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-COMMENT='Translation requests and reported spend, per organisation per month (#762). Read and written only by Portal\\Core\\Translation.';
+COMMENT='Translation requests per organisation per month (#762). The money side moved to tblProviderSpend (#993, migration 302). Read and written only by Portal\\Core\\Translation.';
+
+-- ── Spending with outside companies, in each company's own currency (#993, D-173; migration 302) ──
+CREATE TABLE IF NOT EXISTS `tblProviderSpend` (
+    `siteID`         INT         NOT NULL COMMENT 'The organisation whose members caused the charge. No foreign key on purpose: what an installation was charged outlives the organisation that caused it (as tblTranslationUsage)',
+    `monthStartUtc`  DATE        NOT NULL COMMENT 'The first day of the calendar month, IN UTC, the charge falls in: a calendar date, not a moment',
+    `service`        VARCHAR(20) NOT NULL COMMENT 'Which kind of outside company: ai, translation, transcription or sms',
+    `costCurrency`   CHAR(3)     NOT NULL COMMENT 'The currency the outside company charges in, as three capital letters, for example USD. Never the organisation''s own currency: two currencies are never added together (D-173)',
+    `costMillionths` BIGINT      NOT NULL DEFAULT 0 COMMENT 'What was charged this month, in millionths of one unit of costCurrency (1,000,000 = one whole dollar, pound or euro). Whole numbers only, never a floating-point number',
+    PRIMARY KEY (`siteID`, `monthStartUtc`, `service`, `costCurrency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Spending with outside companies, per organisation, month, service and currency (#993, D-173). Holds no personal data and is not emptied by an erasure. Read and written only by Portal\\Core\\ProviderSpend.';
 
 -- ── Exchange rates (#993, D-173, D-192; migration 301) ──────────────────────
 -- Three tables, read and written only by Portal\\Core\\ExchangeRates. None
@@ -5449,7 +5462,7 @@ CREATE TABLE IF NOT EXISTS `tblExchangeRateFetch` (
     `fetchID`        TINYINT     NOT NULL COMMENT 'Always 1: there is one row, holding the state of the daily fetch',
     `lastAttemptUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last tried to fetch the rates, in UTC, whether or not it worked',
     `lastSuccessUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last fetched the rates successfully, in UTC',
-    `lastProblem`    VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'One fixed word saying why the last attempt failed (http, capped, unreadable, no-xml, refused), or empty when it worked. Never the reply itself',
+    `lastProblem`    VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'One fixed word saying why the last attempt failed (http, capped, unreadable, no-xml, refused, unreachable, future-date, not-saved, test-blocked; each is explained by ExchangeRates::problemWords()), or empty when it worked. Never the reply itself',
     PRIMARY KEY (`fetchID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='The state of the daily exchange-rate fetch: one row (#993).';
@@ -5530,7 +5543,8 @@ CREATE TABLE IF NOT EXISTS `tblAiUsage` (
     `provider`     VARCHAR(30)  NOT NULL,
     `inputTokens`  INT          NOT NULL DEFAULT 0,
     `outputTokens` INT          NOT NULL DEFAULT 0,
-    `costPence`    INT          NOT NULL DEFAULT 0,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `inputSample`  MEDIUMTEXT   DEFAULT NULL,
     `outputSample` MEDIUMTEXT   DEFAULT NULL,
     `occurredAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -12065,6 +12079,10 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('300_suggestion_cancelled_or_po
 -- The three tables, the `exchangeRates.fetch` setting and the two addresses are
 -- written above, beside the translation tables; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('301_exchange_rates.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 302_provider_spend_in_its_own_currency.sql (#993; D-173, D-192, D-194) ──
+INSERT INTO `tblMigrations` (`filename`) VALUES ('302_provider_spend_in_its_own_currency.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

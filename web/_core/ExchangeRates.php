@@ -97,12 +97,6 @@ final class ExchangeRates
     /** How many rates the last successful refreshFrom() found in the file (not the table's size). */
     private static int $lastStored = 0;
 
-    /**
-     * The currencies the outside companies bill in. Package B replaces this
-     * with the price list's own set; here it only drives the page's table.
-     */
-    public const BILLING_CURRENCIES = ['EUR', 'USD'];
-
     /** What a rate may look like: up to 8 figures, then up to 10 after the point. */
     private const RATE_PATTERN = '/^\d{1,8}(\.\d{1,10})?$/';
 

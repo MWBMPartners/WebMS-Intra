@@ -16,6 +16,7 @@ use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Markdown;
+use Portal\Core\ProviderSpend;
 use Portal\Core\RateLimiter;
 use Portal\Core\Recordings;
 use Portal\Core\Site;
@@ -88,10 +89,9 @@ if ($canQueue === true) {
         'hasMedia'      => ($rec['filePath'] !== null && (string) $rec['filePath'] !== ''),
         'providerReady' => Transcription::providerIsReady($tSettings),
         'stillRunning'  => $tState !== null && $tState['stillRunning'] === true,
-        // 💳 The installation's layer on its own: for a limit the
-        //    installation's value caps the organisation's (#668).
-        'capPence'      => Transcription::capFrom(App::settings(), InstallationSettings::layer()),
-        'spentPence'    => Transcription::monthSpendPence($siteId),
+        // 💳 ONE question for both levels, in each level's own currency, with
+        //    "no exchange rate" refusing (#993, D-192, D-194, #668).
+        'moneyRefusal'  => ProviderSpend::whyRefused(App::db(), $siteId, 'transcription', ProviderSpend::currencyOf('transcription', (string) ($tSettings['provider'] ?? 'openai'))),
     ]);
 }
 

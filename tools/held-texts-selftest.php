@@ -319,13 +319,15 @@ if (($job['task'] ?? '') === 'page') {
 // organisation's text). A missing one is a loud "class not found".
 // `DbBackup.php` is for part I; `MailQueue.php` and `MailRoutes.php` are for
 // the two sentences in part L that ask whether the scheduled job is running.
-foreach (['App.php', 'Sabbath.php', 'Site.php', 'Sms.php', 'DbBackup.php', 'MailQueue.php', 'MailRoutes.php'] as $classFile) {
+// `ProviderSpend.php` is where a text's cost is priced and recorded (#993).
+foreach (['App.php', 'Sabbath.php', 'Site.php', 'Sms.php', 'ProviderSpend.php', 'DbBackup.php', 'MailQueue.php', 'MailRoutes.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
 
 use Portal\Core\App;
 use Portal\Core\DbBackup;
 use Portal\Core\MailQueue;
+use Portal\Core\ProviderSpend;
 use Portal\Core\Sabbath;
 use Portal\Core\Site;
 use Portal\Core\Sms;
@@ -371,10 +373,12 @@ final class RecordingSms extends Sms
             throw new RuntimeException('the run was ended while handing over a text for ' . $number);
         }
         if (self::$answer === 'refuse') {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'twilio-http-500'];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'twilio-http-500'];
         }
 
-        return ['ok' => true, 'ref' => 'SMZQX' . count(self::$calls), 'costPence' => 4, 'error' => null];
+        // The cost is what the real Twilio route answers (#993): ProviderSpend's flat
+        // estimate per text, in the company's own currency (USD 52,907 millionths).
+        return ['ok' => true, 'ref' => 'SMZQX' . count(self::$calls), 'cost' => ProviderSpend::cost('sms', 'twilio', null, ['texts' => 1]), 'error' => null];
     }
 }
 
@@ -849,6 +853,7 @@ function handed(string $body): int
 function fresh(array $o = []): array
 {
     q('DELETE FROM tblSmsMessage WHERE siteID IN (?, ?)', 'ii', [ORG, ORG2]);
+    q("DELETE FROM tblProviderSpend WHERE service = 'sms' AND siteID IN (?, ?)", 'ii', [ORG, ORG2]);
     RecordingSms::$calls  = [];
     RecordingSms::$answer = 'accept';
     RecordingSms::$during = null;
@@ -1015,7 +1020,7 @@ $held             = rowOf($A);
 ok(
     'A1 a text that is not urgent, for a person inside their quiet hours, is HELD: send() answers false and "held", nothing is handed to the provider, and the record says queued, "quiet-hours", NOT sent (an empty "sent at"), untaken, with no cost',
     $went === false && $outcome === 'held' && RecordingSms::$calls === [] && $held !== null && $held['status'] === 'queued' && $held['errorMsg'] === Sms::HELD_REASON
-        && $held['sentAt'] === null && $held['claimedAt'] === null && $held['providerRef'] === null && $held['costPence'] === null && (int) $held['recipientUserID'] === WHO['follow'],
+        && $held['sentAt'] === null && $held['claimedAt'] === null && $held['providerRef'] === null && $held['costMillionths'] === null && $held['costCurrency'] === null && (int) $held['recipientUserID'] === WHO['follow'],
     json_encode([$went, $outcome, RecordingSms::$calls, $held])
 );
 ok(
@@ -1043,7 +1048,8 @@ ok(
 );
 ok(
     'A5 its record now says SENT, in plain words that it was held first, with the provider\'s reference and the cost; "taken" is that moment in UTC and "sent at" is that moment on the connection\'s own clock (not the moment it was written)',
-    $sent !== null && $sent['status'] === 'sent' && $sent['errorMsg'] === Sms::SENT_AFTER_HOLD && $sent['providerRef'] === 'SMZQX1' && (int) $sent['costPence'] === 4
+    $sent !== null && $sent['status'] === 'sent' && $sent['errorMsg'] === Sms::SENT_AFTER_HOLD && $sent['providerRef'] === 'SMZQX1' && $sent['costCurrency'] === 'USD' && (int) $sent['costMillionths'] === 52907
+        && ProviderSpend::monthTotals($mysqli, ORG, 'sms') === ['USD' => 52907]
         && $sent['claimedAt'] === utc($W1 + 1) && $sent['sentAt'] === onClock($W1 + 1, DB_ZONE) && $sent['createdAt'] === onClock($FRI20, DB_ZONE) && $sent['heldUseBy'] === utc($FRI20 + 172800),
     json_encode($sent)
 );
@@ -1482,7 +1488,7 @@ $row   = rowOf($D7);
 ok(
     'D7 a text the provider REFUSES is recorded as failed, saying it was held and then refused and why, and is not tried again (a refusal is often a time-out, and a text that timed out may have gone)',
     $refused['failed'] === 1 && $refused['sent'] === 0 && $again === quietRun(0) && handed($D7) === 1 && $row['status'] === 'failed'
-        && $row['errorMsg'] === 'Held for quiet hours, then refused by the provider: twilio-http-500' && $row['costPence'] === null && $row['sentAt'] === onClock($W1 + 60, DB_ZONE),
+        && $row['errorMsg'] === 'Held for quiet hours, then refused by the provider: twilio-http-500' && $row['costMillionths'] === null && ProviderSpend::monthTotals($mysqli, ORG, 'sms') === [] && $row['sentAt'] === onClock($W1 + 60, DB_ZONE),
     json_encode([$refused, $again, story($row)])
 );
 
@@ -2304,9 +2310,15 @@ ok(
     json_encode([$counts, RecordingSms::$calls])
 );
 
-// The month's cost. A weekend whose Saturday is the first of a month, with
-// the database's clock on the quiet hours' own zone, so that the Friday
-// evening is in one month and the Saturday evening in the next.
+// The month's cost (#993). It is recorded in `tblProviderSpend` at the moment a text
+// really GOES, once, in the UTC month of that moment; a held text costs nothing until
+// it is handed over, and a text the provider refused costs nothing at all. (Until #993
+// this section moved the database's clock across a month end and counted by "sent at";
+// the new record's month is `gmdate()` on this machine, which a test cannot move, so
+// the month-end behaviour is no longer exercised here — said, not hidden. What the
+// record does exercise is exactly-once and only-when-sent.)
+// (The weekend is the one whose Saturday is the first of a month, as before, because the
+// list-of-recent-texts check below reads these two rows' moments.)
 $first = saturdayTheFirst();
 [$m0, $m1] = weekendOf($first, QUIET_ZONE);
 $mysqli->query("SET time_zone = '" . QUIET_ZONE . "'");
@@ -2316,16 +2328,18 @@ $L4a = 'ZQXT L4 sent at once on the last evening of a month';
 $L4b = 'ZQXT L4 held on the last evening of a month';
 text('off', 'rota_changes', $L4a);
 text('follow', 'prayer_assignment', $L4b);
-$lastMonth = RecordingSms::monthSpendPence(ORG);
+$sentAtOnce = ProviderSpend::monthTotals($mysqli, ORG, 'sms');
 at($m1 + 60);
-$newMonthBefore = RecordingSms::monthSpendPence(ORG);
 run();
-$newMonthAfter = RecordingSms::monthSpendPence(ORG);
+$afterRun = ProviderSpend::monthTotals($mysqli, ORG, 'sms');
+run();
+$afterSecondRun = ProviderSpend::monthTotals($mysqli, ORG, 'sms');
 $mysqli->query("SET time_zone = '" . DB_ZONE . "'");
 ok(
-    'L4 THE COST: a text held on the last evening of a month and sent on the first of the next costs 4p in the month it WENT. Last month\'s spend was the one text sent at once (4p); the new month\'s is 0p before the run and 4p after it',
-    $lastMonth === 4 && $newMonthBefore === 0 && $newMonthAfter === 4 && (int) rowOf($L4b)['costPence'] === 4 && substr((string) rowOf($L4b)['createdAt'], 0, 7) !== substr((string) rowOf($L4b)['sentAt'], 0, 7),
-    json_encode([$lastMonth, $newMonthBefore, $newMonthAfter, rowOf($L4b)['createdAt'], rowOf($L4b)['sentAt']]) . ' (the weekend of Saturday ' . $first . ')'
+    'L4 THE COST: one text sent at once is 52,907 millionths of a dollar in the month\'s record; the text that was HELD adds nothing until it goes, then exactly one more charge (105,814), and running the job again adds nothing',
+    $sentAtOnce === ['USD' => 52907] && $afterRun === ['USD' => 105814] && $afterSecondRun === ['USD' => 105814]
+        && $sentAtOnce !== null && (int) rowOf($L4b)['costMillionths'] === 52907 && rowOf($L4b)['costCurrency'] === 'USD',
+    json_encode([$sentAtOnce, $afterRun, $afterSecondRun, rowOf($L4b)])
 );
 
 $errors = is_file($scratch . $sep . 'errors.log') === true ? (string) file_get_contents($scratch . $sep . 'errors.log') : '';

@@ -2846,7 +2846,7 @@ final class PublicWebsiteSetup
      * (the door's is one line), and NO redirects — the door never sends one,
      * so an answer that does is not the door's, whatever it leads to.
      *
-     * @return array{timeoutSeconds:int, connectTimeoutSeconds:int, maxBytes:int, maxRedirects:int, httpsOnly:bool, accept:string, deadline:float}
+     * @return array{timeoutSeconds:int, connectTimeoutSeconds:int, maxBytes:int, maxRedirects:int, httpsOnly:bool, accept:string, purpose:string, deadline:float}
      */
     public static function publicAddressFetchOptions(): array
     {
@@ -2857,6 +2857,7 @@ final class PublicWebsiteSetup
             'maxRedirects'          => 0,
             'httpsOnly'             => true,
             'accept'                => 'text/plain',
+            'purpose'               => 'website check',
             'deadline'              => self::CHECK_DEADLINE_SECONDS + microtime(true),
         ];
     }
@@ -2924,7 +2925,7 @@ final class PublicWebsiteSetup
      * website: the per-step limit, the redirect limit, https only, and an
      * overall DEADLINE, worked out at the moment of asking.
      *
-     * @return array{timeoutSeconds:int, connectTimeoutSeconds:int, maxBytes:int, maxRedirects:int, httpsOnly:bool, deadline:float}
+     * @return array{timeoutSeconds:int, connectTimeoutSeconds:int, maxBytes:int, maxRedirects:int, httpsOnly:bool, purpose:string, deadline:float}
      */
     public static function mainWebsiteFetchOptions(): array
     {
@@ -2934,6 +2935,10 @@ final class PublicWebsiteSetup
             'maxBytes'              => 2000000,
             'maxRedirects'          => self::CHECK_MAX_REDIRECTS,
             'httpsOnly'             => true,
+            // Said in the User-Agent: this is a set-up check, not a calendar
+            // import (the default label), which a website's owner reading their
+            // logs would otherwise be told (#993's package-A leftovers).
+            'purpose'               => 'website check',
             'deadline'              => microtime(true) + self::CHECK_DEADLINE_SECONDS,
         ];
     }

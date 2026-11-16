@@ -672,9 +672,10 @@ final class OutsideServices
                          . 'European Central Bank (its daily list of exchange rates).',
             'from'      => 'server',
             'when'      => 'When the portal fetches an outside calendar, searches for a hymn, looks up a barcode, or '
-                         . 'checks the organisation\'s own website is set up; and, about once a day while the '
-                         . 'installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of '
-                         . 'exchange rates.',
+                         . 'checks the organisation\'s own website is set up; and, while the installation\'s '
+                         . 'exchange-rate switch is on, it fetches the European Central Bank\'s list of exchange rates '
+                         . 'once a day (tried again every hour after a failure), and whenever a global administrator '
+                         . 'asks for it.',
             'sends'     => 'Only what is being looked up: the calendar\'s address, the hymn searched for, the barcode. '
                          . 'Nothing about you or anybody else. For the exchange rates, nothing about anybody: only '
                          . 'the request for the published list, which carries this server\'s internet address and the '

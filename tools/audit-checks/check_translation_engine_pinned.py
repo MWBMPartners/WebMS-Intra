@@ -84,7 +84,11 @@ WHAT IT CANNOT SEE, said plainly
 The CODE of the other classes and pages the engine works with. What no longer
 matters is any of them silently REPLACING a function or constant the engine
 calls — that is closed above. What still matters, because those are real
-classes the engine calls by design: `SettingLimit` (the three-tier arithmetic,
+classes the engine calls by design: `ProviderSpend` (since #993 it prices each
+call, records the month's money and decides whether the money limit is
+reached; `tools/provider-spend-selftest.php` is what covers it, and an edit
+making it answer "allowed" or a cost of nothing would pass THIS gate),
+`SettingLimit` (the three-tier arithmetic,
 with its own self-test), `App::settings()`, `Site::id()`, `ContentTranslation`,
 and the one caller, `web/_apps/translation/api/content.php`, which could in
 principle reach a provider by some other route. Any of them could be edited to

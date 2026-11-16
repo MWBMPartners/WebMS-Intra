@@ -170,6 +170,10 @@ if ($out === false) {
     $why = Translation::lastRefusal();
     if ($why === 'money' || $why === 'calls') {
         $reason = 'cap-reached';
+    } elseif ($why === 'no-rate') {
+        // #993: a limit has to be compared and there is no exchange rate (or
+        // no currency) to compare in. Nothing was sent (D-192).
+        $reason = 'no-rate';
     } elseif ($why === 'unreadable') {
         $reason = 'limit-unknown';
     } elseif ($why === 'not-set-up') {

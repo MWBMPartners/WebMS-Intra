@@ -404,12 +404,15 @@ if ($installationCardWasSent() === true) {
     }
     if (isset($currency['write']) === true) {
         // D-139, said where the change is made: nothing already recorded moves.
-        // And the one place it DOES show (#993): spending with outside providers
-        // is still kept as a bare number shown in the installation's currency.
+        // And the one place a figure is READ differently (#993, D-173, D-194):
+        // spending with outside companies is recorded in each company's own
+        // currency and is not affected, but a monthly limit already saved keeps
+        // its number and is read in the NEW currency, not converted.
         $said[]   = 'The installation\'s currency is now ' . $currencyWord($currency['write']) . '. Every amount already '
             . 'recorded keeps the currency it was recorded in; organisations that follow the installation record new '
-            . 'amounts in the new one. Spending with outside providers, and its monthly limits, are shown in the '
-            . 'installation\'s currency and are not converted.';
+            . 'amounts in the new one. Spending with outside companies is recorded in each company\'s own currency '
+            . 'and is not affected; a monthly limit already saved keeps its number and is now read in the new '
+            . 'currency, so it is not converted.';
         $logged[] = 'currency ' . ($currencyBefore === '' ? 'none' : $currencyBefore) . ' to ' . ($currency['write'] === '' ? 'none' : $currency['write']);
     }
     foreach ([['country', $country, $countryBefore, $countryWord], ['currency', $currency, $currencyBefore, $currencyWord]] as [$what, $answer, $now, $word]) {

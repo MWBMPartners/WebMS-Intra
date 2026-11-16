@@ -1179,7 +1179,12 @@ final class SafeFetch
         if (is_string($o['accept']) === false || $o['accept'] === '' || preg_match('/[\x00-\x1F\x7F]/', $o['accept']) === 1) {
             throw new \InvalidArgumentException($who . ': option "accept" must be a single line of text.');
         }
-        if (is_string($o['purpose']) === false || preg_match('/^[A-Za-z][A-Za-z ]{0,38}[A-Za-z]$/', $o['purpose']) !== 1) {
+        // `\z`, never `$`: in PCRE `$` also matches just BEFORE a final line
+        // break, so "exchange rates\n" passed and the label went into a request
+        // header carrying a line break. (Found by package A's independent check;
+        // nothing pinned it until #993's package B, which tests both a trailing
+        // and a middle line break.)
+        if (is_string($o['purpose']) === false || preg_match('/^[A-Za-z][A-Za-z ]{0,38}[A-Za-z]\z/', $o['purpose']) !== 1) {
             throw new \InvalidArgumentException($who . ': option "purpose" must be a short label of letters and spaces.');
         }
         if ($o['deadline'] !== null && is_float($o['deadline']) === false && is_int($o['deadline']) === false) {

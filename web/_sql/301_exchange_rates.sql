@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS `tblExchangeRateFetch` (
     `fetchID`        TINYINT     NOT NULL COMMENT 'Always 1: there is one row, holding the state of the daily fetch',
     `lastAttemptUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last tried to fetch the rates, in UTC, whether or not it worked',
     `lastSuccessUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last fetched the rates successfully, in UTC',
-    `lastProblem`    VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'One fixed word saying why the last attempt failed (http, capped, unreadable, no-xml, refused), or empty when it worked. Never the reply itself',
+    `lastProblem`    VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'One fixed word saying why the last attempt failed (http, capped, unreadable, no-xml, refused, unreachable, future-date, not-saved, test-blocked; each is explained by ExchangeRates::problemWords()), or empty when it worked. Never the reply itself',
     PRIMARY KEY (`fetchID`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='The state of the daily exchange-rate fetch: one row (#993).';

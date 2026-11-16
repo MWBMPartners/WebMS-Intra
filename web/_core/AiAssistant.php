@@ -17,6 +17,15 @@
  * (ai_assist.userDailyCap) both checked before any API call; every call is
  * recorded in tblAiUsage with token counts + cost for the audit trail.
  *
+ * THE MONEY (#993; D-173, D-192, D-194). A call's cost is worked out by
+ * `ProviderSpend::cost()` in the currency the company charges in, added to
+ * `tblProviderSpend` (which an erasure does not touch), and the monthly cap is
+ * checked by `ProviderSpend::whyRefused()`: the installation's figure in the
+ * installation's currency AND an organisation's own row in its own, the
+ * stricter winning. Until #993 the cap was read from the MERGED settings, so
+ * the installation did not cap an organisation (D-013), and the month's spend
+ * was a sum over `tblAiUsage`, which an erasure lowered.
+ *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/277
  * -----------------------------------------------------------------------------
@@ -36,28 +45,68 @@ class AiAssistant
     ];
 
     /**
+     * Why the last `improve()` in this request answered null, as one word, so
+     * the endpoint can say WHICH limit stopped it without working it out again
+     * (the engine knows; a fresh read cannot tell "the provider failed" from
+     * "the limit was already reached" — #762's rule).
+     *
+     *   ''            nothing refused (or improve() has not run)
+     *   'bad-request' an unknown kind or empty text
+     *   'off'         AI assist is switched off
+     *   'money'       the month's money limit is reached
+     *   'no-rate'     a limit has to be checked and there is no exchange rate
+     *                 (or no currency chosen) to check it in (D-192)
+     *   'unreadable'  this month's spend could not be read: nothing was sent
+     *   'daily'       this person's daily limit is reached
+     *   'provider'    the company was asked and did not give a usable answer
+     */
+    private static string $lastRefusal = '';
+
+    /** Why the last `improve()` in this request answered null. See the property. */
+    public static function lastRefusal(): string
+    {
+        return self::$lastRefusal;
+    }
+
+    /**
      * Improve a chunk of user text under the given prompt kind. Returns
      * the polished string, or null when blocked by cap / rate-limit /
      * provider failure (caller decides what to surface to the user).
      */
     public static function improve(int $siteId, int $userId, string $kind, string $userInput): ?string
     {
+        self::$lastRefusal = '';
         if (in_array($kind, self::KINDS, true) === false) {
+            self::$lastRefusal = 'bad-request';
             return null;
         }
         $userInput = trim($userInput);
         if ($userInput === '') {
+            self::$lastRefusal = 'bad-request';
             return null;
         }
 
         $settings = App::settings()['ai_assist'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
+            self::$lastRefusal = 'off';
             return null;
         }
-        if (self::monthSpendPence($siteId) >= (int) ($settings['monthCapPence'] ?? 5000)) {
+        $provider = (string) ($settings['provider'] ?? 'anthropic');
+        // 💰 THE MONEY LIMIT, from the database at each level and never from
+        //    the merged settings (D-013, D-194): see the class header. A free
+        //    local route is still checked against what was already spent, as
+        //    before, and a limit of 0 means nothing may be spent.
+        $whyMoney = ProviderSpend::whyRefused(App::db(), $siteId, 'ai', ProviderSpend::currencyOf('ai', $provider));
+        if ($whyMoney !== '') {
+            self::$lastRefusal = match ($whyMoney) {
+                'installation-limit', 'organisation-limit', 'no-budget' => 'money',
+                'no-rate', 'no-currency'                   => 'no-rate',
+                default                                    => 'unreadable',
+            };
             return null;
         }
         if (self::userDailyCount($siteId, $userId) >= (int) ($settings['userDailyCap'] ?? 20)) {
+            self::$lastRefusal = 'daily';
             return null;
         }
 
@@ -70,9 +119,9 @@ class AiAssistant
             '{org_type}'   => $orgType,
         ]);
 
-        $provider = (string) ($settings['provider'] ?? 'anthropic');
         $result = self::providerCall($provider, $settings, $prompt);
         if ($result === null) {
+            self::$lastRefusal = 'provider';
             return null;
         }
 
@@ -83,7 +132,7 @@ class AiAssistant
             $provider,
             (int) $result['inputTokens'],
             (int) $result['outputTokens'],
-            (int) $result['costPence'],
+            $result['cost'],
             $userInput,
             (string) $result['text']
         );
@@ -142,24 +191,6 @@ class AiAssistant
         ];
     }
 
-    public static function monthSpendPence(int $siteId): int
-    {
-        $db = App::db();
-        $stmt = $db->prepare(
-            'SELECT COALESCE(SUM(costPence), 0) FROM tblAiUsage '
-            . 'WHERE siteID = ? AND occurredAt >= DATE_FORMAT(NOW(), "%Y-%m-01")'
-        );
-        if ($stmt === false) {
-            return 0;
-        }
-        $stmt->bind_param('i', $siteId);
-        $stmt->execute();
-        $stmt->bind_result($s);
-        $stmt->fetch();
-        $stmt->close();
-        return (int) $s;
-    }
-
     public static function userDailyCount(int $siteId, int $userId): int
     {
         $db = App::db();
@@ -195,8 +226,8 @@ class AiAssistant
     }
 
     // -------------------------------------------------------------------------
-    // Providers — each returns ['text','inputTokens','outputTokens','costPence']
-    //   or null on failure.
+    // Providers — each returns ['text','inputTokens','outputTokens','cost'] or
+    //   null on failure; 'cost' is ProviderSpend::cost()'s answer (null: free).
     // -------------------------------------------------------------------------
 
     private static function providerCall(string $provider, array $settings, string $prompt): ?array
@@ -250,8 +281,8 @@ class AiAssistant
         $text = trim((string) $body['content'][0]['text']);
         $inTok  = (int) ($body['usage']['input_tokens']  ?? 0);
         $outTok = (int) ($body['usage']['output_tokens'] ?? 0);
-        $cost   = (int) ceil((($inTok * 0.00008) + ($outTok * 0.0004)) * 100);
-        return ['text' => $text, 'inputTokens' => $inTok, 'outputTokens' => $outTok, 'costPence' => max(0, $cost)];
+        return ['text' => $text, 'inputTokens' => $inTok, 'outputTokens' => $outTok,
+                'cost' => ProviderSpend::cost('ai', 'anthropic', $model, ['in' => $inTok, 'out' => $outTok])];
     }
 
     private static function openaiCall(array $settings, string $prompt): ?array
@@ -287,8 +318,8 @@ class AiAssistant
         }
         $inTok  = (int) ($body['usage']['prompt_tokens']     ?? 0);
         $outTok = (int) ($body['usage']['completion_tokens'] ?? 0);
-        $cost   = (int) ceil((($inTok * 0.00015) + ($outTok * 0.0006)) * 100);
-        return ['text' => $text, 'inputTokens' => $inTok, 'outputTokens' => $outTok, 'costPence' => max(0, $cost)];
+        return ['text' => $text, 'inputTokens' => $inTok, 'outputTokens' => $outTok,
+                'cost' => ProviderSpend::cost('ai', 'openai', $model, ['in' => $inTok, 'out' => $outTok])];
     }
 
     /**
@@ -323,22 +354,30 @@ class AiAssistant
         if ($text === '') {
             return null;
         }
-        return ['text' => $text, 'inputTokens' => 0, 'outputTokens' => 0, 'costPence' => 0];
+        return ['text' => $text, 'inputTokens' => 0, 'outputTokens' => 0, 'cost' => null];
     }
 
-    private static function recordUsage(int $siteId, int $userId, string $kind, string $provider, int $inTok, int $outTok, int $cost, string $inputSample, string $outputSample): void
+    /**
+     * @param array{currency:string, millionths:int}|null $cost
+     */
+    private static function recordUsage(int $siteId, int $userId, string $kind, string $provider, int $inTok, int $outTok, ?array $cost, string $inputSample, string $outputSample): void
     {
         $db = App::db();
+        // The month's money: the row below is the audit trail (an erasure
+        // deletes it), this is what the limit reads (an erasure does not).
+        ProviderSpend::record($db, $siteId, 'ai', $cost);
+        $costCurrency   = $cost === null ? null : (string) $cost['currency'];
+        $costMillionths = $cost === null ? null : (int) $cost['millionths'];
         $inSnip  = mb_substr($inputSample, 0, 1000);
         $outSnip = mb_substr($outputSample, 0, 1000);
         $stmt = $db->prepare(
-            'INSERT INTO tblAiUsage (siteID, userID, promptKind, provider, inputTokens, outputTokens, costPence, inputSample, outputSample) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            'INSERT INTO `tblAiUsage` (`siteID`, `userID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costCurrency`, `costMillionths`, `inputSample`, `outputSample`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         if ($stmt === false) {
             return;
         }
-        $stmt->bind_param('iissiiiss', $siteId, $userId, $kind, $provider, $inTok, $outTok, $cost, $inSnip, $outSnip);
+        $stmt->bind_param('iissiisiss', $siteId, $userId, $kind, $provider, $inTok, $outTok, $costCurrency, $costMillionths, $inSnip, $outSnip);
         $stmt->execute();
         $stmt->close();
     }

@@ -249,17 +249,22 @@ check('B2 the four per-app currency settings are not seeded, and org.currency is
 // money. Each must have a `currency` column, or be named below with the reason
 // it does not; and the tables with one must be exactly Currency::OWN_TABLES
 // and Currency::CHILD_TABLES, which the labelling of old rows walks.
+// Since #993 (D-173) each of these records the charge in the OUTSIDE COMPANY's own
+// currency, in `costCurrency` beside `costMillionths`. It is deliberately NOT a
+// column called `currency`: that exact name makes B4 demand the table is one of
+// an organisation's own money tables, whose old-row labelling would stamp the
+// organisation's currency onto what a company charged in dollars.
 $notOrganisationMoney = [
-    'tblAiUsage'            => 'the INSTALLATION\'s spending with an AI provider (one key pays for every organisation; its currency is a separate question, raised as an issue)',
-    'tblContentTranslation' => 'a cache of translations; its cost is the installation\'s spending with a provider',
-    'tblTranslationUsage'   => 'the installation\'s spending with a translation provider',
-    'tblSmsMessage'         => 'the installation\'s spending with a text-message provider',
-    'tblTranscript'         => 'the installation\'s spending with a transcription provider',
+    'tblAiUsage'            => 'spending with an AI company, kept in that company\'s own currency in `costCurrency` (D-173)',
+    'tblContentTranslation' => 'a cache of translations; each row\'s cost is spending with a translation company, in that company\'s own currency in `costCurrency` (D-173)',
+    'tblSmsMessage'         => 'spending with a text-message company, kept in that company\'s own currency in `costCurrency` (D-173)',
+    'tblTranscript'         => 'spending with a transcription company, kept in that company\'s own currency in `costCurrency` (D-173)',
+    'tblProviderSpend'      => 'the month\'s spending with outside companies, per service, kept in each company\'s own currency in `costCurrency` (D-173)',
 ];
 $moneyShaped = [];
 foreach (rows($db, "SELECT `TABLE_NAME` AS `t`, `COLUMN_NAME` AS `c`, `DATA_TYPE` AS `d` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE()") as $col) {
     if (in_array($col['d'], ['int', 'bigint', 'decimal', 'mediumint', 'smallint'], true) === true
-        && preg_match('/(Pence|Amount|^amount$|^cashTotal|^chequeTotal|^envelopeTotal|^payAmount|^unitCost|^lineTotal)/', (string) $col['c']) === 1) {
+        && preg_match('/(Pence|Amount|Millionths$|^amount$|^cashTotal|^chequeTotal|^envelopeTotal|^payAmount|^unitCost|^lineTotal)/', (string) $col['c']) === 1) {
         $moneyShaped[(string) $col['t']] = true;
     }
 }
@@ -277,6 +282,20 @@ $staleReasons = array_values(array_filter(array_keys($notOrganisationMoney), sta
     => isset($moneyShaped[$t]) === false || isset($withCurrency[$t]) === true));
 check('B3 every table holding money keeps its own currency: each money-shaped table has a `currency` column or is named here with the reason it does not, and each reason is still true (fails BOTH ways)',
     $noCurrency === [] && $staleReasons === [], 'no currency column: ' . json_encode($noCurrency) . '; reason no longer true: ' . json_encode($staleReasons));
+// Every table in that list keeps the OUTSIDE COMPANY's currency beside its amount.
+$spendTables = array_keys($notOrganisationMoney);
+$haveCostCurrency = array_column(rows($db, "SELECT DISTINCT `TABLE_NAME` AS `t` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` = 'costCurrency'"), 't');
+sort($spendTables);
+sort($haveCostCurrency);
+check('B3b every spending-with-an-outside-company table keeps costCurrency beside its amount, and no table has one that is not listed (fails BOTH ways)',
+    $spendTables === $haveCostCurrency,
+    'listed: ' . json_encode($spendTables) . '; with the column: ' . json_encode($haveCostCurrency));
+// B1's no-built-in-default rule, for costCurrency too: a writer that forgets it must leave it EMPTY, never a real currency.
+$costCurrencyDefaults = rows($db, "SELECT `TABLE_NAME` AS `t`, `COLUMN_DEFAULT` AS `d`, `IS_NULLABLE` AS `n` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` = 'costCurrency'");
+$builtInCost = array_values(array_filter($costCurrencyDefaults, static fn (array $r): bool
+    => $r['d'] !== null && $r['d'] !== '' && $r['d'] !== "''" && strtoupper((string) $r['d']) !== 'NULL'));
+check('B3c no costCurrency column defaults to a real currency (a writer that forgets it never records dollars or pounds)',
+    $builtInCost === [] && $costCurrencyDefaults !== [], json_encode($builtInCost));
 check('B4 the tables with a `currency` column are EXACTLY Currency::OWN_TABLES and Currency::CHILD_TABLES (fails BOTH ways: a table missing there would keep rows nobody can label)',
     $listed === $withCurrencyNames,
     'with a column, not listed: ' . json_encode(array_values(array_diff($withCurrencyNames, $listed))) . '; listed, no column: ' . json_encode(array_values(array_diff($listed, $withCurrencyNames))));

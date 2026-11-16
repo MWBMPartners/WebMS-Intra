@@ -430,7 +430,11 @@ class Sms
         $result = static::providerSend($provider, $settings, $number, $body);
 
         $status = $result['ok'] === true ? 'sent' : 'failed';
-        self::record($siteId, $userId, $number, $kept, $category, $status, $result['ref'], $result['costPence'], $result['error']);
+        $cost = $result['ok'] === true ? ($result['cost'] ?? null) : null;
+        // 💷 The month's money (#993): recorded in the company's own currency in
+        //    the record an erasure does not touch, only for a text that went.
+        ProviderSpend::record(App::db(), $siteId, 'sms', $cost);
+        self::record($siteId, $userId, $number, $kept, $category, $status, $result['ref'], $cost, $result['error']);
         self::$lastOutcome = $status;
 
         return $result['ok'];
@@ -574,31 +578,6 @@ class Sms
     }
 
     /**
-     * What this organisation's texts have cost so far this month, in pence.
-     *
-     * By the moment each text was sent, for the reason given at
-     * sentTodayCount(): a text held on the last day of a month and sent on
-     * the first costs money in the month it went.
-     */
-    public static function monthSpendPence(int $siteId): int
-    {
-        $db = App::db();
-        $stmt = $db->prepare(
-            'SELECT COALESCE(SUM(costPence), 0) FROM tblSmsMessage '
-            . "WHERE siteID = ? AND COALESCE(sentAt, createdAt) >= DATE_FORMAT(NOW(), '%Y-%m-01')"
-        );
-        if ($stmt === false) {
-            return 0;
-        }
-        $stmt->bind_param('i', $siteId);
-        $stmt->execute();
-        $stmt->bind_result($s);
-        $stmt->fetch();
-        $stmt->close();
-        return (int) $s;
-    }
-
-    /**
      * Generate + store a 6-digit verification code (10-min lifetime),
      * then send it to the number. Returns true on dispatch success.
      */
@@ -685,21 +664,23 @@ class Sms
      *        recorded, the day's-limit refusal included; that is left as it
      *        was.)
      */
-    private static function record(int $siteId, ?int $userId, string $number, string $body, string $category, string $status, ?string $providerRef, ?int $costPence, ?string $error, bool $stampSentAt = true): void
+    private static function record(int $siteId, ?int $userId, string $number, string $body, string $category, string $status, ?string $providerRef, ?array $cost, ?string $error, bool $stampSentAt = true): void
     {
         $db = App::db();
         $stmt = $db->prepare(
             'INSERT INTO tblSmsMessage (siteID, recipientUserID, recipientNumber, body, category, status, '
-            . ' provider, providerRef, costPence, errorMsg, sentAt) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
+            . ' provider, providerRef, costCurrency, costMillionths, errorMsg, sentAt) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
         );
         if ($stmt === false) {
             return;
         }
-        $provider = (string) (App::settings()['sms']['provider'] ?? 'twilio');
+        $provider       = (string) (App::settings()['sms']['provider'] ?? 'twilio');
+        $costCurrency   = $cost === null ? null : (string) $cost['currency'];
+        $costMillionths = $cost === null ? null : (int) $cost['millionths'];
         $stmt->bind_param(
-            'iissssssis',
-            $siteId, $userId, $number, $body, $category, $status, $provider, $providerRef, $costPence, $error
+            'iisssssssis',
+            $siteId, $userId, $number, $body, $category, $status, $provider, $providerRef, $costCurrency, $costMillionths, $error
         );
 
         // 🧯 IF THE PERSON HAS GONE, KEEP THE RECORD AND DROP THE NAME.
@@ -734,17 +715,17 @@ class Sms
             $stmt->close();
             $stmt = $db->prepare(
                 'INSERT INTO tblSmsMessage (siteID, recipientUserID, recipientNumber, body, category, status, '
-                . ' provider, providerRef, costPence, errorMsg, sentAt) '
-                . 'VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
+                . ' provider, providerRef, costCurrency, costMillionths, errorMsg, sentAt) '
+                . 'VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ' . ($stampSentAt === true ? 'NOW()' : 'NULL') . ')'
             );
             if ($stmt === false) {
                 return;
             }
-            // Nine values, the person left out: site, number, body, kind,
-            // status, provider, reference, cost (a number), reason.
+            // Ten values, the person left out: site, number, body, kind,
+            // status, provider, reference, currency, cost (a number), reason.
             $stmt->bind_param(
-                'issssssis',
-                $siteId, $number, $body, $category, $status, $provider, $providerRef, $costPence, $error
+                'isssssssis',
+                $siteId, $number, $body, $category, $status, $provider, $providerRef, $costCurrency, $costMillionths, $error
             );
             $stmt->execute();
         }
@@ -1235,7 +1216,7 @@ class Sms
      * A text the provider refused is NOT tried again: a refusal is often a
      * time-out, and nobody can tell whether a text that timed out went.
      *
-     * @param array{ok: bool, ref: string|null, costPence: int|null, error: string|null} $result
+     * @param array{ok: bool, ref: string|null, cost: array{currency:string, millionths:int}|null, error: string|null} $result
      */
     private static function finishHeld(mysqli $db, int $messageId, string $provider, array $result): void
     {
@@ -1244,15 +1225,30 @@ class Sms
             ? self::SENT_AFTER_HOLD
             : mb_substr('Held for quiet hours, then refused by the provider: ' . (string) ($result['error'] ?? 'no reason given'), 0, 255);
         $ref    = $result['ref'] === null ? null : mb_substr((string) $result['ref'], 0, 100);
-        $cost   = $result['costPence'];
+        $cost   = $result['ok'] === true ? ($result['cost'] ?? null) : null;
+        $costCurrency   = $cost === null ? null : (string) $cost['currency'];
+        $costMillionths = $cost === null ? null : (int) $cost['millionths'];
         $held   = self::HELD_REASON;
         $stmt   = $db->prepare(
-            'UPDATE tblSmsMessage SET status = ?, provider = ?, providerRef = ?, costPence = ?, errorMsg = ?, sentAt = NOW() '
+            'UPDATE tblSmsMessage SET status = ?, provider = ?, providerRef = ?, costCurrency = ?, costMillionths = ?, errorMsg = ?, sentAt = NOW() '
             . "WHERE messageID = ? AND status = 'queued' AND errorMsg = ? AND claimedAt IS NOT NULL"
         );
-        $stmt->bind_param('sssisis', $status, $provider, $ref, $cost, $words, $messageId, $held);
+        $stmt->bind_param('ssssisis', $status, $provider, $ref, $costCurrency, $costMillionths, $words, $messageId, $held);
         $stmt->execute();
+        $moved = $stmt->affected_rows;
         $stmt->close();
+        // 💷 The month's money (#993), once, and only when this call is the one
+        //    that settled the row: a second run finds it no longer held.
+        if ($moved === 1 && $cost !== null) {
+            $site = $db->prepare('SELECT `siteID` FROM `tblSmsMessage` WHERE `messageID` = ?');
+            $site->bind_param('i', $messageId);
+            $site->execute();
+            $row = $site->get_result()->fetch_assoc();
+            $site->close();
+            if ($row !== null) {
+                ProviderSpend::record($db, (int) $row['siteID'], 'sms', $cost);
+            }
+        }
     }
 
     /**
@@ -1454,7 +1450,7 @@ class Sms
 
     /**
      * Dispatch to the configured provider. Each provider returns
-     * ['ok' => bool, 'ref' => string|null, 'costPence' => int|null,
+     * ['ok' => bool, 'ref' => string|null, 'cost' => ProviderSpend::cost()'s answer or null,
      *  'error' => string|null] so the caller can persist a uniform row.
      *
      * `protected`, and called as `static::providerSend()`, so that
@@ -1472,7 +1468,7 @@ class Sms
             case 'aws':
                 return self::sendAwsSns($settings, $number, $body);
             default:
-                return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'unknown-provider'];
+                return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'unknown-provider'];
         }
     }
 
@@ -1487,7 +1483,7 @@ class Sms
         $token  = (string) ($settings['twilio']['token'] ?? '');
         $from   = (string) ($settings['fromNumber'] ?? '');
         if ($sid === '' || $token === '' || $from === '') {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'twilio-not-configured'];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'twilio-not-configured'];
         }
         $url = 'https://api.twilio.com/2010-04-01/Accounts/' . rawurlencode($sid) . '/Messages.json';
         $ch = curl_init($url);
@@ -1506,13 +1502,13 @@ class Sms
         // freed when it goes out of scope. The call has done nothing since then,
         // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
         if ($resp === false || $code < 200 || $code >= 300) {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'twilio-http-' . $code];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'twilio-http-' . $code];
         }
         $body = json_decode((string) $resp, true);
         $ref  = is_array($body) === true ? (string) ($body['sid'] ?? '') : '';
         // Twilio doesn't return price on initial accept (it's added on the
-        // status callback); 4p is a safe pessimistic placeholder.
-        return ['ok' => true, 'ref' => $ref !== '' ? $ref : null, 'costPence' => 4, 'error' => null];
+        // status callback), so the cost is ProviderSpend's flat estimate per text.
+        return ['ok' => true, 'ref' => $ref !== '' ? $ref : null, 'cost' => ProviderSpend::cost('sms', 'twilio', null, ['texts' => 1]), 'error' => null];
     }
 
     /**
@@ -1525,7 +1521,7 @@ class Sms
         $key  = (string) ($settings['messagebird']['apiKey'] ?? '');
         $from = (string) ($settings['fromNumber'] ?? '');
         if ($key === '' || $from === '') {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'messagebird-not-configured'];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'messagebird-not-configured'];
         }
         $ch = curl_init('https://rest.messagebird.com/messages');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -1542,11 +1538,11 @@ class Sms
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'messagebird-http-' . $code];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'messagebird-http-' . $code];
         }
         $body = json_decode((string) $resp, true);
         $ref  = is_array($body) === true ? (string) ($body['id'] ?? '') : '';
-        return ['ok' => true, 'ref' => $ref !== '' ? $ref : null, 'costPence' => 5, 'error' => null];
+        return ['ok' => true, 'ref' => $ref !== '' ? $ref : null, 'cost' => ProviderSpend::cost('sms', 'messagebird', null, ['texts' => 1]), 'error' => null];
     }
 
     /**
@@ -1562,7 +1558,7 @@ class Sms
         $secret    = (string) ($settings['aws']['secret'] ?? '');
         $region    = (string) ($settings['aws']['region'] ?? 'eu-west-1');
         if ($accessKey === '' || $secret === '') {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'aws-not-configured'];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'aws-not-configured'];
         }
         $host    = 'sns.' . $region . '.amazonaws.com';
         $payload = http_build_query([
@@ -1602,12 +1598,12 @@ class Sms
         $resp = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
-            return ['ok' => false, 'ref' => null, 'costPence' => null, 'error' => 'aws-http-' . $code];
+            return ['ok' => false, 'ref' => null, 'cost' => null, 'error' => 'aws-http-' . $code];
         }
         $messageId = null;
         if (preg_match('/<MessageId>([^<]+)<\/MessageId>/', (string) $resp, $m) === 1) {
             $messageId = $m[1];
         }
-        return ['ok' => true, 'ref' => $messageId, 'costPence' => 6, 'error' => null];
+        return ['ok' => true, 'ref' => $messageId, 'cost' => ProviderSpend::cost('sms', 'aws', null, ['texts' => 1]), 'error' => null];
     }
 }

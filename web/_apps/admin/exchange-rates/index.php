@@ -58,15 +58,16 @@ $status = ExchangeRates::status($db);
 $installationCurrency = Currency::ofInstallation();
 $organisationCurrency = Currency::ofOrganisation($siteId);
 
-// 🧮 The rate each limit would use now, from each billing currency. Package B
-//    replaces BILLING_CURRENCIES with the price list's own set.
+// 🧮 The rate each limit would use now, from each currency an outside company
+//    bills in: the price list's own set (`ProviderSpend::billingCurrencies()`,
+//    #993), so a company added to the list appears here with no edit.
 $levels = [
     ['name' => 'the installation\'s limit', 'currency' => $installationCurrency, 'site' => null],
     ['name' => 'this organisation\'s own limit', 'currency' => $organisationCurrency, 'site' => $siteId],
 ];
 $lines = [];
 foreach ($levels as $level) {
-    foreach (ExchangeRates::BILLING_CURRENCIES as $from) {
+    foreach (\Portal\Core\ProviderSpend::billingCurrencies() as $from) {
         if ($level['currency'] === '') {
             $lines[] = ['level' => $level['name'], 'from' => $from, 'to' => '', 'words' => 'No currency is set for this level, so no comparison can be made.', 'source' => ''];
             continue;
@@ -113,7 +114,7 @@ $ratesCard = static function (string $title, string $scope, ?array $rows, bool $
         <div class="card-header"><strong><?php echo $e($title); ?></strong></div>
         <div class="card-body">
             <?php if ($rows === null): ?>
-                <p class="text-muted">Typed rates for this level are not shown to you.</p>
+                <p class="text-muted" data-rates-unreadable>The typed rates for this level could not be read just now.</p>
             <?php elseif ($rows === []): ?>
                 <p class="text-muted">No rates typed.</p>
             <?php else: ?>

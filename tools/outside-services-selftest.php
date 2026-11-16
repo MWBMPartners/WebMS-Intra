@@ -2695,7 +2695,7 @@ $wantSaid = [
     // ✋ #993: the exchange-rate fetch, pinned WHOLE in each of the four columns it changed.
     'lookupsAboutNobody#rates' => 'For the exchange rates, nothing about anybody: only the request for the published list, which carries this server\'s internet address and the product\'s name.',
     'lookupsAboutNobody#bank'  => 'and the European Central Bank (its daily list of exchange rates).',
-    'lookupsAboutNobody#daily' => 'and, about once a day while the installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of exchange rates.',
+    'lookupsAboutNobody#daily' => 'and, while the installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of exchange rates once a day (tried again every hour after a failure), and whenever a global administrator asks for it.',
     'lookupsAboutNobody#why'   => 'and to compare spending with outside companies against spending limits.',
     // ✋ Round 5 of the check: every clause tested against the settings' variants (off, unset, an
     //    organisation's row, kept for ever, the scheduled job not set up); each that changed is pinned WHOLE.

@@ -95,8 +95,19 @@ if ($skipped > 0) {
     $words .= sprintf(' %d had already been claimed by another run.', $skipped);
 }
 if ($stopped === true) {
-    $words .= ' The run stopped because this month\'s transcription budget is used up;'
-        . ' anything still waiting stays in the queue.';
+    // What stopped it is said, because "the budget is used up" is untrue when the
+    // real cause is a missing exchange rate or an unreadable record (#993).
+    $stoppedWhy = (string) ($result['stoppedWhy'] ?? '');
+    $words .= match ($stoppedWhy) {
+        'installation-limit', 'organisation-limit' => ' The run stopped because this month\'s transcription budget is used up;'
+            . ' anything still waiting stays in the queue.',
+        'no-budget'                                => ' The run stopped because the transcription budget is set to nothing;'
+            . ' anything still waiting stays in the queue.',
+        'no-rate', 'no-currency'                   => ' The run stopped because the spending limit could not be checked: '
+            . \Portal\Core\ProviderSpend::refusalWords($stoppedWhy) . ' Anything still waiting stays in the queue.',
+        default                                    => ' The run stopped because this month\'s spending could not be read;'
+            . ' anything still waiting stays in the queue.',
+    };
 }
 $_SESSION['flash_msg']  = $words;
 $_SESSION['flash_type'] = ($failed > 0 || $stopped === true) ? 'warning' : 'success';

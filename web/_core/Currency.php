@@ -295,10 +295,12 @@ final class Currency
      * labelUnlabelled(). Section B of tools/currency-selftest.php compares this
      * list and CHILD_TABLES with the schema and fails both ways: a table holding
      * money that is in neither could never be labelled. The provider-spend
-     * tables (translation, transcription, AI, texts) are deliberately in
-     * neither: that is the INSTALLATION's spending, estimated in hundredths
-     * from US-dollar list prices, and what currency those figures are in is
-     * its own question (see #966's notes).
+     * tables (translation, transcription, AI, texts, and the month's
+     * `tblProviderSpend`) are deliberately in neither: each charge is kept in
+     * the OUTSIDE COMPANY's own currency in `costCurrency` (D-173, #993), never
+     * in a column called `currency`, because labelling old rows with the
+     * organisation's currency would be wrong for what a company charged in
+     * dollars. `ProviderSpend` is the one place those are priced and read.
      *
      * @var list<string>
      */
