@@ -64,7 +64,7 @@ fonts and archives are skipped by their ending; a file of any OTHER ending is
 read whole, so a new kind of file cannot slip past by being new. Text is
 compared without regard to capitals, and a name may hold accented letters.
 
-A host is found in three shapes:
+A host is found in four shapes:
   - after `//`, `\\/\\/` (JavaScript and JSON escaping) or `%2F%2F` (an address
     inside another address), with or without the scheme, and with `*.`,
     `{s}.`, `{$x}.` or `${x}.` in front;
@@ -74,7 +74,14 @@ A host is found in three shapes:
   - as a whole quoted string that is a host name, or a list of them separated
     by commas (`'api-free.deepl.com'`, a seeded allow-list), when its last part
     is a real top-level name from `REAL_TOP_LEVEL` -- needed because settings
-    keys (`privacy.outside.gravatar`) look like host names too.
+    keys (`privacy.outside.gravatar`) look like host names too. Single,
+    double and backtick quotes all count;
+  - as a source in a PAGE-RULE LIST, with or without `https://`: every word
+    after a `*-src` directive up to its `;`, and the value given to a
+    `$csp...Extra` variable. Round 2 of the check planted `cdn.newtracker.io`
+    in header.php's `script-src` and `*.tiles.newmaps.io` in an event page's
+    `$cspImgExtra`; both told every browser to load from a new host and both
+    passed green, because neither had a `//`.
 
 WHAT THIS CANNOT SEE, said plainly
 ----------------------------------
@@ -92,6 +99,12 @@ WHAT THIS CANNOT SEE, said plainly
 4. A JavaScript regular-expression literal containing `//` or a quote can
    confuse the comment reader. Text it wrongly keeps can only add hosts, which
    fail loudly.
+5. Measured gaps that stay green, each recorded rather than closed: a bare
+   host name in a quoted string ending in a top-level name not in
+   REAL_TOP_LEVEL (`'pixel.tracker.xyz'` -- a host written with `//` is read
+   whatever its ending); a host inside a base64 `data:` address, or any other
+   encoding but percent-encoding; and a page rule built in pieces
+   (`'img-' . 'src ' . $x`).
 
 RUN IT
 ------
@@ -158,6 +171,12 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
 }
 
 # 📁 Files whose hosts are not the portal's own words. Path under web/ -> reason.
+# ⌨️ Entries whose company is at an address somebody TYPES (a setting), so no
+#    host is in the code and none is listed. Each is still printed on the
+#    privacy pages. Fails both ways: an entry here that lists hosts, and an
+#    entry with no hosts that is not here.
+TYPED_ADDRESS_ONLY = {"errorMonitoring", "webhooks", "offsiteBackup", "qrTracking", "lookupsAboutNobody"}
+
 WHOLE_FILES: dict[str, str] = {
     "_core/data/giving-retention-countries.json":
         "The source documents behind each country's suggested keeping period, shown as links an "
@@ -461,14 +480,25 @@ HOST_AFTER_SLASHES = re.compile(
     r"((?:" + LABEL + r"\.)+" + TOP + r")(?![\w-])")
 GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
 WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
-QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"")
+QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"|`([^`\\]*)`")
 
 # Rule C: the text just before an address, on the same line, that means a
 # browser fetches it by itself.
 LOAD_CONTEXT = re.compile(
     r"(?:\bsrc\s*[=:]\s*\\?[\"'`]?|\bposter\s*=\s*\\?[\"'`]?|<link\b[^>]*\bhref\s*=\s*\\?[\"'`]?"
     r"|\burl\(\s*[\"']?|@import\s+(?:url\()?\s*[\"']?|\b[a-z-]+-src\b[^;\"]*|\$csp\w*extra\s*\.?=\s*[^;]*"
-    r"|\bfetch\(\s*[\"'`]?|\bloadscript\(\s*[\"'`]?|\bimportscripts\(\s*[\"'`]?)[^\s\"'`<>]*$")
+    r"|\bfetch\(\s*[\"'`]?|\bloadscript\(\s*[\"'`]?|\bimportscripts\(\s*[\"'`]?|\bsendbeacon\(\s*[\"'`]?"
+    r"|\bnew\s+(?:websocket|eventsource|image)\(\s*[\"'`]?|\.open\(\s*[\"'`][a-z]+[\"'`]\s*,\s*[\"'`]?)[^\s\"'`<>]*$")
+
+# Rule C, second half (round 2 of the check): a PAGE-RULE LIST names hosts with
+# no `https://` at all -- `script-src 'self' cdn.newtracker.io` and
+# `$cspImgExtra = '*.tiles.newmaps.io'` both tell every browser to load from a
+# host that the `//` shape never sees. So every source in such a list is read as
+# a host of its own: the words after a `*-src` directive up to its `;`, and the
+# value given to a `$csp...Extra` variable.
+CSP_DIRECTIVE = re.compile(r"\b[a-z-]+-src\s+([^;\"]*)")
+CSP_EXTRA = re.compile(r"\$csp\w*extra\s*\.?=\s*(['\"])(.*?)\1")
+CSP_SOURCE_HOST = re.compile(r"^(?:\*\.)?((?:" + LABEL + r"\.)+" + TOP + r")(?::\d+)?(?:/\S*)?$")
 
 PHP_PROBE = r"""
 $out = [];
@@ -577,7 +607,7 @@ def code_texts(web: Path) -> dict[str, tuple[str, list[str]]]:
             code = "\n".join(line for line in raw.splitlines() if line.lstrip().startswith("#") is False)
         else:
             code = raw
-        strings = [a or b for a, b in QUOTED.findall(code)]
+        strings = [a or b or c for a, b, c in QUOTED.findall(code)]
         texts[rel] = (code, strings)
     exe = php()
     for start in range(0, len(php_files), 200):
@@ -615,11 +645,20 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
             before = low[max(line_start, match.start() - 200):match.start()]
             found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
                           low.count("\n", 0, match.start()) + 1))
+        for pattern, group in ((CSP_DIRECTIVE, 1), (CSP_EXTRA, 2)):
+            for match in pattern.finditer(low):
+                for source in match.group(group).split():
+                    source = source.strip("'\"`,")
+                    if "//" in source or "$" in source or "{" in source or source.endswith(":"):
+                        continue  # a keyword, a scheme, a variable, or an address the `//` shape reads
+                    one = CSP_SOURCE_HOST.match(source)
+                    if one is not None and one.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
+                        found.append((rel, one.group(1), True, low.count("\n", 0, match.start()) + 1))
         for match in GLUED_SUFFIX.finditer(low):
             if match.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
                 found.append((rel, match.group(1), False, low.count("\n", 0, match.start()) + 1))
         for string in strings:
-            low_s = string.lower()
+            low_s = (string or "").lower()
             if WHOLE_HOSTS.match(low_s) is None:
                 continue
             for host in re.split(r"\s*,\s*", low_s.strip()):
@@ -648,9 +687,14 @@ def check(web: Path, per_file: dict[str, dict[str, int]] | None = None) -> list[
                 problems.append("✗ OutsideServices::%s['%s'] says it is contacted from %r; it must be 'browser', "
                                 "'server' or 'both', or the privacy pages print nothing for it."
                                 % (list_name, key, entry["from"]))
-            if list_name != "SERVICES" and key != "errorMonitoring" and entry["hosts"] == []:
-                problems.append("✗ OutsideServices::%s['%s'] lists no hosts, so nothing ties it to code."
+            typed = key in TYPED_ADDRESS_ONLY
+            if list_name != "SERVICES" and typed is False and entry["hosts"] == []:
+                problems.append("✗ OutsideServices::%s['%s'] lists no hosts, so nothing ties it to code. If the "
+                                "address is one somebody types, add the entry to TYPED_ADDRESS_ONLY here, on purpose."
                                 % (list_name, key))
+            if typed is True and entry["hosts"] != []:
+                problems.append("✗ OutsideServices::%s['%s'] is in TYPED_ADDRESS_ONLY but lists hosts; take it out "
+                                "of that list, so its hosts are tied to code like any other." % (list_name, key))
     for h, (kind, _reason) in NOT_ABOUT_ANYBODY.items():
         if h in owners:
             problems.append("✗ %s is named on the privacy pages (%s) AND listed here as sending nobody's details. "
@@ -840,6 +884,31 @@ def self_test() -> int:
     run("S29 a page-rule source naming a LINK host fails",
         append("_apps/privacy/index.php", "<?php $cspFrameExtra = 'https://github.com'; ?>\n"),
         "puts github.com where a browser fetches it by itself")
+    run("S30 a host with no scheme added to the page rule's script-src fails",
+        replace("_core/templates/header.php", "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; ",
+                "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com cdn.newtracker.io; "),
+        new + " cdn.newtracker.io")
+    run("S31 a wildcard host with no scheme in a page's $cspImgExtra fails",
+        replace("_apps/calendar/event.php", "$cspImgExtra = 'https://*.tile.openstreetmap.org';",
+                "$cspImgExtra = 'https://*.tile.openstreetmap.org *.tiles.newmaps.io';"),
+        new + " tiles.newmaps.io")
+    run("S32 an example host sent by sendBeacon fails (a browser load)",
+        append("public_html/assets/js/portal.js", "\nnavigator.sendBeacon('https://www.example.org/b', 'x');\n"),
+        "puts www.example.org where a browser fetches it by itself")
+    run("S33 a bare host in a backtick string fails",
+        append("public_html/assets/js/portal.js", "\nvar h = `beacon.newcompany.com`;\n"),
+        new + " beacon.newcompany.com")
+    run("S34 a keyword, a scheme and a variable in a page rule are NOT read as hosts",
+        append("_apps/privacy/index.php", "<?php $cspImgExtra = \"'self' data: https: {$x}\"; ?>\n"), None)
+    run("S35 an entry marked as typed-address-only that lists a host fails",
+        replace("_core/OutsideServices.php", "            'why'       => 'So that the people running this portal hear about faults and can fix them.',\n"
+                "            'hosts'     => [],",
+                "            'why'       => 'So that the people running this portal hear about faults and can fix them.',\n"
+                "            'hosts'     => ['api.what3words.com'],"),
+        "['errorMonitoring'] is in TYPED_ADDRESS_ONLY but lists hosts")
+    run("S36 an entry with no hosts that is not marked typed-address-only fails",
+        replace("_core/OutsideServices.php", "'hosts'     => ['api.what3words.com'],", "'hosts'     => [],"),
+        "['what3words'] lists no hosts")
     print("%d of %d self-test cases passed" % (checks - failures, checks))
     return 0 if failures == 0 else 1
 
@@ -866,9 +935,9 @@ def main() -> int:
               "privacy pages, under the on/off rules, or listed here as sending nobody's details." % len(problems),
               file=sys.stderr)
         return 1
-    print("✓ Every outside host found in code is accounted for, in the three shapes this check reads (after a //, "
+    print("✓ Every outside host found in code is accounted for, in the four shapes this check reads (after a //, "
           "plain, escaped or percent-encoded; a glued-on .suffix; a whole quoted host name ending in a known "
-          "top-level name); %d PER_FILE lines hold; no link, example or server-only company sits where a browser "
+          "top-level name; a source in a page-rule list); %d PER_FILE lines hold; no link, example or server-only company sits where a browser "
           "loads by itself, in the load shapes it knows. It CANNOT see a host built from other pieces, an address "
           "typed by an administrator, a load through a variable, or whether the privacy-page words are true."
           % sum(len(v) for v in PER_FILE.values()))

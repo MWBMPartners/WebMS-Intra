@@ -298,15 +298,16 @@ final class OutsideServices
             'why'       => 'To find where the address is, so that a map can be drawn or directions given.',
             'hosts'     => ['maps.googleapis.com', 'nominatim.openstreetmap.org'],
         ],
-        'publicPlaceMaps' => [
-            'name'      => 'Maps of buildings and public places',
+        'placeMaps' => [
+            'name'      => 'Maps of venues and of where events are held',
             'companies' => 'OpenStreetMap',
             'from'      => 'browser',
-            'when'      => 'When you open a page that shows a map of an event\'s venue, of a venue, or (for this '
+            'when'      => 'When you open a page that shows a map of a venue, of where an event is held, or (for this '
                          . 'organisation\'s administrators) of the organisation\'s own address. An event\'s page can be '
-                         . 'open to visitors who have not signed in. These maps are of buildings, not homes, so the maps '
-                         . 'choice on Account, Outside services (which covers homes and meeting places) does not switch '
-                         . 'them off.',
+                         . 'open to visitors who have not signed in. The maps choice on Account, Outside services does '
+                         . 'not switch these maps off. A venue and the organisation\'s address are buildings, but where '
+                         . 'an event is held is whatever its organiser typed, and can be somebody\'s home: its map is '
+                         . 'drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
             'sends'     => 'Which map squares to draw, which tells OpenStreetMap the area around the place, together '
                          . 'with your internet address and browser.',
             'why'       => 'To show where the place is.',
@@ -392,6 +393,23 @@ final class OutsideServices
      * OpenAI, Google, DeepL, LibreTranslate) and WebPush.php with the push
      * allow-list seeded in full_schema.sql.
      *
+     * Round 2 of the check (16 November 2026) found five more untruths or gaps,
+     * each fixed against the code it names: a payment company's message to the
+     * portal (Payments::ingestWebhook(), kept in tblWebhookEvent for
+     * `webhooks.payload.retentionDays`) carries the payer's name, e-mail and
+     * address; a MEMBER can connect their own Zoom account when `zoom.mode` is
+     * `user` (account/integrations/zoom.php, admin/integrations/zoom/callback.php
+     * keeps the account's e-mail and identifier); push-subscribe.js makes the
+     * BROWSER register with its push service; and outgoing webhooks
+     * (WebhookDispatcher::emit() callers), the off-site backup
+     * (tools/offsite-backup), CueRCode (Qr::resolveContent()) and the look-ups
+     * that carry nobody's details (FeedImporter, Hymnal, AssetRegister's GEPIR
+     * look-up, PublicWebsiteSetup) were on no list. They were found by
+     * enumerating every server call site:
+     *     grep -rlE "curl_init\(|SafeFetch::(get|fetch|post|request)|stream_context_create|fsockopen\(|stream_socket_client\(|\bmail\(|proc_open\(|shell_exec\(|exec\(" web/ tools/offsite-backup
+     * which answered 33 files on 16 November 2026. Entries whose `hosts` is
+     * empty reach an address somebody TYPES, so no host is in the code.
+     *
      * @var array<string, array{name:string, companies:string, from:string, when:string, sends:string, why:string, hosts:list<string>}>
      */
     public const USED_BY_ORGANISATION = [
@@ -434,7 +452,12 @@ final class OutsideServices
             'sends'     => 'This portal\'s server tells the company the amount, the currency, a short description of '
                          . 'what is being paid for and this portal\'s own reference number. Your browser is then sent to '
                          . 'the company\'s own payment page, which receives your internet address and browser and what '
-                         . 'you type there, such as your card details; the portal never sees those.',
+                         . 'you type there. The portal never sees your card details. Afterwards the company sends this '
+                         . 'portal a message about the payment, which can carry the name, e-mail address and billing or '
+                         . 'delivery address you gave it; the portal keeps that message whole for the period this '
+                         . 'installation sets (90 days unless it is changed), and then the nightly clear-out empties it, '
+                         . 'once that scheduled job has been set up. Nothing on the message links it to your account, so '
+                         . 'an erasure request cannot reach it.',
             'why'       => 'To take the payment safely.',
             'hosts'     => ['api.stripe.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com'],
         ],
@@ -442,9 +465,14 @@ final class OutsideServices
             'name'      => 'Video meetings',
             'companies' => 'Zoom',
             'from'      => 'both',
-            'when'      => 'When an administrator connects the organisation\'s Zoom account (their browser is sent to '
-                         . 'Zoom to agree), and when a meeting is created for an event.',
-            'sends'     => 'The event\'s name, when it starts, how long it lasts and its time zone. Joining the meeting is '
+            'when'      => 'When a Zoom account is connected, and when a meeting is created for an event. Usually an '
+                         . 'administrator connects the organisation\'s own Zoom account; where this organisation is set '
+                         . 'to let each person use their own, any signed-in member can connect theirs on their own '
+                         . 'account page. Either way, the browser of whoever connects is sent to Zoom to agree.',
+            'sends'     => 'For a meeting: the event\'s name, when it starts, how long it lasts and its time zone. When '
+                         . 'an account is connected, the portal receives and keeps that Zoom account\'s e-mail address '
+                         . 'and identifier, and the keys that let it act for the account (stored scrambled). When a '
+                         . 'meeting\'s recording is ready, Zoom tells the portal where it is. Joining a meeting is '
                          . 'between you and Zoom.',
             'why'       => 'To set up the meeting.',
             'hosts'     => ['api.zoom.us', 'zoom.us'],
@@ -483,12 +511,64 @@ final class OutsideServices
             'name'      => 'Notifications on your device',
             'companies' => 'The company that runs your browser\'s notification service: Google, Mozilla, Apple or '
                          . 'Microsoft.',
-            'from'      => 'server',
-            'when'      => 'Only if you have switched on notifications in your browser, whenever one is sent to you.',
-            'sends'     => 'The address your browser gave for its notifications, and the notification itself, scrambled '
-                         . 'so that only your browser can read it.',
+            'from'      => 'both',
+            'when'      => 'Only if you have switched on notifications in your browser: when you switch them on, and '
+                         . 'whenever one is sent to you.',
+            'sends'     => 'Your browser registers with that company and stays in touch with it, so the company receives '
+                         . 'your internet address and browser. This portal\'s server then sends it the address your '
+                         . 'browser gave for notifications and each notification, scrambled so that only your browser '
+                         . 'can read it.',
             'why'       => 'To deliver the notification to your device.',
             'hosts'     => ['fcm.googleapis.com', 'push.services.mozilla.com', 'push.apple.com', 'notify.windows.com'],
+        ],
+        'webhooks' => [
+            'name'      => 'Messages to another system (webhooks)',
+            'companies' => 'Whatever address this organisation\'s administrator has typed in, such as a booking or '
+                         . 'church-management system.',
+            'from'      => 'server',
+            'when'      => 'When something the administrator chose happens, such as an event registration, a prayer '
+                         . 'request, a suggested event or a filled-in form.',
+            'sends'     => 'A short message about what happened. For an event registration it includes the registered '
+                         . 'person\'s full name and school year, which is often a child\'s; for a prayer request, its '
+                         . 'subject; otherwise reference numbers, and the account numbers of whoever acted. The portal '
+                         . 'keeps a copy of each message sent for the period this organisation sets, then empties it, '
+                         . 'unless the organisation has chosen to keep them.',
+            'why'       => 'So that another system the organisation uses hears about it straight away.',
+            'hosts'     => [],
+        ],
+        'offsiteBackup' => [
+            'name'      => 'Off-site backup',
+            'companies' => 'The storage service this installation\'s administrator chose: a cloud storage company '
+                         . 'reached through rclone, storage that works like Amazon S3, or an SFTP server.',
+            'from'      => 'server',
+            'when'      => 'When the scheduled off-site copy runs, if it has been set up and switched on.',
+            'sends'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled '
+                         . 'first with a key that stays on this portal\'s server. Uploaded files are not sent.',
+            'why'       => 'So that the portal can be restored if its own server is lost.',
+            'hosts'     => [],
+        ],
+        'qrTracking' => [
+            'name'      => 'QR codes that count scans',
+            'companies' => 'CueRCode, at the address this installation\'s administrator typed in.',
+            'from'      => 'both',
+            'when'      => 'Only if this installation is set to use it, when the portal makes a QR code.',
+            'sends'     => 'This portal\'s server sends CueRCode the address or text the QR code is to hold. The code '
+                         . 'then holds CueRCode\'s own address, so the phone of anybody who scans it goes to CueRCode '
+                         . 'first, which receives its internet address and browser.',
+            'why'       => 'So that the organisation can see how often a code is scanned.',
+            'hosts'     => [],
+        ],
+        'lookupsAboutNobody' => [
+            'name'      => 'Look-ups that carry nothing about you',
+            'companies' => 'The outside calendars this organisation imports, the hymn service, the barcode registry '
+                         . 'and the organisation\'s own website, each at an address an administrator typed in.',
+            'from'      => 'server',
+            'when'      => 'When the portal fetches an outside calendar, searches for a hymn, looks up a barcode, or '
+                         . 'checks the organisation\'s own website is set up.',
+            'sends'     => 'Only what is being looked up: the calendar\'s address, the hymn searched for, the barcode. '
+                         . 'Nothing about you or anybody else.',
+            'why'       => 'To bring that information into the portal.',
+            'hosts'     => [],
         ],
     ];
 

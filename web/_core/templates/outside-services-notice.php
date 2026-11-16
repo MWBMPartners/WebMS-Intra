@@ -61,7 +61,7 @@ $outsideFromWords = [
     internet address (the number that identifies your connection, which can show roughly where you are) and
     your browser (the program you are reading this in, and its version), because that is how the internet
     works. When only <strong>this portal's own server</strong> contacts it, the company learns the server's
-    address, not yours, unless the entry says that yours is passed on.
+    address, not yours, unless the entry says that yours is passed on. Where both do, both apply.
 </p>
 <p>
     <strong>You can switch these three on or off for yourself</strong>, where this portal allows them at all, on

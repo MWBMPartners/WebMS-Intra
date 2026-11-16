@@ -2637,16 +2637,18 @@ $e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
 //    the list being tested would pass on a list that had quietly lost an entry.
 $wantGroups = [
     'switchable'   => ['gravatar', 'providerPhoto', 'memberMap'],
-    'named'        => ['what3words', 'addressLookup', 'publicPlaceMaps', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'],
-    'organisation' => ['signIn', 'email', 'textMessages', 'payments', 'videoMeetings', 'videoUploads', 'transcription', 'translation', 'pushNotifications'],
+    'named'        => ['what3words', 'addressLookup', 'placeMaps', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'],
+    'organisation' => ['signIn', 'email', 'textMessages', 'payments', 'videoMeetings', 'videoUploads', 'transcription', 'translation', 'pushNotifications',
+                       'webhooks', 'offsiteBackup', 'qrTracking', 'lookupsAboutNobody'],
 ];
 // ✋ Who contacts each company, pinned by hand from the code (round 1 of the check found
 //    the first version said "from this portal's own server" of sign-in and payments).
 $wantFrom = [
-    'what3words' => 'server', 'addressLookup' => 'server', 'publicPlaceMaps' => 'browser', 'embeddedContent' => 'browser',
+    'what3words' => 'server', 'addressLookup' => 'server', 'placeMaps' => 'browser', 'embeddedContent' => 'browser',
     'sharedLibraries' => 'browser', 'robotCheck' => 'both', 'errorMonitoring' => 'server',
     'signIn' => 'both', 'email' => 'server', 'textMessages' => 'server', 'payments' => 'both', 'videoMeetings' => 'both',
-    'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'server',
+    'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'both',
+    'webhooks' => 'server', 'offsiteBackup' => 'server', 'qrTracking' => 'both', 'lookupsAboutNobody' => 'server',
 ];
 $fromWords = ['browser' => 'Your browser.', 'server' => 'This portal\'s own server, not your browser.', 'both' => 'Your browser, and this portal\'s own server.'];
 // ✋ Sentences that must be in ONE named entry, each a truth a reader relies on.
@@ -2654,11 +2656,19 @@ $wantSaid = [
     'what3words'      => 'For a home, the three words name the home itself.',
     'robotCheck'      => 'sends the company the check\'s answer and your internet address',
     'errorMonitoring' => 'Not your internet address.',
-    'publicPlaceMaps' => 'does not switch them off',
+    'placeMaps'       => 'and can be somebody\'s home: its map is drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
     'signIn'          => 'Your browser is sent to the company\'s own sign-in page',
     'payments'        => 'Your browser is then sent to the company\'s own payment page',
     'textMessages'    => 'The telephone number it is sent to and the words of the message.',
     'sharedLibraries' => 'jsDelivr, and cdnjs (which is run by Cloudflare)',
+    // ✋ Round 2 of the check: each of these was untrue or missing, and is pinned WHOLE.
+    'payments#kept'     => 'The portal never sees your card details. Afterwards the company sends this portal a message about the payment, which can carry the name, e-mail address and billing or delivery address you gave it; the portal keeps that message whole for the period this installation sets (90 days unless it is changed), and then the nightly clear-out empties it, once that scheduled job has been set up. Nothing on the message links it to your account, so an erasure request cannot reach it.',
+    'videoMeetings'     => 'where this organisation is set to let each person use their own, any signed-in member can connect theirs on their own account page.',
+    'pushNotifications' => 'Your browser registers with that company and stays in touch with it, so the company receives your internet address and browser.',
+    'webhooks'          => 'For an event registration it includes the registered person\'s full name and school year, which is often a child\'s; for a prayer request, its subject;',
+    'offsiteBackup'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled first with a key that stays on this portal\'s server. Uploaded files are not sent.',
+    'qrTracking'        => 'so the phone of anybody who scans it goes to CueRCode first, which receives its internet address and browser.',
+    'lookupsAboutNobody' => 'Nothing about you or anybody else.',
 ];
 $notices = [];
 $wholePage = '';
@@ -2695,8 +2705,11 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
                 && str_contains($itemOf($body, $key), '<em>Who contacts it:</em> ' . $e($fromWords[$wantFrom[$key]])) === true);
         }
     }
-    foreach ($wantSaid as $key => $words) {
-        check("V04 {$what}: '{$key}' says \"{$words}\" (hand-pinned)", str_contains($itemOf($body, $key), $e($words)) === true);
+    foreach ($wantSaid as $label => $words) {
+        // A second sentence for one entry is keyed "<entry>#<why>", because an array key may appear once.
+        $key = explode('#', $label)[0];
+        check("V04 {$what}: '{$label}' says \"" . mb_substr($words, 0, 90) . '…" whole (hand-pinned)',
+            str_contains($itemOf($body, $key), $e($words)) === true);
     }
     check("V05 {$what}: the opening does not claim every company learns your internet address",
         str_contains((string) preg_replace('/\s+/', ' ', $body), 'the company learns the server\'s address, not yours, unless the entry says that yours is passed on') === true);

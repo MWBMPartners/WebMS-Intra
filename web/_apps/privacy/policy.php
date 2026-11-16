@@ -129,7 +129,7 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
 
 <?php // 🛂 #808 (D-158): every outside company a page can reach, named, through ONE template shared
-      //    with the Privacy & Data Protection page; the words are OutsideServices::SERVICES and ::NAMED. ?>
+      //    with the Privacy & Data Protection page; the words are OutsideServices::SERVICES, ::NAMED and ::USED_BY_ORGANISATION (D-195). ?>
 <h3>Outside companies</h3>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'outside-services-notice.php'; ?>
 

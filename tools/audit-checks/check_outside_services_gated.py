@@ -112,7 +112,7 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
     },
     OSM_TILES: {
         OUTSIDE: (2, "The page-rule source a member-map page is given AFTER deciding (mapTileSource()), and "
-                     "the host of NAMED['publicPlaceMaps'], the privacy pages' entry for the building maps "
+                     "the host of NAMED['placeMaps'], the privacy pages' entry for the venue and event maps "
                      "below (#808): a description, which builds no address."),
         "_core/partials/location-map-assets.php": (
             2, "The shared map script: its tile address template, and a note telling callers which "
