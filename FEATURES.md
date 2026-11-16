@@ -2378,3 +2378,7 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Admin, Calendar, Moderation: a suggestion cancelled or postponed earlier is marked with a
   warning naming which, and is approved only with a ticked confirmation box (#1081, D-197,
   D-198); its edit form shows the warning too.
+
+- Privacy & Data Protection page and privacy policy: "Outside companies" section, worded only by
+  `OutsideServices::SERVICES`, `::NAMED` and `::USED_BY_ORGANISATION` through
+  `templates/outside-services-notice.php`.

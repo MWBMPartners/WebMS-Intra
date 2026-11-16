@@ -4,6 +4,36 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The privacy pages name every outside company (#808; D-158, D-195)
+
+- **Privacy pages name every outside company (#808; D-158, D-195).** Both privacy pages gain an "Outside
+  companies" section in three lists:
+  - the three a member can switch (Gravatar, sign-in photo, maps of homes and meeting places);
+  - the ones D-158 says must be named before the first install, no switch yet (#1085): what3words, the address
+    look-up (Google or OpenStreetMap; Google falls back to OpenStreetMap), maps of venues and of where events
+    are held (an event's location can be a home, and its map is drawn whatever anybody's maps choice says),
+    videos and designs inside a page, the shared code libraries every page fetches, the noticeboard's connection
+    to Google's font service, the robot check, and error
+    reports;
+  - D-195's second list, "only if this organisation uses it": sign-in with Microsoft or Google, e-mail, text
+    messages, payments (including the payer's name, e-mail and address the payment company sends back, kept for
+    the webhook payload period), video meetings (an administrator's or, in member mode, a member's own Zoom
+    account), video uploads, transcription, translation, device notifications, messages to another system
+    (webhooks), the off-site backup, QR codes that count scans (CueRCode), and look-ups that carry nothing
+    about anybody.
+  The opening says every company a browser contacts learns this portal's web address, which for a church's
+  portal can hint at a member's beliefs. Transcription sends the whole audio or video file.
+  Every entry says WHO contacts the company (your browser, this portal's server, or both), when, what it
+  receives and why. The Cookies section and the cookie banner now list the cookies the portal really sets (the
+  session cookie, the trusted-device cookie, the cookie-notice answer) and say it sets no tracking cookies of its
+  own; the Privacy page's "Linked sign-in accounts" names the name and photo address kept.
+- The privacy policy's Financial records point says the one exception for a payment: the payment company's own
+  message (name, e-mail, address) is not reached by an erasure and is kept until the nightly clear-out empties it,
+  90 days unless changed.
+- New hard gate `tools/audit-checks/check_outside_hosts_named.py` (`--self-test`, 64 cases); every failure names
+  the true line.
+- Open: #1096 (an e-mail address typed into a page's search box reaches the error monitor; D-174's gap), #1095 (the referrer-policy setting is overridden). Codex has not reviewed this.
+
 ### A hidden waiting suggestion comes back as a draft; approving one that was cancelled or postponed earlier needs a warning and a ticked box (#1081, #1084; D-196, D-197, D-198)
 
 - **A hidden event suggestion comes back as a draft (#1081; D-196).** Before #965 a visitor's

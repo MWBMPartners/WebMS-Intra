@@ -24787,3 +24787,46 @@ over HTTP; S the source rules; Z the tidy-up.
 - Tests: sections U (no database) and M (HTTP, two organisations) of
   `tools/series-suggestion-host-selftest.php`; plants P32-P53; section B's B10, B10b and B10c
   (each mark kept on bring-back, alone and together) with plants P42, P42b and P42c.
+
+### Outside companies named, not switched (#808)
+
+- `NAMED` and `USED_BY_ORGANISATION` describe; they NEVER permit. Each entry's `from` (browser / server / both)
+  decides whether the reader's internet address reaches the company. Round 1 of the check found the first
+  version claimed every company learns it (untrue for what3words, the address look-up, error reports) and called
+  sign-in and payments server jobs (both send the browser to the company's own page).
+- Never state what a company does with what it receives (cookies, recognising people) unless the code does it or
+  the company's own documentation says so, and then say it is the company's.
+- The gate's rules: every host it reads in code is in one list (A); disclosed hosts and links are counted file
+  by file (B); nothing but a browser-contacted company may sit where a browser loads by itself (C); a host is
+  never both disclosed and "about nobody" (D); every list line still true, and a disclosed host must be named
+  outside OutsideServices.php (E).
+- Page-rule lists (`*-src` directives, `$csp...Extra`) are read as host lists too (round 2).
+- Shapes it reads: after `//`, `\/\/` or `%2F%2F` (with `*.`, `{s}.`, `{$x}.`, `${x}.` prefixes), a glued
+  `.suffix` (not a file ending), a whole quoted host name or comma list ending in a known top-level name. Text is
+  compared without capitals; names may hold accented letters.
+- Internet-number and punycode addresses are read (rounds 7-9). Round 9's commit message said "an internet
+  number in any spelling a browser accepts is read"; that is untrue and is corrected here. What is read: every
+  NUMBER spelling of the host (dotted, one large number, hexadecimal, octal, shortened, trailing dot, with a port
+  or a user name) and, since round 10, one ending at a `)` as in CSS `url(...)` -- but ONLY where `//` (plain,
+  `\/\/` or `%2F%2F`) comes directly before the host. NOT read, measured in round 10 (Edge fetched each):
+  backslashes for slashes (`https:\\tracker.io\p.gif`, `\\tracker.io/p.gif`, `https:/\tracker.io/`), a tab after
+  `//` or a line break inside the host, percent-encoded characters in the host (`https://tracker%2eio/`); and,
+  read as an address by node's URL reader, `http:tracker.io/p.gif` with no slashes. Full-width dots are not
+  claimed (Edge did not fetch them). Also not a load place: `srcset`. A false red: `//300/400` in a script
+  comment the comment reader keeps. All are stated in the gate's docstring and its success line (D-065: the
+  class is stated, not closed spelling by spelling).
+- Blind spots: a host built from other pieces, an address typed by an administrator, a load through a variable,
+  whether the words are true.
+- The error-reports entry names the three callers that fill the account-number field; the outside-services test
+  (V09) pins them with PHP's tokeniser and, since round 10, counts a caller that fills the field by position, by
+  name (`userId:`) or through a spread (`...$args`). It cannot see a call through a variable class or method
+  name, or `call_user_func()`.
+- Verified not contacted: the noticeboard bundle's unpkg.com React and Google Fonts (page rule allows neither;
+  React is loaded locally first), Swagger UI's validator (`validatorUrl: null`).
+
+D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to an outside error monitor, taking out only a
+  scheduled job's token. A search typed into `?q=` (admin/users invites "name, email, or username") therefore
+  reaches the monitor with any e-mail address in it, percent-encoded or not (measured with a reflection probe).
+  The privacy notice now says so. Not fixed in #808 because that package must not touch Logger's error recording,
+  and `Logger::withoutAddresses()` applied to a whole address cut `/admin/users?q=bob@example.com` to
+  `/admin/[address]` (measured), so the fix needs its own design. Raised as #1096.
