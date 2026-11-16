@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeRequest` (
     `requestedByID`    INT          DEFAULT NULL COMMENT 'The administrator who started it. Never one of the two accounts (refused)',
     `requestedAtUtc`   DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when it was started',
     `expiresAtUtc`     DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC: after this nobody can agree to it (AccountMerge::REQUEST_DAYS)',
+    `notBeforeUtc`     DATETIME     NOT NULL COMMENT 'A MOMENT IN UTC: nobody can agree to it before this, 7 days after the start notice was sent (D-200, AccountMerge::WAIT_DAYS)',
     `status`           ENUM('waiting','completed','cancelled') NOT NULL DEFAULT 'waiting' COMMENT 'waiting: open. completed: merged. cancelled: by either account or an administrator',
     `browserTokenHash` CHAR(64)     DEFAULT NULL COMMENT 'SHA-256 of the random token the FIRST agreement put in a cookie; the token itself is never stored. Emptied on completion',
     `movedSignIns`     TINYINT(1)   DEFAULT NULL COMMENT 'Whether the person ticked to bring the duplicate''s Microsoft or Google sign-ins and passkeys. NULL until completed',
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
     `userID`          INT        NOT NULL COMMENT 'One of the two accounts',
     `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
     `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
+    `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied by that erasure (GdprEraser::eraseMergeRecords)',
     PRIMARY KEY (`sideID`),
     UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
     UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),
@@ -73,6 +75,21 @@ SET @hasCol := (
 );
 SET @sql := IF(@hasCol = 0,
     'ALTER TABLE `tblUsers` ADD COLUMN `signInChangedByOtherAtUtc` DATETIME DEFAULT NULL COMMENT ''A MOMENT IN UTC: when somebody OTHER than this account last chose its way in - set its password (Auth::storeHash) or changed its e-mail address (admin users page). Never cleared by the account itself. A merge refuses an agreement from an account whose way in was changed by somebody else recently (#1064, D-190)'' AFTER `signInVersion`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 📧 tblUsers.emailBeforeChangeByOther (D-200): the address held before
+--    somebody else first changed it. Same guard and the same rules about the
+--    comment as the column above.
+SET @hasCol := (
+    SELECT COUNT(*) FROM `information_schema`.`COLUMNS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblUsers'
+      AND `COLUMN_NAME`  = 'emailBeforeChangeByOther'
+);
+SET @sql := IF(@hasCol = 0,
+    'ALTER TABLE `tblUsers` ADD COLUMN `emailBeforeChangeByOther` VARCHAR(255) DEFAULT NULL COMMENT ''The e-mail address this account held before somebody OTHER than it first changed it (admin users page); a merge start notice is sent here too (#1064, D-200). Emptied by an erasure'' AFTER `signInChangedByOtherAtUtc`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

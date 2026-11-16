@@ -634,6 +634,8 @@ const ACCOUNT_AFTER_ERASURE = [
     'phoneNumber' => null, 'avatarPath' => null, 'locale' => null, 'notifyPrefs' => null, 'totpSecret' => null,
     'calendarToken' => null, 'displayBio' => null, 'displayPhoto' => null, 'displayPhone' => null,
     'displayAddress' => null, 'latitude' => null, 'longitude' => null, 'what3words' => null,
+    // #1064 (D-200): the address the account held before somebody else changed it.
+    'emailBeforeChangeByOther' => null,
 ];
 // Not about the person: the row's own number and date, and switches that
 // have nothing left to show once the columns above are empty.

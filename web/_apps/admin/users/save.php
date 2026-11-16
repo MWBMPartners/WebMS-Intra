@@ -736,8 +736,12 @@ if ($action === 'update') {
         //    purpose: MySQL applies a SET left to right, so `emailAddress` here
         //    is still the OLD address. Nothing is recorded when the address does
         //    not change, or when an administrator edits their own account.
+        //    D-200: the address held BEFORE the first such change is kept
+        //    (COALESCE: an earlier one is never overwritten), so a merge's start
+        //    notice can reach the person there too. Emptied by an erasure.
         $markWayIn = ((int) ($_SESSION['user_id'] ?? 0)) !== (int) $userID ? 1 : 0;
-        $wayInSql  = '`signInChangedByOtherAtUtc` = IF(? = 1 AND NOT (`emailAddress` <=> ?), UTC_TIMESTAMP(), `signInChangedByOtherAtUtc`), ';
+        $wayInSql  = '`emailBeforeChangeByOther` = IF(? = 1 AND NOT (`emailAddress` <=> ?), COALESCE(`emailBeforeChangeByOther`, `emailAddress`), `emailBeforeChangeByOther`), '
+            . '`signInChangedByOtherAtUtc` = IF(? = 1 AND NOT (`emailAddress` <=> ?), UTC_TIMESTAMP(), `signInChangedByOtherAtUtc`), ';
         if ($actorGlobal === true) {
             $stmt = $mysqli->prepare(
                 'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, '
@@ -746,7 +750,7 @@ if ($action === 'update') {
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('issssiiii', $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
+            $stmt->bind_param('isissssiiii', $markWayIn, $emailAddress, $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
         } else {
             $stmt = $mysqli->prepare(
                 'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, isActive = ? WHERE userID = ?'
@@ -754,7 +758,7 @@ if ($action === 'update') {
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('issssii', $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
+            $stmt->bind_param('isissssii', $markWayIn, $emailAddress, $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
         }
         $stmt->execute();
         $stmt->close();

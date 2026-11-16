@@ -34,10 +34,18 @@ if ($mergePreview['lines'] === []) {
         ? 'The duplicate holds no records at all apart from the account itself.'
         : 'This account holds no records apart from the account itself.') . '</p>';
 }
-foreach (AccountMerge::TREATMENT_WORDS as $mergeTreatment => [$mergeHeading, $mergeNote]) {
+// `$mergeKeptSide` (default false): the KEPT account reading its own records.
+// Every per-treatment heading describes what happens to the DUPLICATE's records,
+// so none is true here: one heading, AccountMerge::KEPT_SIDE_WORDS (third check,
+// finding F).
+$mergeKeptSide = ($mergeKeptSide ?? false) === true;
+$mergeGroups   = $mergeKeptSide === true
+    ? ['kept-side' => AccountMerge::KEPT_SIDE_WORDS]
+    : AccountMerge::TREATMENT_WORDS;
+foreach ($mergeGroups as $mergeTreatment => [$mergeHeading, $mergeNote]) {
     $mergeLines = array_values(array_filter(
         $mergePreview['lines'],
-        static fn (array $l): bool => $l['treatment'] === $mergeTreatment
+        static fn (array $l): bool => $mergeKeptSide === true || $l['treatment'] === $mergeTreatment
     ));
     if ($mergeLines === []) {
         continue;

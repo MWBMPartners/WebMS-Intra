@@ -1809,6 +1809,12 @@ class GdprEraser
         // in the written list, so nothing would have noticed the step being
         // removed.
         'tblEmailLog'         => 'eraseEmailLogRecipients',
+        // #1064 (D-199): a merge's side rows say which account was merged into
+        // which, and the duplicate's holds the address it had when merged. The
+        // generic walk would DELETE them by account number, which would lose the
+        // map a retried erasure needs to find what was merged in; so a step of
+        // its own empties the address and leaves the two account numbers.
+        'tblAccountMergeSide' => 'eraseMergeRecords',
     ];
 
     /**
@@ -2256,6 +2262,13 @@ class GdprEraser
         //    it on the account row; the email-log step needs it to search by.
         try {
             $erasedEmail = self::addressToScrub($db, $requestId, $userId);
+            // 🔀 #1064 (D-199): every account number merged INTO this one is
+            //    the same person. History under those numbers is never
+            //    reassigned by a merge, so the erasure follows the merge: each
+            //    merged-in number is walked below as well, and mail to the
+            //    address each held when it was merged is found by that address.
+            //    Read ONCE, here, before anything changes.
+            $mergedIn = AccountMerge::mergedIntoWithAddresses($db, $userId);
         } catch (\Throwable $e) {
             throw self::stopped($db, $requestId, $e);
         }
@@ -2312,6 +2325,20 @@ class GdprEraser
             //    tools/gdpr-coverage-selftest.php looks for it.)
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $erasedEmail));
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
+            // 🔀 #1064: the same two steps for the address each MERGED-IN
+            //    account held when it was merged (its own row now holds a
+            //    placeholder, so its current address would find nothing), then
+            //    that remembered address itself is emptied. Only when there is a
+            //    merge to follow, so an ordinary erasure's steps are unchanged.
+            foreach ($mergedIn as $formerAddress) {
+                if ($formerAddress !== '') {
+                    $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $formerAddress));
+                    $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $formerAddress));
+                }
+            }
+            if ($mergedIn !== []) {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMergeRecords($requestId, array_keys($mergedIn)));
+            }
             // 📜 #707 — the values an audit-trail row kept ABOUT this person.
             //    BEFORE the walk, and that is load-bearing: it finds rows about
             //    their MEMBERSHIPS by looking the membership rows up, and the
@@ -2326,12 +2353,33 @@ class GdprEraser
             //    on `userID`. So there are now four ways for a reordering to
             //    make this step quietly find nothing.
             $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAuditTrailAboutPerson($requestId, $userId));
+            foreach (array_keys($mergedIn) as $mergedId) {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAuditTrailAboutPerson($requestId, $mergedId));
+            }
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
                     $db,
                     static fn (): string => self::processEntry($db, $requestId, $userId, $entry)
                 );
                 $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
+            }
+            // 🔀 #1064 (D-199): the same walk for every merged-in number, so the
+            //    history a merge left under it (activity, consent, plays, send
+            //    records, access logs) is reached. The account ROW itself is
+            //    skipped: the merge already emptied it and closed it, and the
+            //    erasure's made-up address is per request, so a second account
+            //    given it would break the address column's unique key.
+            foreach (array_keys($mergedIn) as $mergedId) {
+                foreach (self::catalogue() as $entry) {
+                    if ((string) $entry['table'] === 'tblUsers') {
+                        continue;
+                    }
+                    $outcomes[] = self::asOneStep(
+                        $db,
+                        static fn (): string => self::processEntry($db, $requestId, $mergedId, $entry)
+                    );
+                    $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
+                }
             }
             // 🧾 Giving statements (#440 Q5): the rendered PDFs, then the
             //    address each was mailed to. Two steps, two audit lines.
@@ -4441,6 +4489,36 @@ class GdprEraser
      * @return array<int, array{table: string, rows: int|null, action: string, reason: string, keepsNumber: bool, couldNotRead?: true, note?: string}>
      */
     public static function inventory(int $userId): array
+    {
+        // 🔀 #1064 (D-199): the account AND every account merged into it are the
+        //    same person, and a merge never reassigns history, so what is held
+        //    about them is the sum of all of them. Rows that say the same thing
+        //    (same table, action, reason and whether the number is kept) are
+        //    added together; anything else is listed as it comes.
+        $ids = array_merge([$userId], AccountMerge::mergedInto(App::db(), $userId));
+        if (count($ids) === 1) {
+            return self::inventoryOf($userId);
+        }
+        $merged = [];
+        foreach ($ids as $id) {
+            foreach (self::inventoryOf($id) as $row) {
+                $key = json_encode([$row['table'] ?? '', $row['action'] ?? '', $row['reason'] ?? '', $row['keepsNumber'] ?? null]);
+                if (isset($merged[$key]) === true && isset($row['rows']) === true && is_int($row['rows']) === true
+                    && is_int($merged[$key]['rows'] ?? null) === true) {
+                    $merged[$key]['rows'] += $row['rows'];
+                } elseif (isset($merged[$key]) === false) {
+                    $merged[$key] = $row;
+                } else {
+                    $merged[$key . '#' . count($merged)] = $row;
+                }
+            }
+        }
+
+        return array_values($merged);
+    }
+
+    /** What `inventory()` counts for ONE account number. */
+    private static function inventoryOf(int $userId): array
     {
         $db = App::db();
         $out = [];
@@ -8730,6 +8808,52 @@ class GdprEraser
                     . 'was already gone)'
                 : '')
         );
+
+        return self::STEP_CHANGED;
+    }
+
+    /**
+     * 🔀 #1064 (D-199): empty the address each MERGED-IN account held when it
+     *    was merged (`tblAccountMergeSide.formerEmail`), once the send-log and
+     *    waiting-mail steps have searched by it. The side rows themselves stay:
+     *    two account numbers and dates, which are how a retried erasure still
+     *    finds what was merged into this account.
+     *
+     * @param list<int> $mergedIds The merged-in account numbers.
+     */
+    private static function eraseMergeRecords(int $requestId, array $mergedIds): string
+    {
+        $db = App::db();
+        $ids = array_values(array_filter(array_map('intval', $mergedIds), static fn (int $id): bool => $id > 0));
+        if ($ids === []) {
+            self::logAudit($db, $requestId, 'none', 'tblAccountMergeSide', null, 'no account was merged into this one');
+
+            return self::STEP_UNCHANGED;
+        }
+        try {
+            $stmt = $db->prepare('UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL WHERE `formerEmail` IS NOT NULL AND `userID` IN ('
+                . implode(', ', array_fill(0, count($ids), '?')) . ')');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+            $stmt->execute();
+            $emptied = (int) $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // Never the fault's own words: they could quote the address.
+            self::logAudit($db, $requestId, 'failed', 'tblAccountMergeSide', null, 'the address an account merged into this one '
+                . 'held could not be emptied; running the request again will find it');
+
+            return self::STEP_FAILED;
+        }
+        if ($emptied === 0) {
+            self::logAudit($db, $requestId, 'none', 'tblAccountMergeSide', null, 'no address of a merged-in account was still held');
+
+            return self::STEP_UNCHANGED;
+        }
+        self::logAudit($db, $requestId, 'anonymise', 'tblAccountMergeSide', (string) $emptied . ' row(s)', 'the address '
+            . $emptied . ' merged-in account(s) held when merged is emptied; which account was merged into which stays');
 
         return self::STEP_CHANGED;
     }

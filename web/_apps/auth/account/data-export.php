@@ -171,20 +171,29 @@ if ($userId <= 0) {
  */
 const DATA_COPY_ROWS_PER_KIND = 5000;
 
-$fetchUserRows = static function (string $sql, array $stripFields = []) use ($mysqli, $userId): array {
-    $stmt = $mysqli->prepare($sql);
-    if ($stmt === false) {
-        return [];
+// 🔀 #1064 (D-199): the account AND every account merged into it are the same
+//    person, and a merge never reassigns history, so every query below runs for
+//    each of those numbers and the rows are handed over together. The order is
+//    this account first, then the merged-in ones.
+$personIds = array_merge([$userId], \Portal\Core\AccountMerge::mergedInto($mysqli, $userId));
+
+$fetchUserRows = static function (string $sql, array $stripFields = []) use ($mysqli, $personIds): array {
+    $rows = [];
+    foreach ($personIds as $personId) {
+        $stmt = $mysqli->prepare($sql);
+        if ($stmt === false) {
+            return [];
+        }
+        // 🔢 One bound value per '?'. The SQL here is written by this file alone —
+        //    never built from a request — so counting the marks in it is safe, and
+        //    a query with none would be refused by prepare() long before this.
+        $marks  = substr_count($sql, '?');
+        $values = array_fill(0, max(1, $marks), $personId);
+        $stmt->bind_param(str_repeat('i', count($values)), ...$values);
+        $stmt->execute();
+        $rows = array_merge($rows, $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+        $stmt->close();
     }
-    // 🔢 One bound value per '?'. The SQL here is written by this file alone —
-    //    never built from a request — so counting the marks in it is safe, and
-    //    a query with none would be refused by prepare() long before this.
-    $marks  = substr_count($sql, '?');
-    $values = array_fill(0, max(1, $marks), $userId);
-    $stmt->bind_param(str_repeat('i', count($values)), ...$values);
-    $stmt->execute();
-    $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    $stmt->close();
     foreach ($rows as &$row) {
         foreach ($stripFields as $f) {
             unset($row[$f]);
@@ -288,6 +297,13 @@ $payload = [
         ),
         'trustedDevices' => $fetchUserRows(
             'SELECT deviceID, label, createdIP, lastSeenAt, expiresAt, revokedAt, createdAt FROM tblTrustedDevices WHERE userID = ?'
+        ),
+        // 🔀 #1064 — requests to merge your accounts: which side each account
+        //    was, when it agreed, and (on a merged duplicate) the address it held
+        //    when it was merged. Export↔erasure parity with
+        //    GdprEraser::eraseMergeRecords(), which empties that address.
+        'accountMerges' => $fetchUserRows(
+            'SELECT `requestID`, `userID`, `side`, `confirmedAtUtc`, `formerEmail` FROM tblAccountMergeSide WHERE `userID` = ?'
         ),
         // 🛂 #778 — your own choices about outside services (which outside
         //    companies may be sent something about you). Export↔erasure parity

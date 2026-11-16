@@ -99,6 +99,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     $open     = $request['status'] === 'waiting' && ($request['expired'] === 1 || $request['expired'] === '1') === false;
     $second   = $open === true && AccountMerge::isSecondStep($request, $me, $token);
     $fresh    = SelfServicePassword::recentlyProvedThemselves($me);
+    // ⏳ D-200: nobody can agree until 7 days after the notice. The moment is
+    //    stored in UTC and shown on the ORGANISATION's own clock (Site::timezone()).
+    $tooSoon  = $request['tooSoon'] === 1 || $request['tooSoon'] === '1';
+    $opensAt  = '';
+    if ($tooSoon === true) {
+        $opensAt = (new \DateTimeImmutable((string) $request['notBeforeUtc'], new \DateTimeZone('UTC')))
+            ->setTimezone(new \DateTimeZone(Site::timezone()))->format('j F Y, H:i');
+    }
     ?>
     <div class="alert alert-info">
         <p class="mb-2">
@@ -134,6 +142,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             $mergeShowClashes = true;
         } elseif ($fresh === true) {
             $mergePreview = AccountMerge::ownCounts($mysqli, $me);
+            // The kept account's own records simply stay: one true heading.
+            $mergeKeptSide = $me === $keptId;
         }
         ?>
         <?php if ($mergeShowClashes === true && $mergePreview['refusal'] !== ''): ?>
@@ -142,7 +152,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         <?php endif; ?>
 
-        <?php if ($fresh === false): ?>
+        <?php if ($tooSoon === true): ?>
+            <p data-merge-state="too-soon">
+                You can agree to this merge from <strong><?php echo $e($opensAt); ?></strong>, 7 days after you were told
+                about it, so that you have time to cancel it if it was not you. You can cancel it now.
+            </p>
+        <?php elseif ($fresh === false): ?>
             <p data-merge-state="needs-proof">
                 To agree, first <a href="<?php echo $e(Site::url('logout')); ?>">sign out</a>, sign in to
                 account <?php echo $me; ?> again, then come back to

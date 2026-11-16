@@ -186,22 +186,6 @@ final class AccountMerge
             'tblVisitor.convertedUserID', 'tblVisitor.createdByID', 'tblVisitorContact.contactedByID',
             'tblWebhooks.createdByID', 'tblWorkflowActions.actedByID', 'tblWorkflowInstances.startedByID',
             'tblZoomMeeting.createdByID',
-            // 📜 What the person did, was told or was recorded doing. These were
-            //    "keep" until the adversarial check of 0eb2f2b3 (finding 5): left
-            //    naming the closed duplicate, NO later erasure of the kept account
-            //    could reach them — the newsletter send records even hold the
-            //    duplicate's old address. The same person did all of it, so they
-            //    move. The change history's "who made the change" moves for the
-            //    same reason: an erasure empties the network address on the
-            //    person's own rows, and would otherwise miss these. D-116 keeps
-            //    every change-history ROW; none is deleted.
-            'tblActivityLogs.userID', 'tblAiUsage.userID', 'tblAssetAudit.actorUserID',
-            'tblAssetScanLog.actorUserID', 'tblAuditTrail.userID', 'tblCapabilityMap.decidedByID',
-            'tblCareAccessLog.viewerID', 'tblConsentLog.userID', 'tblErasureRequest.processedByID',
-            'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID', 'tblErrors.userID',
-            'tblExternalFeedRuns.triggeredByID', 'tblMigrations.executedByID',
-            'tblNewsletterRecipient.userID', 'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID',
-            'tblRecordingPlay.userID',
         ],
 
         // 🤝 The two copies say the same thing (the same group, role, meeting,
@@ -232,11 +216,26 @@ final class AccountMerge
             'tblGivingKeptDonors.donorID', 'tblGivingStatementLog.donorID', 'tblPledges.userID',
         ],
 
-        // 📜 The merge's own records, which say which account went where.
-        //    (The change-history rows ABOUT the duplicate's own account row are
-        //    the polymorphic `tblAuditTrail.recordID`: kept, values emptied.)
+        // 📜 HISTORY: left EXACTLY as written, under the duplicate's number
+        //    (the owner, 16 November 2026 — D-199; D-116 whole). A merge never
+        //    reassigns "who did it": the activity log, the change history, the
+        //    access, scan, consent, send and usage logs and every record of a
+        //    decision keep the number they were made under. Instead the merge
+        //    writes a NEW activity entry saying the person on those earlier
+        //    actions is now the kept account, and reading, exporting and
+        //    ERASING the kept account follow completed merges
+        //    (`mergedInto()`; `GdprEraser::execute()`, `inventory()` and the
+        //    data copy ask it), so nothing here is out of an erasure's reach.
+        //    (An earlier version of this package moved these; D-199 reversed it.)
         self::KEEP => [
             'tblAccountMergeRequest.requestedByID', 'tblAccountMergeSide.userID',
+            'tblActivityLogs.userID', 'tblAiUsage.userID', 'tblAssetAudit.actorUserID',
+            'tblAssetScanLog.actorUserID', 'tblAuditTrail.userID', 'tblCapabilityMap.decidedByID',
+            'tblCareAccessLog.viewerID', 'tblConsentLog.userID', 'tblErasureRequest.processedByID',
+            'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID', 'tblErrors.userID',
+            'tblExternalFeedRuns.triggeredByID', 'tblMigrations.executedByID',
+            'tblNewsletterRecipient.userID', 'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID',
+            'tblRecordingPlay.userID',
         ],
 
         // 🔑 Moved only because the person has just proved BOTH accounts, and
@@ -341,8 +340,12 @@ final class AccountMerge
             'For example a different reply to the same event, or a different role in the same group. Then the merge waits until they are made the same.'],
         self::REFUSE_ON_CLASH => ['Money records that would move, unless both accounts have one',
             'A pledge, a Gift Aid record or a giving statement. If both accounts have one for the same thing, the merge waits until it is sorted out by hand.'],
+        // ⚠️ TRUE SINCE D-199, and only since: round 2 of this package moved
+        //    these rows while this sentence said they were never rewritten.
         self::KEEP => ['History, left exactly as it is',
-            'The record of who did what and when keeps the account number it was made under. It is never rewritten.'],
+            'The record of who did what and when keeps the account number it was made under and is never rewritten. '
+            . 'A new entry records that those earlier actions are now the account that stays. If the person later asks '
+            . 'for their details to be erased, these are erased with them.'],
         self::SIGN_IN_IF_TICKED => ['Microsoft or Google sign-ins and passkeys',
             'These move only if the person ticks the box when they confirm. Otherwise they are deleted with the duplicate.'],
         self::SIGN_IN_DROPPED => ['Other ways of signing in, which are never moved',
@@ -350,6 +353,15 @@ final class AccountMerge
         self::REFUSE_IF_ANY => ['Records that stop a merge',
             'An open erasure request, an offboarding that has not been undone, records a restore is still holding back, or a made-up Demo Data person.'],
     ];
+
+    /**
+     * The one heading the KEPT account sees over its own records (finding F of
+     * the third check): every per-treatment heading above describes what happens
+     * to the DUPLICATE's records, so none of them is true of the account that
+     * stays — its records simply stay.
+     */
+    public const KEPT_SIDE_WORDS = ['This account\'s own records, which all stay with it',
+        'Nothing of this account moves or is deleted. Its own password, Microsoft or Google sign-ins and passkeys stay.'];
 
     /** How long a request stays open, and how long the second agreement may follow the first. */
     public const REQUEST_DAYS          = 14;
@@ -363,6 +375,14 @@ final class AccountMerge
      * days is a judgement, put to the owner on #1064.
      */
     public const SIGN_IN_CHANGE_DAYS = 90;
+
+    /**
+     * Nobody can agree to a merge until this many days after its start notice
+     * was sent (the owner, 16 November 2026 — D-200), so a person who did not
+     * ask for it has a week to see the notice and cancel. Stored on the request
+     * as `notBeforeUtc` when it is started.
+     */
+    public const WAIT_DAYS = 7;
 
     /**
      * The browser cookie that carries the first agreement to the second. On
@@ -399,6 +419,7 @@ final class AccountMerge
     public const R_UNKNOWN_CLASH        = 'unknown_clash';
     public const R_SIGN_IN_CHANGED      = 'sign_in_changed';
     public const R_CHANGED_DURING       = 'changed_during';
+    public const R_TOO_SOON             = 'too_soon';
 
     /**
      * What the PERSON reads when their agreement is refused — their own words,
@@ -406,9 +427,13 @@ final class AccountMerge
      * about the OTHER account beyond what the final step shows anyway.
      */
     private const PERSON_WORDS = [
-        self::R_SIGN_IN_CHANGED => 'This account\'s password or e-mail address was changed recently by somebody other '
-            . 'than you, so it cannot be used to agree to a merge yet. If you did not expect that change, tell whoever '
-            . 'looks after the portal for your organisation.',
+        // D-200: say how long the bar lasts, and that a new request is needed.
+        self::R_SIGN_IN_CHANGED => 'This account\'s password or e-mail address was changed by somebody other than you '
+            . 'in the 90 days before this request was made, or since. Neither account can agree to this request: once '
+            . '90 days have passed since that change, an administrator will need to make a new request. If you did not '
+            . 'expect that change, tell whoever looks after the portal for your organisation.',
+        self::R_TOO_SOON => 'A merge can only be agreed to from 7 days after you were told about it, so that you have '
+            . 'time to see the message and cancel if it was not you. Please come back then. You can cancel it now.',
         self::R_CHANGED_DURING => 'Something changed while the accounts were being merged, so nothing was merged. '
             . 'Please try again in a minute.',
         self::R_CHOICES_DIFFER => 'Both accounts have a record that can only be kept once, and the two say different '
@@ -461,8 +486,10 @@ final class AccountMerge
         self::R_UNKNOWN_CLASH => 'The portal does not know how to merge one of the kinds of record these accounts '
             . 'have. Nothing has been changed. Please report this.',
         self::R_SIGN_IN_CHANGED => 'The password or e-mail address of one of those accounts was changed by somebody '
-            . 'other than its owner recently, so its owner cannot agree to a merge yet.',
+            . 'other than its owner in the 90 days before this request, or since, so its owner cannot agree to it. Once '
+            . '90 days have passed since that change, a new request will be needed.',
         self::R_CHANGED_DURING => 'Something changed while the accounts were being merged, so nothing was merged.',
+        self::R_TOO_SOON => 'Nobody can agree to this merge until 7 days after the notice was sent.',
     ];
 
     /** Words for a refusal code; an unknown code throws rather than printing nothing. */
@@ -1001,18 +1028,25 @@ final class AccountMerge
 
                 return ['outcome' => 'already_waiting', 'requestId' => (int) $open['requestID']];
             }
-            $days = self::REQUEST_DAYS;
+            // ⏳ D-200: open for REQUEST_DAYS, and nobody can agree before
+            //    WAIT_DAYS have passed since this notice. The request must outlast
+            //    the wait by a week, or it could expire before it could be agreed.
+            $days = self::REQUEST_DAYS + self::WAIT_DAYS;
+            $wait = self::WAIT_DAYS;
             self::run(
                 $db,
-                'INSERT INTO `tblAccountMergeRequest` (`siteID`, `requestedByID`, `requestedAtUtc`, `expiresAtUtc`, `status`) '
-                . "VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL {$days} DAY, 'waiting')",
+                'INSERT INTO `tblAccountMergeRequest` (`siteID`, `requestedByID`, `requestedAtUtc`, `expiresAtUtc`, `notBeforeUtc`, `status`) '
+                . "VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP() + INTERVAL {$days} DAY, UTC_TIMESTAMP() + INTERVAL {$wait} DAY, 'waiting')",
                 $siteId,
                 $requesterId
             );
             $requestId = (int) $db->insert_id;
             self::run($db, "INSERT INTO `tblAccountMergeSide` (`requestID`, `userID`, `side`) VALUES (?, ?, 'kept'), (?, ?, 'duplicate')",
                 $requestId, $keptId, $requestId, $duplicateId);
-            $addresses = self::addressesOf($db, $keptId, $duplicateId);
+            // ✉️ D-200: ALSO the address each account held before somebody
+            //    else changed it, so a person whose address an administrator
+            //    replaced still hears about it.
+            $addresses = self::addressesOf($db, $keptId, $duplicateId, true);
             Logger::activity('AccountMergeStarted', 'Asked the person to agree to merging account ' . $duplicateId
                 . ' into account ' . $keptId . ' (request ' . $requestId . ')');
             $db->commit();
@@ -1029,9 +1063,14 @@ final class AccountMerge
             $addresses,
             'Please confirm: two of your accounts may be merged',
             "An administrator has asked to merge two accounts that may both be yours (account numbers {$keptId} and "
-            . "{$duplicateId}).\n\nNothing happens unless you agree. To agree, sign in to either account and go to "
+            . "{$duplicateId}).\n\nNothing happens unless you agree, and you cannot agree until " . self::WAIT_DAYS . " days "
+            . "after this message, so that you have time to cancel it if it was not you. You can cancel it now: sign in to "
+            . "either account and go to "
             . ($where === '' ? 'your Account page, where a "Merge my accounts" button is shown while a request is waiting' : $where)
-            . ", then follow the steps there. If these are not both yours, you can cancel the request there.\n",
+            . ". To agree later, follow the steps on the same page.\n\nIf somebody other than you changed the password or "
+            . "e-mail address of either account in the " . self::SIGN_IN_CHANGE_DAYS . " days before this request, or "
+            . "changes it before you agree, the merge cannot go ahead; a new request will be needed once "
+            . self::SIGN_IN_CHANGE_DAYS . " days have passed since that change.\n",
             $siteId
         );
 
@@ -1052,6 +1091,7 @@ final class AccountMerge
             $db,
             'SELECT r.`requestID`, r.`siteID`, r.`requestedByID`, r.`status`, r.`browserTokenHash`, '
             . '(r.`expiresAtUtc` <= UTC_TIMESTAMP()) AS `expired`, k.`userID` AS `keptId`, d.`userID` AS `duplicateId`, '
+            . 'r.`notBeforeUtc`, (r.`notBeforeUtc` > UTC_TIMESTAMP()) AS `tooSoon`, '
             . 'TIMESTAMPDIFF(SECOND, k.`confirmedAtUtc`, UTC_TIMESTAMP()) AS `keptAgreedAgo`, '
             . 'TIMESTAMPDIFF(SECOND, d.`confirmedAtUtc`, UTC_TIMESTAMP()) AS `duplicateAgreedAgo` '
             . 'FROM `tblAccountMergeRequest` r '
@@ -1159,7 +1199,8 @@ final class AccountMerge
             // 🔒 Lower account number first (#647/#697), then the request and sides.
             self::lockAccounts($db, $keptId, $dupId);
             $req = self::one($db, 'SELECT `requestID`, `siteID`, `requestedByID`, `status`, `browserTokenHash`, '
-                . '(`expiresAtUtc` <= UTC_TIMESTAMP()) AS `expired` FROM `tblAccountMergeRequest` WHERE `requestID` = ? FOR UPDATE', $requestId);
+                . '(`expiresAtUtc` <= UTC_TIMESTAMP()) AS `expired`, (`notBeforeUtc` > UTC_TIMESTAMP()) AS `tooSoon` '
+                . 'FROM `tblAccountMergeRequest` WHERE `requestID` = ? FOR UPDATE', $requestId);
             self::all($db, 'SELECT `sideID` FROM `tblAccountMergeSide` WHERE `requestID` = ? FOR UPDATE', $requestId);
             $state = self::requestFor($db, $requestId, $actingUserId);
             if ($req === null || $state === null) {
@@ -1186,6 +1227,13 @@ final class AccountMerge
                 $db->rollback();
 
                 return ['outcome' => 'needs_proof', 'token' => ''];
+            }
+            // ⏳ D-200: nobody agrees — first OR second — until WAIT_DAYS after
+            //    the notice. Cancelling stays open all the time (`cancel()`).
+            if (self::flag($req['tooSoon']) === true) {
+                $db->rollback();
+
+                return ['outcome' => self::R_TOO_SOON, 'token' => ''];
             }
 
             $siteId = (int) $req['siteID'];
@@ -1234,8 +1282,21 @@ final class AccountMerge
                 return ['outcome' => $why, 'token' => ''];
             }
 
-            $addresses = self::addressesOf($db, $keptId, $dupId);
-            $photos    = self::applyMerge($db, $keptId, $dupId, $moveSignIns);
+            $addresses   = self::addressesOf($db, $keptId, $dupId);
+            // 📧 The duplicate's address as it is NOW, kept on its side row so an
+            //    erasure of the kept account can find mail sent to it (the send
+            //    log, waiting mail) after closeDuplicate() has replaced it. That
+            //    erasure empties it (GdprEraser::eraseMergeRecords()).
+            $formerEmail = (string) (self::one($db, 'SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = ?', $dupId)['emailAddress'] ?? '');
+            try {
+                $photos = self::applyMerge($db, $keptId, $dupId, $moveSignIns);
+            } catch (MergeRefused $refused) {
+                $db->rollback();
+
+                return ['outcome' => $refused->code(), 'token' => ''];
+            }
+            self::run($db, 'UPDATE `tblAccountMergeSide` SET `formerEmail` = ? WHERE `requestID` = ? AND `userID` = ?',
+                $formerEmail, $requestId, $dupId);
             self::run($db, 'UPDATE `tblAccountMergeSide` SET `confirmedAtUtc` = UTC_TIMESTAMP() WHERE `requestID` = ? AND `userID` = ?',
                 $requestId, $actingUserId);
             self::run($db, "UPDATE `tblAccountMergeRequest` SET `status` = 'completed', `finishedAtUtc` = UTC_TIMESTAMP(), "
@@ -1255,11 +1316,13 @@ final class AccountMerge
 
                 return ['outcome' => $left, 'token' => ''];
             }
-            // The record names the KEPT account explicitly: the person may be
-            // signed in as the duplicate at this moment, and Logger would
-            // otherwise name the account that has just been closed.
-            Logger::activity('AccountsMerged', 'Account ' . $dupId . ' was merged into account ' . $keptId
-                . ' (request ' . $requestId . ', ways of signing in ' . ($moveSignIns === true ? 'brought across' : 'not brought across') . ')', $keptId);
+            // 📜 D-199: the NEW entry that says who the earlier actions belong
+            //    to, since they are never reassigned. Two numbers and fixed
+            //    words. It names the KEPT account explicitly: the person may be
+            //    signed in as the duplicate at this moment.
+            Logger::activity('AccountsMerged', 'The person on the earlier actions of account ' . $dupId
+                . ' is now account ' . $keptId . ': the two accounts were merged (request ' . $requestId . ', ways of signing in '
+                . ($moveSignIns === true ? 'brought across' : 'not brought across') . ')', $keptId);
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollback();
@@ -1376,14 +1439,12 @@ final class AccountMerge
      */
     private static function applyMerge(mysqli $db, int $keptId, int $dupId, bool $moveSignIns): array
     {
-        // 🧾 FIRST, before any membership moves (the rule finds rows about the
-        //    duplicate's memberships through their CURRENT account number): the
-        //    change history's values about the duplicate's own account row and
-        //    memberships are emptied, by the eraser's own rule (#707). The
-        //    duplicate's details are emptied below; a copy kept here would be one
-        //    no later erasure of the kept account could reach (finding 5). Every
-        //    ROW stays (D-116): who changed what, and when.
-        GdprEraser::emptyChangeHistoryAbout($db, $dupId);
+        // 📜 The change history is NOT touched here (D-199): its rows, values
+        //    included, stay exactly as written. An erasure of the kept account
+        //    follows the merge and empties the values about the duplicate's own
+        //    account and memberships then, by #707's rule
+        //    (`GdprEraser::emptyChangeHistoryAbout()`). (Round 2 of this package
+        //    emptied them at merge time; D-199 reversed that.)
 
         $keys = self::uniqueKeysOf($db);
         foreach (self::columns() as $name => $entry) {
@@ -1410,10 +1471,24 @@ final class AccountMerge
                     . ' AND NOT (' . str_replace('{t}', $t, self::REFUSE_WHEN[$name] ?? '1 = 1') . ')', $k, $d);
                 continue;
             }
+            // 🔒 A table with a unique key on this column: LOCK both accounts'
+            //    rows in it first (finding D of the third check). The preview
+            //    that judged "same" or "no clash" read a snapshot; a table with
+            //    no foreign key (RSVPs, among others) lets another connection
+            //    change a row meanwhile, and the account lock does not hold that
+            //    back. Under this lock nothing can change them until the commit.
+            if (($keys[$table][$column] ?? []) !== []) {
+                self::all($db, 'SELECT 1 FROM ' . $t . ' WHERE ' . $t . '.`' . $column . '` IN (?, ?)' . self::cond($entry['when'], $t) . ' FOR UPDATE', $k, $d);
+            }
             foreach ($keys[$table][$column] ?? [] as $others) {
                 $on = '';
                 foreach ($others as $other) {
                     $on .= ' AND k.`' . $other . '` = d.`' . $other . '`';
+                }
+                if ($treatment === self::REFUSE_ON_CLASH) {
+                    // 💷 NEVER delete a money record: a clash left in place makes
+                    //    the UPDATE below hit the key, which is a refusal.
+                    continue;
                 }
                 if ($treatment === self::STRICTER_ON_CLASH) {
                     $set = [];
@@ -1429,11 +1504,25 @@ final class AccountMerge
                         . ' SET ' . implode(', ', $set) . ' WHERE k.`' . $column . '` = ?' . self::cond($entry['when'], 'k'), $d, $k);
                 }
                 // Keep-kept, stricter (after the write above) and same-or-refuse
-                // (the preview refused any that differ) all remove D's copy.
+                // remove D's copy — same-or-refuse ONLY where the two still agree,
+                // asked INSIDE the delete on the locked rows, never trusted from
+                // the preview. A copy that now differs is left, and the UPDATE
+                // below then hits the key: a refusal, not a guess.
+                $same = $treatment === self::SAME_OR_REFUSE && self::differs($name) !== '' ? ' AND NOT ' . self::differs($name) : '';
                 self::run($db, 'DELETE d FROM ' . $t . ' d JOIN ' . $t . ' k ON k.`' . $column . '` = ?' . self::cond($entry['when'], 'k') . $on
-                    . ' WHERE d.`' . $column . '` = ?' . self::cond($entry['when'], 'd'), $k, $d);
+                    . ' WHERE d.`' . $column . '` = ?' . self::cond($entry['when'], 'd') . $same, $k, $d);
             }
-            self::run($db, 'UPDATE ' . $t . ' SET `' . $column . '` = ? WHERE ' . $where, $k, $d);
+            try {
+                self::run($db, 'UPDATE ' . $t . ' SET `' . $column . '` = ? WHERE ' . $where, $k, $d);
+            } catch (\mysqli_sql_exception $clash) {
+                // 1062: a duplicate key — a copy that differs, a money record,
+                // or a row written meanwhile. Never an error page: a refusal.
+                if ($clash->getCode() !== 1062) {
+                    throw $clash;
+                }
+                throw new MergeRefused($treatment === self::REFUSE_ON_CLASH ? self::R_CLASH
+                    : ($treatment === self::SAME_OR_REFUSE ? self::R_CHOICES_DIFFER : self::R_CHANGED_DURING));
+            }
         }
 
         // 🔕 Notification choices live in one column of tblUsers; the stricter
@@ -1491,18 +1580,77 @@ final class AccountMerge
         Auth::endOtherSessionsOf($db, $dupId);
     }
 
-    /** Both accounts' addresses, read before anything is changed. @return list<string> */
-    private static function addressesOf(mysqli $db, int $keptId, int $dupId): array
+    /**
+     * Both accounts' addresses, read before anything is changed; with
+     * `$withEarlier`, also the address each held before somebody OTHER than it
+     * first changed it (`emailBeforeChangeByOther`, D-200). Each address once.
+     *
+     * Where an account's way in was changed by somebody else but no earlier
+     * address was recorded (the change was a password, which leaves the address
+     * as it was), the current address IS the earlier one, so nothing is missing.
+     *
+     * @return list<string>
+     */
+    private static function addressesOf(mysqli $db, int $keptId, int $dupId, bool $withEarlier = false): array
     {
         $out = [];
-        foreach (self::all($db, 'SELECT `emailAddress` FROM `tblUsers` WHERE `userID` IN (?, ?)', $keptId, $dupId) as $row) {
-            $address = (string) $row['emailAddress'];
-            if (filter_var($address, FILTER_VALIDATE_EMAIL) !== false) {
-                $out[] = $address;
+        foreach (self::all($db, 'SELECT `emailAddress`, `emailBeforeChangeByOther` FROM `tblUsers` WHERE `userID` IN (?, ?)', $keptId, $dupId) as $row) {
+            $candidates = [(string) $row['emailAddress']];
+            if ($withEarlier === true) {
+                $candidates[] = (string) ($row['emailBeforeChangeByOther'] ?? '');
+            }
+            foreach ($candidates as $address) {
+                if (filter_var($address, FILTER_VALIDATE_EMAIL) !== false && in_array($address, $out, true) === false) {
+                    $out[] = $address;
+                }
             }
         }
 
         return $out;
+    }
+
+    /**
+     * Every account number merged INTO this one by a completed merge, followed
+     * through chains (A into B, then B into C: both A and B for C). The ONE
+     * answer to "which numbers are this same person" for reading, exporting and
+     * erasing (D-199). Never includes `$survivor` itself.
+     *
+     * @return list<int>
+     */
+    public static function mergedInto(mysqli $db, int $survivor): array
+    {
+        return array_keys(self::mergedIntoWithAddresses($db, $survivor));
+    }
+
+    /**
+     * As `mergedInto()`, with the address each duplicate held when it was
+     * merged (`tblAccountMergeSide.formerEmail`, '' once an erasure emptied it).
+     *
+     * @return array<int, string> duplicate number => former address
+     */
+    public static function mergedIntoWithAddresses(mysqli $db, int $survivor): array
+    {
+        $found = [];
+        $todo  = [$survivor];
+        while ($todo !== []) {
+            $next = array_shift($todo);
+            foreach (self::all(
+                $db,
+                "SELECT d.`userID` AS `dup`, d.`formerEmail` AS `email` FROM `tblAccountMergeRequest` r "
+                . "JOIN `tblAccountMergeSide` k ON k.`requestID` = r.`requestID` AND k.`side` = 'kept' "
+                . "JOIN `tblAccountMergeSide` d ON d.`requestID` = r.`requestID` AND d.`side` = 'duplicate' "
+                . "WHERE r.`status` = 'completed' AND k.`userID` = ?",
+                $next
+            ) as $row) {
+                $dup = (int) $row['dup'];
+                if ($dup !== $survivor && isset($found[$dup]) === false) {
+                    $found[$dup] = (string) ($row['email'] ?? '');
+                    $todo[]      = $dup;
+                }
+            }
+        }
+
+        return $found;
     }
 
     /**
