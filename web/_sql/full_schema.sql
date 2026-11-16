@@ -1230,6 +1230,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `moderatedAt`        DATETIME      DEFAULT NULL,
     `moderationNote`     TEXT          DEFAULT NULL,
     `cancelledWhileWaiting` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = this suggestion was cancelled while it was still waiting to be approved (before #965 refused that), so approving it needs a confirmation (D-197). Kept because the status and reason that showed it can later be lost (D-196 empties the reason). Set by migration 300 and HiddenSeriesDates::restore(); never cleared',
+    `postponedWhileWaiting` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = this suggestion was postponed while it was still waiting to be approved (before #965 refused that), so approving it needs a confirmation (D-198). Kept because the status and reason that showed it can later be lost (D-196 empties the reason). Set by migration 300 and HiddenSeriesDates::restore(); never cleared',
 
     -- 🚫 Cancellation audit (#337 — added by migration 112)
     `cancelReason`       TEXT          DEFAULT NULL,
@@ -11929,10 +11930,11 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VAL
 INSERT INTO `tblMigrations` (`filename`) VALUES ('298_member_limits.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
--- ── from 300_suggestion_cancelled_while_waiting.sql (#1081; D-197) ──────────
--- tblEvents.cancelledWhileWaiting is written above, in the table itself. A
--- fresh install holds no suggestions for the migration to mark. This is the record.
-INSERT INTO `tblMigrations` (`filename`) VALUES ('300_suggestion_cancelled_while_waiting.sql')
+-- ── from 300_suggestion_cancelled_or_postponed_while_waiting.sql (#1081; D-197, D-198)
+-- tblEvents.cancelledWhileWaiting and postponedWhileWaiting are written above,
+-- in the table itself. A fresh install holds no suggestions for the migration
+-- to mark. This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('300_suggestion_cancelled_or_postponed_while_waiting.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

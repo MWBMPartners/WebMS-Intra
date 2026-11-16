@@ -75,10 +75,14 @@
  *     it. D-146 rules out clearing a cancellation reason on the way back, and
  *     D-196 makes the exception for a waiting suggestion on purpose (the old
  *     path left a row "waiting and cancelled", which #965 refuses from every
- *     writer). And D-197 makes approving such a suggestion need a warning
- *     and a confirmation: the fact that it was cancelled is kept in
- *     `tblEvents.cancelledWhileWaiting`, which this method sets when it
- *     empties the reason, so the moderation page can still see it.
+ *     writer). And D-197 (cancelled) and D-198 (postponed) make approving
+ *     such a suggestion need a warning and a confirmation: the fact is kept
+ *     in `tblEvents.cancelledWhileWaiting` or `postponedWhileWaiting`
+ *     (`EventSuggestions::WARN_IF_EVER`), which this method sets when it
+ *     empties the reason, so the moderation page can still see it. A
+ *     postponed one's reason is emptied the same way (D-196 speaks of the
+ *     cancellation reason; the column is one and the same, and #998's rule
+ *     is that a draft carries none).
  *
  *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
  *     a reason is optional (`EventCancelReason`, #998, is the one writer, and
@@ -502,29 +506,34 @@ final class HiddenSeriesDates
             //    from the row locked in step 3. Such a date keeps its
             //    `cancelReason` and who changed its status, untouched.
             //
-            //    ⚠️ D-197: when a WAITING suggestion that was CANCELLED comes
-            //    back as a draft, its cancellation is about to vanish from the
-            //    row (the status becomes draft, the reason is emptied below),
-            //    so it is recorded in `cancelledWhileWaiting` in this same
-            //    statement. `GREATEST` only ever sets it: nothing clears it.
-            //    That matters for a suggestion ALREADY marked (by migration
-            //    300) and then set back to Draft before it was hidden: it is
-            //    a draft here, so `$markCancel` is 0, and `= ?` would wipe the
-            //    mark and let it be approved with no warning (round 2 of the
-            //    check; section B's B10 holds that case).
+            //    ⚠️ D-197, D-198: when a WAITING suggestion that was CANCELLED
+            //    or POSTPONED comes back as a draft, that status is about to
+            //    vanish from the row (the status becomes draft, the reason is
+            //    emptied below), so it is recorded in its own column from
+            //    `EventSuggestions::WARN_IF_EVER` in this same statement — one
+            //    `GREATEST` per listed status, which only ever sets a mark:
+            //    nothing clears one. That matters for a suggestion ALREADY
+            //    marked (by migration 300) and then set back to Draft before it
+            //    was hidden: it is a draft here, so its mark value is 0, and
+            //    `= ?` would wipe the mark and let it be approved with no
+            //    warning (round 2 of the check; section B's B10 holds that case).
             $submission   = $row['submissionStatus'] === null ? null : (string) $row['submissionStatus'];
             $suggestion   = self::isWaitingSuggestion($submission);
             $newStatus    = self::statusOnReturn((string) $row['status'], $submission);
-            $markCancel   = ($suggestion === true && in_array((string) $row['status'], EventSuggestions::WARN_IF_EVER_STATUSES, true) === true) ? 1 : 0;
+            $markSql      = '';
+            $marks        = [];
+            foreach (EventSuggestions::WARN_IF_EVER as $markStatus => $markColumn) {
+                $markSql .= ', `' . $markColumn . '` = GREATEST(`' . $markColumn . '`, ?)';
+                $marks[]  = ($suggestion === true && (string) $row['status'] === $markStatus) ? 1 : 0;
+            }
             $write        = $db->prepare(
-                'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ?, '
-                . '`cancelledWhileWaiting` = GREATEST(`cancelledWhileWaiting`, ?) '
+                'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ?' . $markSql . ' '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `isDeleted` = 1 AND `externalFeedID` IS NULL'
             );
             if ($write === false) {
                 throw new \RuntimeException('the date could not be brought back');
             }
-            $write->bind_param('siiiii', $newStatus, $userId, $markCancel, $eventId, $siteId, $seriesId);
+            $write->bind_param('si' . str_repeat('i', count($marks)) . 'iii', $newStatus, $userId, ...[...$marks, $eventId, $siteId, $seriesId]);
             $write->execute();
             $changed = $write->affected_rows;
             $write->close();

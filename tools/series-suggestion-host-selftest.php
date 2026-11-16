@@ -36,14 +36,18 @@
  *      its reason (D-146); the same-day confirmation (D-144) still applies;
  *      A's administrator cannot reach B's date; approving it afterwards
  *      publishes it.
- *   U  D-196 and D-197 asked of the classes directly, no database: what each
- *      kind of hidden date comes back as (the exception is for a WAITING
- *      suggestion only), and every new sentence word for word.
- *   M  D-197: approving a suggestion that was cancelled earlier — known from
- *      its status, or from the kept mark alone — is refused unless the
- *      moderator ticked the box; the list and the edit form warn; an ordinary
- *      suggestion is unaffected; the approval e-mail still goes once; B's
- *      administrator cannot reach A's suggestion.
+ *   U  D-196, D-197 and D-198 asked of the classes directly, no database:
+ *      what each kind of hidden date comes back as (the exception is for a
+ *      WAITING suggestion only), the rule in both spellings, and every new
+ *      sentence word for word for cancelled, postponed and both.
+ *   M  D-197, D-198: approving a suggestion that was cancelled or postponed
+ *      earlier — known from its status, or from a kept mark alone, or both —
+ *      is refused unless the moderator ticked the box; the list and the edit
+ *      form warn, naming which; tampered posts (a list, another value, the
+ *      old field name) confirm nothing; an ordinary suggestion is
+ *      unaffected; the approval e-mail still goes once; a decided
+ *      suggestion's old reason is emptied; B's administrator cannot reach
+ *      A's suggestion.
  *   N  #1084: `SmallGroups::offboardingHomesWords()` in every mix of what
  *      became of each group's leaders — e-mailed, could not be, no other
  *      leader — each sentence written out in full here. Database-free: it is
@@ -1427,7 +1431,7 @@ function hiddenDate(int $site, int $series, string $name, string $start, string 
 
 function hiddenState(int $id): array
 {
-    return one('SELECT `status`, `submissionStatus`, `isDeleted`, `cancelReason`, `cancelledWhileWaiting` FROM `tblEvents` WHERE `eventID` = ?', 'i', [$id]) ?? [];
+    return one('SELECT `status`, `submissionStatus`, `isDeleted`, `cancelReason`, `cancelledWhileWaiting`, `postponedWhileWaiting` FROM `tblEvents` WHERE `eventID` = ?', 'i', [$id]) ?? [];
 }
 
 /** The part of the series page drawn for ONE hidden date (its row, up to the next one). */
@@ -1498,7 +1502,8 @@ $sectionB = static function (): void {
     $st = hiddenState($sugPostponed);
     check('B04 a pending suggestion hidden while POSTPONED comes back as a draft too, its reason emptied',
         (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && $st['cancelReason'] === null, json_encode($st));
-    check('B04b ...and is NOT marked as cancelled (D-197 is about cancellation only)', (int) ($st['cancelledWhileWaiting'] ?? 1) === 0, json_encode($st));
+    check('B04b D-198: ...and the fact that it was POSTPONED is kept (and it is not marked cancelled)',
+        (int) ($st['postponedWhileWaiting'] ?? 0) === 1 && (int) ($st['cancelledWhileWaiting'] ?? 1) === 0, json_encode($st));
 
     $r  = $bringBack($jarA, $pageA, $seriesA, $ordinary);
     $st = hiddenState($ordinary);
@@ -1534,7 +1539,7 @@ $sectionB = static function (): void {
     post($jarA, '/admin/calendar/moderation?status=pending', '/admin/calendar/moderate', ['eventID' => (string) $sugCancelled, 'action' => 'approve']);
     check('B09 D-197: approving it WITHOUT the confirmation is refused, so it is still waiting', (hiddenState($sugCancelled)['submissionStatus'] ?? '') === 'pending');
     $mod = post($jarA, '/admin/calendar/moderation?status=pending', '/admin/calendar/moderate',
-        ['eventID' => (string) $sugCancelled, 'action' => 'approve', 'confirmCancelledEarlier' => '1']);
+        ['eventID' => (string) $sugCancelled, 'action' => 'approve', 'confirmCancelledOrPostponed' => '1']);
     $st  = hiddenState($sugCancelled);
     check('B09b ...and with it, approving publishes it', ($st['status'] ?? '') === 'published' && ($st['submissionStatus'] ?? '') === 'approved', 'HTTP ' . $mod['status'] . ' ' . json_encode($st));
 };
@@ -1632,22 +1637,50 @@ $sectionN = static function (): void {
 };
 
 // =============================================================================
-// U. D-196 AND D-197: THE RULES AND THEIR WORDS, WITH NO DATABASE
+// U. D-196, D-197, D-198: THE RULES AND THEIR WORDS, WITH NO DATABASE
 // =============================================================================
-// The D-197 words, written out WHOLE by hand.
-const CANCELLED_EARLIER_WARNING = 'This suggestion was cancelled earlier, while it was waiting to be approved. Approving it publishes it: '
-    . 'members will see it on the calendar as an event that is going ahead, and it will no longer show as cancelled. '
-    . 'If that is what you want, tick the box to confirm before you press Approve.';
-// The edit form's own sentence: that page has neither the box nor Approve.
-const CANCELLED_EARLIER_FORM_WARNING = 'This suggestion was cancelled earlier, while it was waiting to be approved. Approving it publishes it: '
-    . 'members will see it on the calendar as an event that is going ahead, and it will no longer show as cancelled. '
-    . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.';
-const CANCELLED_EARLIER_LABEL   ='I know this suggestion was cancelled earlier, and I want to publish it';
-const CANCELLED_EARLIER_REFUSAL = 'Not approved. This suggestion was cancelled earlier, so approving it needs the box beside Approve ticked, '
-    . 'to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.';
+// Every new sentence, written out WHOLE by hand for each combination the
+// words can take (cancelled, postponed, both), never read from the class: a
+// test holding the class's own copy tests nothing. Printed from the real code
+// first and read as English before being pinned here.
+const EARLIER_WORDS = [
+    'cancelled' => [
+        'warning' => 'This suggestion was cancelled earlier, while it was waiting to be approved, so members may have seen it marked as cancelled. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'If that is what you want, tick the box to confirm before you press Approve.',
+        'form' => 'This suggestion was cancelled earlier, while it was waiting to be approved, so members may have seen it marked as cancelled. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.',
+        'label' => 'I know this suggestion was cancelled earlier, and I want to publish it',
+        'refusal' => 'Not approved. This suggestion was cancelled earlier, so approving it needs the box beside Approve ticked, '
+            . 'to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.',
+    ],
+    'postponed' => [
+        'warning' => 'This suggestion was postponed earlier, while it was waiting to be approved, so members may have seen it marked as postponed. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'If that is what you want, tick the box to confirm before you press Approve.',
+        'form' => 'This suggestion was postponed earlier, while it was waiting to be approved, so members may have seen it marked as postponed. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.',
+        'label' => 'I know this suggestion was postponed earlier, and I want to publish it',
+        'refusal' => 'Not approved. This suggestion was postponed earlier, so approving it needs the box beside Approve ticked, '
+            . 'to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.',
+    ],
+    'both' => [
+        'warning' => 'This suggestion was cancelled and postponed earlier, while it was waiting to be approved, so members may have seen it marked as cancelled or postponed. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'If that is what you want, tick the box to confirm before you press Approve.',
+        'form' => 'This suggestion was cancelled and postponed earlier, while it was waiting to be approved, so members may have seen it marked as cancelled or postponed. '
+            . 'Approving it publishes it: members will see it on the calendar as an event that is going ahead. '
+            . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.',
+        'label' => 'I know this suggestion was cancelled and postponed earlier, and I want to publish it',
+        'refusal' => 'Not approved. This suggestion was cancelled and postponed earlier, so approving it needs the box beside Approve ticked, '
+            . 'to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.',
+    ],
+];
 
 $sectionU = static function (): void {
-    head('U. D-196 and D-197: what a hidden date comes back as, and every new sentence, asked of the classes directly');
+    head('U. D-196, D-197, D-198: what a hidden date comes back as, and every new sentence in every combination, asked of the classes directly');
     $core   = ['EventSuggestions.php', 'HiddenSeriesDates.php'];
     $status = askCopy($core, '$out[$k] = \Portal\Core\HiddenSeriesDates::statusOnReturn($c[0], $c[1]);', [
         'U01' => ['cancelled', 'pending'], 'U02' => ['postponed', 'pending'], 'U03' => ['published', 'pending'],
@@ -1667,35 +1700,58 @@ $sectionU = static function (): void {
         'U07' => 'restored-suggestion', 'U08' => 'restored-same-day-suggestion']);
     check('U07 the suggestion message, word for word', ($words['U07'] ?? '') === RESTORE_WORDS_SUGGESTION, (string) ($words['U07'] ?? ''));
     check('U08 the same-day suggestion message, word for word', ($words['U08'] ?? '') === RESTORE_WORDS_SAME_DAY_SUGGESTION, (string) ($words['U08'] ?? ''));
-    $said = askCopy(['EventSuggestions.php'], '$out[$k] = match ($c) { "w" => \Portal\Core\EventSuggestions::cancelledEarlierWarning(), '
-        . '"l" => \Portal\Core\EventSuggestions::cancelledEarlierConfirmLabel(), "r" => \Portal\Core\EventSuggestions::cancelledEarlierRefusal(), '
-        . '"e" => \Portal\Core\EventSuggestions::cancelledEarlierEditFormWarning(), '
-        . '"f" => \Portal\Core\EventSuggestions::CONFIRM_CANCELLED_FIELD, "s" => \Portal\Core\EventSuggestions::cancelledEarlierSql("e"), '
-        . '"p1" => \Portal\Core\EventSuggestions::wasCancelledEarlier(["status" => "cancelled", "cancelledWhileWaiting" => 0]), '
-        . '"p2" => \Portal\Core\EventSuggestions::wasCancelledEarlier(["status" => "draft", "cancelledWhileWaiting" => "1"]), '
-        . '"p3" => \Portal\Core\EventSuggestions::wasCancelledEarlier(["status" => "postponed", "cancelledWhileWaiting" => 0]) };',
-        ['U09' => 'w', 'U10' => 'l', 'U11' => 'r', 'U12' => 'f', 'U13' => 's', 'U14' => 'p1', 'U15' => 'p2', 'U16' => 'p3', 'U17' => 'e']);
-    check('U09 D-197: the warning, word for word', ($said['U09'] ?? '') === CANCELLED_EARLIER_WARNING, (string) ($said['U09'] ?? ''));
-    check('U10 D-197: the box\'s label, word for word', ($said['U10'] ?? '') === CANCELLED_EARLIER_LABEL, (string) ($said['U10'] ?? ''));
-    check('U11 D-197: the refusal, word for word', ($said['U11'] ?? '') === CANCELLED_EARLIER_REFUSAL, (string) ($said['U11'] ?? ''));
-    check('U12 the confirmation travels in the field confirmCancelledEarlier', ($said['U12'] ?? '') === 'confirmCancelledEarlier');
-    check('U13 the SQL rule asks BOTH facts, qualified by the alias', ($said['U13'] ?? '') === "(`e`.`status` IN ('cancelled') OR `e`.`cancelledWhileWaiting` = 1)", (string) ($said['U13'] ?? ''));
-    check('U17 D-197: the edit form\'s own warning, word for word (it names where to approve, not a box it lacks)', ($said['U17'] ?? '') === CANCELLED_EARLIER_FORM_WARNING, (string) ($said['U17'] ?? ''));
-    check('U14 the PHP rule: cancelled now counts', ($said['U14'] ?? null) === true);
-    check('U15 the PHP rule: the kept mark counts', ($said['U15'] ?? null) === true);
-    check('U16 the PHP rule: postponed alone does not', ($said['U16'] ?? null) === false);
+
+    // Four sentences x three combinations, each asked of the real methods.
+    $combos = ['cancelled' => ['cancelled'], 'postponed' => ['postponed'], 'both' => ['cancelled', 'postponed']];
+    $kinds  = ['warning' => 'earlierStatusWarning', 'form' => 'earlierStatusEditFormWarning', 'label' => 'earlierStatusConfirmLabel', 'refusal' => 'earlierStatusRefusal'];
+    $cases  = [];
+    foreach ($combos as $combo => $statuses) {
+        foreach ($kinds as $kind => $method) {
+            $cases[$combo . '/' . $kind] = [$method, $statuses];
+        }
+    }
+    $said = askCopy(['EventSuggestions.php'], '$out[$k] = \Portal\Core\EventSuggestions::{$c[0]}($c[1]);', $cases);
+    $n    = 9;
+    foreach ($combos as $combo => $statuses) {
+        foreach ($kinds as $kind => $method) {
+            $got = (string) ($said[$combo . '/' . $kind] ?? '');
+            check(sprintf('U%02d D-197/D-198: the %s for "%s", word for word', $n, $kind, $combo), $got === EARLIER_WORDS[$combo][$kind], $got);
+            $n++;
+        }
+    }
+    $facts = askCopy(['EventSuggestions.php'], '$out[$k] = match ($c[0]) { "field" => \Portal\Core\EventSuggestions::CONFIRM_FIELD, '
+        . '"sql" => \Portal\Core\EventSuggestions::cancelledOrPostponedEarlierSql("e"), default => \Portal\Core\EventSuggestions::earlierStatuses($c[1]) };', [
+        'U21' => ['field', []], 'U22' => ['sql', []],
+        'U23' => ['row', ['status' => 'cancelled', 'cancelledWhileWaiting' => 0, 'postponedWhileWaiting' => 0]],
+        'U24' => ['row', ['status' => 'draft', 'cancelledWhileWaiting' => '1', 'postponedWhileWaiting' => 0]],
+        'U25' => ['row', ['status' => 'postponed', 'cancelledWhileWaiting' => 0, 'postponedWhileWaiting' => 0]],
+        'U26' => ['row', ['status' => 'draft', 'cancelledWhileWaiting' => 0, 'postponedWhileWaiting' => '1']],
+        'U27' => ['row', ['status' => 'postponed', 'cancelledWhileWaiting' => '1', 'postponedWhileWaiting' => 0]],
+        'U28' => ['row', ['status' => 'draft', 'cancelledWhileWaiting' => 0, 'postponedWhileWaiting' => 0]],
+    ]);
+    check('U21 the confirmation travels in the field confirmCancelledOrPostponed', ($facts['U21'] ?? '') === 'confirmCancelledOrPostponed');
+    check('U22 the SQL rule asks both statuses and both marks, qualified by the alias',
+        ($facts['U22'] ?? '') === "(`e`.`status` IN ('cancelled', 'postponed') OR `e`.`cancelledWhileWaiting` = 1 OR `e`.`postponedWhileWaiting` = 1)", (string) ($facts['U22'] ?? ''));
+    check('U23 the PHP rule: cancelled now', ($facts['U23'] ?? null) === ['cancelled']);
+    check('U24 the PHP rule: the cancelled mark alone', ($facts['U24'] ?? null) === ['cancelled']);
+    check('U25 D-198: the PHP rule: postponed now', ($facts['U25'] ?? null) === ['postponed']);
+    check('U26 D-198: the PHP rule: the postponed mark alone', ($facts['U26'] ?? null) === ['postponed']);
+    check('U27 D-198: postponed now AND marked cancelled earlier: both, in the list\'s order', ($facts['U27'] ?? null) === ['cancelled', 'postponed']);
+    check('U28 control: neither', ($facts['U28'] ?? null) === []);
 };
 
 // =============================================================================
-// M. D-197: APPROVING A SUGGESTION THAT WAS CANCELLED EARLIER NEEDS A CONFIRMATION
+// M. D-197, D-198: APPROVING A SUGGESTION CANCELLED OR POSTPONED EARLIER
+//    NEEDS A CONFIRMATION
 // =============================================================================
 /** A waiting suggestion with its own visitor address (so its approval e-mail can be counted). */
-function waitingSuggestion(int $site, string $name, string $status, int $mark, string $email, ?string $reason): int
+function waitingSuggestion(int $site, string $name, string $status, int $cMark, int $pMark, string $email, ?string $reason): int
 {
     global $db;
     q('INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `submissionStatus`, `submitterName`, '
-        . "`submitterEmail`, `submittedAt`, `cancelledWhileWaiting`, `cancelReason`) VALUES (?, ?, ?, '2027-08-14 15:00:00', 'Europe/Paris', ?, 'pending', 'Pat Visitor', ?, NOW(), ?, ?)",
-        'issssis', [$site, $name, 'p847-m' . bin2hex(random_bytes(5)), $status, $email, $mark, $reason]);
+        . "`submitterEmail`, `submittedAt`, `cancelledWhileWaiting`, `postponedWhileWaiting`, `cancelReason`) "
+        . "VALUES (?, ?, ?, '2027-08-14 15:00:00', 'Europe/Paris', ?, 'pending', 'Pat Visitor', ?, NOW(), ?, ?, ?)",
+        'issssiis', [$site, $name, 'p847-m' . bin2hex(random_bytes(5)), $status, $email, $cMark, $pMark, $reason]);
 
     return (int) $db->insert_id;
 }
@@ -1721,92 +1777,125 @@ function moderationRowOf(string $html, string $name): string
     return squash(html_entity_decode(substr($html, $at, ($next === false ? 4000 : $next - $at)), ENT_QUOTES, 'UTF-8'));
 }
 
+/** How many "Array to string" faults the error table holds. */
+function arrayFaults(): int
+{
+    return (int) (one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorTitle` LIKE '%Array to string%' OR `errorDetail` LIKE '%Array to string%'")['n'] ?? 0);
+}
+
 $sectionM = static function (): void {
     global $db;
-    head('M. D-197: a suggestion cancelled earlier is approved only after a warning and a ticked box');
+    head('M. D-197, D-198: a suggestion cancelled or postponed earlier is approved only after a warning naming which, and a ticked box');
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P847 M%'");
     $db->query("DELETE FROM `tblEmailLog` WHERE `toRecipients` LIKE 'p847.m%@example.invalid'");
     $db->query("DELETE FROM `tblMailQueue` WHERE `toRecipients` LIKE 'p847.m%@example.invalid'");
-    // The two ways the history is known — the status itself, and the kept mark
-    // alone (a hidden one brought back: draft, reason gone) — plus an ordinary
-    // suggestion, and one in organisation B.
-    $byStatus  = waitingSuggestion(ORG_A, 'P847 M cancelled now', 'cancelled', 0, 'p847.m1@example.invalid', 'P847 VISITOR-ERA REASON');
-    $byMark    = waitingSuggestion(ORG_A, 'P847 M marked draft', 'draft', 1, 'p847.m2@example.invalid', null);
-    $ordinary  = waitingSuggestion(ORG_A, 'P847 M ordinary', 'draft', 0, 'p847.m3@example.invalid', null);
-    $inB       = waitingSuggestion(ORG_B, 'P847 M Bee cancelled', 'cancelled', 0, 'p847.m4@example.invalid', null);
-    // Round 2 of the check: a suggestion POSTPONED while waiting (no warning
-    // under D-197, which names cancelled) still holding its old reason, and a
-    // cancelled one that is REJECTED.
-    $postponed = waitingSuggestion(ORG_A, 'P847 M postponed', 'postponed', 0, 'p847.m5@example.invalid', 'P847 later date');
-    $toReject  = waitingSuggestion(ORG_A, 'P847 M to reject', 'cancelled', 0, 'p847.m6@example.invalid', 'P847 rejected reason');
+    // Each way the history is known — the status now, or the kept mark alone
+    // (a hidden one brought back: draft, reason gone) — for each status, one
+    // holding BOTH, an ordinary suggestion, one to reject, and one in B.
+    $cNow     = waitingSuggestion(ORG_A, 'P847 M cancelled now', 'cancelled', 0, 0, 'p847.m1@example.invalid', 'P847 VISITOR-ERA REASON');
+    $cMark    = waitingSuggestion(ORG_A, 'P847 M cancel-marked draft', 'draft', 1, 0, 'p847.m2@example.invalid', null);
+    $ordinary = waitingSuggestion(ORG_A, 'P847 M ordinary', 'draft', 0, 0, 'p847.m3@example.invalid', null);
+    $inB      = waitingSuggestion(ORG_B, 'P847 M Bee postponed', 'postponed', 0, 0, 'p847.m4@example.invalid', null);
+    $pNow     = waitingSuggestion(ORG_A, 'P847 M postponed now', 'postponed', 0, 0, 'p847.m5@example.invalid', 'P847 later date');
+    $toReject = waitingSuggestion(ORG_A, 'P847 M to reject', 'cancelled', 0, 0, 'p847.m6@example.invalid', 'P847 rejected reason');
+    $pMark    = waitingSuggestion(ORG_A, 'P847 M postpone-marked draft', 'draft', 0, 1, 'p847.m7@example.invalid', null);
+    $both     = waitingSuggestion(ORG_A, 'P847 M both', 'postponed', 1, 0, 'p847.m8@example.invalid', null);
     $jarA = signIn(AADMIN, ORG_A);
     $jarB = signIn(BADMIN, ORG_B);
     $list = '/admin/calendar/moderation?status=pending';
     $approve = static fn (string $jar, int $id, bool $box): array => post($jar, $list, '/admin/calendar/moderate',
-        ['eventID' => (string) $id, 'action' => 'approve'] + ($box === true ? ['confirmCancelledEarlier' => '1'] : []));
+        ['eventID' => (string) $id, 'action' => 'approve'] + ($box === true ? ['confirmCancelledOrPostponed' => '1'] : []));
     $state = static fn (int $id): array => one('SELECT `status`, `submissionStatus`, `cancelReason` FROM `tblEvents` WHERE `eventID` = ?', 'i', [$id]) ?? [];
+    $waiting = static fn (int $id): bool => ($state($id)['submissionStatus'] ?? '') === 'pending';
 
+    // The list, before anything is decided.
     $html = req($jarA, 'GET', $list)['body'];
-    $rowS = moderationRowOf($html, 'P847 M cancelled now');
-    $rowM = moderationRowOf($html, 'P847 M marked draft');
-    check('M00 the list warns beside Approve for a suggestion cancelled NOW, word for word', str_contains($rowS, CANCELLED_EARLIER_WARNING), substr($rowS, 0, 500));
-    check('M00b ...and for one whose cancellation is known only from the kept mark', str_contains($rowM, CANCELLED_EARLIER_WARNING), substr($rowM, 0, 500));
+    $rowC = moderationRowOf($html, 'P847 M cancelled now');
+    $rowB = moderationRowOf($html, 'P847 M both');
+    check('M00 the list warns beside Approve for a suggestion cancelled NOW, word for word', str_contains($rowC, EARLIER_WORDS['cancelled']['warning']), substr($rowC, 0, 500));
+    check('M00b ...and for one whose cancellation is known only from the kept mark', str_contains(moderationRowOf($html, 'P847 M cancel-marked draft'), EARLIER_WORDS['cancelled']['warning']));
     check('M00c ...with the box, by its field name and label, inside the Approve form',
-        preg_match('/name="confirmCancelledEarlier" value="1"/', $rowS) === 1 && str_contains($rowS, CANCELLED_EARLIER_LABEL), substr($rowS, 0, 600));
+        preg_match('/name="confirmCancelledOrPostponed" value="1"/', $rowC) === 1 && str_contains($rowC, EARLIER_WORDS['cancelled']['label']), substr($rowC, 0, 600));
     $rowO = moderationRowOf($html, 'P847 M ordinary');
-    check('M00d control: an ordinary suggestion has no warning and no box', $rowO !== '' && str_contains($rowO, 'cancelled earlier') === false && str_contains($rowO, 'confirmCancelledEarlier') === false, substr($rowO, 0, 400));
+    check('M00d control: an ordinary suggestion has no warning and no box', $rowO !== '' && str_contains($rowO, 'earlier, while it was waiting') === false
+        && str_contains($rowO, 'confirmCancelledOrPostponed') === false, substr($rowO, 0, 400));
+    check('M00e D-198: the list warns for a suggestion POSTPONED now, saying postponed', str_contains(moderationRowOf($html, 'P847 M postponed now'), EARLIER_WORDS['postponed']['warning']));
+    check('M00f D-198: ...and for one known only from the postponed mark', str_contains(moderationRowOf($html, 'P847 M postpone-marked draft'), EARLIER_WORDS['postponed']['warning']));
+    check('M00g D-198: one that was both is warned about BOTH, and its box says both',
+        str_contains($rowB, EARLIER_WORDS['both']['warning']) && str_contains($rowB, EARLIER_WORDS['both']['label']), substr($rowB, 0, 600));
 
-    $r = $approve($jarA, $byStatus, false);
+    // Each suggestion's own edit form, before anything is decided.
+    $formOf = static fn (int $id): string => squash(html_entity_decode(req($jarA, 'GET', '/calendar/manage?edit=' . $id)['body'], ENT_QUOTES, 'UTF-8'));
+    $form   = $formOf($cMark);
+    check('M07 the edit form shows its own warning, word for word (the cancelled mark alone)', str_contains($form, EARLIER_WORDS['cancelled']['form']));
+    check('M07c ...and never the moderation page\'s "tick the box before you press Approve", which that page has neither of', str_contains($form, 'tick the box to confirm before you press Approve') === false);
+    check('M07d D-198: the postponed-marked one\'s edit form says postponed', str_contains($formOf($pMark), EARLIER_WORDS['postponed']['form']));
+    check('M07e D-198: the one that was both says both', str_contains($formOf($both), EARLIER_WORDS['both']['form']));
+    check('M07b control: an ordinary suggestion\'s edit form has no warning', str_contains($formOf($ordinary), 'earlier, while it was waiting') === false);
+
+    // Refused without the box, in every case, with the right words.
+    $r = $approve($jarA, $cNow, false);
     check('M01 D-197: approving it WITHOUT the box is refused; it is still waiting and still cancelled',
-        ($state($byStatus)['submissionStatus'] ?? '') === 'pending' && ($state($byStatus)['status'] ?? '') === 'cancelled', json_encode($state($byStatus)));
+        $waiting($cNow) && ($state($cNow)['status'] ?? '') === 'cancelled', json_encode($state($cNow)));
     check('M01b ...and nobody is e-mailed', approvalMails('p847.m1@example.invalid') === 0);
-    check('M01c ...and the moderator is told why, word for word', str_contains(flashAfter($jarA, $r), CANCELLED_EARLIER_REFUSAL), aroundWords(flashAfter($jarA, $r), 'Not approved'));
-    $approve($jarA, $byMark, false);
-    check('M02 the same refusal when only the kept mark shows it', ($state($byMark)['submissionStatus'] ?? '') === 'pending', json_encode($state($byMark)));
+    check('M01c ...and the moderator is told why, word for word', str_contains(flashAfter($jarA, $r), EARLIER_WORDS['cancelled']['refusal']), aroundWords(flashAfter($jarA, $r), 'Not approved'));
+    $approve($jarA, $cMark, false);
+    check('M02 the same refusal when only the cancelled mark shows it', $waiting($cMark), json_encode($state($cMark)));
+    $r = $approve($jarA, $pNow, false);
+    check('M02b D-198: a suggestion POSTPONED now is refused without the box', $waiting($pNow) && approvalMails('p847.m5@example.invalid') === 0, json_encode($state($pNow)));
+    check('M02c D-198: ...told it was postponed, word for word', str_contains(flashAfter($jarA, $r), EARLIER_WORDS['postponed']['refusal']), aroundWords(flashAfter($jarA, $r), 'Not approved'));
+    $approve($jarA, $pMark, false);
+    check('M02d D-198: ...and so is one known only from the postponed mark', $waiting($pMark), json_encode($state($pMark)));
+    $r = $approve($jarA, $both, false);
+    check('M02e D-198: one that was both is refused, told both, word for word',
+        $waiting($both) && str_contains(flashAfter($jarA, $r), EARLIER_WORDS['both']['refusal']), json_encode($state($both)));
 
+    // Tampered posts: none of them is a confirmation.
+    $errorsBefore = arrayFaults();
+    post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $cMark, 'action' => 'approve', 'confirmCancelledOrPostponed' => ['1']]);
+    check('M10 the box posted as a LIST is not a confirmation: still waiting', $waiting($cMark), json_encode($state($cMark)));
+    check('M10b ...and refused cleanly, with no "Array to string" fault recorded', arrayFaults() === $errorsBefore, $errorsBefore . ' -> ' . arrayFaults());
+    post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $ordinary, 'action' => ['approve']]);
+    check('M10c ...and an action posted as a list is no action, with no fault recorded', arrayFaults() === $errorsBefore && $waiting($ordinary));
+    foreach (['yes', 'on', ' 1', '1 ', 'true'] as $notOne) {
+        post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $pMark, 'action' => 'approve', 'confirmCancelledOrPostponed' => $notOne]);
+    }
+    check('M10d the box posted with any value but exactly "1" is not a confirmation ("yes", "on", " 1", "1 ", "true")', $waiting($pMark), json_encode($state($pMark)));
+    post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $pMark, 'action' => 'approve', 'confirmCancelledEarlier' => '1']);
+    check('M10f the OLD field name (a page drawn before D-198) is not a confirmation', $waiting($pMark), json_encode($state($pMark)));
+
+    // Approved with the box: published, e-mailed ONCE, old reason emptied;
+    // a second press changes nothing.
     $approve($jarA, $ordinary, false);
     check('M03 control: an ordinary suggestion is approved with no box, as before', ($state($ordinary)['submissionStatus'] ?? '') === 'approved' && ($state($ordinary)['status'] ?? '') === 'published', json_encode($state($ordinary)));
     check('M03b ...and its visitor is e-mailed once', approvalMails('p847.m3@example.invalid') === 1, (string) approvalMails('p847.m3@example.invalid'));
-
-    $approve($jarA, $byStatus, true);
-    check('M04 with the box ticked it is approved and published', ($state($byStatus)['submissionStatus'] ?? '') === 'approved' && ($state($byStatus)['status'] ?? '') === 'published', json_encode($state($byStatus)));
+    $approve($jarA, $cNow, true);
+    check('M04 with the box ticked it is approved and published', ($state($cNow)['submissionStatus'] ?? '') === 'approved' && ($state($cNow)['status'] ?? '') === 'published', json_encode($state($cNow)));
     check('M04b ...and its visitor is e-mailed ONCE', approvalMails('p847.m1@example.invalid') === 1, (string) approvalMails('p847.m1@example.invalid'));
-    check('M04d ...and its old cancellation reason is EMPTIED: a published event carries none (#998)', array_key_exists('cancelReason', $state($byStatus)) && $state($byStatus)['cancelReason'] === null, json_encode($state($byStatus)));
-    $r = $approve($jarA, $byStatus, true);
+    check('M04d ...and its old cancellation reason is EMPTIED: a published event carries none (#998)', array_key_exists('cancelReason', $state($cNow)) && $state($cNow)['cancelReason'] === null, json_encode($state($cNow)));
+    $r = $approve($jarA, $cNow, true);
     check('M04c a second press changes nothing and sends no second e-mail', approvalMails('p847.m1@example.invalid') === 1
         && str_contains(flashAfter($jarA, $r), 'Nothing changed: that suggestion has already been decided'));
-
-    $approve($jarA, $postponed, false);
-    check('M08 a suggestion POSTPONED while waiting is approved without the box (D-197 names cancelled), and its old reason is emptied',
-        ($state($postponed)['submissionStatus'] ?? '') === 'approved' && ($state($postponed)['status'] ?? '') === 'published'
-        && $state($postponed)['cancelReason'] === null, json_encode($state($postponed)));
+    $approve($jarA, $pNow, true);
+    check('M08 D-198: a suggestion POSTPONED now is approved with the box, and its old reason is emptied',
+        ($state($pNow)['submissionStatus'] ?? '') === 'approved' && ($state($pNow)['status'] ?? '') === 'published'
+        && $state($pNow)['cancelReason'] === null, json_encode($state($pNow)));
+    $approve($jarA, $pNow, true);
+    check('M08b ...e-mailed ONCE, even after a second press', approvalMails('p847.m5@example.invalid') === 1, (string) approvalMails('p847.m5@example.invalid'));
+    $approve($jarA, $both, true);
+    check('M11 one that was both is approved with the box, e-mailed once', ($state($both)['submissionStatus'] ?? '') === 'approved' && approvalMails('p847.m8@example.invalid') === 1, json_encode($state($both)));
     post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $toReject, 'action' => 'reject']);
-    check('M09 rejecting a cancelled suggestion empties its old reason too (a rejected one is a draft)',
+    check('M09 rejecting a cancelled suggestion needs no box and empties its old reason (a rejected one is a draft)',
         ($state($toReject)['submissionStatus'] ?? '') === 'rejected' && $state($toReject)['cancelReason'] === null, json_encode($state($toReject)));
-    // A request chooses the TYPE of what it sends: the box posted as a list.
-    $errorsBefore = (int) (one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorTitle` LIKE '%Array to string%' OR `errorDetail` LIKE '%Array to string%'")['n'] ?? 0);
-    post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $byMark, 'action' => 'approve', 'confirmCancelledEarlier' => ['1']]);
-    $errorsAfter = (int) (one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorTitle` LIKE '%Array to string%' OR `errorDetail` LIKE '%Array to string%'")['n'] ?? 0);
-    check('M10 the box posted as a LIST is not a confirmation: still waiting', ($state($byMark)['submissionStatus'] ?? '') === 'pending', json_encode($state($byMark)));
-    check('M10b ...and refused cleanly, with no "Array to string" fault recorded', $errorsAfter === $errorsBefore, $errorsBefore . ' -> ' . $errorsAfter);
-    post($jarA, $list, '/admin/calendar/moderate', ['eventID' => (string) $ordinary, 'action' => ['approve']]);
-    check('M10c ...and an action posted as a list is no action, also with no fault recorded', (int) (one("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorTitle` LIKE '%Array to string%' OR `errorDetail` LIKE '%Array to string%'")['n'] ?? 0) === $errorsBefore);
 
     // Two organisations: B's administrator cannot reach A's suggestion, even
     // with the box ticked; and in B the same rule applies to B's own.
-    $approve($jarB, $byMark, true);
-    check('M05 B\'s administrator cannot approve A\'s suggestion, box or not', ($state($byMark)['submissionStatus'] ?? '') === 'pending');
+    $approve($jarB, $pMark, true);
+    check('M05 B\'s administrator cannot approve A\'s suggestion, box or not', $waiting($pMark));
     $approve($jarB, $inB, false);
-    check('M06 in organisation B, approving B\'s cancelled suggestion without the box is refused too', ($state($inB)['submissionStatus'] ?? '') === 'pending');
+    check('M06 D-198: in organisation B, approving B\'s postponed suggestion without the box is refused too', $waiting($inB));
     $approve($jarB, $inB, true);
-    check('M06b ...and with it, approved', ($state($inB)['submissionStatus'] ?? '') === 'approved' && approvalMails('p847.m4@example.invalid') === 1);
-
-    // The suggestion's own page (its edit form) says it too.
-    $form = squash(html_entity_decode(req($jarA, 'GET', '/calendar/manage?edit=' . $byMark)['body'], ENT_QUOTES, 'UTF-8'));
-    check('M07 the suggestion\'s edit form shows its own warning, word for word (the kept mark alone)', str_contains($form, CANCELLED_EARLIER_FORM_WARNING));
-    check('M07c ...and never the moderation page\'s "tick the box before you press Approve", which that page has neither of', str_contains($form, 'tick the box to confirm before you press Approve') === false);
-    $form = squash(html_entity_decode(req($jarA, 'GET', '/calendar/manage?edit=' . $ordinary)['body'], ENT_QUOTES, 'UTF-8'));
-    check('M07b control: an ordinary suggestion\'s edit form does not', str_contains($form, 'cancelled earlier') === false);
+    check('M06b ...and with it, approved and e-mailed once', ($state($inB)['submissionStatus'] ?? '') === 'approved' && approvalMails('p847.m4@example.invalid') === 1);
 };
 
 // ── Run everything once ─────────────────────────────────────────────────────
@@ -1870,21 +1959,29 @@ $plants = [
         "'what you want. Tick it below and set Status to Published: that is what '", $sectionB, 'B06b', 'the same-day suggestion message telling them to publish it from the list'],
     ['P31', '_core/SmallGroups.php', "\$start = 'A' . substr(\$start, 1);", '', $sectionN, 'N10', 'an unnamed group starting a sentence in lower case'],
     // D-197
-    ['P32', '_apps/admin/calendar/moderate.php', "  AND (? = 1 OR NOT ' . EventSuggestions::cancelledEarlierSql('') . ')'", "  AND (? = 1 OR TRUE)'", $sectionM, 'M01', 'the approval no longer asking about the history'],
-    ['P33', '_core/EventSuggestions.php', "') OR ' . \$on . '`cancelledWhileWaiting` = 1)'", "') OR FALSE)'", $sectionM, 'M02', 'the rule forgetting the kept mark'],
+    ['P32', '_apps/admin/calendar/moderate.php', "  AND (? = 1 OR NOT ' . EventSuggestions::cancelledOrPostponedEarlierSql('') . ')'", "  AND (? = 1 OR TRUE)'", $sectionM, 'M01', 'the approval no longer asking about the history'],
+    ['P33', '_core/EventSuggestions.php', "            \$parts[] = \$on . '`' . \$column . '` = 1';\n", '', $sectionM, 'M02', 'the SQL rule forgetting the kept marks'],
     ['P34', '_apps/admin/calendar/moderate.php', "\$confirmed  = (is_string(\$confirmRaw) === true && \$confirmRaw === '1') ? 1 : 0;", '$confirmed  = 1;', $sectionM, 'M01', 'the confirmation taken as given whatever was posted'],
-    ['P35', '_apps/admin/calendar/moderation.php', "<?php if (\$cancelledEarlier === true): ?>\n                            <?php // ⚠️ D-197", "<?php if (false): ?>\n                            <?php // ⚠️ D-197", $sectionM, 'M00', 'the list not warning'],
-    ['P36', '_apps/admin/calendar/moderation.php', "<?php if (\$cancelledEarlier === true): ?>\n                                <?php // The handler", "<?php if (false): ?>\n                                <?php // The handler", $sectionM, 'M00c', 'the list not drawing the box'],
-    ['P37', '_apps/admin/calendar/moderate.php', '$needsConfirm = $why->get_result()->fetch_row() !== null;', '$needsConfirm = false;', $sectionM, 'M01c', 'the refusal worded as "already decided"'],
-    ['P38', '_core/HiddenSeriesDates.php', "\$markCancel   = (\$suggestion === true && in_array((string) \$row['status'], EventSuggestions::WARN_IF_EVER_STATUSES, true) === true) ? 1 : 0;", '$markCancel   = 0;', $sectionB, 'B01b', 'bringing one back losing the fact that it was cancelled'],
+    ['P35', '_apps/admin/calendar/moderation.php', "<?php if (\$needsConfirm === true): ?>\n                            <?php // ⚠️ D-197", "<?php if (false): ?>\n                            <?php // ⚠️ D-197", $sectionM, 'M00', 'the list not warning'],
+    ['P36', '_apps/admin/calendar/moderation.php', "<?php if (\$needsConfirm === true): ?>\n                                <?php // The handler", "<?php if (false): ?>\n                                <?php // The handler", $sectionM, 'M00c', 'the list not drawing the box'],
+    ['P37', '_apps/admin/calendar/moderate.php', '$earlier = EventSuggestions::earlierStatuses($why->get_result()->fetch_assoc() ?? []);', '$earlier = [];', $sectionM, 'M01c', 'the refusal worded as "already decided"'],
+    ['P38', '_core/HiddenSeriesDates.php', "\$marks[]  = (\$suggestion === true && (string) \$row['status'] === \$markStatus) ? 1 : 0;", '$marks[]  = 0;', $sectionB, 'B01b', 'bringing one back losing the fact that it was cancelled'],
     // Round 2 of the check.
-    ['P42', '_core/HiddenSeriesDates.php', '`cancelledWhileWaiting` = GREATEST(`cancelledWhileWaiting`, ?) ', '`cancelledWhileWaiting` = ? ', $sectionB, 'B10', 'bringing one back wiping a mark it already had'],
+    ['P42', '_core/HiddenSeriesDates.php', "'` = GREATEST(`' . \$markColumn . '`, ?)'", "'` = ?'", $sectionB, 'B10', 'bringing one back wiping a mark it already had'],
     ['P43', '_apps/admin/calendar/moderate.php', 'EventCancelReason::write($mysqli, $siteId, [$eventId], false, null);', '', $sectionM, 'M04d', 'an approved suggestion keeping its old cancellation reason'],
     ['P44', '_apps/admin/calendar/moderate.php', '$confirmed  = (is_string($confirmRaw) === true && $confirmRaw === \'1\') ? 1 : 0;', '$confirmed  = (string) $confirmRaw === \'1\' ? 1 : 0;', $sectionM, 'M10b', 'the posted box cast to text whatever its type'],
     ['P45', '_core/SmallGroups.php', "if ((array_values(\$outcome['noLeader'])[0] ?? '') === self::UNNAMED_GROUP) {", 'if (str_starts_with($start, self::UNNAMED_GROUP) === true) {', $sectionN, 'N13', 'a real group name beginning "a small group" capitalised'],
-    ['P46', '_apps/calendar/manage/_event_form.php', 'EventSuggestions::cancelledEarlierEditFormWarning()', 'EventSuggestions::cancelledEarlierWarning()', $sectionM, 'M07', 'the edit form promising a box and a button it does not have'],
-    ['P39', '_apps/calendar/manage/_event_form.php', 'if (\Portal\Core\EventSuggestions::wasCancelledEarlier($ev) === true): ?>', 'if (false): ?>', $sectionM, 'M07', 'the edit form not warning'],
-    ['P40', '_core/EventSuggestions.php', " || (int) (\$event['cancelledWhileWaiting'] ?? 0) === 1;", ';', $sectionM, 'M07', 'the PHP rule forgetting the kept mark'],
+    ['P46', '_apps/calendar/manage/_event_form.php', 'EventSuggestions::earlierStatusEditFormWarning($earlierStatuses)', 'EventSuggestions::earlierStatusWarning($earlierStatuses)', $sectionM, 'M07', 'the edit form promising a box and a button it does not have'],
+    // D-198
+    ['P47', '_core/EventSuggestions.php', "public const WARN_IF_EVER = ['cancelled' => 'cancelledWhileWaiting', 'postponed' => 'postponedWhileWaiting'];", "public const WARN_IF_EVER = ['cancelled' => 'cancelledWhileWaiting'];", $sectionM, 'M02b', 'postponed left out of the one list'],
+    ['P48', '_core/EventSuggestions.php', "        if (count(\$statuses) === 1) {\n            return \$statuses[0];", "        if (count(\$statuses) === 1) {\n            return 'cancelled';", $sectionU, 'U13', 'the words always saying "cancelled"'],
+    ['P49', '_core/EventSuggestions.php', "return implode(', ', \$statuses) . ' ' . \$join . ' ' . \$last;", 'return $last;', $sectionU, 'U17', 'the words for both naming only one'],
+    ['P50', '_apps/admin/calendar/moderation.php', 'EventSuggestions::earlierStatusWarning($earlier)', "EventSuggestions::earlierStatusWarning(['cancelled'])", $sectionM, 'M00e', 'the list naming the wrong status'],
+    ['P51', '_apps/admin/calendar/moderate.php', 'EventSuggestions::earlierStatusRefusal($earlier)', "EventSuggestions::earlierStatusRefusal(['cancelled'])", $sectionM, 'M02c', 'the refusal naming the wrong status'],
+    ['P52', '_apps/admin/calendar/moderate.php', '$confirmRaw = $_POST[EventSuggestions::CONFIRM_FIELD] ?? null;', '$confirmRaw = $_POST[EventSuggestions::CONFIRM_FIELD] ?? $_POST[\'confirmCancelledEarlier\'] ?? null;', $sectionM, 'M10f', 'the old field name still accepted'],
+    ['P53', '_core/HiddenSeriesDates.php', "\$marks[]  = (\$suggestion === true && (string) \$row['status'] === \$markStatus) ? 1 : 0;", "\$marks[]  = (\$suggestion === true && (string) \$row['status'] === \$markStatus && \$markStatus === 'cancelled') ? 1 : 0;", $sectionB, 'B04b', 'bringing one back marking cancelled only'],
+    ['P39', '_apps/calendar/manage/_event_form.php', '<?php if ($earlierStatuses !== []): ?>', '<?php if (false): ?>', $sectionM, 'M07', 'the edit form not warning'],
+    ['P40', '_core/EventSuggestions.php', "if (\$now === \$status || (int) (\$event[\$column] ?? 0) === 1) {", 'if ($now === $status) {', $sectionM, 'M07', 'the PHP rule forgetting the kept marks'],
     ['P41', '_core/HiddenSeriesDates.php', "\$keeps = in_array(\$was, self::KEEPS_STATUS, true) === true ? \$was : 'draft';", "\$keeps = 'draft';", $sectionU, 'U04', 'the D-196 exception widened to every date'],
 ];
 foreach ($plants as [$id, $file, $find, $with, $section, $mustFail, $what]) {

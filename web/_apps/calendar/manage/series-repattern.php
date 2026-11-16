@@ -930,10 +930,10 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                             // Off, which is what every date the create handler
                             // makes has, so a new date matches its siblings.
                             $values[] = '0';
-                        } elseif ($column === 'cancelledWhileWaiting') {
-                            // A suggestion's own history (#1081, D-197), never
-                            // a new date's: its DEFAULT, because the column is
-                            // NOT NULL like `registrationEnabled`.
+                        } elseif (in_array($column, \Portal\Core\EventSuggestions::WARN_IF_EVER, true) === true) {
+                            // A suggestion's own history (#1081, D-197, D-198),
+                            // never a new date's: each mark's DEFAULT, because
+                            // the columns are NOT NULL like `registrationEnabled`.
                             $values[] = '0';
                         } elseif ($column === 'showOnWebsite') {
                             // 🌐 NEVER INHERITED (#493 P1; D-057, the D-033
