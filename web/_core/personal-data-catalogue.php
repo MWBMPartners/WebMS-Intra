@@ -174,6 +174,14 @@ declare(strict_types=1);
  *             wherever it names the person. A person column left out is not
  *             looked at.
  *   period    for 'retain' only: how long, and under what obligation
+ *   notInDataCopy
+ *             for an 'erase' table whose rows are deliberately NOT handed over
+ *             in the member's own data copy (`account/data-export`): one
+ *             sentence, in plain words, saying why (#1063). Every OTHER
+ *             'erase' table must be handed over there. Section 27 of
+ *             tools/gdpr-coverage-selftest.php fails both ways: an 'erase'
+ *             table that is in neither place, and a table carrying this
+ *             sentence that is handed over after all (or is not 'erase').
  *   addressKept
  *             for every column that keeps a NETWORK ADDRESS, raw or scrambled
  *             (#1019; the owner's decision D-178): column => one sentence a
@@ -1304,11 +1312,15 @@ return [
         'decision' => 'erase',
         'reason'   => "Rows a restore could not put back, kept so somebody can. A kept row from tblTotpBackupCodes carries a hash of this person's sign-in code, so it is a second copy of what the main table holds and goes with them. The whole row is deleted rather than anonymised: a kept row with its person taken out could not be put back anywhere.",
         'columns'  => ['userID'],
+        // #1063: deliberately NOT in the member's data copy.
+        'notInDataCopy' => 'Each row is a whole copy of another record a restore could not put back - one of your sign-in codes (stored only scrambled) or one of the organisation\'s settings. A sign-in secret, even scrambled, is never handed over in a file anybody holding it could read, and a setting is the organisation\'s, not yours.',
     ],
     'tblTotpBackupCodes' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
+        // #1063: deliberately NOT in the member's data copy.
+        'notInDataCopy' => 'These are your spare two-step sign-in codes, stored only scrambled. A sign-in secret, even scrambled, is never handed over in a file anybody holding it could read; you can make a new set at any time from your account, which replaces these.',
     ],
     'tblTrustedDevices' => [
         'decision' => 'erase',

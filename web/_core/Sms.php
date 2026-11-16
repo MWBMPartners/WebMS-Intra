@@ -165,6 +165,13 @@ class Sms
      *
      * @var list<string>
      */
+    /**
+     * What the record of a verification text keeps in place of the words sent
+     * (#1063): the same sentence with the code masked. See send()'s
+     * `$bodyToKeep` and startVerification().
+     */
+    public const VERIFICATION_TEXT_KEPT = 'Your portal verification code is ******. It expires in 10 minutes.';
+
     public const NEVER_HELD = ['critical_alerts', 'emergency_comms'];
 
     /**
@@ -278,11 +285,23 @@ class Sms
      *        text is NOT kept: it is recorded as not sent. It makes no
      *        difference to a text that is sent at once.
      *
+     * @param string|null $bodyToKeep The words KEPT in the record of this
+     *        text, where they must differ from the words SENT (#1063). Today
+     *        only startVerification() passes it: the code that confirms a
+     *        number is a working secret for ten minutes, and the record is
+     *        read by the administrators' text-message page and handed over in
+     *        the member's own data copy, so the record keeps the sentence with
+     *        the code masked. Null keeps what was sent. A text that is HELD
+     *        keeps the words it will send (it must), which is why no caller
+     *        passing this may be of a kind that can be held: verification
+     *        texts are 'critical_alerts', on NEVER_HELD.
+     *
      * @return bool True only when the provider took the text NOW. False for
      *         a held text too: lastOutcome() tells them apart.
      */
-    public static function send(int $siteId, string $number, string $body, string $category = 'general', ?int $userId = null, ?string $useBy = null): bool
+    public static function send(int $siteId, string $number, string $body, string $category = 'general', ?int $userId = null, ?string $useBy = null, ?string $bodyToKeep = null): bool
     {
+        $kept = $bodyToKeep ?? $body;
         $settings = App::settings()['sms'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
             self::$lastOutcome = 'off';
@@ -308,7 +327,7 @@ class Sms
         //   Found by the independent check of this package, in a line this
         //   package did not write.
         if (self::sentTodayCount($siteId) >= (int) ($settings['dailyCap'] ?? 100)) {
-            self::record($siteId, $userId, $number, $body, $category, 'failed', null, null, 'daily-cap', false);
+            self::record($siteId, $userId, $number, $kept, $category, 'failed', null, null, 'daily-cap', false);
             self::$lastOutcome = 'failed';
 
             return false;
@@ -393,7 +412,7 @@ class Sms
                     $siteId,
                     $why === 'no-account' ? null : $userId,
                     $number,
-                    $body,
+                    $kept,
                     $category,
                     'failed',
                     null,
@@ -411,7 +430,7 @@ class Sms
         $result = static::providerSend($provider, $settings, $number, $body);
 
         $status = $result['ok'] === true ? 'sent' : 'failed';
-        self::record($siteId, $userId, $number, $body, $category, $status, $result['ref'], $result['costPence'], $result['error']);
+        self::record($siteId, $userId, $number, $kept, $category, $status, $result['ref'], $result['costPence'], $result['error']);
         self::$lastOutcome = $status;
 
         return $result['ok'];
@@ -602,7 +621,20 @@ class Sms
         $stmt->execute();
         $stmt->close();
 
-        return self::send($siteId, $number, 'Your portal verification code is ' . $code . '. It expires in 10 minutes.', 'critical_alerts', $userId);
+        // 🔐 #1063: the record keeps the sentence with the code MASKED. The
+        //    code works for ten minutes; the record is shown to administrators
+        //    and handed over in the member's data copy, which deliberately
+        //    leaves the stored code out of the text-message settings because a
+        //    file holding it would let anybody finish the verification.
+        return self::send(
+            $siteId,
+            $number,
+            'Your portal verification code is ' . $code . '. It expires in 10 minutes.',
+            'critical_alerts',
+            $userId,
+            null,
+            self::VERIFICATION_TEXT_KEPT
+        );
     }
 
     /**

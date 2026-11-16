@@ -253,7 +253,10 @@ appended with its real date and a note that it was added later.
 | [D-195](195-the-privacy-pages-list-the-companies-an-organisation-uses-from-its-server.md) | 2026-11-16 | D-195 · The privacy pages list the companies an organisation uses from its own server, as a second short list | in force |
 | [D-196](196-a-hidden-waiting-suggestion-comes-back-as-a-draft.md) | 2026-11-16 | D-196 · A hidden event suggestion still waiting for approval comes back as a draft, with any cancellation reason removed | in force |
 | [D-197](197-approving-a-suggestion-that-was-cancelled-shows-a-warning.md) | 2026-11-16 | D-197 · Approving a suggestion that was cancelled earlier is allowed, with a visible warning | in force |
+| [D-198](198-approving-a-suggestion-that-was-postponed-earlier-shows-the-same-warning.md) | 2026-11-16 | Approving a suggestion that was postponed earlier shows the same warning and needs the same box | in force |
+| [D-199](199-a-merge-is-logged-as-a-new-entry-and-history-is-never-reassigned.md) | 2026-11-16 | D-199 · A merge is logged as a new activity entry; earlier history is never reassigned | in force |
+| [D-200](200-a-merge-waits-seven-days-and-the-old-address-is-told.md) | 2026-11-16 | D-200 · A merge completes no sooner than 7 days after its notice, and the old address is told | in force |
 
-*197 decisions. This index is checked against the folder by
+*200 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

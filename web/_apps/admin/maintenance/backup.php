@@ -361,6 +361,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             Logger::activity($type, $what, isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null);
         };
+        // 🧾 #990: a failed check or restore's REASON goes to the Errors page,
+        //    never into the activity log's words. The reason can be the
+        //    database's own message ("Duplicate entry '…'"), which quotes a
+        //    stored value - somebody's e-mail address, a name - and the
+        //    activity log keeps it beyond every erasure. On the Errors page
+        //    any e-mail address in it is taken out as it is written (D-174).
+        //    The administrator who pressed the button is still shown the
+        //    reason in full, at the time. Returns the fixed sentence the
+        //    activity line ends with.
+        $reasonToErrors = static function (string $what, string $reason): string {
+            Logger::errorPlatform('Backup', 'Error', 'BACKUP_ACTION_FAILED', $what, $reason);
+
+            return 'The reason is on the Errors page.';
+        };
         // Added to the message when the portal could not be put back as found.
         $stillClosed = ' The portal could not be reopened automatically and is still closed to everyone '
                      . 'else: the recovery guide says how to reopen it.';
@@ -473,7 +487,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result['success'] === true ? 'BackupTableRestored' : 'BackupTableRestoreFailed',
                 $result['success'] === true
                     ? sprintf('Table %s put back from snapshot %s: %d rows.', $table, $name, $result['rows_restored'])
-                    : sprintf('Putting table %s back from snapshot %s failed; nothing was changed. %s', $table, $name, (string) ($result['error'] ?? ''))
+                    : sprintf('Putting table %s back from snapshot %s failed; nothing was changed. %s', $table, $name,
+                        $reasonToErrors('Putting one table back from a snapshot failed', (string) ($result['error'] ?? '')))
             );
             if ($result['success'] === true) {
                 $flash = sprintf(
@@ -547,7 +562,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $result['success'] === true ? 'BackupRestored' : 'BackupRestoreFailed',
                 ($result['success'] === true
                     ? trim(sprintf('Snapshot %s put back in full: %d tables, %d rows. %s', $name, $result['tables_restored'], $result['rows_restored'], $notes))
-                    : sprintf('Putting snapshot %s back failed; nothing was changed. %s', $name, $result['error']))
+                    : sprintf('Putting snapshot %s back failed; nothing was changed. %s', $name,
+                        $reasonToErrors('Putting a whole snapshot back failed', (string) $result['error'])))
                 . ($restorerGone === true
                     ? sprintf(' It was run by account #%d, which is not in the restored database, so this line names no account.', (int) ($_SESSION['user_id'] ?? 0))
                     : ''),
@@ -675,7 +691,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'BackupSnapshotChecked',
                 $result['success'] === true
                     ? trim(sprintf('Snapshot %s was checked by a full rehearsal: it can be restored (%d tables, %d rows). Nothing was changed. %s', $name, $result['tables_restored'], $result['rows_restored'], $notes))
-                    : sprintf('Snapshot %s was checked by a full rehearsal: it cannot be restored. %s', $name, $result['error'])
+                    : sprintf('Snapshot %s was checked by a full rehearsal: it cannot be restored. %s', $name,
+                        $reasonToErrors('A snapshot failed its full rehearsal', (string) $result['error']))
             );
         } elseif ($action === 'delete') {
             // 🗑️ The class does the deleting: a link is removed as a link and

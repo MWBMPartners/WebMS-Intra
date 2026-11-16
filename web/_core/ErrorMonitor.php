@@ -42,7 +42,10 @@ class ErrorMonitor
      *
      * Called from Logger::errorPlatform() after the DB insert; wrapped
      * in try/catch by the caller so transport failures never break
-     * the logging path.
+     * the logging path. The words arrive with any e-mail address already
+     * taken out (D-174). `$namesNobody` is true only from
+     * Logger::errorNamingNobody() (#1044): then no browser name and no
+     * account number is sent.
      */
     public static function capture(
         string $platform,
@@ -50,7 +53,8 @@ class ErrorMonitor
         string $code,
         string $title,
         string $detail = '',
-        ?int $userId = null
+        ?int $userId = null,
+        bool $namesNobody = false
     ): void {
         $settings = App::settings()['monitoring'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
@@ -77,6 +81,11 @@ class ErrorMonitor
         }
         $environment = (string) ($settings['environment'] ?? App::env());
         $payload = self::buildPayload($platform, $severity, $code, $title, $detail, $userId, $environment);
+        // 🕶️ #1044: for a form promising anonymity (Logger::errorNamingNobody())
+        //    the monitor is told nothing of the browser or the account either.
+        if ($namesNobody === true) {
+            unset($payload['request']['headers'], $payload['user']);
+        }
 
         self::send($parsed, $payload);
     }
