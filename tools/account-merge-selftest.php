@@ -256,6 +256,9 @@ $haveIdx = array_map(static fn (array $r): string => $r['t'] . '.' . $r['i'], q(
     . "FROM `information_schema`.`STATISTICS` WHERE `TABLE_SCHEMA` = DATABASE()"));
 check('A11 the ten indexes the merge\'s locking reads need are in the install script', array_diff($wantIdx, $haveIdx) === [],
     implode(', ', array_diff($wantIdx, $haveIdx)));
+check('A12 both address lists are MEDIUMTEXT, so no number of address changes can fill them',
+    n($db, "SELECT COUNT(*) AS n FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `DATA_TYPE` = 'mediumtext' "
+        . "AND ((`TABLE_NAME` = 'tblUsers' AND `COLUMN_NAME` = 'earlierEmails') OR (`TABLE_NAME` = 'tblAccountMergeSide' AND `COLUMN_NAME` = 'formerEarlierEmails'))") === 2);
 
 // =============================================================================
 echo "B. The rule on hand-made facts\n";
@@ -1548,6 +1551,83 @@ check('I20d ...run 2 did NOT search the request\'s own address once another acco
     n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` = '{$cpOld}' AND `subject` = 'Zed mail {$tag}'") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$cpReq} AND `action` = 'completed' "
         . "AND `details` LIKE '%1 address(es) this person held before are another account''s now%'") === 1);
+
+check('I20e ...and its two mail steps say the address was skipped because another account holds it, never that no address is known',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$cpReq} AND `action` = 'skip' "
+        . "AND `details` LIKE 'the address this request was filed with is another account''s now, so % was not searched by it%'") === 2
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$cpReq} AND `details` LIKE '%no email address is known%'") === 0);
+
+// 🔁 ROUND 12 (the check's P1, P1b, P8): the kept address must survive EVERY
+//    later run, of this request or of another open request for the same
+//    account. A failing send-log step on each run but the last.
+$failOn = static function (string $address) use ($db): void {
+    $db->query("CREATE TRIGGER `am_selftest_retry` BEFORE UPDATE ON `tblEmailLog` FOR EACH ROW BEGIN IF OLD.`toRecipients` LIKE '%{$address}%' "
+        . "THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'transient'; END IF; END");
+};
+$logLine = static function (string $address, string $subject) use ($db, $insert, $third): void {
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    $insert('tblEmailLog', ['toRecipients' => $address, 'subject' => $subject, 'errorDetail' => '', 'errorCode' => ''], $third);
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+};
+$kept = static fn (int $rid): ?string => q($db, "SELECT `replacedEmail` FROM `tblErasureRequest` WHERE `requestID` = {$rid}")[0]['replacedEmail'] ?? null;
+// One request, three runs: fail, fail, succeed (P8).
+$t3   = $user('ThreeRuns'); $member($t3, $siteA);
+$t3Rq = (int) GdprEraser::fileRequest($siteA, $t3, true)['requestID'];
+$t3To = 'three-runs-' . $tag . '@selftest.invalid';
+$move($t3, $t3To);
+$logLine($t3To, 'Three mail ' . $tag);
+$failOn($t3To);
+$t3a = GdprEraser::execute($t3Rq, $t3, $adminA);
+$t3b = GdprEraser::execute($t3Rq, $t3, $adminA);
+$t3Kept = $kept($t3Rq);
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+$t3c = GdprEraser::execute($t3Rq, $t3, $adminA);
+check('I23 three runs of one request (fail, fail, succeed): after the SECOND failed run the request still keeps the real address, not the made-up one',
+    ($t3a['failed'] ?? 0) >= 1 && ($t3b['failed'] ?? 0) >= 1 && $t3Kept === $t3To, json_encode($t3Kept));
+check('I23b ...and the third run searches by it: the line is gone and the request closes',
+    ($t3c['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$t3To}%' AND `subject` = 'Three mail {$tag}'") === 0,
+    json_encode($t3c));
+// Two open requests for one account (P1, P1b): request 1's run fails after its
+// account step, then request 2 is run (once failing, once succeeding).
+$tw   = $user('TwoRequests'); $member($tw, $siteA);
+$twR1 = (int) GdprEraser::fileRequest($siteA, $tw, true)['requestID'];
+$twR2 = (int) GdprEraser::fileRequest($siteA, $tw, true)['requestID'];
+$twTo = 'two-requests-' . $tag . '@selftest.invalid';
+$move($tw, $twTo);
+$logLine($twTo, 'Two mail ' . $tag);
+$failOn($twTo);
+$tw1 = GdprEraser::execute($twR1, $tw, $adminA);
+$tw2 = GdprEraser::execute($twR2, $tw, $adminA);
+$twKept = [$kept($twR1), $kept($twR2)];
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+$tw3 = GdprEraser::execute($twR2, $tw, $adminA);
+check('I24 two open requests: request 1 keeps the real address, and request 2\'s run keeps NO made-up address (another request\'s or its own)',
+    $twR1 !== $twR2 && ($tw1['failed'] ?? 0) >= 1 && ($tw2['failed'] ?? 0) >= 1 && $twKept === [$twTo, null], json_encode($twKept));
+check('I24b ...and request 2, run again, searches by the address request 1 kept: the line is gone, and both requests close with no address kept',
+    ($tw3['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$twTo}%' AND `subject` = 'Two mail {$tag}'") === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` IN ({$twR1}, {$twR2}) AND `status` = 'completed' AND `replacedEmail` IS NULL") === 2,
+    json_encode($tw3));
+// An address changed ONLY IN CAPITALS after filing, whose old spelling then
+// passes to another account: it is ONE address, counted once as not searched.
+$cs   = $user('CapsChange'); $member($cs, $siteA);
+$csLo = q($db, "SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = {$cs}")[0]['emailAddress'];
+$csRq = (int) GdprEraser::fileRequest($siteA, $cs, true)['requestID'];
+$csUp = strtoupper(substr($csLo, 0, 1)) . substr($csLo, 1);
+$move($cs, $csUp);
+$logLine($csUp, 'Caps mail ' . $tag);
+$failOn($csLo);
+$cs1 = GdprEraser::execute($csRq, $cs, $adminA);
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+$csZ = $user('CapsTaker');
+$db->query("UPDATE `tblUsers` SET `emailAddress` = '{$csLo}' WHERE `userID` = {$csZ}");
+$cs2 = GdprEraser::execute($csRq, $cs, $adminA);
+check('I25 an address changed only in capitals and then taken by another account is counted ONCE as not searched',
+    ($cs1['failed'] ?? 0) >= 1 && ($cs2['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$csRq} AND `action` = 'completed' "
+        . "AND `details` LIKE '%1 address(es) this person held before are another account''s now%'") === 1,
+    json_encode([$cs1, $cs2]));
 
 // 🧾 ROUND 11: the shared address-list fragment on a stored value that is not
 //    a list of addresses. The column is plain text, so it can hold anything:

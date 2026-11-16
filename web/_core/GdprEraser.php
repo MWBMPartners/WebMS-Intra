@@ -2309,9 +2309,14 @@ class GdprEraser
             //    merged-in account's address at merge and before such a change.
             //    The send log and the mail queue keep a recipient only as text,
             //    so each is searched by each address.
+            //    Round 12: each address ONCE whatever its capitals (as
+            //    `AccountMerge::heldByOthers()` compares them), so one address
+            //    is never searched, or counted as skipped, twice.
             $otherAddresses = [];
-            foreach (array_merge(self::earlierAddressOf($db, $userId), self::replacedAddressOf($db, $requestId), ...array_values($mergedIn)) as $address) {
-                if ($address !== '' && $address !== $erasedEmail && in_array($address, $otherAddresses, true) === false) {
+            $seenAddress    = [mb_strtolower($erasedEmail) => true];
+            foreach (array_merge(self::earlierAddressOf($db, $userId), self::replacedAddressesOf($db, $requestId, $userId), ...array_values($mergedIn)) as $address) {
+                if ($address !== '' && isset($seenAddress[mb_strtolower($address)]) === false) {
+                    $seenAddress[mb_strtolower($address)] = true;
                     $otherAddresses[] = $address;
                 }
             }
@@ -2327,12 +2332,15 @@ class GdprEraser
             //    it comes from the request (the account row holds the made-up
             //    one), and the request's address can have passed to another
             //    account in between: searching it erased that account's
-            //    send-log line (measured by the independent check). Its two
-            //    steps still run with no address, so the step count is the
-            //    same, and it is counted with the others in the closing line.
+            //    send-log line (measured by the independent check). It is
+            //    counted with the others in the closing line, and its two
+            //    steps are replaced by two lines saying it was skipped on
+            //    purpose (round 12: they used to run with no address and
+            //    record "no email address is known", which was untrue).
+            $mainAddressTaken = false;
             if ($erasedEmail !== '' && AccountMerge::heldByOthers($db, [$erasedEmail], array_merge([$userId], array_keys($mergedIn))) !== []) {
                 $takenAddresses[] = $erasedEmail;
-                $erasedEmail      = '';
+                $mainAddressTaken = true;
             }
             // 🚩 Round 7: an account the merge record says was merged into this
             //    one but which is no longer as the merge closed it. Only a
@@ -2394,8 +2402,13 @@ class GdprEraser
             //    in it depends on the order; it moved up so that every step
             //    that works by address sits in one place, where
             //    tools/gdpr-coverage-selftest.php looks for it.)
-            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $erasedEmail));
-            $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
+            if ($mainAddressTaken === true) {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::noteMainAddressTaken($db, $requestId, 'tblMailQueue', 'the mail queue'));
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::noteMainAddressTaken($db, $requestId, 'tblEmailLog', 'the send log'));
+            } else {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $erasedEmail));
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $erasedEmail));
+            }
             // 🔀 #1064: the same two steps for every address this person held
             //    before (D-200) and each MERGED-IN account held when it was
             //    merged (its own row now holds a placeholder, so its current
@@ -6242,7 +6255,8 @@ class GdprEraser
                 //    ("Data too long"; measured by the independent check). A
                 //    VARCHAR(255) beside the request always fits, because it
                 //    holds one address the size of the column it came from.
-                //    Never overwritten by the made-up address on a later run.
+                //    Never overwritten by a made-up address on a later run, nor
+                //    by another request's (round 12).
                 //    Done just before the statement below, inside its guard, so
                 //    a failure is this step's failure like any other.
                 $sets[] = '`emailAddress` = ' . $madeUp;
@@ -6343,7 +6357,7 @@ class GdprEraser
         $problem  = null;
         try {
             if ($table === 'tblUsers') {
-                self::keepReplacedAddressOnRequest($db, $requestId, $userId, str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL));
+                self::keepReplacedAddressOnRequest($db, $requestId, $userId);
             }
             $stmt = $db->prepare($sql);
             if ($stmt === false) {
@@ -9087,44 +9101,77 @@ class GdprEraser
     }
 
     /**
-     * 📧 The address the account held when this request's erasure replaced
-     *    it (`tblErasureRequest.replacedEmail`, round 11 of #1064), as a list
-     *    of none or one. Searched by on every run until the request closes.
+     * 📧 The addresses the account held when an erasure replaced them
+     *    (`tblErasureRequest.replacedEmail`, rounds 11 and 12 of #1064), from
+     *    THIS request and EVERY other request for the same account. An account
+     *    can have two open requests (`fileRequest()` allows it, and
+     *    `closeRequest()` closes the others with the one that finishes); the
+     *    replaced address is kept on whichever request's run replaced it, so a
+     *    run of the OTHER request must read it too, or it closes without ever
+     *    searching by it (measured by the independent check, round 12). Never
+     *    a made-up `deleted-…` address. Searched by on every run until the
+     *    request closes.
      *
      * @return list<string>
      */
-    private static function replacedAddressOf(\mysqli $db, int $requestId): array
+    private static function replacedAddressesOf(\mysqli $db, int $requestId, int $userId): array
     {
-        $stmt = $db->prepare('SELECT `replacedEmail` AS `a` FROM `tblErasureRequest` WHERE `requestID` = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT DISTINCT `replacedEmail` AS `a` FROM `tblErasureRequest` '
+            . 'WHERE (`requestID` = ? OR `userID` = ?) AND `replacedEmail` IS NOT NULL');
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
         }
-        $stmt->bind_param('i', $requestId);
+        $stmt->bind_param('ii', $requestId, $userId);
         $stmt->execute();
-        $address = trim((string) ($stmt->get_result()->fetch_assoc()['a'] ?? ''));
+        $out = [];
+        foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+            $address = trim((string) $row['a']);
+            if ($address !== '' && filter_var($address, FILTER_VALIDATE_EMAIL) !== false
+                && self::isTombstoneAddress($address) === false) {
+                $out[] = $address;
+            }
+        }
         $stmt->close();
 
-        return $address === '' || filter_var($address, FILTER_VALIDATE_EMAIL) === false ? [] : [$address];
+        return $out;
+    }
+
+    /**
+     * 🚫 The two lines written in place of the main address's two mail steps
+     *    when another account holds that address now (round 12 of #1064). The
+     *    address IS known; it is not searched on purpose. Never the address.
+     */
+    private static function noteMainAddressTaken(\mysqli $db, int $requestId, string $table, string $words): string
+    {
+        self::logAudit($db, $requestId, 'skip', $table, null, 'the address this request was filed with is another '
+            . 'account\'s now, so ' . $words . ' was not searched by it: mail to it cannot be told from mail to whoever '
+            . 'holds it now');
+
+        return self::STEP_UNCHANGED;
     }
 
     /**
      * 📧 Keep, on the request, the address the erasure's account step is about
      *    to replace (round 11 of #1064). Runs inside that step's transaction,
      *    so the two land together or not at all. Skipped when the account
-     *    already holds this request's made-up address (a later run: the real
-     *    one was kept by the first) or holds none.
+     *    holds no address, or ANY request's made-up address (round 12: the
+     *    first version compared only with THIS request's, so a run of a second
+     *    open request stored the first's made-up address over nothing, and a
+     *    later run's would have replaced the real one). So a real address,
+     *    once kept, is never overwritten by a made-up one.
      */
-    private static function keepReplacedAddressOnRequest(\mysqli $db, int $requestId, int $userId, string $madeUp): void
+    private static function keepReplacedAddressOnRequest(\mysqli $db, int $requestId, int $userId): void
     {
+        $madeUpPattern = str_replace('{rid}', '%', self::TOMBSTONE_EMAIL);
         $stmt = $db->prepare(
             'UPDATE `tblErasureRequest` `r` JOIN `tblUsers` `u` ON `u`.`userID` = ? '
             . 'SET `r`.`replacedEmail` = `u`.`emailAddress` '
-            . "WHERE `r`.`requestID` = ? AND COALESCE(`u`.`emailAddress`, '') <> '' AND `u`.`emailAddress` <> ?"
+            . "WHERE `r`.`requestID` = ? AND COALESCE(`u`.`emailAddress`, '') <> '' AND `u`.`emailAddress` NOT LIKE ?"
         );
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
         }
-        $stmt->bind_param('iis', $userId, $requestId, $madeUp);
+        $stmt->bind_param('iis', $userId, $requestId, $madeUpPattern);
         $stmt->execute();
         $stmt->close();
     }
