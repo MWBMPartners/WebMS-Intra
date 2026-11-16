@@ -163,6 +163,9 @@ class Captcha
      * member's account, session fingerprint, network address and browser, and
      * so put the member's name to a refused "anonymous" prayer request in the
      * same second as the form's own record, which names nobody (#1017).
+     * Since #1044 the same list decides the Errors-page lines this class
+     * writes when the provider cannot be reached or does not answer in JSON:
+     * for these forms they go through Logger::errorNamingNobody().
      * The ONE list; `check_activity_naming_nobody.py` pins it whole.
      */
     private const PROMISES_ANONYMITY = [self::FOR_ANONYMOUS_PRAYER_REQUEST];
@@ -453,12 +456,12 @@ class Captcha
 
         if ($active === self::PROVIDER_TURNSTILE) {
             $secret = self::setting($SETTINGS, 'auth', 'turnstile', 'secretKey');
-            return self::verifyTurnstile($secret, $postData);
+            return self::verifyTurnstile($secret, $postData, $form);
         }
 
         if ($active === self::PROVIDER_HCAPTCHA) {
             $secret = self::setting($SETTINGS, 'auth', 'hcaptcha', 'secretKey');
-            return self::verifyHcaptcha($secret, $postData);
+            return self::verifyHcaptcha($secret, $postData, $form);
         }
 
         if ($active === self::PROVIDER_RECAPTCHA) {
@@ -467,7 +470,7 @@ class Captcha
             if ($version === 'v3') {
                 return self::verifyRecaptchaV3($secret, $postData, $SETTINGS, $form);
             }
-            return self::verifyRecaptchaV2($secret, $postData);
+            return self::verifyRecaptchaV2($secret, $postData, $form);
         }
 
         // ✅ No captcha configured — allow
@@ -585,37 +588,37 @@ class Captcha
     // Provider-specific verification
     // ===========================================================================
 
-    private static function verifyTurnstile(string $secret, array $post): bool
+    private static function verifyTurnstile(string $secret, array $post, string $form): bool
     {
         $token = (string) ($post[self::TURNSTILE_POST_FIELD] ?? '');
         if ($secret === '' || $token === '') {
             return false;
         }
-        $json = self::postVerify(self::TURNSTILE_VERIFY_URL, $secret, $token);
+        $json = self::postVerify(self::TURNSTILE_VERIFY_URL, $secret, $token, $form);
         return $json !== null
             && isset($json['success']) === true
             && $json['success'] === true;
     }
 
-    private static function verifyHcaptcha(string $secret, array $post): bool
+    private static function verifyHcaptcha(string $secret, array $post, string $form): bool
     {
         $token = (string) ($post[self::HCAPTCHA_POST_FIELD] ?? '');
         if ($secret === '' || $token === '') {
             return false;
         }
-        $json = self::postVerify(self::HCAPTCHA_VERIFY_URL, $secret, $token);
+        $json = self::postVerify(self::HCAPTCHA_VERIFY_URL, $secret, $token, $form);
         return $json !== null
             && isset($json['success']) === true
             && $json['success'] === true;
     }
 
-    private static function verifyRecaptchaV2(string $secret, array $post): bool
+    private static function verifyRecaptchaV2(string $secret, array $post, string $form): bool
     {
         $token = (string) ($post[self::RECAPTCHA_POST_FIELD] ?? '');
         if ($secret === '' || $token === '') {
             return false;
         }
-        $json = self::postVerify(self::RECAPTCHA_VERIFY_URL, $secret, $token);
+        $json = self::postVerify(self::RECAPTCHA_VERIFY_URL, $secret, $token, $form);
         return $json !== null
             && isset($json['success']) === true
             && $json['success'] === true;
@@ -631,8 +634,8 @@ class Captcha
      * recordV3Refusal(). (Every provider can also write an Errors-page line,
      * through postVerify() and curlPost(), when the provider cannot be reached
      * or answers something that is not JSON. Those go through
-     * Logger::errorPlatform(), which keeps the request's network address and
-     * browser and is NOT made anonymous here - see #1017's notes.)
+     * recordProblem(), which since #1044 names nobody for a form on
+     * PROMISES_ANONYMITY, as recordV3Refusal() does.)
      */
     private static function verifyRecaptchaV3(string $secret, array $post, array $settings, string $form): bool
     {
@@ -640,7 +643,7 @@ class Captcha
         if ($secret === '' || $token === '') {
             return false;
         }
-        $json = self::postVerify(self::RECAPTCHA_VERIFY_URL, $secret, $token);
+        $json = self::postVerify(self::RECAPTCHA_VERIFY_URL, $secret, $token, $form);
         if ($json === null || ($json['success'] ?? false) !== true) {
             return false;
         }
@@ -784,23 +787,45 @@ class Captcha
      *
      * @return array<string,mixed>|null
      */
-    private static function postVerify(string $url, string $secret, string $token): ?array
+    private static function postVerify(string $url, string $secret, string $token, string $form): ?array
     {
         $response = self::curlPost($url, [
             'secret'   => $secret,
             'response' => $token,
             'remoteip' => $_SERVER['REMOTE_ADDR'] ?? '',
-        ]);
+        ], $form);
         if ($response === null) {
-            Logger::errorPlatform('Captcha', 'Warning', 'CURL_FAIL', 'siteverify request failed', $url);
+            self::recordProblem($form, 'Captcha', 'Warning', 'CURL_FAIL', 'siteverify request failed', $url);
             return null;
         }
         $json = json_decode($response, true);
         if (json_last_error() !== JSON_ERROR_NONE || is_array($json) === false) {
-            Logger::errorPlatform('Captcha', 'Warning', 'JSON_FAIL', 'siteverify response was not valid JSON', $response);
+            self::recordProblem($form, 'Captcha', 'Warning', 'JSON_FAIL', 'siteverify response was not valid JSON', $response);
             return null;
         }
         return $json;
+    }
+
+    /**
+     * 📝 One Errors-page line about the bot check itself failing (the
+     * provider could not be reached, or did not answer in JSON). ONE place
+     * for every such line, so they can never disagree about whose it is.
+     *
+     * For a form on PROMISES_ANONYMITY it goes through
+     * Logger::errorNamingNobody() (#1044): no account, network address,
+     * browser or headers - the ordinary line kept the sender's network
+     * address, the same one on their own sign-in records, so the "anonymous"
+     * request could be matched to them on the Errors page. Every other form
+     * keeps the ordinary line. The words are the provider's and this file's,
+     * never anything a person typed.
+     */
+    private static function recordProblem(string $form, string $platform, string $severity, string $code, string $title, string $detail): void
+    {
+        if (in_array($form, self::PROMISES_ANONYMITY, true) === true) {
+            Logger::errorNamingNobody($platform, $severity, $code, $title, $detail);
+            return;
+        }
+        Logger::errorPlatform($platform, $severity, $code, $title, $detail);
     }
 
     /**
@@ -840,7 +865,7 @@ class Captcha
      *
      * @return string|null Response body on success, or null on failure
      */
-    private static function curlPost(string $url, array $data): ?string
+    private static function curlPost(string $url, array $data, string $form): ?string
     {
         $ch = curl_init($url);
         if ($ch === false) {
@@ -856,7 +881,7 @@ class Captcha
         if ($response === false) {
             $errno  = curl_errno($ch);
             $errmsg = curl_error($ch);
-            Logger::errorPlatform('cURL', 'Error', (string) $errno, $errmsg, 'URL: ' . $url);
+            self::recordProblem($form, 'cURL', 'Error', (string) $errno, $errmsg, 'URL: ' . $url);
             return null;
         }
         return (string) $response;

@@ -86,6 +86,37 @@
  *                          opened and closed; each visit's day and kind only.
  *                          Never who opened it, its number, the visiting
  *                          worker or the visit notes — #1015, D-184)
+ *   #1063 — every other kind of record the erasure deletes with you:
+ *   tblAiUsage            (what you asked the AI assistant, its answer, the cost)
+ *   tblAssetOwners        (equipment you own or look after, without the notes)
+ *   tblEventCoordinators  (events you coordinate, without who made you one)
+ *   tblEventCrewMembers, tblEventJobAssignments, tblEventPeople (event crews,
+ *                          jobs and listings you are on)
+ *   tblEventRSVPs         (your answers to events)
+ *   tblInvitation         (the invitation you joined by, without its code)
+ *   tblLeadershipAssignments (leadership roles, without the notes)
+ *   tblNewsletterRecipient (newsletters sent to you, without the unsubscribe code)
+ *   tblOffboarding        (if you were offboarded: when, and what was chosen for
+ *                          your data; without the reason typed, which is an
+ *                          administrator's note)
+ *   tblPathwayEnrolments, tblPathwayProgress (pathways and steps, without notes)
+ *   tblPaymentMethod      (saved ways to pay, without the payment company's
+ *                          references)
+ *   tblPledges, tblProjectPledge (promises to give)
+ *   tblPushSubscriptions  (notification devices, without their address or keys)
+ *   tblReadingPlanEnrollment, tblUserMilestone, tblUserTours
+ *   tblRecordingPlay      (recordings you played, with the scrambled address)
+ *   tblSmsMessage         (texts sent to you; the code in a text that
+ *                          confirmed your phone number is masked, and a
+ *                          prayer-chain text's words are left out)
+ *   tblCareAccessLog      (when you opened a pastoral care file, nothing else)
+ *   tblVisitor            (your visitor record from before you had an account,
+ *                          without the follow-up notes)
+ *   Left out on purpose, each with its reason in the written list
+ *   (personal-data-catalogue.php, `notInDataCopy`): tblTotpBackupCodes and
+ *   tblRestoreHeldRows.
+ *   A kind that can grow without limit is cut to its newest
+ *   DATA_COPY_ROWS_PER_KIND rows, and `shortened` in the file says so.
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -130,6 +161,16 @@ if ($userId <= 0) {
  * @param string $sql           Prepared SQL whose every '?' is the user ID
  * @param string[] $stripFields Column names to drop from each row
  */
+/**
+ * 📏 How many rows of ONE kind the copy hands over, for the kinds that can
+ * grow without limit (#1063): text messages, AI questions, recordings played,
+ * newsletters, event answers, care files opened. Each such query asks for one
+ * more than this, so the page can tell "exactly this many" from "more", and
+ * `shortened` in the file says, in words, which kinds were cut. The activity
+ * history is one of them: it was cut at 5,000 rows silently before #1063.
+ */
+const DATA_COPY_ROWS_PER_KIND = 5000;
+
 $fetchUserRows = static function (string $sql, array $stripFields = []) use ($mysqli, $userId): array {
     $stmt = $mysqli->prepare($sql);
     if ($stmt === false) {
@@ -166,6 +207,13 @@ $payload = [
         // added to the strip list below — visibilityCoords is the
         // subject's own datum, and the coordinates/W3W are exactly the
         // kind of PII this export exists to surface).
+        //
+        // 📅 `calendarToken` IS handed over, on purpose (#1063 check round 2):
+        //    it holds only a SHA-256 fingerprint of your calendar feed's token
+        //    (Ical::ensureUserToken()), which cannot be turned back into a
+        //    working feed address. tools/data-copy-selftest.php pins that the
+        //    token is stored only as a fingerprint; if that ever changed, it
+        //    would have to be stripped here like `totpSecret`.
         'user' => $fetchUserRows(
             'SELECT * FROM tblUsers WHERE userID = ? LIMIT 1',
             ['totpSecret']
@@ -206,7 +254,7 @@ $payload = [
         //    550 call sites — it would miss cases while looking as though it
         //    had not, which is worse than leaving the field out.
         'activityLogs' => $fetchUserRows(
-            'SELECT logID, activityType, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT 5000'
+            'SELECT logID, activityType, visitorIP, timestamp FROM tblActivityLogs WHERE userID = ? ORDER BY timestamp DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         'expenseClaims' => $fetchUserRows(
             // tblExpenseClaims uses `userID` not `submittedByID`
@@ -712,6 +760,175 @@ $payload = [
         //    Never who opened the case, its number, the visiting worker or the
         //    visit notes (D-184 rules those out).
         'careCasesAboutYou' => GdprEraser::careCasesAboutYou($userId),
+        // 📦 #1063: EVERY KIND OF RECORD THE ERASURE DELETES WITH YOU IS
+        //    HANDED OVER HERE TOO, or is named in the written list
+        //    (web/_core/personal-data-catalogue.php, `notInDataCopy`) with
+        //    the reason it is not. Measured on 15 November 2026, 26 of the
+        //    53 kinds the written list erases were in neither place; section
+        //    27 of tools/gdpr-coverage-selftest.php now fails both ways on
+        //    that list. Each block below matches on the column the erasure
+        //    deletes by, and applies the rule this file has always applied:
+        //    what is YOURS is handed over; another person's account number
+        //    (who granted, added, marked or entered it), a secret that works
+        //    without signing in, and notes a worker wrote (which can name
+        //    other people - the reasoning D-184 applied to visit notes) are
+        //    left out. Each says which.
+        //
+        // 🤖 What you asked the AI assistant and what it answered (both cut
+        //    to the first 1,000 characters when stored), and what it cost.
+        'aiAssistantUse' => $fetchUserRows(
+            'SELECT `siteID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costPence`, `inputSample`, `outputSample`, `occurredAt` '
+            . 'FROM `tblAiUsage` WHERE `userID` = ? ORDER BY `occurredAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🧰 Equipment you are named as an owner, custodian or stakeholder of.
+        //    The notes are left out: the asset's administrator writes them.
+        'equipmentYouOwn' => $fetchUserRows(
+            'SELECT `siteID`, `assetID`, `roleKind`, `sharePercent`, `isLendingAuthority`, `isMaintenanceAuthority` '
+            . 'FROM `tblAssetOwners` WHERE `userID` = ?'
+        ),
+        // 🗓️ Events you were made a coordinator of. Who made you one is left
+        //    out (another person's account number).
+        'eventsYouCoordinate' => $fetchUserRows(
+            'SELECT `c`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `c`.`permissions`, `c`.`grantedAt`, `c`.`revokedAt` '
+            . 'FROM `tblEventCoordinators` AS `c` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `c`.`eventID` '
+            . 'WHERE `c`.`userID` = ?'
+        ),
+        // 👷 The event crews and jobs you are on, and the events you are
+        //    listed as one of the people at (a speaker, a host).
+        'eventCrewsYouAreOn' => $fetchUserRows(
+            'SELECT `crewID`, `role`, `addedAt` FROM `tblEventCrewMembers` WHERE `userID` = ?'
+        ),
+        'eventJobsYouHave' => $fetchUserRows(
+            'SELECT `jobID`, `assignedAt` FROM `tblEventJobAssignments` WHERE `userID` = ?'
+        ),
+        'eventsYouAreListedAt' => $fetchUserRows(
+            'SELECT `p`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `p`.`role`, `p`.`isPrimary`, `p`.`createdAt` '
+            . 'FROM `tblEventPeople` AS `p` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `p`.`eventID` '
+            . 'WHERE `p`.`userID` = ?'
+        ),
+        // ✋ Your answers to events: going, maybe or not going, and any
+        //    guests you said you would bring.
+        'eventAnswers' => $fetchUserRows(
+            'SELECT `r`.`siteID`, `r`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `r`.`response`, `r`.`guestCount`, `r`.`status`, '
+            . '`r`.`waitlistedAt`, `r`.`createdAt`, `r`.`updatedAt` '
+            . 'FROM `tblEventRSVPs` AS `r` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` '
+            . 'WHERE `r`.`userID` = ? ORDER BY `r`.`createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // ✉️ The invitation you joined by: the address it was sent to, the
+        //    role offered and the welcome written to you. The invitation's
+        //    code is left out (a stored fingerprint of a link), and so are
+        //    who sent or withdrew it.
+        'invitationYouAccepted' => $fetchUserRows(
+            'SELECT `siteID`, `email`, `intendedRole`, `welcomeMessage`, `expiresAt`, `acceptedAt`, `createdAt` '
+            . 'FROM `tblInvitation` WHERE `acceptedByID` = ?'
+        ),
+        // 🧭 Leadership roles you hold or held. The notes are left out (an
+        //    administrator writes them), and so are who recorded or changed
+        //    the role.
+        'leadershipRoles' => $fetchUserRows(
+            'SELECT `siteID`, `roleID`, `personName`, `personEmail`, `startDate`, `endDate`, `isActive`, `createdAt`, `updatedAt` '
+            . 'FROM `tblLeadershipAssignments` WHERE `userID` = ?'
+        ),
+        // 📰 Each newsletter sent to you: the address, and when it was
+        //    delivered, opened and a link in it pressed. The unsubscribe code
+        //    is left out: it works without signing in.
+        'newslettersSentToYou' => $fetchUserRows(
+            'SELECT `newsletterID`, `emailAddress`, `deliveredAt`, `openedAt`, `clickedAt`, `errorMsg` '
+            . 'FROM `tblNewsletterRecipient` WHERE `userID` = ? ORDER BY `recipientID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🚪 If you were offboarded: when, what was chosen for your data, and
+        //    when you came back. Left out: who did it; the REASON, which is
+        //    free text an administrator types on the offboarding page and can
+        //    name other people (an administrator's note, like the notes left
+        //    out above); and the list of steps the portal carried out (a
+        //    technical record of the portal's own work, which can name other
+        //    records).
+        'offboarding' => $fetchUserRows(
+            'SELECT `effectiveDate`, `dataDisposition`, `offboardedAt`, `rehiredAt` '
+            . 'FROM `tblOffboarding` WHERE `userID` = ?'
+        ),
+        // 🪜 Pathways you are enrolled on, and the steps you have completed.
+        //    Who enrolled you, and who marked or took back a step, are left
+        //    out; so are a step's notes (whoever marked it wrote them).
+        'pathwayEnrolments' => $fetchUserRows(
+            'SELECT `siteID`, `pathwayID`, `status`, `enrolledAt`, `completedAt`, `updatedAt` FROM `tblPathwayEnrolments` WHERE `userID` = ?'
+        ),
+        'pathwayStepsCompleted' => $fetchUserRows(
+            'SELECT `siteID`, `stepID`, `source`, `completedAt`, `revokedAt` FROM `tblPathwayProgress` WHERE `userID` = ?'
+        ),
+        // 💳 The ways to pay you saved: which company and the label you gave
+        //    it. The company's own references for your account and card are
+        //    left out: with the portal's key they can be used to take a
+        //    payment, and your own Payment methods page does not show them.
+        'paymentMethods' => $fetchUserRows(
+            'SELECT `siteID`, `provider`, `label`, `isDefault`, `createdAt` FROM `tblPaymentMethod` WHERE `userID` = ?'
+        ),
+        // 🤝 Promises to give: to a campaign, and to a project.
+        'pledges' => $fetchUserRows(
+            'SELECT `siteID`, `campaignID`, `amountPence`, `currency`, `paymentSchedule`, `status`, `createdAt`, `updatedAt` '
+            . 'FROM `tblPledges` WHERE `userID` = ?'
+        ),
+        'projectPledges' => $fetchUserRows(
+            'SELECT `projectID`, `donorName`, `donorEmail`, `amountPence`, `currency`, `pledgedAt`, `fulfilledAt`, `isAnonymous`, `message` '
+            . 'FROM `tblProjectPledge` WHERE `donorID` = ?'
+        ),
+        // 🔔 The devices you allowed to receive notifications: the browser
+        //    and what it is sent. The device's address and its two keys are
+        //    left out: with them anybody could send notifications to it.
+        'notificationDevices' => $fetchUserRows(
+            'SELECT `siteID`, `userAgent`, `channels`, `createdAt`, `lastUsedAt`, `isActive`, `failCount`, `lastFailureAt` '
+            . 'FROM `tblPushSubscriptions` WHERE `userID` = ?'
+        ),
+        // 📖 Reading plans you started, and where you are in each.
+        'readingPlans' => $fetchUserRows(
+            'SELECT `planID`, `startedAt`, `completedAt`, `currentDay` FROM `tblReadingPlanEnrollment` WHERE `userID` = ?'
+        ),
+        // ▶️ Recordings you played, and when, with the scrambled network
+        //    address each play was recorded from (a network address is
+        //    personal data, D-178).
+        'recordingsPlayed' => $fetchUserRows(
+            'SELECT `recordingID`, `playedAt`, `ipHash` FROM `tblRecordingPlay` WHERE `userID` = ? ORDER BY `playedAt` DESC, `playID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 📱 Text messages sent to you: the number, the kind, the words, and
+        //    what became of each. The text company's own reference is left out.
+        //    TWO KINDS ARE NOT HANDED OVER WORD FOR WORD:
+        //    - The code that confirmed your number: its record never held the
+        //      code (Sms::VERIFICATION_TEXT_KEPT masks it as the text is
+        //      recorded), because a file holding a working code would let
+        //      anybody holding it finish a verification in your name - the
+        //      same reason the code is left out of your text-message settings.
+        //    - A prayer-chain text ('prayer_assignment'): its words are
+        //      ANOTHER member's prayer request (its subject), which they asked
+        //      about themselves and can have erased on their own (D-016). So
+        //      only the day, the kind and what became of it are handed over;
+        //      `body` is empty.
+        'textMessagesSentToYou' => $fetchUserRows(
+            "SELECT `siteID`, `recipientNumber`, CASE WHEN `category` = 'prayer_assignment' THEN NULL ELSE `body` END AS `body`, "
+            . '`category`, `status`, `sentAt`, `createdAt` '
+            . 'FROM `tblSmsMessage` WHERE `recipientUserID` = ? ORDER BY `createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🎂 The dates you have added to your profile (a birthday, an
+        //    anniversary) and who may see each.
+        'milestones' => $fetchUserRows(
+            'SELECT `kind`, `label`, `monthDay`, `originYear`, `privacy`, `createdAt` FROM `tblUserMilestone` WHERE `userID` = ?'
+        ),
+        // 🧭 The guided tours you have finished.
+        'toursCompleted' => $fetchUserRows(
+            'SELECT `tourID`, `completedAt` FROM `tblUserTours` WHERE `userID` = ?'
+        ),
+        // 👁️ When you opened a pastoral care file. Only the moment: whose
+        //    file it was is somebody else's (the reasoning of D-142).
+        'careFilesYouOpened' => $fetchUserRows(
+            'SELECT `viewedAt` FROM `tblCareAccessLog` WHERE `viewerID` = ? ORDER BY `viewedAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🚶 Your own visitor record, from before you had an account. The
+        //    follow-up notes are left out (the people following you up wrote
+        //    them, and they can name others - D-184's reasoning), and so are
+        //    who entered it and who was following you up.
+        'yourVisitorRecord' => $fetchUserRows(
+            'SELECT `siteID`, `fullName`, `email`, `phone`, `firstVisitedAt`, `source`, `status`, `createdAt`, `updatedAt` '
+            . 'FROM `tblVisitor` WHERE `convertedUserID` = ?'
+        ),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields
@@ -722,6 +939,16 @@ $payload = [
         // sharing the same name/email) that this export must not take.
     ],
 ];
+
+// ✂️ #1063: a kind cut to its newest DATA_COPY_ROWS_PER_KIND rows says so,
+//    in words, rather than looking complete.
+foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened', 'activityLogs'] as $kind) {
+    if (count($payload['data'][$kind]) > DATA_COPY_ROWS_PER_KIND) {
+        $payload['data'][$kind]   = array_slice($payload['data'][$kind], 0, DATA_COPY_ROWS_PER_KIND);
+        $payload['shortened'][$kind] = 'Only the newest ' . number_format(DATA_COPY_ROWS_PER_KIND)
+            . ' of these are shown here. Ask the organisation\'s office for the rest.';
+    }
+}
 
 // 📝 Audit log — the act of exporting one's own data is itself an event
 Logger::activity('DataExport', 'User downloaded their data export');

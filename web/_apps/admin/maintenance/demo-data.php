@@ -506,7 +506,7 @@ function demo_data_rollback(\mysqli $db): void
     try {
         $db->rollback();
     } catch (\Throwable $problem) {
-        error_log('[WebMS-Intra] Demo data: rollback failed: ' . $problem->getMessage());
+        error_log('[WebMS-Intra] Demo data: rollback failed: ' . Logger::withoutAddresses($problem->getMessage()));
     }
 }
 
@@ -1084,6 +1084,10 @@ function demo_data_load(\mysqli $db, int $siteId): array
             return [
                 'type'    => 'warning',
                 'message' => 'Loading reached its final save, but the database did not confirm it, so this page cannot say whether the demo rows were saved. Reload this page: if it lists demo rows, the load worked; if it lists none, nothing was saved and you can load again. The database said: ' . $problem->getMessage(),
+                // #990: the activity line keeps the fixed words; the database's own
+                // words go to the Errors page, where any e-mail address is removed.
+                'logWords' => 'Loading reached its final save, but the database did not confirm it, so this page cannot say whether the demo rows were saved. Reload this page: if it lists demo rows, the load worked; if it lists none, nothing was saved and you can load again.',
+                'reason'  => $problem->getMessage(),
                 'items'   => [],
                 'log'     => 'DemoDataLoadUnconfirmed',
             ];
@@ -1091,6 +1095,10 @@ function demo_data_load(\mysqli $db, int $siteId): array
         return [
             'type'    => 'danger',
             'message' => 'Loading failed part way, so everything it had done was undone. Nothing was changed. The database said: ' . $problem->getMessage(),
+            // #990: the activity line keeps the fixed words; the database's own
+            // words go to the Errors page, where any e-mail address is removed.
+            'logWords' => 'Loading failed part way, so everything it had done was undone. Nothing was changed.',
+            'reason'  => $problem->getMessage(),
             'items'   => [],
             'log'     => 'DemoDataLoadFailed',
         ];
@@ -1509,6 +1517,10 @@ function demo_data_wipe(\mysqli $db): array
             return [
                 'type'    => 'warning',
                 'message' => 'The wipe reached its final save, but the database did not confirm it, so this page cannot say whether the rows were deleted. Reload this page to see what is still listed; running Wipe again is safe, because it only ever deletes rows that are still listed and still exactly as loaded. The database said: ' . $problem->getMessage(),
+                // #990: the activity line keeps the fixed words; the database's own
+                // words go to the Errors page, where any e-mail address is removed.
+                'logWords' => 'The wipe reached its final save, but the database did not confirm it, so this page cannot say whether the rows were deleted. Reload this page to see what is still listed; running Wipe again is safe, because it only ever deletes rows that are still listed and still exactly as loaded.',
+                'reason'  => $problem->getMessage(),
                 'items'   => [],
                 'log'     => 'DemoDataWipeUnconfirmed',
             ];
@@ -1516,6 +1528,10 @@ function demo_data_wipe(\mysqli $db): array
         return [
             'type'    => 'danger',
             'message' => 'Wipe failed part way, so everything it had done was undone. Nothing was deleted. The database said: ' . $problem->getMessage(),
+            // #990: the activity line keeps the fixed words; the database's own
+            // words go to the Errors page, where any e-mail address is removed.
+            'logWords' => 'Wipe failed part way, so everything it had done was undone. Nothing was deleted.',
+            'reason'  => $problem->getMessage(),
             'items'   => [],
             'log'     => 'DemoDataWipeFailed',
         ];
@@ -1580,14 +1596,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 📝 Logged AFTER the transaction has ended. Logger writes through the
         //    same connection, so a line written inside the transaction would
         //    vanish with a rollback, which is exactly when it matters most.
+        //    #990: a failure's REASON is the database's own words, which can
+        //    quote a stored value; it goes to the Errors page (any e-mail
+        //    address taken out, D-174) and the activity line keeps the fixed
+        //    words only. The administrator is still shown it on this page.
         try {
+            $words = (string) ($result['logWords'] ?? $result['message']);
+            if (isset($result['reason']) === true) {
+                Logger::errorPlatform('DemoData', 'Error', 'DEMO_DATA_FAILED', $words, (string) $result['reason']);
+                $words .= ' The reason is on the Errors page.';
+            }
             Logger::activity(
                 $result['log'],
-                $result['message'] . ($result['items'] !== [] ? ' ' . implode(' | ', $result['items']) : ''),
+                $words . ($result['items'] !== [] ? ' ' . implode(' | ', $result['items']) : ''),
                 isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null
             );
         } catch (\Throwable $problem) {
-            error_log('[WebMS-Intra] Demo data: could not write the activity log: ' . $problem->getMessage());
+            error_log('[WebMS-Intra] Demo data: could not write the activity log: ' . Logger::withoutAddresses($problem->getMessage()));
         }
     }
 }
@@ -1627,7 +1652,7 @@ try {
     // tblDemoDataRegister (migration 194). Load and Wipe would both fail
     // safely inside their transactions, but say so plainly instead.
     $registerReady = false;
-    error_log('[WebMS-Intra] Demo data: could not read the current state: ' . $problem->getMessage());
+    error_log('[WebMS-Intra] Demo data: could not read the current state: ' . Logger::withoutAddresses($problem->getMessage()));
 }
 
 $currentSite = Site::current();

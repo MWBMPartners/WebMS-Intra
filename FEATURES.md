@@ -2370,3 +2370,6 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Attendance API: members get no `updatedAt` on sessions (D-162).
 
 ---------------------------------------------------------------------------
+- Privacy: error words are stored without e-mail addresses (D-174); every record of an anonymous prayer request
+  names nobody; a member's full data copy covers every kind of record erased with them, or says why not, never hands
+  over another person's details or a working secret, and says when a long list was cut.

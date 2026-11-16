@@ -314,6 +314,11 @@ function bps_settle(): bool
     global $bps;
     $onlyOwn = array_diff(array_keys(bps_newLines()), BPS_OWN_LINES) === [];
     Brs::$writer->query('DELETE FROM tblActivityLogs WHERE logID > ' . (int) $bps['logMark']);
+    // #990: a failed check or restore now writes its REASON to the Errors page
+    // (platform 'Backup') rather than into the activity line's words. That row
+    // is the page's own, like its activity line, so it goes here too; any
+    // other new error row is left for the comparison to see.
+    Brs::$writer->query("DELETE FROM tblErrors WHERE errorPlatform = 'Backup' AND errorID > " . (int) $bps['errMark']);
     Brs::$writer->query("UPDATE tblSettings SET settingValue = '' WHERE settingKey = 'portal.maintenance.message' AND siteID IS NULL");
     return $onlyOwn;
 }
@@ -3276,6 +3281,19 @@ brs_check(
     (int) ($qBadLine['userID'] ?? 0) === BPS_ROOT && str_contains((string) ($qBadLine['activityDescription'] ?? ''), 'names no account') === false,
     'Q27b a FAILED restore changed nothing, so its line NAMES Rae, who pressed it, and never says it names nobody',
     json_encode($qBadLine)
+);
+// #990: the failure's REASON is the database's or the snapshot's own words,
+// which can quote a stored value, so it goes to the Errors page (any e-mail
+// address taken out there, D-174) and the activity line ends with a fixed
+// sentence instead. The administrator who pressed it was shown the reason.
+$qBadError = Brs::$writer->query("SELECT `errorTitle`, `errorDetail` FROM `tblErrors` WHERE `errorPlatform` = 'Backup' AND `errorID` > "
+    . (int) $bps['errMark'] . ' ORDER BY `errorID` DESC LIMIT 1')->fetch_assoc();
+brs_check(
+    str_ends_with((string) ($qBadLine['activityDescription'] ?? ''), 'nothing was changed. The reason is on the Errors page.') === true
+    && (string) ($qBadError['errorTitle'] ?? '') === 'Putting a whole snapshot back failed' && trim((string) ($qBadError['errorDetail'] ?? '')) !== ''
+    && str_contains($qBadSaid, trim((string) ($qBadError['errorDetail'] ?? '')) === '' ? "\x00" : mb_substr(trim((string) $qBadError['errorDetail']), 0, 30)) === true,
+    'Q27c the failed restore\'s activity line holds a fixed sentence, not the reason; the reason is on the Errors page and was shown to Rae (#990)',
+    json_encode([$qBadLine, $qBadError, $qBadSaid])
 );
 bps_settle();
 brs_removeFolder($backups . '/' . $qSnap4);

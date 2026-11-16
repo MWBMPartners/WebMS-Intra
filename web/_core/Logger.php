@@ -13,6 +13,9 @@
  *  • Logger::exception(...)            – registered as set_exception_handler.
  *  • Logger::errorPlatform(...)        – manual logging for external libs / systems.
  *  • Logger::errorPlatformForSite(...) – the same, for a named organisation.
+ *  • Logger::errorNamingNobody(...)    – the same, keeping nothing of the
+ *                                        sender, for a form that promises
+ *                                        anonymity (#1044).
  * -----------------------------------------------------------------------------
  * 🛟 None of these ever throws, loops, or needs a working database. When the
  *    database cannot take the row, the essentials go to PHP's own error log
@@ -75,12 +78,23 @@ class Logger
      *   • Every database write goes through insertRow(), which catches every
      *     failure and says what went wrong instead of throwing.
      *   • If the row could not be written, ONE line goes to PHP's own error log
-     *     (writeFallback()). It carries the same essentials the row would have
-     *     held — what kind of event, the message, the file and line where
-     *     there is one, the organisation, the user and the visitor's address.
-     *     It never carries request headers, the session identifier or the
-     *     session contents: PHP's log is read by more people and kept for
-     *     longer than the database table, so it gets less.
+     *     (writeFallback()). Since #990 (15 November 2026) it carries the KIND
+     *     of record and its NUMBERS only — the type, the organisation, the
+     *     account — plus, for an error, the error's one-line title and where
+     *     it happened, with any e-mail address taken out (D-174). It never
+     *     carries an activity record's words, the visitor's network address,
+     *     the page address, request headers, the session identifier or the
+     *     session contents. PHP's log is kept by the hosting company, for as
+     *     long as it likes, where no erasure and no clear-out can reach it, so
+     *     it gets the least. (It used to carry the words and the network
+     *     address too; an activity record's words can hold a typed sign-in
+     *     name, and the address is personal data, D-178.)
+     *   • An error's own words — its title, its detail and its code — have any
+     *     e-mail address replaced with "[address]" before they go ANYWHERE:
+     *     the Errors page's row, the alert e-mail, the outside error monitor
+     *     and the fallback line (D-174, #1007, #990). A mail server's refusal
+     *     often quotes the address it refused, and an error row names no
+     *     person, so no erasure could ever find it. See withoutAddresses().
      *   • While an error is being recorded, alerted or forwarded, any further
      *     error raised by that work goes to PHP's log only — at most one line —
      *     and never to the database, alerts or the error monitor. See
@@ -97,6 +111,47 @@ class Logger
      *   • A fatal PHP error that stops the script (running out of memory, for
      *     example) cannot be caught by anything here.
      */
+
+    /**
+     * 🕶️ True once the request has PROMISED the person sending it anonymity
+     * (#1044 round 2): see promiseAnonymity(). From then on every error this
+     * class records for the request - errorPlatform(), errorPlatformForSite(),
+     * the PHP error handler and the exception handler - keeps nothing of the
+     * sender, and every activity() record names nobody.
+     */
+    private static bool $promisesAnonymity = false;
+
+    /**
+     * 🕶️ Say, ONCE, at the top of a page, that this request promises the
+     * person sending it anonymity (#1044 round 2). Today one page:
+     * `prayer-requests/anonymous-save.php`.
+     *
+     * WHY A MARK ON THE REQUEST AND NOT A CHOICE AT EACH CALL. On that page the
+     * Errors-page lines are written by the page itself (a statement that
+     * would not prepare or run), by PrayerChain (reached through
+     * maybeAutoAssign() after the request is saved), by Mailer (an e-mail to
+     * the assigned partner that failed), and by PHP itself (any warning or
+     * exception). Choosing at each call site would mean every one of those
+     * classes knowing whether its caller promised anonymity, and the next one
+     * added would not; a mark on the request covers them all, including the
+     * ones nobody has written yet.
+     *
+     * What it does: errorPlatform() and errorPlatformForSite() write as
+     * errorNamingNobody() does (no account, network address, browser or
+     * headers), which also covers phpError() and exception(); activity()
+     * writes as activityNamingNobody() does. audit() is NOT changed (nothing
+     * on that page writes one; a change history names who changed a record
+     * and is kept for ever, D-116).
+     *
+     * It cannot be undone within the request, on purpose: a promise kept for
+     * half a request is not kept. `check_activity_naming_nobody.py` names the
+     * one page that calls it, and requires it before that page's first
+     * record.
+     */
+    public static function promiseAnonymity(): void
+    {
+        self::$promisesAnonymity = true;
+    }
 
     /** Reference to the global MySQLi connection. */
     private static ?mysqli $db = null;
@@ -372,6 +427,12 @@ class Logger
 
     public static function activity(string $type, string $description = '', ?int $userId = null): void
     {
+        // 🕶️ A request that promised anonymity names nobody (#1044 round 2).
+        if (self::$promisesAnonymity === true) {
+            self::activityNamingNobody($type, $description);
+
+            return;
+        }
         // Declared before the try so the fallback line below can use whatever
         // had been worked out before anything failed.
         $siteId = null;
@@ -483,14 +544,16 @@ class Logger
         }
 
         if ($failure !== null) {
-            // 📝 Deliberately NOT the session's fingerprint, its facts or the
-            //    headers — see the section at the top of this class.
+            // 📝 The type and the numbers ONLY (#990). Not the words: they
+            //    are free text from hundreds of callers and can hold a typed
+            //    sign-in name (D-137) or an organisation's support address
+            //    (D-175), and PHP's own log is beyond every erasure. Not the
+            //    network address either (D-178), nor the session's
+            //    fingerprint, facts or headers — see the top of this class.
             self::writeFallback('an activity record', $failure, [
-                'type'        => $type,
-                'description' => $description,
-                'site'        => $siteId,
-                'user'        => $userId,
-                'address'     => $ip,
+                'type' => $type,
+                'site' => $siteId,
+                'user' => $userId,
             ]);
         }
     }
@@ -547,7 +610,7 @@ class Logger
      * doing the matching for them.
      *
      * Never throws, like every method here; a failed write leaves one line in
-     * PHP's own error log with the type and the words, and no address.
+     * PHP's own error log with the type and the organisation's number only.
      *
      * @param string $type        The record type, as for `activity()`.
      * @param string $description Fixed words and numbers only; never a person's details.
@@ -570,9 +633,8 @@ class Logger
 
         if ($failure !== null) {
             self::writeFallback('an activity record that names nobody', $failure, [
-                'type'        => $type,
-                'description' => $description,
-                'site'        => $siteId,
+                'type' => $type,
+                'site' => $siteId,
             ]);
         }
     }
@@ -702,7 +764,8 @@ class Logger
 
         if ($failure !== null) {
             // 📝 Deliberately NOT the old/new values or the change set — see
-            //    the docblock above.
+            //    the docblock above — and, since #990, not the network
+            //    address either (D-178): the kind of change and its numbers.
             self::writeFallback('an audit trail record', $failure, [
                 'table'   => $tableName,
                 'record'  => $recordId,
@@ -712,7 +775,6 @@ class Logger
                 'user'    => $userId,
                 'apiKey'  => $apiKeyId,
                 'source'  => $source,
-                'address' => $ip,
             ]);
         }
     }
@@ -785,7 +847,9 @@ class Logger
         } catch (Throwable $ignored) {
             $siteId = null;
         }
-        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId);
+        // 🕶️ A request that promised anonymity keeps nothing of the sender
+        //    (#1044 round 2; see promiseAnonymity()).
+        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId, self::$promisesAnonymity);
     }
 
     /**
@@ -835,11 +899,111 @@ class Logger
         string $detail = '',
         ?int $userId = null
     ): void {
-        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId);
+        // 🕶️ A request that promised anonymity keeps nothing of the sender
+        //    (#1044 round 2; see promiseAnonymity()).
+        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId, self::$promisesAnonymity);
     }
 
     /**
-     * The shared body behind the two methods above.
+     * 🕶️ Record a problem keeping NOTHING of the person whose request met it
+     * (#1044): an Errors-page row with no account, no network address, no
+     * browser name and no request headers, and an outside error monitor told
+     * nothing of the browser either.
+     *
+     * FOR ONE PURPOSE ONLY: a problem met while handling a form that PROMISES
+     * the person sending it that what they send is anonymous - today the
+     * anonymous prayer form, through `Captcha` (its bot check could not reach
+     * the provider, or got an answer that was not JSON). The ordinary
+     * `errorPlatform()` keeps the sender's network address, which is the same
+     * address stored on their own sign-in records, so an administrator could
+     * match the "anonymous" request to them through the Errors page. It is
+     * `activityNamingNobody()`'s twin, and the same gate
+     * (`tools/audit-checks/check_activity_naming_nobody.py`) names every
+     * caller and fails when one is added or taken away.
+     *
+     * WHAT IT STILL KEEPS: the organisation, the kind of problem, its words
+     * (with any e-mail address taken out, as every error's are, D-174) and the
+     * page address - which for a form is the form's own fixed address and
+     * names nobody. It goes to the alert e-mail exactly as any other error
+     * does; that e-mail never carried the sender's address.
+     *
+     * WHAT IT CANNOT DO: make the words anonymous. They are the caller's, and
+     * must name nobody - a provider's own message, never anything typed.
+     *
+     * @param string $platform Where the problem happened (Captcha, cURL…).
+     * @param string $severity Notification | Warning | Error | Critical | Fatal.
+     * @param string $code     A short code for this kind of problem.
+     * @param string $title    One line saying what happened.
+     * @param string $detail   The long version.
+     */
+    public static function errorNamingNobody(
+        string $platform,
+        string $severity,
+        string $code,
+        string $title,
+        string $detail = ''
+    ): void {
+        try {
+            $siteId = Site::id();
+        } catch (Throwable $ignored) {
+            $siteId = null;
+        }
+        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, null, true);
+    }
+
+    /**
+     * 🧹 Any e-mail address in an error's own words replaced with "[address]"
+     * (D-174, #1007, #990). The ONE place it is done; writeErrorRow() and
+     * writeFallback() call it, so every error's words are cleaned the same
+     * way before they are stored or sent anywhere.
+     *
+     * WHY. A mail server's refusal, a provider's error and a database's
+     * "Duplicate entry '…'" all quote what they were given, and that is
+     * often somebody's e-mail address. An Errors-page row names no person, so
+     * no erasure can find it (#1007); the owner chose to remove addresses as
+     * the words are written, rather than tag rows for a later erasure.
+     *
+     * WHAT IT RECOGNISES: something@domain where the domain has at least one
+     * dot - `name@example.org`, `<name@example.org>`, an address inside
+     * quotes or brackets, an address in a web address (`https://key@host.io/`
+     * is replaced too, which costs nothing). Letters beyond plain English are
+     * included, byte by byte, so it never fails on text that is not valid
+     * UTF-8 (a PHP error's words may not be).
+     *
+     * WHAT IT CANNOT SEE, said plainly: an address with no dot after the @
+     * (`name@localhost`), an address written with the @ spelt out or broken
+     * across two lines, and any other kind of personal detail an error
+     * quotes - a name, a telephone number, a typed value. D-174 is about
+     * addresses; nothing here judges the rest.
+     *
+     * @param string $words An error's own words.
+     * @return string The same words with every e-mail address replaced.
+     */
+    public static function withoutAddresses(string $words): string
+    {
+        // ⏱️ LINEAR, NOT QUADRATIC (#1044/#990 check round 1). The first
+        //    version could start a match at EVERY character of a long run of
+        //    address-like characters and scan to its end each time, so 80 KB
+        //    of "a.a.a…" took over a second where the pattern engine's JIT is
+        //    switched off (pcre.jit=0, which some hosts set). Now a match may
+        //    only START where such a run starts (the look-behind), and no part
+        //    gives back what it took (the possessive `++`), so each character
+        //    is looked at a bounded number of times. Measured by part E of
+        //    tools/error-words-selftest.php with the JIT off.
+        $cleaned = preg_replace(
+            '/(?<![A-Za-z0-9._%+\-!#$&*=?^{|}~\x80-\xFF])[A-Za-z0-9._%+\-!#$&*=?^{|}~\x80-\xFF]++@[A-Za-z0-9\-\x80-\xFF]++(?:\.[A-Za-z0-9\-\x80-\xFF]++)++/',
+            '[address]',
+            $words
+        );
+
+        // preg_replace answers null only when the pattern engine itself fails
+        // (a backtracking limit). The words are then not stored at all rather
+        // than stored with an address in them.
+        return is_string($cleaned) === true ? $cleaned : '(the words could not be checked for addresses, so they were not kept)';
+    }
+
+    /**
+     * The shared body behind the methods above.
      *
      * Written once rather than twice on purpose. Two copies of this would drift
      * — one would gain a column, or a change to the alerting rules, and the
@@ -882,7 +1046,10 @@ class Logger
      * in the same request at that moment, so this is theoretical) would also
      * go only to PHP's log.
      *
-     * @param int|null $siteId Already decided by the caller. Not guessed here.
+     * @param int|null $siteId      Already decided by the caller. Not guessed here.
+     * @param bool     $namesNobody True only from errorNamingNobody(): the
+     *                              account, network address, browser name and
+     *                              request headers are written as empty.
      */
     private static function writeErrorRow(
         ?int $siteId,
@@ -891,8 +1058,19 @@ class Logger
         string $code,
         string $title,
         string $detail = '',
-        ?int $userId = null
+        ?int $userId = null,
+        bool $namesNobody = false
     ): void {
+        // 🧹 D-174: the error's own words lose any e-mail address HERE, before
+        //    the row, the alert, the error monitor or the fallback line sees
+        //    them, so no path below can carry one.
+        $code   = self::withoutAddresses($code);
+        $title  = self::withoutAddresses($title);
+        $detail = self::withoutAddresses($detail);
+        if ($namesNobody === true) {
+            $userId = null;
+        }
+
         // 🔁 Already recording an error? Then this one was raised by that work.
         if (self::$recordingError === true) {
             if (self::$nestedProblemNoted === false) {
@@ -900,7 +1078,7 @@ class Logger
                 self::writeFallback(
                     'a second problem (raised while recording an earlier error)',
                     'kept out of the database, alerts and the error monitor so it cannot start a loop; only the first such problem per error is logged',
-                    self::errorFallbackFields($siteId, $platform, $severity, $code, $title, $detail, $userId, self::clientIp())
+                    self::errorFallbackFields($siteId, $platform, $severity, $code, $title, $detail, $userId)
                 );
             }
             return;
@@ -909,11 +1087,11 @@ class Logger
         self::$recordingError     = true;
         self::$nestedProblemNoted = false;
         try {
-            $ip = null;
             try {
-                $headersJson = json_encode(self::requestHeaders());
-                $ip          = self::clientIp();
-                $ua          = $_SERVER['HTTP_USER_AGENT'] ?? '';
+                // 🕶️ #1044: nothing of the sender for a form promising anonymity.
+                $headersJson = $namesNobody === true ? null : json_encode(self::requestHeaders());
+                $ip          = $namesNobody === true ? null : self::clientIp();
+                $ua          = $namesNobody === true ? null : ($_SERVER['HTTP_USER_AGENT'] ?? '');
                 // Without a scheduled job's token: see withoutJobToken().
                 $url         = self::requestAddress();
 
@@ -940,7 +1118,7 @@ class Logger
                 self::writeFallback(
                     'an error',
                     $failure,
-                    self::errorFallbackFields($siteId, $platform, $severity, $code, $title, $detail, $userId, $ip)
+                    self::errorFallbackFields($siteId, $platform, $severity, $code, $title, $detail, $userId)
                 );
             }
 
@@ -955,7 +1133,7 @@ class Logger
             try {
                 self::maybeDispatchAlert($platform, $severity, $code, $title, $detail);
             } catch (Throwable $ignored) {
-                error_log('Alert dispatch failed: ' . self::oneLine($ignored->getMessage()));
+                error_log('Alert dispatch failed: ' . self::oneLine(self::withoutAddresses($ignored->getMessage())));
             }
 
             // 📡 External error monitor (#143). When monitoring.enabled = '1' AND
@@ -964,9 +1142,9 @@ class Logger
             //    no-op when not configured. Wrapped in try/catch so any
             //    transport / config failure can never break the logging path.
             try {
-                ErrorMonitor::capture($platform, $severity, $code, $title, $detail, $userId);
+                ErrorMonitor::capture($platform, $severity, $code, $title, $detail, $userId, $namesNobody);
             } catch (Throwable $ignored) {
-                error_log('Error monitor capture failed: ' . self::oneLine($ignored->getMessage()));
+                error_log('Error monitor capture failed: ' . self::oneLine(self::withoutAddresses($ignored->getMessage())));
             }
         } finally {
             self::$recordingError = false;
@@ -1106,10 +1284,18 @@ class Logger
     }
 
     /**
-     * The essentials of an error, for its fallback line: what kind of problem,
-     * the message, the file and line (which the error handler and exception
-     * handler put at the start of the detail), organisation, user, address,
-     * and the page being requested — the same page address the row holds.
+     * The essentials of an error, for its fallback line (#990): what kind of
+     * problem, its one-line title, WHERE it happened (the first line of the
+     * detail, which the error and exception handlers make the file and line),
+     * the organisation and the account. The title and place arrive here with
+     * any e-mail address already taken out (D-174, in writeErrorRow()).
+     *
+     * LEFT OUT, and why: the rest of the detail (a stack trace or a
+     * provider's whole answer, which can quote any value), the visitor's
+     * network address (personal data, D-178) and the page address (its query
+     * can carry what a person typed). They belonged here before #990; PHP's
+     * own log is kept by the hosting company where no erasure or clear-out
+     * reaches, so it gets the least that still says what went wrong.
      *
      * @return array<string, string|int|null>
      */
@@ -1120,19 +1306,18 @@ class Logger
         string $code,
         string $title,
         string $detail,
-        ?int $userId,
-        ?string $ip
+        ?int $userId
     ): array {
+        $firstLine = strtok($detail, "\n");
+
         return [
             'platform' => $platform,
             'severity' => $severity,
             'code'     => $code,
             'title'    => $title,
-            'detail'   => $detail,
+            'where'    => $firstLine === false ? '' : mb_substr($firstLine, 0, 300),
             'site'     => $siteId,
             'user'     => $userId,
-            'address'  => $ip,
-            'url'      => self::requestAddress(),
         ];
     }
 
@@ -1156,9 +1341,11 @@ class Logger
         foreach ($fields as $name => $value) {
             $parts[] = $name . '=' . self::oneLine($value);
         }
+        // 🧹 The REASON is the database's own words, and "Duplicate entry
+        //    '…'" quotes a value: any address in it goes too (D-174).
         error_log(
             '[WebMS-Intra] Logger could not record ' . $what . ' in the database ('
-            . self::oneLine($reason) . '): ' . implode('; ', $parts)
+            . self::oneLine(self::withoutAddresses($reason)) . '): ' . implode('; ', $parts)
         );
     }
 

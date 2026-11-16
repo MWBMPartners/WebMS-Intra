@@ -24704,3 +24704,51 @@ over HTTP; S the source rules; Z the tidy-up.
   (H06–H13), `tools/installer-selftest.php` (P01–P03),
   `tools/access-pages-selftest.php` (Q26, Q26b). Counts are pinned in each
   file; read them there.
+
+
+- `Logger::withoutAddresses()` is the ONE place an error's words lose their addresses; `writeErrorRow()` applies it
+  before the row, alert, monitor and fallback line. It starts a match only where a run of address characters starts
+  and uses possessive quantifiers: the first version took 0.99 s on 80 KB and 156 s on 1 MB with `pcre.jit=0`
+  (measured); now 0.002 s and 0.021 s. It cannot see `name@localhost`, an address spelt out, or other details.
+- It is NOT applied to activity descriptions (D-175 keeps the support address, D-137 a typed sign-in name). Callers
+  holding an error's words write a fixed sentence instead. Enumeration, reproducible:
+  `grep -rn "getMessage()" web/ | wc -l` gives 369 uses; `grep -rn "getMessage()" web/ | grep -c "Logger::error"`
+  gives 69 that reach `Logger::error*` on the same line (cleaned there). The 51 activity calls judged came from a
+  scratch walk (`/tmp/claude-501/p1044/flow.py`, not in the repository): for every file under `web/` holding both
+  `getMessage()` and `Logger::activity`, it bracket-matches each `Logger::activity*()` call, blanks string literals,
+  and lists the calls using a variable whose name looks like an error (`err|msg|message|reason|why|problem|fault|
+  result|ex|e|detail|warn`); 65 files, 51 calls, each read by hand. Error words were found in the Google test, the
+  Graph token test (two lines), WebPush, the backup page (three) and demo-data, all fixed. `error_log()` calls that
+  write an exception's message straight to PHP's log are #1087, which says 150 lines in 39 files and UNDERCOUNTS
+  (a call can span lines): PHP's tokeniser finds 166 calls in 42 files (`/tmp/claude-501/p1044/count-errorlog.php
+  web`, which walks each `error_log(` call's tokens to its closing bracket and counts it when it holds
+  `getMessage()` and not `withoutAddresses`). #1087 should say 166 / 42.
+- `Logger::promiseAnonymity()` marks a request; `errorPlatform()`, `errorPlatformForSite()` (and so `phpError()` and
+  `exception()`) and `activity()` follow it. `audit()` does not (nothing on the page writes one; D-116).
+  `check_activity_naming_nobody.py` counts its callers both ways, requires it before the page's first record, and
+  pins the Logger statements that honour it. Because the promise covers every record, the older per-call layers are
+  proved with the promise taken out (`$withoutPromise` in erasure-pages-selftest.php).
+- `Sms::send()` takes `$bodyToKeep`: the words kept in the record when they must differ from those sent. Only
+  `startVerification()` passes it. A held text keeps what it will send, so no caller passing it may be of a kind
+  that can be held (verification is `critical_alerts`, on NEVER_HELD).
+- `notInDataCopy` on a catalogue entry is the ONE place a kind is named as not handed over; section 27 of
+  gdpr-coverage-selftest.php fails both ways AND pins the list whole (exactly tblRestoreHeldRows and
+  tblTotpBackupCodes; a third fails on purpose).
+- `tools/data-copy-selftest.php` runs every `$fetchUserRows()` block's real SQL (63 today, the two closures that
+  call it included) against a world where another person's number, words (OTHER_WORDS, the test's own judgement)
+  and secrets (SECRETS) sit in every other column, applying each block's strip list as the page does. Marker rows
+  are written with REPLACE (INSERT IGNORE kept the member's real tblUsers row, so the first version could not fail
+  for the `user` block), and every block must hand over its marker row. Every table also gets a SECOND row,
+  somebody else's (every matched column names them; its own numbers, days and words), and a block returning any of
+  it fails: that catches a block that stops narrowing (`OR 1 = 1`, a dropped join condition; 10 shapes planted, all
+  red). Every column a block matches the member's number against must hold an account number (a `siteID = ?` plant
+  goes red). Still unseen: a match on the WRONG account column (`grantedByID` for `userID`), and a parent join that
+  pulls in another person's row through a column the second row does not set apart. It also pins why `tblUsers.calendarToken`
+  may be handed over: Ical stores only its SHA-256 fingerprint. Not covered by it: the two mail blocks (part Q9 of
+  mail-queue-selftest.php) and the three GdprEraser-helper blocks (sections O and P of erasure-pages-selftest.php);
+  an account column neither linked to tblUsers nor named like one; another person's words in a column not on
+  OTHER_WORDS.
+- `DATA_COPY_ROWS_PER_KIND` (5,000) caps seven kinds that can grow without limit, the activity history included (it
+  used to be cut at 5,000 silently); `shortened` names each one that was cut.
+- Tests: error-words-selftest.php (30), data-copy-selftest.php (3 checks over 63 blocks), erasure-pages N56-N63,
+  R1-R8, held-texts B2b, backup-page Q27c, gdpr-coverage section 27.
