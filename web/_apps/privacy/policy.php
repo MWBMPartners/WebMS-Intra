@@ -82,7 +82,12 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 
 <h3>Retention policy</h3>
 <ul>
-    <li><strong>Financial records</strong> (expenses, giving, payments) are kept to meet tax and accounting law. On erasure they are kept, not deleted, and the amounts and dates stay. On a payment, and on a gift that is not kept for tax, your name and the link to you are removed. An expense claim keeps your account number, because a claim must say who was paid; your account itself is emptied, but that number can still be matched back to you wherever a record keeps your name beside it: gifts kept for tax<?php echo $everyGiftKept === true ? ' (for this organisation, every gift)' : ''; ?> keep your name with your number until this organisation's keep-until date (see the exception below), and so do the records a worker or volunteer made (see the point about having worked or volunteered here).
+    <?php // 💳 #808 round 3: "On a payment ... your name and the link to you are removed" had no exception,
+          //    while Payments::ingestWebhook() keeps the payment company's message (name, e-mail, address)
+          //    in tblWebhookEvent, which no erasure reaches; only run_webhook_payload_sweep() empties it,
+          //    after `webhooks.payload.retentionDays` (90 by default). Pinned whole by section F of
+          //    tools/erasure-pages-selftest.php and by section V of tools/outside-services-selftest.php. ?>
+    <li><strong>Financial records</strong> (expenses, giving, payments) are kept to meet tax and accounting law. On erasure they are kept, not deleted, and the amounts and dates stay. On a payment, and on a gift that is not kept for tax, your name and the link to you are removed. The one exception for a payment is the payment company's own message about it, which can hold the name, e-mail address and billing or delivery address you gave that company: an erasure does not reach it, and it is kept until the nightly clear-out empties it, after 90 days unless this installation has chosen another period or to keep them for ever, and only once that scheduled job has been set up (see Outside companies, below). An expense claim keeps your account number, because a claim must say who was paid; your account itself is emptied, but that number can still be matched back to you wherever a record keeps your name beside it: gifts kept for tax<?php echo $everyGiftKept === true ? ' (for this organisation, every gift)' : ''; ?> keep your name with your number until this organisation's keep-until date (see the exception below), and so do the records a worker or volunteer made (see the point about having worked or volunteered here).
         <?php if ($givingRule !== null && $givingRule['confirmed'] === true): ?>
             One exception: gifts covered by a tax declaration, a tax receipt or a giving statement<?php echo $givingRule['scope'] === GivingRetention::SCOPE_ALL ? ' (for this organisation, every gift)' : ''; ?> keep your name and home address for <?php echo (int) $givingRule['years']; ?> <?php echo (int) $givingRule['years'] === 1 ? 'year' : 'years'; ?> after the end of the financial year of your last such gift, so that this organisation can show them to the tax authority if it is asked to. They are then cleared automatically, by the portal's clear-out job (which runs each night once it has been set up) - but never while a hold is on, which this organisation, or whoever runs this installation, can switch on during an audit or a tax enquiry.
         <?php else: ?>
@@ -127,6 +132,11 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
       //    "Retention policy" section above is unchanged. ?>
 <h3>Network addresses</h3>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
+
+<?php // 🛂 #808 (D-158): every outside company a page can reach, named, through ONE template shared
+      //    with the Privacy & Data Protection page; the words are OutsideServices::SERVICES, ::NAMED and ::USED_BY_ORGANISATION (D-195). ?>
+<h3>Outside companies</h3>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'outside-services-notice.php'; ?>
 
 <h3>Contact</h3>
 <p>Data protection enquiries: <?php if ($contact !== ''): ?><a href="mailto:<?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($contact, ENT_QUOTES, 'UTF-8'); ?></a><?php else: ?><em>not configured — see your portal admin.</em><?php endif; ?></p>

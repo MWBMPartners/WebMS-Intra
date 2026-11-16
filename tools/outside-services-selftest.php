@@ -56,6 +56,15 @@
  *      host's agreement), a non-member sees nothing, a planned meeting takes no
  *      roll and no Attendance push and is left out of the report, and removing
  *      a home deletes its address at once
+ *   V  #808, D-158, D-195: both privacy pages print every outside company (the
+ *      switchable ones, the NAMED ones and the second list, "only if this
+ *      organisation uses it"), every field of every entry inside that entry's
+ *      own item, who contacts each company as pinned by hand from the code,
+ *      and the lists in a hand-pinned order,
+ *      word for word the same on both pages and for every reader — a visitor,
+ *      members of two organisations with different own choices, and an
+ *      organisation that has said "no" — because the list describes and
+ *      decides nothing
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It cannot show what a real browser fetches. It reads the HTML and the page
@@ -2587,6 +2596,338 @@ if ($sgEnabledBefore === null) {
 } else {
     q('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingID` = ?', 'si', [$sgEnabledBefore['settingValue'], (int) $sgEnabledBefore['settingID']]);
 }
+
+// =============================================================================
+// V. #808, D-158: EVERY OUTSIDE COMPANY IS NAMED ON BOTH PRIVACY PAGES
+// =============================================================================
+// The owner's decision: name each outside company truthfully on the privacy
+// page before the first install, gate it after. The words live in ONE place
+// (OutsideServices::SERVICES and ::NAMED) and are printed by ONE template, so
+// what is proved here is that both pages print ALL of them, WHOLE, the SAME on
+// both pages, and the same for everybody: a visitor, two members of different
+// organisations with different choices of their own, and an organisation that
+// has said "no" to a service (the list describes, it never decides).
+head('V. Every outside company is named on both privacy pages (#808, D-158)');
+setChoice(M, OutsideServices::GRAVATAR, 'off');
+setChoice(AONLY, OutsideServices::GRAVATAR, 'on');
+setAt(K_GRAV, ORG_B, 'no');
+$jarVM = signIn('m', ORG_A);
+$jarVA = signIn('aonly', ORG_A);
+$jarVB = signIn('badmin', ORG_B);
+check('V00 premise: two organisations, and members whose own choices differ', orgSeen($jarVM) === ORG_A && orgSeen($jarVB) === ORG_B
+    && choiceOf(M, OutsideServices::GRAVATAR) === 'off' && choiceOf(AONLY, OutsideServices::GRAVATAR) === 'on' && stored(K_GRAV, ORG_B) === 'no');
+/** The notice's own block, or '' when the page has none. */
+$noticeOf = static function (string $html): string {
+    return preg_match('#<div data-outside-services-notice="1">.*?<ul data-outside-services="organisation">.*?</ul>\s*</div>#s', $html, $m) === 1 ? $m[0] : '';
+};
+/** One entry's own list item, so a field can only be found in the entry it belongs to. */
+$itemOf = static function (string $notice, string $key): string {
+    return preg_match('#<li data-outside-service="' . preg_quote($key, '#') . '">(.*?)</li>#s', $notice, $m) === 1 ? $m[1] : '';
+};
+/** The keys of one group's list, in order. */
+$groupKeys = static function (string $notice, string $group): array {
+    if (preg_match('#<ul data-outside-services="' . preg_quote($group, '#') . '">(.*?)</ul>#s', $notice, $m) !== 1) {
+        return ['(no such list)'];
+    }
+
+    return preg_match_all('#<li data-outside-service="([A-Za-z0-9]+)">#', $m[1], $mm) > 0 ? $mm[1] : [];
+};
+$e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+// ✋ Hand-pinned, not derived from the constants: deriving the expectation from
+//    the list being tested would pass on a list that had quietly lost an entry.
+$wantGroups = [
+    'switchable'   => ['gravatar', 'providerPhoto', 'memberMap'],
+    'named'        => ['what3words', 'addressLookup', 'placeMaps', 'embeddedContent', 'sharedLibraries', 'fontConnection', 'robotCheck', 'errorMonitoring'],
+    'organisation' => ['signIn', 'email', 'textMessages', 'payments', 'videoMeetings', 'videoUploads', 'transcription', 'translation', 'pushNotifications',
+                       'webhooks', 'offsiteBackup', 'qrTracking', 'lookupsAboutNobody'],
+];
+// ✋ Who contacts each company, pinned by hand from the code (round 1 of the check found
+//    the first version said "from this portal's own server" of sign-in and payments).
+$wantFrom = [
+    'what3words' => 'server', 'addressLookup' => 'server', 'placeMaps' => 'browser', 'embeddedContent' => 'browser',
+    'sharedLibraries' => 'browser', 'fontConnection' => 'browser', 'robotCheck' => 'both', 'errorMonitoring' => 'server',
+    'signIn' => 'both', 'email' => 'server', 'textMessages' => 'server', 'payments' => 'both', 'videoMeetings' => 'both',
+    'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'both',
+    'webhooks' => 'server', 'offsiteBackup' => 'server', 'qrTracking' => 'both', 'lookupsAboutNobody' => 'server',
+];
+// ✋ Who sets each service up, pinned by hand from the level each settings page writes (#808 round 4).
+$wantSetUp = [
+    'signIn' => 'installation', 'email' => 'installation', 'textMessages' => 'installation', 'payments' => 'installation',
+    'videoMeetings' => 'both', 'videoUploads' => 'installation', 'transcription' => 'installation',
+    'translation' => 'installation', 'pushNotifications' => 'installation', 'webhooks' => 'organisation',
+    'offsiteBackup' => 'installation', 'qrTracking' => 'installation', 'lookupsAboutNobody' => 'both',
+];
+$setUpWords = [
+    'installation' => 'Whoever runs this whole installation, for every organisation on it.',
+    'organisation' => 'This organisation, for itself.',
+    'both'         => 'Partly whoever runs this whole installation, partly this organisation for itself.',
+];
+$fromWords = ['browser' => 'Your browser.', 'server' => 'This portal\'s own server, not your browser.', 'both' => 'Your browser, and this portal\'s own server.'];
+// ✋ Sentences that must be in ONE named entry, each a truth a reader relies on.
+$wantSaid = [
+    'what3words'      => 'For a home, the three words name the home itself.',
+    'robotCheck'      => 'sends the company the check\'s answer and your internet address',
+    'errorMonitoring' => 'Never your internet address.',
+    'errorMonitoring#address' => 'The whole address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name or an e-mail address;',
+    // ✋ Round 9: each changed sentence pinned WHOLE.
+    'errorMonitoring#field' => 'Three kinds of report also carry, in a field of its own, the portal\'s own account number for a person (a number, never a name): a refused attempt to change an account, and a refused attempt to give an account an e-mail address another account already has (the number of whoever tried); and a daily e-mail about imported events that could not be sent (the number of the administrator it was for).',
+    'pushNotifications#contact' => 'Each one the server sends also carries, in a signed header, the contact address this installation gave for its notifications (an e-mail or web address), as the notification standard asks, so the company can tell which portal is sending to your device.',
+    'sharedLibraries#web' => 'Your internet address, your browser, and this portal\'s web address. Nothing you type is sent.',
+    'errorMonitoring#message' => 'That message can include account numbers (of the person acting, or of the person acted on), request numbers and other details of what was being handled.',
+    'fontConnection#sends' => 'Your internet address and the time. Nothing is asked for over the connection.',
+    'fontConnection#when'  => 'When you open the noticeboard. Its script tells your browser to get ready to fetch fonts from Google, so the browser looks up Google\'s font servers and opens a connection to them. The portal tells your browser not to fetch the fonts themselves, and gives the noticeboard its own copy of them instead.',
+    'embeddedContent#web2' => 'and this portal\'s web address unless the page has been set to send none.',
+    'placeMaps'       => 'and can be somebody\'s home: its map is drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
+    'signIn'          => 'Your browser is sent to the company\'s own sign-in page',
+    'payments'        => 'Your browser is then sent to the company\'s own payment page',
+    'textMessages'    => 'The telephone number it is sent to and the words of the message.',
+    'sharedLibraries' => 'jsDelivr, and cdnjs (which is run by Cloudflare)',
+    // ✋ Round 2 of the check: each of these was untrue or missing, and is pinned WHOLE.
+    'payments#kept'     => 'The portal never sees your card details. Afterwards the company sends this portal a message about the payment, which can carry the name, e-mail address and billing or delivery address you gave it; the portal keeps that message whole for the period this installation sets (90 days unless it is changed), and then the nightly clear-out empties it, once that scheduled job has been set up, unless this installation has chosen to keep them for ever. The message carries the portal\'s own payment number, which links it to your payment record, and through that to your account until an erasure removes the link. A gift paid this way that the organisation must keep for tax is the exception: its record keeps that payment number with your account number and name until its keep-until date, so until then the message can still be matched to you. An erasure request does not reach the message itself; only the clear-out can empty it.',
+    'videoMeetings'     => 'where this installation is set to let each person connect their own Zoom account, any signed-in member can connect theirs on their own account page. Either way, the browser of whoever connects is sent to Zoom to agree, and the account is connected for one organisation.',
+    'videoMeetings#recording' => 'Zoom can tell the portal where it is, if it has been set up to.',
+    'pushNotifications' => 'Your browser registers with that company and stays in touch with it, so the company receives your internet address and browser.',
+    'webhooks'          => 'A short message about what happened, with the organisation\'s number and the time. What else it holds depends on what happened. An event registration: the registered person\'s full name and school year, which is often a child\'s. A suggested event: its name, which may have been typed by a visitor, and the account number of whoever suggested it. A prayer request: its subject, whether it was sent anonymously, and who may see it. A response card (the card somebody fills in after a service): the kind of step they ticked, such as baptism or membership. A registration accepted, turned down or put on the waiting list: the account number of whoever decided. An event approved or rejected, a filled-in form, or a finished approval process: reference numbers and the outcome only. The portal keeps a copy of each message. Once it has been delivered, or given up on after six tries, the nightly clear-out empties the copy after the period that applies to this organisation, once that scheduled job has been set up. That period is this organisation\'s own figure where it has set one no longer than the whole installation\'s, and otherwise the installation\'s. Copies are kept for ever only if the whole installation keeps them for ever and this organisation has not set a shorter period. A message still waiting to be tried again is kept until it is delivered or given up on, and the further tries need the scheduled retry job.',
+    'offsiteBackup#words' => 'an online storage company reached through rclone (a program that copies files to online storage), online storage that works like Amazon\'s storage service S3, or an SFTP server (a computer that accepts files sent to it over a secure connection).',
+    'offsiteBackup'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled first with a key that stays on this portal\'s server. Uploaded files are not sent.',
+    'qrTracking'        => 'so the phone of anybody who scans it goes to CueRCode first, which receives its internet address and browser.',
+    'lookupsAboutNobody' => 'Nothing about you or anybody else.',
+    // ✋ Round 5 of the check: every clause tested against the settings' variants (off, unset, an
+    //    organisation's row, kept for ever, the scheduled job not set up); each that changed is pinned WHOLE.
+    'email#companies'      => 'The mail route this whole installation uses: Microsoft 365, Google, or a mail server its administrator has set up.',
+    'addressLookup#cached' => 'unless the answer for that address is already remembered.',
+    'sharedLibraries#pages' => 'On the portal\'s ordinary pages: your browser fetches the page\'s layout and icons from them',
+    'errorMonitoring#share' => 'The administrator can choose to send only a share of these reports.',
+    'transcription#when'   => 'When a recording that somebody asked to have written out is processed.',
+    'translation#stored'   => 'and no up-to-date translation of it is already stored.',
+    'pushNotifications#companies' => 'The company that runs your browser\'s notification service, such as Google, Mozilla, Apple or Microsoft.',
+    'offsiteBackup#runNow' => 'When the off-site copy runs, if it has been set up and switched on: on its schedule, or when an administrator presses Run now.',
+    // ✋ Round 6: round 5's "a QR code can hold your calendar address" was FALSE (only qr.php with
+    //    ?provider=cuercode reaches CueRCode, and no page asks for that); each changed sentence pinned WHOLE.
+    'qrTracking#whole'     => 'Only if this installation is set up with CueRCode, and only when somebody signed in asks the portal\'s QR code address for a tracked code themselves. No page of the portal asks for one.',
+    'qrTracking#sends'     => 'This portal\'s server sends CueRCode the text that person asked to have in the code (up to 500 characters).',
+    'gravatar#viewer'      => 'A scramble of the e-mail address of the member whose picture is shown, which Gravatar can match to that member, with the internet address and browser of whoever is looking, this portal\'s web address and the time, every time a page shows that picture. A member\'s picture is fetched for somebody else only when that member allows it and the person looking has not switched it off.',
+    'providerPhoto#viewer' => 'An address on Google\'s servers that belongs to the shown member\'s photo alone, with the internet address and browser of whoever is looking, this portal\'s web address and the time, every time a page shows that picture. A member\'s photo is fetched for somebody else only when that member allows it and the person looking has not switched it off.',
+    'addressLookup#contact' => 'Every request to OpenStreetMap also carries this portal\'s privacy contact e-mail address (or, if none is set, the address the portal sends e-mail from), as OpenStreetMap asks: the organisation\'s address, not yours.',
+    'sharedLibraries#api'  => 'The API guide (the page describing how other programs can talk to the portal) does too, unless this portal is set to use its own copy.',
+    'errorMonitoring#anonymous' => 'For a fault on a form that promises not to name you, such as the anonymous prayer form, the report leaves out the browser\'s description and that account-number field.',
+    // ✋ Round 7 of the check: each changed sentence pinned WHOLE.
+    'errorMonitoring#when' => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, or when an e-mail cannot be sent.',
+    'transcription#file'   => 'The recording itself: the whole audio or video file, so the pictures of everybody filmed as well as the voices of whoever speaks.',
+    'embeddedContent#livestream' => 'The livestream page also puts the player of YouTube, Vimeo, Facebook (Meta) or Twitch into the page, but the portal currently tells your browser not to load it there, so nothing is fetched from that company on that page.',
+    'memberMap#web'        => 'together with the internet address and browser of whoever is looking and this portal\'s web address.',
+    'placeMaps#web'        => 'with your internet address, your browser and this portal\'s web address.',
+    'robotCheck#web'       => 'so the company receives your internet address, your browser and this portal\'s web address;',
+    'signIn#web'           => 'so it receives your internet address, your browser, this portal\'s web address and what you type there.',
+    'payments#web'         => 'which receives your internet address, your browser, this portal\'s web address and what you type there.',
+    'videoUploads#web'     => 'with their internet address, their browser and this portal\'s web address.',
+    'email#fallback'       => 'If the administrator has chosen it, a message Microsoft 365 fails to send is then sent through Google instead. An alert about a fault, sent to the people who run the portal, can also go out through the server\'s own mail program, which hands it to the hosting company\'s mail service.',
+    'translation#libre'    => 'or a LibreTranslate server (a translation program, which anybody may run, at an address this installation\'s administrator typed in)',
+];
+$notices = [];
+$wholePage = '';
+foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' => 'the privacy policy'] as $path => $what) {
+    foreach (['a visitor' => '', 'M (A and B)' => $jarVM, 'a member of A alone' => $jarVA, "B's administrator" => $jarVB] as $who => $jar) {
+        $page = req($jar, 'GET', $path);
+        $notice = $noticeOf($page['body']);
+        $notices["{$path}|{$who}"] = $notice;
+        check("V01 {$what}, for {$who}: answers a WHOLE page with the outside-companies section in it",
+            $page['status'] === 200 && str_contains($page['body'], '</html>') === true && $notice !== '', 'status ' . $page['status']);
+        if ($who === 'a visitor') {
+            $wholePage = $page['body'];
+        }
+    }
+    $body = $notices["{$path}|a visitor"];
+    foreach ($wantGroups as $group => $keys) {
+        check("V02 {$what}: the '{$group}' list holds exactly its hand-pinned entries, in order", $groupKeys($body, $group) === $keys,
+            implode(',', $groupKeys($body, $group)));
+    }
+    foreach (OutsideServices::SERVICES as $key => $entry) {
+        foreach (['name', 'company', 'sends'] as $field) {
+            check("V03 {$what}: switchable '{$key}' prints its {$field} whole, in its own entry",
+                str_contains($itemOf($body, $key), $e($entry[$field])) === true);
+        }
+    }
+    foreach (['NAMED' => OutsideServices::NAMED, 'USED_BY_ORGANISATION' => OutsideServices::USED_BY_ORGANISATION] as $listName => $list) {
+        foreach ($list as $key => $entry) {
+            foreach (['name', 'companies', 'when', 'sends', 'why'] as $field) {
+                check("V03 {$what}: {$listName} '{$key}' prints its {$field} whole, in its own entry",
+                    str_contains($itemOf($body, $key), $e($entry[$field])) === true);
+            }
+            check("V03b {$what}: '{$key}' says who contacts it as pinned by hand (" . ($wantFrom[$key] ?? '?') . ')',
+                isset($wantFrom[$key]) === true && $entry['from'] === $wantFrom[$key]
+                && str_contains($itemOf($body, $key), '<em>Who contacts it:</em> ' . $e($fromWords[$wantFrom[$key]])) === true);
+        }
+    }
+    foreach ($wantSaid as $label => $words) {
+        // A second sentence for one entry is keyed "<entry>#<why>", because an array key may appear once.
+        $key = explode('#', $label)[0];
+        check("V04 {$what}: '{$label}' says \"" . mb_substr($words, 0, 90) . '…" whole (hand-pinned)',
+            str_contains($itemOf($body, $key), $e($words)) === true);
+    }
+    check("V05 {$what}: the opening does not claim every company learns your internet address",
+        str_contains((string) preg_replace('/\s+/', ' ', $body), 'the company learns the server\'s address, not yours, unless the entry says that yours is passed on') === true);
+    // ✋ Round 8: EVERY clause of the opening paragraph, each by its own check.
+    $openingClauses = [
+        'Some parts of this portal use another company\'s service.',
+        'Each entry below says what that company receives, and who contacts it.',
+        'When <strong>your browser</strong> fetches something from a company, the company also learns your internet address (the number that identifies your connection, which can show roughly where you are).',
+        'It also learns your browser\'s description of itself: the program and its version, your computer\'s or phone\'s operating system and often the kind of device, and the languages it is set to prefer.',
+        'With this portal\'s usual settings it also learns this portal\'s web address (its name, not the page you are on).',
+        'So the company can tell that somebody using this portal is looking.',
+        'This portal belongs to an organisation, such as a church, so that alone can say something about you, for example about your beliefs.',
+        'When only <strong>this portal\'s own server</strong> contacts it, the company learns the server\'s address, not yours, unless the entry says that yours is passed on.',
+        'Where both do, both apply.',
+    ];
+    foreach ($openingClauses as $i => $clause) {
+        check("V05f {$what}: opening clause " . ($i + 1) . ' is there whole: "' . mb_substr($clause, 0, 60) . '…"',
+            str_contains((string) preg_replace('/\s+/', ' ', $body), $clause) === true);
+    }
+    check("V05b {$what}: the second list is headed as the owner decided (D-195)", str_contains($body, '<strong>Only if this organisation uses it.</strong>') === true);
+    check("V05c {$what}: the second list's opening says who sets each one up, and that an installation-wide one covers every organisation (#808 round 4)",
+        str_contains((string) preg_replace('/\s+/', ' ', $body), 'Each entry below says who sets it up: this organisation for itself, or whoever runs this whole installation, in which case it covers the members of every organisation on the installation, whether or not this organisation chose it. Ask the organisation which are in use.') === true);
+    foreach ($wantSetUp as $key => $level) {
+        check("V05d {$what}: '{$key}' says who sets it up as pinned by hand ({$level})",
+            (OutsideServices::USED_BY_ORGANISATION[$key]['setUp'] ?? '') === $level
+            && str_contains($itemOf($body, $key), '<em>Set up by:</em> ' . $e($setUpWords[$level])) === true);
+    }
+    check("V06 {$what}: links to the member's own Outside services page", str_contains($body, 'href="/account/outside-services"') === true);
+    check("V06b {$what}: the withdrawn untruths are not back (third-party cookies, recognising people, Google's cookies), on a page that HAS the section",
+        $body !== '' && str_contains($wholePage, 'No third-party tracking') === false && str_contains($wholePage, 'can recognise you') === false
+        && str_contains($wholePage, 'sets Google') === false);
+}
+// ✋ V09, round 9: the error-reports entry NAMES which reports carry an account number, so the set
+//    of callers that fill that field is pinned here by PHP's own tokeniser over every file under
+//    web/. A new caller naming a person turns this red, and the sentence must then be reconsidered.
+//    Round 10: a caller fills the field in THREE ways, not one -- by position (the 6th argument of
+//    Logger::errorPlatform(), the 7th of errorPlatformForSite()), by NAME (`userId: 5`; both methods
+//    call the parameter $userId, checked in Logger.php), or by a SPREAD (`...$args`), which can carry
+//    either. Round 9 counted commas only, so a named or spread caller passed green (measured by the
+//    round-10 check). A spread is counted as filling the field because nothing here can see what the
+//    array holds -- the safe direction. V09a-V09f drive this function directly on made-up calls.
+//    What it still cannot see: a call through a variable class or method name, or call_user_func().
+function v09FillsAccountField(array $toks, int $open, string $method): bool
+{
+    $n = count($toks);
+    $depth = 0;
+    $args = 1;
+    $empty = true;
+    for ($m = $open; $m < $n; $m++) {
+        $text = is_array($toks[$m]) === true ? $toks[$m][1] : $toks[$m];
+        if ($text === '(' || $text === '[' || $text === '{') {
+            $depth++;
+            continue;
+        }
+        if ($text === ')' || $text === ']' || $text === '}') {
+            $depth--;
+            if ($depth === 0) {
+                break;
+            }
+            continue;
+        }
+        // 📦 A spread at the call's own level: it can fill the field by position or by name.
+        if ($depth === 1 && is_array($toks[$m]) === true && $toks[$m][0] === T_ELLIPSIS) {
+            return true;
+        }
+        // 🏷️ A named argument `userId:` at the call's own level (a ':' and not '::').
+        if ($depth === 1 && is_array($toks[$m]) === true && $toks[$m][0] === T_STRING && $toks[$m][1] === 'userId') {
+            $q = $m + 1;
+            while ($q < $n && is_array($toks[$q]) === true && $toks[$q][0] === T_WHITESPACE) {
+                $q++;
+            }
+            if ($q < $n && $toks[$q] === ':') {
+                return true;
+            }
+        }
+        if ($depth === 1 && $text === ',') {
+            $args++;
+        }
+        if ($depth >= 1 && trim($text) !== '') {
+            $empty = false;
+        }
+    }
+    // 🔢 By position.
+    return $empty === false && $args >= ($method === 'errorPlatform' ? 6 : 7);
+}
+function v09Callers(string $code): array
+{
+    $found = [];
+    $toks = token_get_all($code);
+    $n = count($toks);
+    for ($i = 0; $i < $n; $i++) {
+        if (is_array($toks[$i]) === false || $toks[$i][0] !== T_STRING
+            || in_array($toks[$i][1], ['errorPlatform', 'errorPlatformForSite'], true) === false) {
+            continue;
+        }
+        $j = $i - 1;
+        while ($j >= 0 && is_array($toks[$j]) === true && $toks[$j][0] === T_WHITESPACE) {
+            $j--;
+        }
+        if ($j < 0 || is_array($toks[$j]) === false || $toks[$j][0] !== T_DOUBLE_COLON) {
+            continue;
+        }
+        $k = $i + 1;
+        while ($k < $n && is_array($toks[$k]) === true && $toks[$k][0] === T_WHITESPACE) {
+            $k++;
+        }
+        if ($k >= $n || $toks[$k] !== '(') {
+            continue;
+        }
+        if (v09FillsAccountField($toks, $k, $toks[$i][1]) === true) {
+            $found[] = $toks[$i][1];
+        }
+    }
+    return $found;
+}
+$v09Cases = [
+    'V09a a 6th argument by position'                          => ["<?php Logger::errorPlatform('X', 'W', 'C', 't', '', 5);", 1],
+    'V09b a named userId:'                                     => ["<?php \\Portal\\Core\\Logger::errorPlatform('X', 'Warning', 'C', 't', userId: 5);", 1],
+    'V09c a spread'                                            => ['<?php Logger::errorPlatform(...$a);', 1],
+    'V09d a named userId: on errorPlatformForSite'             => ['<?php Logger::errorPlatformForSite(1, \'X\', \'W\', \'C\', \'t\', userId: $u);', 1],
+    'V09e (stays clear) five arguments, or detail: named'      => ["<?php Logger::errorPlatform('X', 'W', 'C', 't', detail: 'd'); Logger::errorPlatformForSite(1, 'X', 'W', 'C', 't', 'd');", 0],
+    'V09f (stays clear) a userId: inside a nested call'        => ["<?php Logger::errorPlatform('X', 'W', 'C', f(userId: 1));", 0],
+];
+foreach ($v09Cases as $v09Label => [$v09Code, $v09Want]) {
+    check($v09Label . ' is counted as ' . ($v09Want === 1 ? 'filling' : 'not filling') . ' the account-number field (round 10)',
+        count(v09Callers($v09Code)) === $v09Want);
+}
+$accountFieldCallers = [];
+$webDir = $repo . $sep . 'web';
+$walkErr = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webDir, FilesystemIterator::SKIP_DOTS));
+foreach ($walkErr as $errFile) {
+    $errPath = (string) $errFile;
+    if (substr($errPath, -4) !== '.php') {
+        continue;
+    }
+    foreach (v09Callers((string) file_get_contents($errPath)) as $unused) {
+        $accountFieldCallers[] = str_replace($sep, '/', substr($errPath, strlen($webDir) + 1));
+    }
+}
+sort($accountFieldCallers);
+check('V09 exactly the three callers the error-reports entry names fill the account-number field (tokenised, round 9)',
+    $accountFieldCallers === ['_core/AccountGuard.php', '_core/AccountGuard.php', '_core/ImportNotifier.php'],
+    implode(', ', $accountFieldCallers));
+check('V06d the privacy policy\'s Financial records point says, whole, that the payment company\'s message is the exception an erasure does not reach (#808 round 3)',
+    str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy/policy')['body']),
+        'your name and the link to you are removed. The one exception for a payment is the payment company\'s own message about it, which can hold the name, e-mail address and billing or delivery address you gave that company: an erasure does not reach it, and it is kept until the nightly clear-out empties it, after 90 days unless this installation has chosen another period or to keep them for ever, and only once that scheduled job has been set up (see Outside companies, below).') === true);
+check('V06e the Privacy page lists the cookies the portal really sets, and the sign-in details it really keeps (#808 round 6)',
+    str_contains((string) preg_replace('/\s+/', ' ', req('', 'GET', '/privacy')['body']), 'The portal sets only the cookies it needs to work: a session cookie, which keeps you signed in and carries what the portal needs from page to page (such as the token that stops other websites sending forms in your name, and your language if you change it); the "trust this device" cookie for two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the cookie notice, kept for a year. Your browser\'s own storage (not a cookie) also holds, for this portal: your light or dark display, colour-blind-safe colours, reading mode, and whether you dismissed the offer to install the portal as an app, none of which is sent to the portal; the calendar view you last used, which the calendar puts into the page address and so is sent to the portal; a code for the livestream page in the current tab, sent to the portal while you watch and with each chat message, so that it can count who is watching and tell your messages apart; forms you send while offline, kept until you are back online and then sent; copies of pages, so they can be shown when you are offline; and, on the noticeboard, the poster size and reduced-motion choice you set there, which are not sent to the portal.') === true
+    && str_contains(req('', 'GET', '/privacy')['body'], 'the identifier that company gives your account, and the name, e-mail address and (where it has one) photo address it returns.') === true
+    && str_contains(req('', 'GET', '/privacy')['body'], 'We use only the cookies the portal needs to work (to keep you signed in, to remember a trusted device if you ask, and to remember this answer), and no tracking cookies of our own.') === true);
+check('V06c the Privacy page\'s Cookies section points at the companies the browser contacts itself',
+    str_contains(req('', 'GET', '/privacy')['body'], 'whether they keep' . "\n" . '    anything in your browser is up to them') === true);
+check('V07 the two pages print the SAME section, word for word', $notices['/privacy|a visitor'] === $notices['/privacy/policy|a visitor']);
+$sameForAll = true;
+foreach ($notices as $label => $notice) {
+    [$path] = explode('|', $label);
+    if ($notice !== $notices["{$path}|a visitor"]) {
+        $sameForAll = false;
+    }
+}
+check('V08 ...and the same for every reader: it describes, it decides nothing (B\'s "no" and the members\' own choices change no word)', $sameForAll === true);
+setAt(K_GRAV, ORG_B, null);
+setChoice(M, OutsideServices::GRAVATAR, null);
+setChoice(AONLY, OutsideServices::GRAVATAR, null);
 
 $errors = (string) @file_get_contents($child . $sep . 'php-errors.log');
 check('Z01 the server logged no PHP error or warning during the run', preg_match('/PHP (Fatal|Warning|Parse|Deprecated)/', $errors) !== 1, mb_substr($errors, 0, 600));

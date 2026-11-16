@@ -1398,6 +1398,20 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_outside_services_gated.py
 
+      # #808 (D-158, D-195): every outside internet name the check can read in
+      # the code under web/ is accounted for -- switched on and off
+      # (OutsideServices::SERVICES), or named on both privacy pages
+      # (OutsideServices::NAMED, ::USED_BY_ORGANISATION; one host may be in
+      # several of those), or listed in the check as sending nobody's details --
+      # counted file by file, never where a browser loads by itself unless the
+      # privacy pages say the browser contacts it; and a listed name no code
+      # uses any more fails too. Its --self-test is run by the audit
+      # self-tests step (#919). Needs php for the tokeniser.
+      - name: 'Every outside company in code is named (hard gate, #808)'
+        id: outside_hosts_named
+        if: always()
+        run: python3 -I tools/audit-checks/check_outside_hosts_named.py
+
       # #493 P4a: the public door's two feeds keep the shape their schemas
       # promise to other people's websites, every property is described, and
       # the check's own validator is proved both ways. The self-test

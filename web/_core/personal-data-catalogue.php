@@ -3055,7 +3055,10 @@ return [
                     . 'e-mail address and billing address, so those are here in full while the message is '
                     . 'kept. A message whose signature did not verify is recorded WITHOUT its body, so a '
                     . 'request from somebody who is not the provider leaves a note and nothing else. '
-                    . 'Nothing on the row links it to an account, so an erasure request cannot match it.',
+                    . 'No column on the row names an account, so an erasure request cannot match it; but the '
+                    . 'stored message carries the portal\'s own payment number, which links it to a payment '
+                    . 'record, and through that to the payer\'s account until an erasure removes the link, or '
+                    . 'to a gift kept for tax until that gift\'s keep-until date (#808).',
         'period'   => 'the installation\'s webhook payload period '
                     . '(`webhooks.payload.retentionDays`, 90 days unless changed). There is no '
                     . 'per-organisation figure here, because the table has no organisation column and the '

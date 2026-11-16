@@ -85,7 +85,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <li><strong>Account data</strong> — name, email, optional phone, hashed password (we never store passwords in plain text).</li>
     <li><strong>Authentication events</strong> — login successes, failures, password-reset requests, 2FA verifications. IP address + user agent for security audit.</li>
     <li><strong>Activity logs</strong> — what you did inside the portal (e.g. submitted a prayer request, recorded attendance, approved an expense). Used for incident investigation and reverting accidental changes.</li>
-    <li><strong>Linked SSO accounts</strong> — if you signed in with Microsoft 365 or Google, the provider's "sub" identifier and the email they returned.</li>
+    <?php // 🔑 #808 round 6: this said only "the provider's 'sub' identifier and the email", while Auth.php keeps the
+          //    name and the photo's address too (the Outside companies list says so). ?>
+    <li><strong>Linked sign-in accounts</strong> — if you sign in with a Microsoft or Google account, the identifier that company gives your account, and the name, e-mail address and (where it has one) photo address it returns.</li>
     <?php // 🏠 #1037, D-183: a remembered map position of a home is personal data. Worded in ONE
           //    place (GeocodeCacheRetention::privacyWords()), with the period the clear-out uses. ?>
     <li data-geocode-home-notice="1"><strong>Map positions of homes</strong> — <?php echo htmlspecialchars(GeocodeCacheRetention::privacyWords($mysqli), ENT_QUOTES, 'UTF-8'); ?></li>
@@ -136,6 +138,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h2 class="h4 mt-4">Network addresses</h2>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'network-addresses.php'; ?>
 
+<?php // 🛂 #808 (D-158): every outside company a page can reach, named, through ONE template shared
+      //    with the privacy policy; the words are OutsideServices::SERVICES, ::NAMED and ::USED_BY_ORGANISATION (D-195). ?>
+<h2 class="h4 mt-4">Outside companies</h2>
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'outside-services-notice.php'; ?>
+
 <h2 class="h4 mt-4">Your rights</h2>
 <ul>
     <li><strong>Access</strong> — request a copy of your data via
@@ -158,11 +165,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h2 class="h4 mt-4">Cookies</h2>
 <p>
-    The portal uses functionally-necessary cookies only: a session cookie for
-    sign-in, a CSRF token, the "trust this device" 2FA cookie (only set if you
-    explicitly tick the box), and small UI preferences (theme, language).
-    No third-party tracking cookies. No analytics cookies are set without
-    your consent.
+    <?php // 🍪 #808 round 6: written from the cookies the code really sets (setcookie() in Auth.php for the
+          //    trusted device, privacy/consent.php for the notice; PHP's own session cookie). The form token
+          //    and a changed language live IN the session; the light/dark choice is localStorage. ?>
+    The portal sets only the cookies it needs to work: a session cookie, which keeps you signed in
+    and carries what the portal needs from page to page (such as the token that stops other websites
+    sending forms in your name, and your language if you change it); the "trust this device" cookie for
+    two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the
+    cookie notice, kept for a year. Your browser's own storage (not a cookie) also holds, for this portal:
+    your light or dark display, colour-blind-safe colours, reading mode, and whether you dismissed the offer
+    to install the portal as an app, none of which is sent to the portal; the calendar view you last used,
+    which the calendar puts into the page address and so is sent to the portal; a code for the livestream
+    page in the current tab, sent to the portal while you watch and with each chat message, so that it can
+    count who is watching and tell your messages apart; forms you send
+    while offline, kept until you are back online and then sent; copies of pages, so they can be shown
+    when you are offline; and, on the noticeboard, the poster size and reduced-motion choice you set there,
+    which are not sent to the portal.
+    The portal sets no tracking or analytics cookies of its own.
+    <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the
+          //    Outside companies section, which lists companies the reader's browser contacts
+          //    directly (video players, the robot check). The portal cannot promise what those
+          //    companies do, so it says what it does itself and points at the list. ?>
+    Some of the outside companies listed under <em>Outside companies</em> above are contacted by your
+    browser directly, such as a video player or the check that you are not a robot; whether they keep
+    anything in your browser is up to them, under your browser's settings, and is described in each
+    company's own privacy notice.
 </p>
 
 <p class="text-muted small mt-5">
