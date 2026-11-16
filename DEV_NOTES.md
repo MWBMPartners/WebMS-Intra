@@ -24752,3 +24752,38 @@ over HTTP; S the source rules; Z the tidy-up.
   used to be cut at 5,000 silently); `shortened` names each one that was cut.
 - Tests: error-words-selftest.php (30), data-copy-selftest.php (3 checks over 63 blocks), erasure-pages N56-N63,
   R1-R8, held-texts B2b, backup-page Q27c, gdpr-coverage section 27.
+
+
+### Approving a suggestion cancelled or postponed earlier (#1081; D-196, D-197, D-198)
+
+- `EventSuggestions::WARN_IF_EVER` (`status => column`: cancelled => `cancelledWhileWaiting`,
+  postponed => `postponedWhileWaiting`) is the ONE list. The SQL rule
+  `cancelledOrPostponedEarlierSql($alias)`, the PHP rule `earlierStatuses($row)` (WHICH statuses,
+  in list order), `HiddenSeriesDates::restore()`'s marks, the words and `series-repattern.php`'s
+  defaults all read it. One column per status, because the words must say which (D-198).
+- The columns (migration 300 and `full_schema.sql`) keep the fact; the change history cannot (no
+  status writer writes `tblAuditTrail`). Migration 300 marks every waiting suggestion that is
+  cancelled or postponed when it runs; `restore()` marks one in its own UPDATE when it brings it
+  back as a draft (D-196), with `GREATEST`, so a mark already there survives. Nothing clears one.
+- Migration 300 was EDITED IN PLACE and renamed (`300_suggestion_cancelled_or_postponed_while_waiting.sql`,
+  formerly `..._cancelled_while_waiting.sql`) when D-198 widened it: no installation had run the
+  narrower version. Run twice on a database built before it, it equals a fresh install.
+- The rule is asked by the approval's own conditional UPDATE, so check and write are one
+  statement; the list uses the same SQL clause to decide whether to warn, and the PHP rule for
+  the words. The confirmation is the posted field `confirmCancelledOrPostponed=1`, type-checked;
+  the old name `confirmCancelledEarlier` confirms nothing. The approval is still one conditional
+  statement, so the e-mail goes once.
+- The words are built from the list: `earlierStatusWarning()`, `earlierStatusEditFormWarning()`
+  (the edit form has no box and no Approve), `earlierStatusConfirmLabel()`,
+  `earlierStatusRefusal()`; every combination is printed and pinned whole in section U.
+- After any approval or rejection that changed a row, `moderate.php` calls
+  `EventCancelReason::write()` (in its own try, after the decision is stored, before the e-mail).
+- NOTE ON THE RECORD: D-198's "Where" line names `EventSuggestions::WARN_IF_EVER_STATUSES`; the
+  constant in the code is `EventSuggestions::WARN_IF_EVER` (a map of status to column, because
+  D-198 needed one column per status). Decision files are never edited, so it is noted here.
+- Known limit: a suggestion cancelled or postponed and then set back to Draft BEFORE migration
+  300 ran, or one restored from a backup older than migration 300 and then set to Draft, carries
+  no mark.
+- Tests: sections U (no database) and M (HTTP, two organisations) of
+  `tools/series-suggestion-host-selftest.php`; plants P32-P53; section B's B10, B10b and B10c
+  (each mark kept on bring-back, alone and together) with plants P42, P42b and P42c.

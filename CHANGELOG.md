@@ -4,6 +4,37 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A hidden waiting suggestion comes back as a draft; approving one that was cancelled or postponed earlier needs a warning and a ticked box (#1081, #1084; D-196, D-197, D-198)
+
+- **A hidden event suggestion comes back as a draft (#1081; D-196).** Before #965 a visitor's
+  suggestion still waiting to be approved could be set to Cancelled or Postponed. If it was
+  then hidden, "Bring back" on the series page would have returned it still cancelled or
+  postponed — in front of members, unapproved, which D-169 rules out. It now always comes back
+  as a draft, still waiting, with any old reason emptied; the button and the message say so and
+  point to Admin, Calendar, Moderation. Ordinary cancelled and postponed dates are unchanged
+  (D-146, D-147; D-196 is the narrow exception for a waiting suggestion).
+- **Approving a suggestion that was cancelled or postponed earlier needs a confirmation (#1081;
+  D-197, D-198).** Approving publishes a suggestion whatever its status, so one members were told
+  was cancelled or postponed would have gone live as though it were going ahead as planned. The
+  moderation page and the suggestion's edit form now warn, naming which (cancelled, postponed or
+  both), and the moderation page asks the moderator to tick a box beside Approve; an approval
+  posted without it is refused and nobody is e-mailed. Migration 300.
+- **A decided suggestion no longer keeps an old cancellation or postponement reason.** Approving
+  or rejecting one empties it, so a later cancellation never shows members a reason from before.
+- **The offboarding note no longer starts a sentence in lower case** when a group's name could
+  not be read ("A small group has no other current leader…"); a real group name is left exactly
+  as typed, even one that begins "a small group".
+- **Tests: the offboarding note's mixes are pinned (#1084).** Every combination of "leaders
+  e-mailed", "could not be e-mailed" and "no other leader" is checked word for word, without a
+  database.
+
+- **Checked:** series-suggestion-host 438 (planted faults each red), event-suggester-privacy 134, erasure-pages 287,
+  event-repeat-pages 398, public-website-tick 349, time-zones 328, gdpr-coverage 113, series-repattern 72, the
+  end-to-end migration harness (42 checks) and every audit script green on MySQL 8.0.36; migration 300 also run twice
+  on MariaDB 11.4. Three rounds of independent check; the last found the portal correct and only a test gap, closed.
+  **Not run:** the full suites on MariaDB or MySQL 8.4, a real browser. #1080 was decided "no change" (D-193).
+  Open: #1086 (a switched-off account's home stays listed). Codex has not reviewed this.
+
 ### An error's words, the anonymous form, and a fuller data copy (#1007, #990, #1044, #1063; D-174, D-176, D-184)
 
 - **An error's own words keep no e-mail address (#1007, #990; D-174).** Before an error's code, title or detail is
