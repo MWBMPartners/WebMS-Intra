@@ -122,6 +122,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    **Any check or review carried out by a CLAUDE agent runs on Opus, whatever
    model is otherwise set (the owner, 15 November 2026 — D-186).** Same rule as
    in `.claude/CLAUDE.md`; change both together.
+   **Model tiers, on every LLM system (the owner, 16 November 2026 — D-202):** plan with the strongest tier, build with a cheaper one (Haiku or Sonnet; for Codex and local models such as Ollama the equivalent cheaper model), keep checks and reviews on the strongest tier. Same rule as in `.claude/CLAUDE.md`; change both together.
    Judge by what the package TOUCHES, not by how the last round felt, or
    the exception swallows the rule; anything outstanding at a cap
    becomes its own issue named in the commit message, so a capped

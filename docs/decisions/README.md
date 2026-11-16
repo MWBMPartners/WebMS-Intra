@@ -256,7 +256,9 @@ appended with its real date and a note that it was added later.
 | [D-198](198-approving-a-suggestion-that-was-postponed-earlier-shows-the-same-warning.md) | 2026-11-16 | Approving a suggestion that was postponed earlier shows the same warning and needs the same box | in force |
 | [D-199](199-a-merge-is-logged-as-a-new-entry-and-history-is-never-reassigned.md) | 2026-11-16 | D-199 · A merge is logged as a new activity entry; earlier history is never reassigned | in force |
 | [D-200](200-a-merge-waits-seven-days-and-the-old-address-is-told.md) | 2026-11-16 | D-200 · A merge completes no sooner than 7 days after its notice, and the old address is told | in force |
+| [D-201](201-a-merge-moves-the-records-that-decide-who-may-manage-them.md) | 2026-11-16 | D-201 · A merge moves the records the portal uses to decide who may manage them, and logs the move | in force |
+| [D-202](202-plan-with-opus-build-with-haiku-or-sonnet-on-every-llm-system.md) | 2026-11-16 | D-202 · Plan with the strongest tier, build with a cheaper tier, check with the strongest tier — on every LLM system | in force |
 
-*200 decisions. This index is checked against the folder by
+*202 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

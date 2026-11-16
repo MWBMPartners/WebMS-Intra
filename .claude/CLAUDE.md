@@ -879,6 +879,13 @@ otherwise set.** Building may use a cheaper tier; an independent check, review, 
 Claude agent never does. The `dev-team:opus-builder` agent type is Opus; name the model if a brief does not.
 Machine-wide too, in `~/.claude/CLAUDE.md`.
 
+**MODEL TIERS, ON EVERY LLM SYSTEM (the owner, 16 November 2026 — D-202).** Plan and design with the strongest tier (Opus);
+build with a cheaper one (Haiku for mechanical edits, Sonnet for ordinary building), being efficient with tokens and
+credit; checks and reviews stay on the strongest tier (D-186). Other systems follow the same shape: Codex (strongest
+model plans and reviews, a cheaper one builds) and local models such as Ollama (cheapest suitable model builds, never
+the only reviewer of risky work). The rule is about tiers, not names. Agent types: `dev-team:opus-builder` plans and
+checks; `dev-team:sonnet-builder` and `dev-team:quick-edits` build. Machine-wide too, in `~/.claude/CLAUDE.md`.
+
 **Deep analysis and deep planning run on Opus**, one agent at a time, in
 sequence. Implementation stays on Sonnet or Haiku, whichever fits — or Opus when
 the work is genuinely complex. **Verification is never done by a weaker model
