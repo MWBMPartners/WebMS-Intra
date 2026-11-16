@@ -111,7 +111,9 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
                      "family a stored photo must come from to be drawn (PROVIDER_PHOTO_HOST_SUFFIX)."),
     },
     OSM_TILES: {
-        OUTSIDE: (1, "The page-rule source a member-map page is given AFTER deciding (mapTileSource())."),
+        OUTSIDE: (2, "The page-rule source a member-map page is given AFTER deciding (mapTileSource()), and "
+                     "the host of NAMED['publicPlaceMaps'], the privacy pages' entry for the building maps "
+                     "below (#808): a description, which builds no address."),
         "_core/partials/location-map-assets.php": (
             2, "The shared map script: its tile address template, and a note telling callers which "
                "source to allow. It draws nothing until a page puts a map on itself."),

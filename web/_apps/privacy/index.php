@@ -166,8 +166,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     The portal uses functionally-necessary cookies only: a session cookie for
     sign-in, a CSRF token, the "trust this device" 2FA cookie (only set if you
     explicitly tick the box), and small UI preferences (theme, language).
-    No third-party tracking cookies. No analytics cookies are set without
-    your consent.
+    The portal sets no tracking or analytics cookies of its own.
+    <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the
+          //    Outside companies section, which lists companies the reader's browser contacts
+          //    directly (video players, the robot check). The portal cannot promise what those
+          //    companies do, so it says what it does itself and points at the list. ?>
+    Some of the outside companies listed under <em>Outside companies</em> above are contacted by your
+    browser directly, such as a video player or the check that you are not a robot; whether they keep
+    anything in your browser is up to them, under your browser's settings, and is described in each
+    company's own privacy notice.
 </p>
 
 <p class="text-muted small mt-5">

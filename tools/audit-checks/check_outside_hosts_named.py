@@ -1,80 +1,97 @@
 #!/usr/bin/env python3
 """
-Every outside company the portal's code names is accounted for (#808, D-158).
+Every outside company the portal's code names is accounted for (#808; D-158, D-195).
 
 Path: tools/audit-checks/check_outside_hosts_named.py
 
 WHY THIS EXISTS
 ---------------
 #778 put three outside services under the on/off rules (D-058, D-072):
-Gravatar, the sign-in photo, and maps of homes. Its own inventory found six
-more that reach another company -- what3words, the address look-up, videos
-and designs shown inside a page, the shared code libraries every page fetches,
-the robot check on forms, and error monitoring -- and the privacy pages named
-none of them. The owner decided (D-158, 12 November 2026): name each one
-truthfully on the privacy pages before the first install; put them under the
-on/off rules after it.
+Gravatar, the sign-in photo, and maps of homes. Its own inventory found more
+that reach another company, and the privacy pages named none of them. The
+owner decided (D-158): name each one truthfully on the privacy pages before the
+first install, and put them under the on/off rules after it (#1085); and
+(D-195) list the companies an organisation may use to do a job for it as a
+second list, "only if this organisation uses it", checked by this same gate.
 
 Naming them is worth little if the NEXT outside company arrives unnoticed. So
 this check reads every internet name (a "host", such as `cdn.jsdelivr.net`)
-written in the CODE under web/ and requires each to be accounted for in
-exactly one place:
+written in the CODE under web/ and requires each to be accounted for:
 
-  1. `Portal\\Core\\OutsideServices::SERVICES` -- the three that are switched
-     on and off (their `imgSources`; guarded further, file by file, by
-     `check_outside_services_gated.py`);
-  2. `Portal\\Core\\OutsideServices::NAMED` -- the six named on the privacy
-     pages and not yet switched (D-158). Their words are printed by
-     `web/_core/templates/outside-services-notice.php`, so being here IS being
-     on the privacy pages;
-  3. `NOT_ABOUT_ANYBODY` below -- hosts in code that send nobody's details to
-     an outside company when a page is viewed or a member acts: a link a
-     person may choose to follow, a name inside a file format that is never
-     contacted, an example address, or a company an administrator sets up to
-     do a job from the server (see the question below);
-  4. `WHOLE_FILES` below -- files whose hosts are not the portal's own words
-     at all (a copied library, the generated noticeboard bundle, a list of
-     source documents), each with its reason.
+  1. `OutsideServices::SERVICES` -- the three switched on and off (guarded
+     further by `check_outside_services_gated.py`);
+  2. `OutsideServices::NAMED` -- named on the privacy pages, no switch yet;
+  3. `OutsideServices::USED_BY_ORGANISATION` -- the second list (D-195);
+  4. `NOT_ABOUT_ANYBODY` below -- a link a person may choose to follow, a name
+     inside a file format that is never contacted, or an example address;
+  5. `WHOLE_FILES` below -- files whose hosts are not the portal's own words.
 
-It FAILS BOTH WAYS, with no other exception list:
-  - a host in code that is in none of the four -- a new outside company, the
-    fault this exists for. Decide which it is and add it, on purpose; if it
-    sends anything about a person, it belongs in NAMED (and so on the privacy
-    pages) or under the on/off rules;
-  - a host in two of the four (one host, one answer);
-  - a listed host that no code names any more, or a WHOLE_FILES entry that
-    no longer exists -- a list that says more than is true is how a check
-    starts reading as coverage it does not give.
+Lists 1-3 are printed on both privacy pages by
+`web/_core/templates/outside-services-notice.php`, so being in one of them IS
+being on the privacy pages.
 
-WHAT COUNTS AS CODE
--------------------
-PHP is read by PHP's own tokeniser with comments dropped (a regular expression
-cannot tell `// see https://github.com/...` from code), and HTML comments
-inside a PHP file's page text are dropped too. JavaScript and CSS have their
-comments removed by a small reader that steps over quoted text; SQL has `--`,
-`#` and `/* */` comments removed the same way; `.htaccess` has its `#` lines
-removed. Everything else that is text (JSON, SVG, HTML, XML) is read whole.
-Pictures, fonts and archives are skipped by their file ending; a file of any
-OTHER ending is read whole rather than skipped, so a new kind of file cannot
-slip past by being new.
+THE RULES, each failing on its own
+----------------------------------
+A. A host in code that is in none of the lists -- a new outside company.
+B. WHERE A HOST MAY BE WRITTEN, FILE BY FILE, WITH A COUNT (`PER_FILE`), for
+   every host in lists 1-3 and every LINK: a use in a file not listed, or more
+   uses than listed, fails (a new use of a known company -- a second Google
+   script on another page -- needs a look at whether the privacy pages still
+   say what is true); fewer fails too. Examples and file-format names are not
+   counted, because they send nothing to anybody; rule C still holds them.
+C. A host in a place a BROWSER LOADS BY ITSELF -- a `src=`, a `<link href=`,
+   a CSS `url(` or `@import`, a page-rule `*-src` source or `$csp...Extra`, a
+   script's `.src =`, `fetch(`, `loadScript(` or `importScripts(` -- must be
+   owned by an entry the browser contacts: SERVICES, or a NAMED or
+   USED_BY_ORGANISATION entry whose `from` is `browser` or `both`. A link, an
+   example, a file-format name, or a company the privacy pages say only the
+   SERVER contacts, fails there.
+D. One host, one KIND of answer: a host may be in several of lists 1-3 (the
+   same company can do two jobs), but never in those and NOT_ABOUT_ANYBODY.
+E. Both ways: every listed host, every PER_FILE line and every WHOLE_FILES
+   entry must still be true. A host in lists 2-3 must be named somewhere
+   OTHER than OutsideServices.php, because its own list naming it proves
+   nothing.
 
-A host is found in two shapes: after `//` (with or without `https:`, and with
-a `*.` or `{s}.` in front, as a page rule or map template writes it), and as a
-quoted piece that BEGINS with a dot -- `'.cloudflarestream.com/'` -- which is
-how an address is glued together around a customer's own part.
+WHAT COUNTS AS CODE, AND THE SHAPES FOUND
+-----------------------------------------
+PHP is read by PHP's own tokeniser with comments dropped, and HTML comments in
+a PHP file's page text dropped too. JavaScript and CSS have their comments
+removed by a small reader that steps over quoted text; SQL has `--`, `#` and
+`/* */` comments removed the same way; `.htaccess` has its `#` lines removed;
+everything else that is text (JSON, SVG, HTML, XML) is read whole. Pictures,
+fonts and archives are skipped by their ending; a file of any OTHER ending is
+read whole, so a new kind of file cannot slip past by being new. Text is
+compared without regard to capitals, and a name may hold accented letters.
+
+A host is found in three shapes:
+  - after `//`, `\\/\\/` (JavaScript and JSON escaping) or `%2F%2F` (an address
+    inside another address), with or without the scheme, and with `*.`,
+    `{s}.`, `{$x}.` or `${x}.` in front;
+  - as a quoted piece that BEGINS with a dot (`'.cloudflarestream.com/'`),
+    which is how an address is glued together around somebody's own part,
+    unless its last part is a file ending (`.html.php`);
+  - as a whole quoted string that is a host name, or a list of them separated
+    by commas (`'api-free.deepl.com'`, a seeded allow-list), when its last part
+    is a real top-level name from `REAL_TOP_LEVEL` -- needed because settings
+    keys (`privacy.outside.gravatar`) look like host names too.
 
 WHAT THIS CANNOT SEE, said plainly
 ----------------------------------
-1. A host built up in other pieces (`'https://' . $host`, or
-   `'cdn.' . 'jsdelivr.net'`). Matching text cannot follow a concatenation.
-   An address the administrator TYPES (an error monitor's, a translation
-   server's) is not in the code at all, which is why error monitoring is in
-   NAMED with no hosts.
-2. Whether the words in NAMED are TRUE. It checks that every company is
-   listed, never what the listing says. That is a person's job at review.
-3. A JavaScript regular-expression literal containing `//` or a quote can
-   confuse the comment reader. The direction of that fault is safe: text it
-   wrongly keeps can only add hosts, which fail loudly.
+1. A host built up in other pieces: `'https://' . $host` where `$host` comes
+   from elsewhere, `'api.' . 'deepl.com'`, or a name in a quoted string that
+   ends in a top-level name not in REAL_TOP_LEVEL. An address an
+   administrator TYPES (a mail server, an error monitor, a translation server)
+   is not in the code at all.
+2. A browser load the context rule (C) does not recognise -- an address held
+   in a variable and used as a `src` lines later, or a load written in a shape
+   not in LOAD_CONTEXT. Rule B still counts the host where it is written.
+3. Whether the words on the privacy pages are TRUE. It checks that every
+   company is listed and who is said to contact it, never what the listing
+   says it receives. That is a person's job at review.
+4. A JavaScript regular-expression literal containing `//` or a quote can
+   confuse the comment reader. Text it wrongly keeps can only add hosts, which
+   fail loudly.
 
 RUN IT
 ------
@@ -82,7 +99,7 @@ RUN IT
     python3 tools/audit-checks/check_outside_hosts_named.py --self-test
 
 Exit 0 when clean, 1 on any problem. Needs `php` on the PATH (for the
-tokeniser and to read OutsideServices' two lists) and REFUSES without it.
+tokeniser and to read OutsideServices' lists) and REFUSES without it.
 """
 
 from __future__ import annotations
@@ -96,19 +113,17 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-OUTSIDE = Path("_core") / "OutsideServices.php"
+OUTSIDE = "_core/OutsideServices.php"
 
-# 🧾 The four kinds of host that are NOT about anybody. Each entry: host ->
-#    (kind, reason). A host written with a leading dot stands for itself and
-#    every name ending in it.
-LINK = "a link a person may choose to follow; nothing is fetched until they do"
-NAME_ONLY = "a name inside a file format, never contacted"
-EXAMPLE = "an example or placeholder address, not a real company"
-JOB = ("a company an administrator sets up to do a job, reached from this portal's own server; "
-       "D-158 did not name these and the privacy page says it does not list them (question on #808)")
+LINK = "link"
+NAME_ONLY = "name-only"
+EXAMPLE = "example"
 
+# 🧾 Hosts in code that send nobody's details. host -> (kind, reason). A link
+#    is counted file by file (rule B); every kind is refused where a browser
+#    loads by itself (rule C).
 NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
-    # --- links a person may follow -------------------------------------------------
+    # --- links a person may choose to follow -------------------------------------
     "github.com": (LINK, "The project's own issue links in the API description and the API guide."),
     "ico.org.uk": (LINK, "The UK data protection regulator, named on the privacy page."),
     "what3words.com": (LINK, "A place's 'open in what3words' link, and the sign-up link on its admin page."),
@@ -116,11 +131,8 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
     "dash.cloudflare.com": (LINK, "Where an administrator gets robot-check keys (admin page)."),
     "dashboard.hcaptcha.com": (LINK, "Where an administrator gets robot-check keys (admin page)."),
     "learn.microsoft.com": (LINK, "Set-up guidance on an admin page."),
-    "zoom.us": (LINK, "Set-up guidance for video meetings on an admin page."),
     "www.php.net": (LINK, "A help link on a server-information page."),
-    "libretranslate.com": (LINK, "The default address of a translation server an administrator may point at; "
-                                 "nothing is sent unless they choose that provider (it is then a JOB)."),
-    # --- names inside a file format --------------------------------------------------
+    # --- names inside a file format ----------------------------------------------
     "www.w3.org": (NAME_ONLY, "XML and SVG namespace names."),
     "www.inkscape.org": (NAME_ONLY, "The drawing program's namespace name inside old logo files."),
     "www.sitemaps.org": (NAME_ONLY, "The sitemap file format's namespace name."),
@@ -130,7 +142,7 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
     "schemas.openxmlformats.org": (NAME_ONLY, "A spreadsheet format's namespace name."),
     "json-schema.org": (NAME_ONLY, "The schema language a JSON schema file declares."),
     "sts.windows.net": (NAME_ONLY, "The issuer name a Microsoft sign-in token carries, compared, never fetched."),
-    # --- examples --------------------------------------------------------------------
+    # --- examples ----------------------------------------------------------------
     "www.example.org": (EXAMPLE, "Example addresses in help text and placeholders."),
     "portal.example.org": (EXAMPLE, "Example addresses in help text and the redirect page."),
     "example.org": (EXAMPLE, "Example addresses."),
@@ -143,26 +155,6 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
     "gair.gair.gair": (EXAMPLE, "The what3words example shape, in Welsh."),
     "youtube.com": (EXAMPLE, "A placeholder showing what a pasted YouTube address looks like."),
     "youtu.be": (EXAMPLE, "Recognising a pasted short YouTube address."),
-    # --- jobs an administrator sets up (server to company) ---------------------------
-    "login.microsoftonline.com": (JOB, "Signing in with Microsoft."),
-    "graph.microsoft.com": (JOB, "Sending e-mail through Microsoft 365."),
-    "accounts.google.com": (JOB, "Signing in with Google."),
-    "oauth2.googleapis.com": (JOB, "Signing in with Google and the Gmail mail route."),
-    "www.googleapis.com": (JOB, "Google sign-in details and the Gmail mail route."),
-    "gmail.googleapis.com": (JOB, "Sending e-mail through Google."),
-    "translation.googleapis.com": (JOB, "Translating an organisation's own published words (D-049)."),
-    "api.openai.com": (JOB, "Translation, and AI drafting, which no page reaches today (#808)."),
-    "api.anthropic.com": (JOB, "Translation, and AI drafting, which no page reaches today (#808)."),
-    "api.assemblyai.com": (JOB, "Transcribing recordings (#276)."),
-    "api.twilio.com": (JOB, "Sending text messages."),
-    "rest.messagebird.com": (JOB, "Sending text messages."),
-    "api.stripe.com": (JOB, "Taking payments."),
-    "api-m.paypal.com": (JOB, "Taking payments."),
-    "api-m.sandbox.paypal.com": (JOB, "Taking test payments."),
-    "api.zoom.us": (JOB, "Creating video meetings."),
-    "api.cloudflare.com": (JOB, "Setting up video uploads with Cloudflare Stream."),
-    ".amazonaws.com": (JOB, "Sending text messages through Amazon (its SNS service), at an address glued "
-                           "together around the administrator's chosen region."),
 }
 
 # 📁 Files whose hosts are not the portal's own words. Path under web/ -> reason.
@@ -192,32 +184,309 @@ WHOLE_FILES: dict[str, str] = {
     "public_html/assets/noticeboard/fonts/OFL-instrument-serif.txt": "A font's licence text.",
 }
 
+# 📍 Rule B: host entry -> {file under web/: number of times it is written there}.
+#    Change a number on purpose, after checking the privacy pages still say
+#    what is true. (Measured on 16 November 2026 with this check's own reader.)
+PER_FILE: dict[str, dict[str, int]] = {
+    '.amazonaws.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Sms.php': 1,
+    },
+    '.cloudflarestream.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/VideoEmbed.php': 2,
+    },
+    '.googleusercontent.com': {
+        '_core/OutsideServices.php': 2,
+    },
+    '.tile.openstreetmap.org': {
+        '_apps/admin/settings/organisation/index.php': 1,
+        '_apps/calendar/event.php': 1,
+        '_apps/venues/venue.php': 1,
+        '_core/OutsideServices.php': 2,
+        '_core/partials/location-map-assets.php': 1,
+    },
+    'accounts.google.com': {
+        '_core/Auth.php': 3,
+        '_core/OutsideServices.php': 1,
+    },
+    'api-free.deepl.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Translation.php': 1,
+    },
+    'api-m.paypal.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Payments.php': 1,
+    },
+    'api-m.sandbox.paypal.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Payments.php': 1,
+    },
+    'api.anthropic.com': {
+        '_core/AiAssistant.php': 1,
+        '_core/OutsideServices.php': 1,
+        '_core/Translation.php': 1,
+    },
+    'api.assemblyai.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Transcription.php': 3,
+    },
+    'api.cloudflare.com': {
+        '_core/CloudflareStream.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'api.deepl.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Translation.php': 1,
+    },
+    'api.openai.com': {
+        '_core/AiAssistant.php': 1,
+        '_core/OutsideServices.php': 2,
+        '_core/Transcription.php': 1,
+        '_core/Translation.php': 1,
+    },
+    'api.stripe.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Payments.php': 2,
+    },
+    'api.twilio.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Sms.php': 1,
+    },
+    'api.what3words.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/What3Words.php': 1,
+    },
+    'api.zoom.us': {
+        '_core/OutsideServices.php': 1,
+        '_core/Zoom.php': 1,
+    },
+    'cdn.jsdelivr.net': {
+        '_core/Asset.php': 8,
+        '_core/OutsideServices.php': 1,
+        '_core/partials/location-map-assets.php': 2,
+        '_core/templates/header.php': 2,
+        '_install/csp.php': 1,
+        '_install/index.php': 1,
+        'public_html/api-docs/index.php': 1,
+    },
+    'cdnjs.cloudflare.com': {
+        '_core/Asset.php': 1,
+        '_core/OutsideServices.php': 1,
+        '_core/templates/header.php': 2,
+    },
+    'challenges.cloudflare.com': {
+        '_core/Captcha.php': 2,
+        '_core/OutsideServices.php': 1,
+        '_core/templates/header.php': 2,
+    },
+    'dash.cloudflare.com': {
+        '_apps/admin/captcha/index.php': 1,
+    },
+    'dashboard.hcaptcha.com': {
+        '_apps/admin/captcha/index.php': 1,
+    },
+    'fcm.googleapis.com': {
+        '_core/OutsideServices.php': 1,
+        '_sql/177_web_push_sender.sql': 2,
+        '_sql/full_schema.sql': 2,
+    },
+    'github.com': {
+        '_apps/admin/live/chat.php': 1,
+        '_apps/admin/settings/qr/index.php': 1,
+        '_apps/help/disaster-recovery.php': 3,
+        '_core/api-spec.json': 1,
+        '_core/api-spec.schema.json': 1,
+    },
+    'gmail.googleapis.com': {
+        '_core/MailerGoogle.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'graph.microsoft.com': {
+        '_apps/admin/integrations/index.php': 1,
+        '_core/Mailer.php': 2,
+        '_core/OutsideServices.php': 1,
+    },
+    'hcaptcha.com': {
+        '_core/Captcha.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'ico.org.uk': {
+        '_apps/privacy/index.php': 1,
+    },
+    'js.hcaptcha.com': {
+        '_core/Captcha.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'learn.microsoft.com': {
+        '_apps/admin/integrations/index.php': 1,
+    },
+    'libretranslate.com': {
+        '_apps/admin/translation/save.php': 1,
+        '_core/OutsideServices.php': 1,
+        '_core/Translation.php': 2,
+        '_sql/099_translation.sql': 2,
+        '_sql/full_schema.sql': 2,
+    },
+    'login.microsoftonline.com': {
+        '_apps/admin/integrations/index.php': 1,
+        '_core/Auth.php': 4,
+        '_core/Mailer.php': 1,
+        '_core/OutsideServices.php': 2,
+    },
+    'maps.googleapis.com': {
+        '_core/Geocoder.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'nominatim.openstreetmap.org': {
+        '_core/Geocoder.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'notify.windows.com': {
+        '_core/OutsideServices.php': 1,
+        '_sql/177_web_push_sender.sql': 2,
+        '_sql/full_schema.sql': 2,
+    },
+    'oauth2.googleapis.com': {
+        '_core/Auth.php': 1,
+        '_core/MailerGoogle.php': 2,
+        '_core/OutsideServices.php': 2,
+    },
+    'player.twitch.tv': {
+        '_core/Livestream.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'player.vimeo.com': {
+        '_core/Livestream.php': 1,
+        '_core/OutsideServices.php': 1,
+        '_core/VideoEmbed.php': 2,
+    },
+    'push.apple.com': {
+        '_core/OutsideServices.php': 1,
+        '_sql/177_web_push_sender.sql': 2,
+        '_sql/full_schema.sql': 2,
+    },
+    'push.services.mozilla.com': {
+        '_core/OutsideServices.php': 1,
+        '_sql/177_web_push_sender.sql': 2,
+        '_sql/full_schema.sql': 2,
+    },
+    'rest.messagebird.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Sms.php': 1,
+    },
+    'translation.googleapis.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/Translation.php': 1,
+    },
+    'upload.cloudflarestream.com': {
+        '_apps/calendar/event-hub.php': 1,
+        '_core/OutsideServices.php': 1,
+        'public_html/assets/js/event-hub-upload.js': 1,
+    },
+    'upload.videodelivery.net': {
+        '_apps/calendar/event-hub.php': 1,
+        '_core/OutsideServices.php': 1,
+        'public_html/assets/js/event-hub-upload.js': 1,
+    },
+    'what3words.com': {
+        '_apps/admin/integrations/what3words/index.php': 1,
+        '_core/GeoLocation.php': 1,
+    },
+    'www.canva.com': {
+        '_apps/noticeboard/foyer.php': 1,
+        '_apps/noticeboard/index.php': 1,
+        '_core/OutsideServices.php': 1,
+        '_core/PublicDoor.php': 1,
+        '_core/api-spec.json': 1,
+        '_core/data/public-door-posters.schema.json': 1,
+    },
+    'www.facebook.com': {
+        '_core/Livestream.php': 2,
+        '_core/OutsideServices.php': 1,
+    },
+    'www.google.com': {
+        '_apps/admin/captcha/index.php': 1,
+        '_core/Captcha.php': 2,
+        '_core/GeoLocation.php': 2,
+        '_core/OutsideServices.php': 1,
+    },
+    'www.googleapis.com': {
+        '_apps/admin/integrations/index.php': 1,
+        '_core/Auth.php': 1,
+        '_core/MailerGoogle.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
+    'www.gravatar.com': {
+        '_core/OutsideServices.php': 2,
+    },
+    'www.openstreetmap.org': {
+        '_core/GeoLocation.php': 1,
+    },
+    'www.php.net': {
+        '_core/PhpRuntime.php': 2,
+    },
+    'www.youtube-nocookie.com': {
+        '_core/OutsideServices.php': 1,
+        '_core/VideoEmbed.php': 2,
+    },
+    'www.youtube.com': {
+        '_core/Livestream.php': 2,
+        '_core/OutsideServices.php': 1,
+    },
+    'zoom.us': {
+        '_core/OutsideServices.php': 1,
+        '_core/Zoom.php': 2,
+    },
+}
+
 # Endings that are never text.
 BINARY = {".png", ".gif", ".jpg", ".jpeg", ".webp", ".ico", ".icns", ".woff", ".woff2", ".ttf", ".otf",
           ".zip", ".gz", ".pdf", ".mp3", ".mp4"}
 
-HOST_AFTER_SLASHES = re.compile(
-    r"(?:https?:)?//(?:\{[a-z]+\}\.|\*\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(?![a-z0-9-])", re.I)
-GLUED_SUFFIX = re.compile(r"""(?<=['"])\.([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(?=[/'"])""", re.I)
-# A glued piece such as '.html.php' or '-run.lock' is a FILE name, not a host: its last part is a
-# file ending. Measured: without this the first run reported `html.php` and `backup-run.lock`.
+# A glued piece whose last part is one of these is a FILE name, not a host.
+# Measured: without it the first run reported `html.php` and `backup-run.lock`.
 FILE_ENDINGS = {"php", "lock", "json", "txt", "js", "css", "sql", "html", "htm", "log", "pdf", "png", "csv",
                 "ics", "xml", "zip", "tmp", "part", "bak", "md", "svg", "jpg", "gif", "webp", "enc", "gz", "tar"}
+
+# A whole quoted string is read as a host only when it ends in one of these.
+REAL_TOP_LEVEL = {"com", "net", "org", "io", "dev", "app", "cloud", "co", "us", "uk", "eu", "tv", "me", "info",
+                  "biz", "ai", "gov", "edu", "int", "de", "fr", "nl", "be", "ch", "at", "ie", "au", "nz", "ca",
+                  "za", "in", "jp", "invalid", "example"}
+
+LABEL = r"[^\W_](?:[\w-]*[^\W_])?"
+TOP = r"[^\W\d_]{2,}"
+HOST_AFTER_SLASHES = re.compile(
+    r"(?:https?(?::|%3a))?(?://|\\/\\/|%2f%2f)(?:\{[^}\s]*\}\.|\$\{[^}\s]*\}\.|\*\.)?"
+    r"((?:" + LABEL + r"\.)+" + TOP + r")(?![\w-])")
+GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
+WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
+QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"")
+
+# Rule C: the text just before an address, on the same line, that means a
+# browser fetches it by itself.
+LOAD_CONTEXT = re.compile(
+    r"(?:\bsrc\s*[=:]\s*\\?[\"'`]?|\bposter\s*=\s*\\?[\"'`]?|<link\b[^>]*\bhref\s*=\s*\\?[\"'`]?"
+    r"|\burl\(\s*[\"']?|@import\s+(?:url\()?\s*[\"']?|\b[a-z-]+-src\b[^;\"]*|\$csp\w*extra\s*\.?=\s*[^;]*"
+    r"|\bfetch\(\s*[\"'`]?|\bloadscript\(\s*[\"'`]?|\bimportscripts\(\s*[\"'`]?)[^\s\"'`<>]*$")
 
 PHP_PROBE = r"""
 $out = [];
 foreach (array_slice($argv, 1) as $f) {
     $text = '';
+    $strings = [];
     foreach (token_get_all((string) file_get_contents($f)) as $t) {
         if (is_array($t) === true) {
             if ($t[0] === T_COMMENT || $t[0] === T_DOC_COMMENT) { $text .= ' '; continue; }
             if ($t[0] === T_INLINE_HTML) { $text .= preg_replace('~<!--.*?-->~s', ' ', $t[1]); continue; }
+            if ($t[0] === T_CONSTANT_ENCAPSED_STRING) { $strings[] = substr($t[1], 1, -1); }
+            if ($t[0] === T_ENCAPSED_AND_WHITESPACE) { $strings[] = $t[1]; }
             $text .= $t[1];
         } else {
             $text .= $t;
         }
     }
-    $out[$f] = $text;
+    $out[$f] = ['code' => $text, 'strings' => $strings];
 }
 echo json_encode($out, JSON_INVALID_UTF8_SUBSTITUTE);
 """
@@ -225,10 +494,12 @@ echo json_encode($out, JSON_INVALID_UTF8_SUBSTITUTE);
 PHP_LISTS = r"""
 require $argv[1];
 $s = [];
-foreach (\Portal\Core\OutsideServices::SERVICES as $k => $v) { $s[$k] = $v['imgSources']; }
+foreach (\Portal\Core\OutsideServices::SERVICES as $k => $v) { $s[$k] = ['hosts' => $v['imgSources'], 'from' => 'browser']; }
 $n = [];
-foreach (\Portal\Core\OutsideServices::NAMED as $k => $v) { $n[$k] = $v['hosts']; }
-echo json_encode(['services' => $s, 'named' => $n]);
+foreach (\Portal\Core\OutsideServices::NAMED as $k => $v) { $n[$k] = ['hosts' => $v['hosts'], 'from' => $v['from']]; }
+$o = [];
+foreach (\Portal\Core\OutsideServices::USED_BY_ORGANISATION as $k => $v) { $o[$k] = ['hosts' => $v['hosts'], 'from' => $v['from']]; }
+echo json_encode(['SERVICES' => $s, 'NAMED' => $n, 'USED_BY_ORGANISATION' => $o]);
 """
 
 
@@ -256,7 +527,7 @@ def strip_c_like(text: str, hash_comments: bool = False, dash_comments: bool = F
                 out.append(text[i + 1])
                 i += 2
                 continue
-            if c == quote:
+            if c == quote or (c == "\n" and quote != "`"):
                 quote = ""
             i += 1
             continue
@@ -270,8 +541,8 @@ def strip_c_like(text: str, hash_comments: bool = False, dash_comments: bool = F
             i = n if end < 0 else end + 2
             out.append(" ")
             continue
-        line_comment = (not dash_comments and text.startswith("//", i) and (i == 0 or text[i - 1] != ":")) \
-            or (hash_comments and c == "#") or (dash_comments and text.startswith("--", i))
+        line_comment = (not dash_comments and text.startswith("//", i) and (i == 0 or text[i - 1] not in ":\\"))
+        line_comment = line_comment or (hash_comments and c == "#") or (dash_comments and text.startswith("--", i))
         if line_comment:
             end = text.find("\n", i)
             i = n if end < 0 else end
@@ -281,9 +552,9 @@ def strip_c_like(text: str, hash_comments: bool = False, dash_comments: bool = F
     return "".join(out)
 
 
-def code_texts(web: Path) -> dict[str, str]:
-    """Every text file under web/, as code with comments removed, keyed by path under web/."""
-    texts: dict[str, str] = {}
+def code_texts(web: Path) -> dict[str, tuple[str, list[str]]]:
+    """Every text file under web/: (code with comments removed, its quoted strings)."""
+    texts: dict[str, tuple[str, list[str]]] = {}
     php_files: list[Path] = []
     for path in sorted(web.rglob("*")):
         if path.is_file() is False or path.suffix.lower() in BINARY:
@@ -291,102 +562,159 @@ def code_texts(web: Path) -> dict[str, str]:
         rel = path.relative_to(web).as_posix()
         if rel in WHOLE_FILES:
             continue
-        if path.suffix.lower() == ".php":
+        suffix = path.suffix.lower()
+        if suffix == ".php":
             php_files.append(path)
             continue
         raw = path.read_text(encoding="utf-8", errors="ignore")
-        suffix = path.suffix.lower()
         if suffix in (".js", ".mjs"):
-            texts[rel] = strip_c_like(raw)
+            code = strip_c_like(raw)
         elif suffix == ".css":
-            texts[rel] = re.sub(r"/\*.*?\*/", " ", raw, flags=re.S)
+            code = re.sub(r"/\*.*?\*/", " ", raw, flags=re.S)
         elif suffix == ".sql":
-            texts[rel] = strip_c_like(raw, hash_comments=True, dash_comments=True)
+            code = strip_c_like(raw, hash_comments=True, dash_comments=True)
         elif path.name == ".htaccess":
-            texts[rel] = "\n".join(line for line in raw.splitlines() if line.lstrip().startswith("#") is False)
+            code = "\n".join(line for line in raw.splitlines() if line.lstrip().startswith("#") is False)
         else:
-            texts[rel] = raw
+            code = raw
+        strings = [a or b for a, b in QUOTED.findall(code)]
+        texts[rel] = (code, strings)
     exe = php()
     for start in range(0, len(php_files), 200):
         batch = php_files[start:start + 200]
         done = subprocess.run([exe, "-r", PHP_PROBE] + [str(p) for p in batch], capture_output=True, text=True)
         if done.returncode != 0:
             raise Refused("PHP's tokeniser could not read the PHP files: %s" % done.stderr.strip()[:400])
-        for name, text in json.loads(done.stdout).items():
-            texts[Path(name).relative_to(web).as_posix()] = text
+        for name, got in json.loads(done.stdout).items():
+            texts[Path(name).relative_to(web).as_posix()] = (got["code"], got["strings"])
     return texts
 
 
-def outside_lists(web: Path) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+def outside_lists(web: Path) -> dict[str, dict[str, dict]]:
     done = subprocess.run([php(), "-r", PHP_LISTS, str(web / OUTSIDE)], capture_output=True, text=True)
     if done.returncode != 0:
         raise Refused("OutsideServices' lists could not be read: %s" % done.stderr.strip()[:400])
     data = json.loads(done.stdout)
-    services = {k: [re.sub(r"^https?://(\*\.)?", lambda m: "." if m.group(1) else "", s).rstrip("/")
-                    for s in v] for k, v in data["services"].items()}
-    return services, data["named"]
+    for key, entry in data["SERVICES"].items():
+        entry["hosts"] = [re.sub(r"^https?://(\*\.)?", lambda m: "." if m.group(1) else "", h).rstrip("/")
+                          for h in entry["hosts"]]
+    return data
 
 
 def covers(entry: str, host: str) -> bool:
-    entry = entry.lower()
     return host == entry or (entry.startswith(".") and (host.endswith(entry) or host == entry[1:]))
 
 
-def check(web: Path) -> list[str]:
+def scan(web: Path) -> list[tuple[str, str, bool, int]]:
+    """Every host occurrence in code: (file, host, in a browser-load place, line number)."""
+    found: list[tuple[str, str, bool, int]] = []
+    for rel, (code, strings) in code_texts(web).items():
+        low = code.lower()
+        for match in HOST_AFTER_SLASHES.finditer(low):
+            line_start = low.rfind("\n", 0, match.start()) + 1
+            before = low[max(line_start, match.start() - 200):match.start()]
+            found.append((rel, match.group(1), LOAD_CONTEXT.search(before) is not None,
+                          low.count("\n", 0, match.start()) + 1))
+        for match in GLUED_SUFFIX.finditer(low):
+            if match.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
+                found.append((rel, match.group(1), False, low.count("\n", 0, match.start()) + 1))
+        for string in strings:
+            low_s = string.lower()
+            if WHOLE_HOSTS.match(low_s) is None:
+                continue
+            for host in re.split(r"\s*,\s*", low_s.strip()):
+                if host.rsplit(".", 1)[-1] in REAL_TOP_LEVEL:
+                    found.append((rel, host, False, 0))
+    return found
+
+
+def check(web: Path, per_file: dict[str, dict[str, int]] | None = None) -> list[str]:
+    per_file = PER_FILE if per_file is None else per_file
     problems: list[str] = []
-    services, named = outside_lists(web)
-    texts = code_texts(web)
+    lists = outside_lists(web)
 
+    # Who owns each entry, and whether a browser may load it.
     owners: dict[str, list[str]] = {}
-    for key, hosts in services.items():
-        for h in hosts:
-            owners.setdefault(h.lower(), []).append("OutsideServices::SERVICES['%s']" % key)
-    for key, hosts in named.items():
-        for h in hosts:
-            owners.setdefault(h.lower(), []).append("OutsideServices::NAMED['%s']" % key)
-    for h in NOT_ABOUT_ANYBODY:
-        owners.setdefault(h.lower(), []).append("NOT_ABOUT_ANYBODY in this check")
-    for entry, places in sorted(owners.items()):
-        if len(places) > 1:
-            problems.append("✗ %s is listed in %d places (%s). One host, one answer: keep it in one."
-                            % (entry, len(places), ", ".join(places)))
+    browser_ok: dict[str, bool] = {}
+    disclosed_lists: dict[str, str] = {}
+    for list_name in ("SERVICES", "NAMED", "USED_BY_ORGANISATION"):
+        for key, entry in lists[list_name].items():
+            for h in entry["hosts"]:
+                h = h.lower()
+                owners.setdefault(h, []).append("OutsideServices::%s['%s']" % (list_name, key))
+                browser_ok[h] = browser_ok.get(h, False) or entry["from"] in ("browser", "both")
+                disclosed_lists.setdefault(h, list_name)
+            if list_name != "SERVICES" and entry["from"] not in ("browser", "server", "both"):
+                problems.append("✗ OutsideServices::%s['%s'] says it is contacted from %r; it must be 'browser', "
+                                "'server' or 'both', or the privacy pages print nothing for it."
+                                % (list_name, key, entry["from"]))
+            if list_name != "SERVICES" and key != "errorMonitoring" and entry["hosts"] == []:
+                problems.append("✗ OutsideServices::%s['%s'] lists no hosts, so nothing ties it to code."
+                                % (list_name, key))
+    for h, (kind, _reason) in NOT_ABOUT_ANYBODY.items():
+        if h in owners:
+            problems.append("✗ %s is named on the privacy pages (%s) AND listed here as sending nobody's details. "
+                            "One host, one kind of answer." % (h, ", ".join(owners[h])))
+        owners.setdefault(h, []).append("NOT_ABOUT_ANYBODY (%s)" % kind)
+        browser_ok.setdefault(h, False)
 
-    found: dict[str, set[str]] = {}
-    for rel, text in texts.items():
-        for pattern in (HOST_AFTER_SLASHES, GLUED_SUFFIX):
-            for match in pattern.finditer(text):
-                if pattern is GLUED_SUFFIX and match.group(1).rsplit(".", 1)[-1].lower() in FILE_ENDINGS:
-                    continue
-                found.setdefault(match.group(1).lower(), set()).add(rel)
-
-    used: set[str] = set()
-    for host, files in sorted(found.items()):
+    def owner_of(host: str) -> str | None:
         matches = [e for e in owners if covers(e, host)]
-        if matches == []:
+        return max(matches, key=len) if matches else None
+
+    counted: dict[str, dict[str, int]] = {}
+    seen: dict[str, set[str]] = {}
+    for rel, host, loads, line in scan(web):
+        entry = owner_of(host)
+        if entry is None:
             problems.append(
-                "✗ %s names the outside host %s, which is in none of the lists.\n"
-                "   A request to another company can tell it something about whoever is looking. Decide what "
-                "it is: if it sends anything about a person, add it to OutsideServices::NAMED (which puts it on "
-                "both privacy pages, D-158) or under the on/off rules (SERVICES, D-058); if it sends nobody's "
-                "details, add it to NOT_ABOUT_ANYBODY here with its reason." % (", ".join(sorted(files)), host))
-        used.update(matches)
+                "✗ %s (line %d) names the outside host %s, which is in none of the lists.\n"
+                "   A request to another company can tell it something about whoever is looking. If it sends "
+                "anything about a person, add it to OutsideServices::NAMED or ::USED_BY_ORGANISATION (which puts "
+                "it on both privacy pages, D-158, D-195) or under the on/off rules (SERVICES, D-058); if it sends "
+                "nobody's details, add it to NOT_ABOUT_ANYBODY here with its reason." % (rel, line, host))
+            continue
+        seen.setdefault(entry, set()).add(rel)
+        if loads and browser_ok.get(entry, False) is False:
+            problems.append(
+                "✗ %s (line %d) puts %s where a browser fetches it by itself, but it is listed as %s.\n"
+                "   A browser that loads it tells that company the reader's internet address. Either this is a "
+                "company the privacy pages must say the BROWSER contacts (a NAMED or USED_BY_ORGANISATION entry "
+                "with from 'browser' or 'both'), or it must not be loaded here."
+                % (rel, line, host, ", ".join(owners[entry])))
+        kind = NOT_ABOUT_ANYBODY.get(entry, ("disclosed", ""))[0]
+        if kind in ("disclosed", LINK):
+            counted.setdefault(entry, {})
+            counted[entry][rel] = counted[entry].get(rel, 0) + 1
+
+    for entry in sorted(set(counted) | set(per_file)):
+        have = counted.get(entry, {})
+        want = per_file.get(entry, {})
+        for rel in sorted(set(have) | set(want)):
+            if have.get(rel, 0) != want.get(rel, 0):
+                problems.append(
+                    "✗ %s names %s %d time(s); PER_FILE says %d.\n"
+                    "   MORE (or a file not listed) is a new use of that company: check the privacy pages still "
+                    "say what is true, then change the number here on purpose. FEWER means a use has gone."
+                    % (rel, entry, have.get(rel, 0), want.get(rel, 0)))
     for entry in sorted(owners):
-        if entry not in used:
-            problems.append("✗ %s is listed (%s) but no code under web/ names it any more. Remove it on "
-                            "purpose; a list that says more than is true reads as coverage."
-                            % (entry, ", ".join(owners[entry])))
+        files = seen.get(entry, set())
+        if disclosed_lists.get(entry) in ("NAMED", "USED_BY_ORGANISATION"):
+            files = files - {OUTSIDE}
+        if files == set():
+            problems.append("✗ %s is listed (%s) but no code under web/ names it%s. Remove it on purpose; a list "
+                            "that says more than is true reads as coverage."
+                            % (entry, ", ".join(owners[entry]),
+                               " outside OutsideServices.php" if entry in disclosed_lists else ""))
     for rel in sorted(WHOLE_FILES):
         if (web / rel).is_file() is False:
             problems.append("✗ WHOLE_FILES names %s, which does not exist. Remove the entry on purpose." % rel)
-    for key, hosts in named.items():
-        if key != "errorMonitoring" and hosts == []:
-            problems.append("✗ OutsideServices::NAMED['%s'] lists no hosts, so nothing ties it to code." % key)
     return problems
 
 
 # 🧪 ---------------------------------------------------------------------------
 # Self-test: plant each fault in a copy of the real tree, and require the check
-# to report it, and to stay green on the untouched copy.
+# to report it (or, for the must-stay-green cases, nothing at all).
 # ---------------------------------------------------------------------------
 
 def self_test() -> int:
@@ -403,11 +731,8 @@ def self_test() -> int:
             plant(web)
             problems = check(web)
             joined = "\n".join(problems)
-            if expect is None:
-                ok = problems == []
-            else:
-                ok = expect in joined and len(problems) >= 1
-            print(("  ✓ " if ok else "  ✗ ") + name + ("" if ok else "\n      got: " + (joined[:600] or "nothing")))
+            ok = problems == [] if expect is None else (expect in joined)
+            print(("  ✓ " if ok else "  ✗ ") + name + ("" if ok else "\n      got: " + (joined[:700] or "nothing")))
             if not ok:
                 failures += 1
 
@@ -422,57 +747,99 @@ def self_test() -> int:
             p = web / rel
             body = p.read_text(encoding="utf-8")
             assert body.count(old) >= 1, "plant anchor missing: " + old
-            p.write_text(body.replace(old, new), encoding="utf-8")
+            p.write_text(body.replace(old, new, 1), encoding="utf-8")
         return plant
 
+    def write(rel: str, text: str):
+        def plant(web: Path) -> None:
+            (web / rel).parent.mkdir(parents=True, exist_ok=True)
+            (web / rel).write_text(text, encoding="utf-8")
+        return plant
+
+    new = "names the outside host"
     print("check_outside_hosts_named self-test")
     run("S01 the untouched tree is green", lambda web: None, None)
     run("S02 a new host in PHP code fails",
         append("_apps/privacy/index.php", "<?php $x = 'https://tracker.newcompany.io/pixel.gif'; ?>\n"),
-        "names the outside host tracker.newcompany.io")
+        new + " tracker.newcompany.io")
     run("S03 the same host in a PHP comment does NOT fail",
         append("_apps/privacy/index.php", "<?php // https://tracker.newcompany.io/pixel.gif\n ?>\n"), None)
     run("S04 a new host in JavaScript code fails",
         append("public_html/assets/js/portal.js", "\nvar beacon = 'https://beacon.newcompany.io/x';\n"),
-        "beacon.newcompany.io")
+        new + " beacon.newcompany.io")
     run("S05 a host only in a JavaScript comment does NOT fail",
         append("public_html/assets/js/portal.js", "\n// https://beacon.newcompany.io/x\n"), None)
     run("S06 a protocol-relative host in page text fails",
         append("_apps/privacy/policy.php", '<script src="//cdn.newcompany.io/a.js"></script>\n'),
-        "cdn.newcompany.io")
+        new + " cdn.newcompany.io")
     run("S07 a glued-on suffix fails",
-        append("_core/VideoEmbed.php", "\n// end\n<?php $u = 'https://x-' . $c . '.newstream.io/'; ?>\n"),
-        "newstream.io")
-    run("S08 a new host in a settings seed fails",
+        append("_core/VideoEmbed.php", "\n<?php $u = 'https://x-' . $c . '.newstream.io/'; ?>\n"),
+        new + " newstream.io")
+    run("S08 a new address in a settings seed fails",
         append("_sql/full_schema.sql", "\nINSERT INTO `tblSettings` VALUES ('x', 'https://api.newcompany.io');\n"),
-        "api.newcompany.io")
+        new + " api.newcompany.io")
     run("S09 the same host in an SQL comment does NOT fail",
         append("_sql/full_schema.sql", "\n-- https://api.newcompany.io\n"), None)
-    run("S10 a NAMED host whose code has gone fails",
+    run("S10 a NAMED host whose code has gone fails (its own list does not count)",
         replace("_core/What3Words.php", "https://api.what3words.com/v3/", "https://' . 'x/v3/"),
         "api.what3words.com is listed")
-    run("S11 a NAMED service that loses a host from its list fails (the code still names it)",
+    run("S11 a NAMED service that loses a host fails where the code still names it",
         replace("_core/OutsideServices.php", "'hosts'     => ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],",
                 "'hosts'     => ['cdnjs.cloudflare.com'],"),
-        "names the outside host cdn.jsdelivr.net")
-    run("S12 a host listed in two places fails",
+        new + " cdn.jsdelivr.net")
+    run("S12 a host both named and 'about nobody' fails",
         replace("_core/OutsideServices.php", "'hosts'     => ['api.what3words.com'],",
                 "'hosts'     => ['api.what3words.com', 'github.com'],"),
-        "github.com is listed in 2 places")
+        "github.com is named on the privacy pages")
     run("S13 a WHOLE_FILES entry that no longer exists fails",
         lambda web: (web / "public_html/assets/noticeboard/fonts/OFL-ibm-plex-mono.txt").unlink(),
         "OFL-ibm-plex-mono.txt, which does not exist")
     run("S14 a switched (SERVICES) host that loses its entry fails where the code still names it",
         replace("_core/OutsideServices.php", "'imgSources' => ['https://www.gravatar.com'],",
                 "'imgSources' => ['https://www.gravatar.invalid'],"),
-        "names the outside host www.gravatar.com")
+        new + " www.gravatar.com")
+    run("S15 a new kind of file is read, not skipped",
+        write("public_html/x.webmanifest", '{"u":"https://t.newcompany.io"}'), new + " t.newcompany.io")
     run("S16 a host inside a WHOLE_FILES file does NOT fail",
         append("_core/data/giving-retention-countries.json", '\n"https://source.newcompany.io/a"\n'), None)
-    run("S17 a glued file name such as '.html.php' is NOT read as a host",
+    run("S17 a glued file name such as '.backup.json' is NOT read as a host",
         append("_apps/privacy/index.php", "<?php $f = $base . '.backup.json'; ?>\n"), None)
-    run("S15 a new kind of file is read, not skipped",
-        lambda web: (web / "public_html" / "x.webmanifest").write_text('{"u":"https://t.newcompany.io"}'),
-        "t.newcompany.io")
+    run("S18 capitals do not hide a host",
+        append("_apps/privacy/index.php", "<?php $x = 'HTTPS://Tracker.NewCompany.IO/x'; ?>\n"),
+        new + " tracker.newcompany.io")
+    run("S19 an address inside another address (percent-encoded) fails",
+        append("_apps/privacy/index.php", "<?php $x = 'https://a.b/?u=https%3A%2F%2Fpixel.newcompany.io%2F'; ?>\n"),
+        new + " pixel.newcompany.io")
+    run("S20 an escaped https:\\/\\/ in JavaScript fails",
+        append("public_html/assets/js/portal.js", "\nvar u = 'https:\\/\\/esc.newcompany.io\\/x';\n"),
+        new + " esc.newcompany.io")
+    run("S21 a JavaScript template address fails",
+        append("public_html/assets/js/portal.js", "\nvar u = `https://${zone}.tpl.newcompany.io/x`;\n"),
+        new + " tpl.newcompany.io")
+    run("S22 a bare host list in a settings seed fails",
+        append("_sql/full_schema.sql", "\nINSERT INTO `tblSettings` VALUES ('push.allow', 'a.newcompany.io,b.newcompany.io');\n"),
+        new + " a.newcompany.io")
+    run("S23 a bare host in a PHP string fails",
+        append("_core/Translation.php", "\n<?php $h = 'api.newtranslator.com'; ?>\n"),
+        new + " api.newtranslator.com")
+    run("S24 a LINK host loaded as a picture fails",
+        append("_apps/privacy/index.php", '<img src="https://www.openstreetmap.org/x.png">\n'),
+        "puts www.openstreetmap.org where a browser fetches it by itself")
+    run("S25 a SERVER-only company loaded as a script fails",
+        append("_apps/privacy/index.php", '<script src="https://api.what3words.com/x.js"></script>\n'),
+        "puts api.what3words.com where a browser fetches it by itself")
+    run("S26 a known company's script on a NEW page fails (file by file)",
+        write("_apps/privacy/zz-new.php", '<script src="https://www.google.com/x.js"></script>\n'),
+        "_apps/privacy/zz-new.php names www.google.com 1 time(s); PER_FILE says 0")
+    run("S27 one more use in a listed file fails",
+        append("_core/Captcha.php", "\n<?php $x = 'https://www.google.com/other'; ?>\n"),
+        "_core/Captcha.php names www.google.com")
+    run("S28 an accented host is reported whole",
+        append("_apps/privacy/index.php", "<?php $x = 'https://pixel.exämple-neu.com/x'; ?>\n"),
+        new + " pixel.exämple-neu.com")
+    run("S29 a page-rule source naming a LINK host fails",
+        append("_apps/privacy/index.php", "<?php $cspFrameExtra = 'https://github.com'; ?>\n"),
+        "puts github.com where a browser fetches it by itself")
     print("%d of %d self-test cases passed" % (checks - failures, checks))
     return 0 if failures == 0 else 1
 
@@ -495,16 +862,16 @@ def main() -> int:
         return 1
     if problems:
         print("\n".join(problems), file=sys.stderr)
-        print("\n%d problem(s). The rule is #808 (D-158): every outside company the code names is on the "
+        print("\n%d problem(s). The rule is #808 (D-158, D-195): every outside company the code names is on the "
               "privacy pages, under the on/off rules, or listed here as sending nobody's details." % len(problems),
               file=sys.stderr)
         return 1
-    services, named = outside_lists(web)
-    print("✓ Every outside host in code is accounted for: %d switched (SERVICES), %d named on the privacy "
-          "pages (NAMED, D-158), %d sending nobody's details, %d whole files explained. (It cannot judge "
-          "whether the privacy-page words are true; a person does that.)"
-          % (sum(len(v) for v in services.values()), sum(len(v) for v in named.values()),
-             len(NOT_ABOUT_ANYBODY), len(WHOLE_FILES)))
+    print("✓ Every outside host found in code is accounted for, in the three shapes this check reads (after a //, "
+          "plain, escaped or percent-encoded; a glued-on .suffix; a whole quoted host name ending in a known "
+          "top-level name); %d PER_FILE lines hold; no link, example or server-only company sits where a browser "
+          "loads by itself, in the load shapes it knows. It CANNOT see a host built from other pieces, an address "
+          "typed by an administrator, a load through a variable, or whether the privacy-page words are true."
+          % sum(len(v) for v in PER_FILE.values()))
     return 0
 
 

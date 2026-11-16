@@ -145,7 +145,9 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
         <i class="fa-solid fa-cookie-bite me-1"></i>Cookies on this portal
     </h2>
     <p id="portal-cookie-banner-desc" class="small text-secondary mb-2">
-        We use functionally-necessary cookies (sign-in, CSRF, theme + language preferences). No third-party tracking.
+        <?php // 🍪 #808 round 1: "No third-party tracking." was more than the portal can promise: the
+              //    Privacy page lists outside companies a browser contacts directly. ?>
+        We use functionally-necessary cookies (sign-in, CSRF, theme + language preferences), and no tracking cookies of our own.
         Read the full <a href="<?php echo htmlspecialchars(Site::url('privacy'), ENT_QUOTES, 'UTF-8'); ?>">Privacy &amp; Data Protection</a> page.
     </p>
     <div class="d-flex gap-2 flex-wrap">

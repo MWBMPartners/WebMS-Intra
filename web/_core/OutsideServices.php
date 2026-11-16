@@ -92,8 +92,10 @@
  *   - It DECIDES for the three services listed in SERVICES and nothing else.
  *     The other outside companies a page can reach -- what3words, the address
  *     look-up, videos and designs shown inside a page, the shared code
- *     libraries, the robot check on forms and error monitoring -- are NAMED in
- *     `NAMED` below and listed on both privacy pages, but nothing switches
+ *     libraries, the robot check on forms, maps of buildings and error
+ *     monitoring -- are NAMED in `NAMED` below, and the companies an
+ *     organisation may use to do a job for it in `USED_BY_ORGANISATION`
+ *     (D-195). Both are listed on both privacy pages, but nothing switches
  *     them off yet. That is the owner's decision D-158 (12 November 2026):
  *     name them truthfully before the first install, put them under the three
  *     levels after it (#808). `NAMED` decides NOTHING; never read it as a
@@ -227,42 +229,60 @@ final class OutsideServices
      * decides NOTHING: no page asks it whether something may be sent, and no
      * page may, because the answer today is always "yes, if it is set up".
      * Putting each under the installation, organisation and member levels is
-     * the work D-158 moves to after the first install.
+     * the work D-158 moves to after the first install (#1085).
      *
      *   name       what the service is called on the privacy pages
      *   companies  who receives the request
+     *   from       WHO contacts the company: `browser` (the reader's own browser,
+     *              so the company learns their internet address and browser),
+     *              `server` (this portal's own server only, so it does not,
+     *              unless `sends` says the address is passed on), or `both`.
+     *              The notice prints it, and the hard gate refuses a `server`
+     *              company's host in a place a browser loads by itself.
      *   when       when it happens, and whether somebody has to set it up first
      *   sends      what the company receives, in plain words
      *   why        why the portal uses it
      *   hosts      the internet names of the company's machines as they are
      *              WRITTEN in the portal's code. This is the list the hard gate
      *              `tools/audit-checks/check_outside_hosts_named.py` reads: a
-     *              host found in code must be here, in SERVICES above, or in
-     *              that check's own list of hosts that are not about anybody;
-     *              and a host listed here that is no longer in any code fails
-     *              too. A host written with a leading dot stands for that name
-     *              and every name ending in it. Error monitoring has none: the
+     *              host found in code must be here, in SERVICES above, in
+     *              USED_BY_ORGANISATION below, or in that check's own list of
+     *              hosts that send nobody's details; and a host listed here
+     *              that no code outside this file names any more fails too.
+     *              A host written with a leading dot stands for that name and
+     *              every name ending in it. Error monitoring has none: the
      *              administrator types the monitor's address in.
      *
-     * The words were checked against the code on 15 November 2026: Asset.php
-     * (the libraries, on every page), header.php's page rule, Captcha.php,
-     * VideoEmbed.php, Livestream.php, the noticeboard page, What3Words.php and
-     * its callers, Geocoder.php (whose Google path falls back to OpenStreetMap,
-     * #808's own comment) and ErrorMonitor.php. When one of those changes what
-     * it sends, change the words here in the same commit.
+     * NEVER STATE WHAT A COMPANY DOES WITH WHAT IT RECEIVES (cookies, tracking,
+     * recognising somebody) unless this code does it or the company's own
+     * documentation says so, and then say it is the company's. The first
+     * version asserted reCAPTCHA's cookies and Facebook's recognising people
+     * from general knowledge, on a page whose own Cookies section said the
+     * opposite (#808, round 1).
      *
-     * @var array<string, array{name:string, companies:string, when:string, sends:string, why:string, hosts:list<string>}>
+     * The words were checked against the code on 16 November 2026: Asset.php
+     * (the libraries, on every page), header.php's page rule, Captcha.php
+     * (postVerify() sends `remoteip`), VideoEmbed.php, Livestream.php, the
+     * noticeboard page, What3Words.php's request() and its callers,
+     * Geocoder.php's google() and nominatim() (Google falls back to
+     * OpenStreetMap), ErrorMonitor.php's buildPayload() (no internet address),
+     * and the three building-map pages (calendar/event.php, venues/venue.php,
+     * admin/settings/organisation/index.php). When one of those changes what it
+     * sends, change the words here in the same commit.
+     *
+     * @var array<string, array{name:string, companies:string, from:string, when:string, sends:string, why:string, hosts:list<string>}>
      */
     public const NAMED = [
         'what3words' => [
             'name'      => 'what3words addresses',
             'companies' => 'what3words',
+            'from'      => 'server',
             'when'      => 'Only if this portal has been set up with a what3words account. It happens when somebody types '
                          . 'a what3words address (three words that name one 3-metre square anywhere in the world) into a '
                          . 'form, while they type it and when they save it, for example on your own directory profile.',
-            'sends'     => 'The three words typed, or the first letters of them while you are still typing. For a home '
-                         . 'that names the home itself. It is sent by this portal\'s own server, not by your browser, '
-                         . 'so what3words does not learn your internet address from it.',
+            'sends'     => 'The three words typed. While you are still typing it receives the letters typed so far, and '
+                         . 'the map position already on the form (if there is one) so that its suggestions are near it. '
+                         . 'For a home, the three words name the home itself.',
             'why'       => 'To turn the three words into a position on a map, and to suggest the right words as you type.',
             'hosts'     => ['api.what3words.com'],
         ],
@@ -270,34 +290,51 @@ final class OutsideServices
             'name'      => 'Looking up an address on a map',
             'companies' => 'Google (Google Maps), or OpenStreetMap (its look-up service, called Nominatim). When the '
                          . 'portal is set up to use Google and Google cannot answer, it asks OpenStreetMap as well.',
+            'from'      => 'server',
             'when'      => 'When somebody presses the button to find an address on the map, and when a form that is '
                          . 'set up to do it by itself is saved -- for example a small group\'s meeting place or a venue.',
-            'sends'     => 'The address that was typed, and its country. It is sent by this portal\'s own server, not '
-                         . 'by your browser, so the company does not learn your internet address from it. The answer '
-                         . 'is remembered for a while; for a home that is personal data, described above.',
+            'sends'     => 'The address that was typed, and its country. The answer is remembered for a while; for a '
+                         . 'home that is personal data, described above.',
             'why'       => 'To find where the address is, so that a map can be drawn or directions given.',
             'hosts'     => ['maps.googleapis.com', 'nominatim.openstreetmap.org'],
+        ],
+        'publicPlaceMaps' => [
+            'name'      => 'Maps of buildings and public places',
+            'companies' => 'OpenStreetMap',
+            'from'      => 'browser',
+            'when'      => 'When you open a page that shows a map of an event\'s venue, of a venue, or (for this '
+                         . 'organisation\'s administrators) of the organisation\'s own address. An event\'s page can be '
+                         . 'open to visitors who have not signed in. These maps are of buildings, not homes, so the maps '
+                         . 'choice on Account, Outside services (which covers homes and meeting places) does not switch '
+                         . 'them off.',
+            'sends'     => 'Which map squares to draw, which tells OpenStreetMap the area around the place, together '
+                         . 'with your internet address and browser.',
+            'why'       => 'To show where the place is.',
+            'hosts'     => ['.tile.openstreetmap.org'],
         ],
         'embeddedContent' => [
             'name'      => 'Videos, designs and pictures shown inside a page',
             'companies' => 'Whichever company holds the video or design: YouTube (Google), Vimeo, Facebook (Meta), '
                          . 'Twitch, Cloudflare (its video service, Cloudflare Stream) or Canva. On the noticeboard, '
                          . 'also any website a poster\'s picture or video is taken from.',
+            'from'      => 'browser',
             'when'      => 'When you open a page that shows one -- a livestream, an event\'s own page with a video on it, '
-                         . 'or the noticeboard. Uploading a video to an event sends the file itself to Cloudflare.',
-            'sends'     => 'Your internet address (the number that identifies your connection, which can show roughly '
-                         . 'where you are), your browser (the program you are reading this in, and its version), and '
-                         . 'which video or design you are looking at. On an event\'s own page a YouTube video uses '
-                         . 'Google\'s "privacy-enhanced" address and a Vimeo video asks Vimeo not to track you; a '
-                         . 'livestream uses the company\'s ordinary player, and Facebook\'s player can '
-                         . 'recognise you if you are signed in to Facebook in the same browser.',
+                         . 'or the noticeboard.',
+            'sends'     => 'Your internet address, your browser, and which video or design you are looking at. The '
+                         . 'video or design is drawn by that company\'s own player, from its own website, inside this '
+                         . 'page, so your browser deals with that company directly, under your browser\'s own settings. '
+                         . 'On an event\'s own page a YouTube video uses the address Google calls its "privacy-enhanced '
+                         . 'mode", and a Vimeo video asks Vimeo not to track you; a livestream uses the company\'s '
+                         . 'ordinary player. What each company does with what it receives is described in its own '
+                         . 'privacy notice.',
             'why'       => 'The video or design is kept by that company, so your browser has to fetch it from there.',
             'hosts'     => ['www.youtube-nocookie.com', 'www.youtube.com', 'player.vimeo.com', 'www.facebook.com',
-                            'player.twitch.tv', '.cloudflarestream.com', 'upload.videodelivery.net', 'www.canva.com'],
+                            'player.twitch.tv', '.cloudflarestream.com', 'www.canva.com'],
         ],
         'sharedLibraries' => [
             'name'      => 'Shared code libraries',
-            'companies' => 'jsDelivr and cdnjs (run by Cloudflare), two services that hand out widely used code.',
+            'companies' => 'jsDelivr, and cdnjs (which is run by Cloudflare): two services that hand out widely used code.',
+            'from'      => 'browser',
             'when'      => 'On every page: your browser fetches the page\'s layout and icons from them, and on some '
                          . 'pages its maps and charts. The API guide does too, unless this portal is set to use its '
                          . 'own copy.',
@@ -309,12 +346,13 @@ final class OutsideServices
             'name'      => 'The check that you are not a robot',
             'companies' => 'Whichever one this portal has been set up with: Cloudflare (Turnstile), Google (reCAPTCHA) '
                          . 'or hCaptcha.',
+            'from'      => 'both',
             'when'      => 'Only if it is switched on. It is shown on some forms, such as signing in, resetting a '
                          . 'password, and the forms anybody can fill in without an account.',
-            'sends'     => 'Your browser fetches the check from the company, which receives your internet address, your '
-                         . 'browser and how you use the page. When you send the form, this portal\'s server asks the '
-                         . 'company whether you passed. Google\'s reCAPTCHA also sets Google\'s own cookies (small files '
-                         . 'your browser keeps for a website).',
+            'sends'     => 'Your browser fetches the check from the company and runs it inside the page, so the company '
+                         . 'receives your internet address and browser; what the check looks at in the page is described '
+                         . 'in the company\'s own privacy notice. When you send the form, this portal\'s server sends the '
+                         . 'company the check\'s answer and your internet address, to ask whether you passed.',
             'why'       => 'To stop automatic programs from flooding the forms or guessing passwords.',
             'hosts'     => ['challenges.cloudflare.com', 'www.google.com', 'js.hcaptcha.com', 'hcaptcha.com'],
         ],
@@ -322,11 +360,135 @@ final class OutsideServices
             'name'      => 'Error reports',
             'companies' => 'Only if this portal\'s administrator has switched it on: a monitoring service of their '
                          . 'choosing, such as Sentry or GlitchTip.',
+            'from'      => 'server',
             'when'      => 'When something goes wrong while a page is being made for you.',
-            'sends'     => 'Your account number if you are signed in, the address of the page, your browser, and the '
-                         . 'fault\'s own message. It is sent by this portal\'s own server.',
+            'sends'     => 'Your account number if you are signed in, the address of the page, the description your '
+                         . 'browser gives of itself, and the fault\'s own message, which can quote what was being '
+                         . 'handled. Not your internet address.',
             'why'       => 'So that the people running this portal hear about faults and can fix them.',
             'hosts'     => [],
+        ],
+    ];
+
+    /**
+     * The companies an organisation may use to do a job for it (#808, the
+     * owner's decision D-195): printed on the two privacy pages as a second
+     * short list, headed "only if this organisation uses it", by the same
+     * template, and checked by the same hard gate. Same fields as NAMED.
+     *
+     * `from` matters most here, because "a job done from the server" was the
+     * first version's wording for ALL of them and it was untrue of three:
+     * signing in with Microsoft or Google sends the member's own BROWSER to
+     * that company's sign-in page (Auth.php's two authorise addresses), a
+     * payment sends the payer's browser to Stripe's checkout or PayPal's
+     * approval page (Payments.php returns the company's own address), and
+     * connecting a Zoom account sends the administrator's browser to Zoom.
+     *
+     * Checked against the code on 16 November 2026: Auth.php (Microsoft and
+     * Google sign-in), Mailer.php and MailerGoogle.php, Sms.php (Twilio,
+     * MessageBird, Amazon SNS), Payments.php (Stripe, PayPal), Zoom.php and
+     * calendar/zoom-create.php, CloudflareStream.php and calendar/event-hub.php,
+     * Transcription.php (AssemblyAI, OpenAI), Translation.php (Anthropic,
+     * OpenAI, Google, DeepL, LibreTranslate) and WebPush.php with the push
+     * allow-list seeded in full_schema.sql.
+     *
+     * @var array<string, array{name:string, companies:string, from:string, when:string, sends:string, why:string, hosts:list<string>}>
+     */
+    public const USED_BY_ORGANISATION = [
+        'signIn' => [
+            'name'      => 'Signing in with a Microsoft or Google account',
+            'companies' => 'Microsoft, or Google',
+            'from'      => 'both',
+            'when'      => 'When you choose to sign in with that account.',
+            'sends'     => 'Your browser is sent to the company\'s own sign-in page, so it receives your internet address, '
+                         . 'your browser and what you type there. Afterwards this portal\'s server collects from the '
+                         . 'company your name, your e-mail address, the account\'s own identifier and, where the company '
+                         . 'has one, the address of your photo on its servers.',
+            'why'       => 'So that you can sign in with an account you already have.',
+            'hosts'     => ['login.microsoftonline.com', 'accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com'],
+        ],
+        'email' => [
+            'name'      => 'Sending e-mail',
+            'companies' => 'Microsoft 365 or Google, if this organisation sends its e-mail through one of them; otherwise '
+                         . 'the mail server it has set up.',
+            'from'      => 'server',
+            'when'      => 'Whenever the portal sends an e-mail.',
+            'sends'     => 'Each message whole: who it is to, the subject and what it says.',
+            'why'       => 'To deliver the message.',
+            'hosts'     => ['graph.microsoft.com', 'login.microsoftonline.com', 'gmail.googleapis.com', 'oauth2.googleapis.com'],
+        ],
+        'textMessages' => [
+            'name'      => 'Sending text messages',
+            'companies' => 'Twilio, MessageBird, or Amazon (its notification service, Amazon SNS)',
+            'from'      => 'server',
+            'when'      => 'When the portal sends a text message.',
+            'sends'     => 'The telephone number it is sent to and the words of the message.',
+            'why'       => 'To deliver the message.',
+            'hosts'     => ['api.twilio.com', 'rest.messagebird.com', '.amazonaws.com'],
+        ],
+        'payments' => [
+            'name'      => 'Taking payments',
+            'companies' => 'Stripe, or PayPal',
+            'from'      => 'both',
+            'when'      => 'When you pay for something through the portal.',
+            'sends'     => 'This portal\'s server tells the company the amount, the currency, a short description of '
+                         . 'what is being paid for and this portal\'s own reference number. Your browser is then sent to '
+                         . 'the company\'s own payment page, which receives your internet address and browser and what '
+                         . 'you type there, such as your card details; the portal never sees those.',
+            'why'       => 'To take the payment safely.',
+            'hosts'     => ['api.stripe.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com'],
+        ],
+        'videoMeetings' => [
+            'name'      => 'Video meetings',
+            'companies' => 'Zoom',
+            'from'      => 'both',
+            'when'      => 'When an administrator connects the organisation\'s Zoom account (their browser is sent to '
+                         . 'Zoom to agree), and when a meeting is created for an event.',
+            'sends'     => 'The event\'s name, when it starts, how long it lasts and its time zone. Joining the meeting is '
+                         . 'between you and Zoom.',
+            'why'       => 'To set up the meeting.',
+            'hosts'     => ['api.zoom.us', 'zoom.us'],
+        ],
+        'videoUploads' => [
+            'name'      => 'Uploading a video',
+            'companies' => 'Cloudflare (its video service, Cloudflare Stream)',
+            'from'      => 'both',
+            'when'      => 'When somebody uploads a video to an event.',
+            'sends'     => 'This portal\'s server asks Cloudflare for an upload address, sending no personal details; the '
+                         . 'uploader\'s browser then sends the video file itself, with their internet address and browser.',
+            'why'       => 'To keep and play the video.',
+            'hosts'     => ['api.cloudflare.com', 'upload.videodelivery.net', 'upload.cloudflarestream.com'],
+        ],
+        'transcription' => [
+            'name'      => 'Writing out what a recording says',
+            'companies' => 'AssemblyAI, or OpenAI',
+            'from'      => 'server',
+            'when'      => 'When somebody asks for a recording to be written out.',
+            'sends'     => 'The recording\'s sound, which includes the voices of whoever speaks on it.',
+            'why'       => 'To turn the speech into text.',
+            'hosts'     => ['api.assemblyai.com', 'api.openai.com'],
+        ],
+        'translation' => [
+            'name'      => 'Translating',
+            'companies' => 'Anthropic, OpenAI, Google, DeepL, or a LibreTranslate server',
+            'from'      => 'server',
+            'when'      => 'When somebody presses Translate on an announcement, a project or a project\'s update.',
+            'sends'     => 'The organisation\'s own published words being translated, and the language wanted. Not '
+                         . 'who asked.',
+            'why'       => 'To translate them.',
+            'hosts'     => ['api.anthropic.com', 'api.openai.com', 'translation.googleapis.com', 'api.deepl.com',
+                            'api-free.deepl.com', 'libretranslate.com'],
+        ],
+        'pushNotifications' => [
+            'name'      => 'Notifications on your device',
+            'companies' => 'The company that runs your browser\'s notification service: Google, Mozilla, Apple or '
+                         . 'Microsoft.',
+            'from'      => 'server',
+            'when'      => 'Only if you have switched on notifications in your browser, whenever one is sent to you.',
+            'sends'     => 'The address your browser gave for its notifications, and the notification itself, scrambled '
+                         . 'so that only your browser can read it.',
+            'why'       => 'To deliver the notification to your device.',
+            'hosts'     => ['fcm.googleapis.com', 'push.services.mozilla.com', 'push.apple.com', 'notify.windows.com'],
         ],
     ];
 

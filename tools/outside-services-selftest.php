@@ -56,8 +56,11 @@
  *      host's agreement), a non-member sees nothing, a planned meeting takes no
  *      roll and no Attendance push and is left out of the report, and removing
  *      a home deletes its address at once
- *   V  #808, D-158: both privacy pages print every outside company (the three
- *      switchable ones and the six NAMED ones) whole, in a hand-pinned order,
+ *   V  #808, D-158, D-195: both privacy pages print every outside company (the
+ *      switchable ones, the NAMED ones and the second list, "only if this
+ *      organisation uses it"), every field of every entry inside that entry's
+ *      own item, who contacts each company as pinned by hand from the code,
+ *      and the lists in a hand-pinned order,
  *      word for word the same on both pages and for every reader — a visitor,
  *      members of two organisations with different own choices, and an
  *      organisation that has said "no" — because the list describes and
@@ -2615,9 +2618,50 @@ check('V00 premise: two organisations, and members whose own choices differ', or
     && choiceOf(M, OutsideServices::GRAVATAR) === 'off' && choiceOf(AONLY, OutsideServices::GRAVATAR) === 'on' && stored(K_GRAV, ORG_B) === 'no');
 /** The notice's own block, or '' when the page has none. */
 $noticeOf = static function (string $html): string {
-    return preg_match('#<div data-outside-services-notice="1">.*?</ul>\s*<p data-outside-services="not-listed">.*?</p>\s*</div>#s', $html, $m) === 1 ? $m[0] : '';
+    return preg_match('#<div data-outside-services-notice="1">.*?<ul data-outside-services="organisation">.*?</ul>\s*</div>#s', $html, $m) === 1 ? $m[0] : '';
 };
+/** One entry's own list item, so a field can only be found in the entry it belongs to. */
+$itemOf = static function (string $notice, string $key): string {
+    return preg_match('#<li data-outside-service="' . preg_quote($key, '#') . '">(.*?)</li>#s', $notice, $m) === 1 ? $m[1] : '';
+};
+/** The keys of one group's list, in order. */
+$groupKeys = static function (string $notice, string $group): array {
+    if (preg_match('#<ul data-outside-services="' . preg_quote($group, '#') . '">(.*?)</ul>#s', $notice, $m) !== 1) {
+        return ['(no such list)'];
+    }
+
+    return preg_match_all('#<li data-outside-service="([A-Za-z0-9]+)">#', $m[1], $mm) > 0 ? $mm[1] : [];
+};
+$e = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+// ✋ Hand-pinned, not derived from the constants: deriving the expectation from
+//    the list being tested would pass on a list that had quietly lost an entry.
+$wantGroups = [
+    'switchable'   => ['gravatar', 'providerPhoto', 'memberMap'],
+    'named'        => ['what3words', 'addressLookup', 'publicPlaceMaps', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'],
+    'organisation' => ['signIn', 'email', 'textMessages', 'payments', 'videoMeetings', 'videoUploads', 'transcription', 'translation', 'pushNotifications'],
+];
+// ✋ Who contacts each company, pinned by hand from the code (round 1 of the check found
+//    the first version said "from this portal's own server" of sign-in and payments).
+$wantFrom = [
+    'what3words' => 'server', 'addressLookup' => 'server', 'publicPlaceMaps' => 'browser', 'embeddedContent' => 'browser',
+    'sharedLibraries' => 'browser', 'robotCheck' => 'both', 'errorMonitoring' => 'server',
+    'signIn' => 'both', 'email' => 'server', 'textMessages' => 'server', 'payments' => 'both', 'videoMeetings' => 'both',
+    'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'server',
+];
+$fromWords = ['browser' => 'Your browser.', 'server' => 'This portal\'s own server, not your browser.', 'both' => 'Your browser, and this portal\'s own server.'];
+// ✋ Sentences that must be in ONE named entry, each a truth a reader relies on.
+$wantSaid = [
+    'what3words'      => 'For a home, the three words name the home itself.',
+    'robotCheck'      => 'sends the company the check\'s answer and your internet address',
+    'errorMonitoring' => 'Not your internet address.',
+    'publicPlaceMaps' => 'does not switch them off',
+    'signIn'          => 'Your browser is sent to the company\'s own sign-in page',
+    'payments'        => 'Your browser is then sent to the company\'s own payment page',
+    'textMessages'    => 'The telephone number it is sent to and the words of the message.',
+    'sharedLibraries' => 'jsDelivr, and cdnjs (which is run by Cloudflare)',
+];
 $notices = [];
+$wholePage = '';
 foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' => 'the privacy policy'] as $path => $what) {
     foreach (['a visitor' => '', 'M (A and B)' => $jarVM, 'a member of A alone' => $jarVA, "B's administrator" => $jarVB] as $who => $jar) {
         $page = req($jar, 'GET', $path);
@@ -2625,27 +2669,45 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
         $notices["{$path}|{$who}"] = $notice;
         check("V01 {$what}, for {$who}: answers a WHOLE page with the outside-companies section in it",
             $page['status'] === 200 && str_contains($page['body'], '</html>') === true && $notice !== '', 'status ' . $page['status']);
-    }
-    $body = $notices["{$path}|a visitor"];
-    $named = preg_match_all('#<li data-outside-service="([A-Za-z0-9]+)">#', $body, $mm) > 0 ? $mm[1] : [];
-    // ✋ Hand-pinned, not derived from the constant: deriving the expected list
-    //    from NAMED would pass on a constant that had quietly lost an entry.
-    check("V02 {$what}: lists the three switchable services and the six D-158 names, in that order", $named === [
-        'gravatar', 'providerPhoto', 'memberMap',
-        'what3words', 'addressLookup', 'embeddedContent', 'sharedLibraries', 'robotCheck', 'errorMonitoring'], implode(',', $named));
-    foreach (OutsideServices::NAMED as $key => $entry) {
-        foreach (['name', 'companies', 'when', 'sends', 'why'] as $field) {
-            check("V03 {$what}: '{$key}' prints its {$field} whole",
-                str_contains($body, htmlspecialchars($entry[$field], ENT_QUOTES, 'UTF-8')) === true);
+        if ($who === 'a visitor') {
+            $wholePage = $page['body'];
         }
     }
-    foreach (['jsDelivr', 'cdnjs', 'Facebook\'s player can recognise you', 'Turnstile', 'reCAPTCHA', 'hCaptcha', 'Nominatim',
-              'what3words', 'Sentry', 'Canva', 'Cloudflare Stream'] as $words) {
-        check("V04 {$what}: names \"{$words}\" (hand-pinned)", str_contains($body, htmlspecialchars($words, ENT_QUOTES, 'UTF-8')) === true);
+    $body = $notices["{$path}|a visitor"];
+    foreach ($wantGroups as $group => $keys) {
+        check("V02 {$what}: the '{$group}' list holds exactly its hand-pinned entries, in order", $groupKeys($body, $group) === $keys,
+            implode(',', $groupKeys($body, $group)));
     }
-    check("V05 {$what}: says plainly which companies it does NOT list", str_contains($body, 'Not listed here: companies this organisation may use to do a job') === true);
+    foreach (OutsideServices::SERVICES as $key => $entry) {
+        foreach (['name', 'company', 'sends'] as $field) {
+            check("V03 {$what}: switchable '{$key}' prints its {$field} whole, in its own entry",
+                str_contains($itemOf($body, $key), $e($entry[$field])) === true);
+        }
+    }
+    foreach (['NAMED' => OutsideServices::NAMED, 'USED_BY_ORGANISATION' => OutsideServices::USED_BY_ORGANISATION] as $listName => $list) {
+        foreach ($list as $key => $entry) {
+            foreach (['name', 'companies', 'when', 'sends', 'why'] as $field) {
+                check("V03 {$what}: {$listName} '{$key}' prints its {$field} whole, in its own entry",
+                    str_contains($itemOf($body, $key), $e($entry[$field])) === true);
+            }
+            check("V03b {$what}: '{$key}' says who contacts it as pinned by hand (" . ($wantFrom[$key] ?? '?') . ')',
+                isset($wantFrom[$key]) === true && $entry['from'] === $wantFrom[$key]
+                && str_contains($itemOf($body, $key), '<em>Who contacts it:</em> ' . $e($fromWords[$wantFrom[$key]])) === true);
+        }
+    }
+    foreach ($wantSaid as $key => $words) {
+        check("V04 {$what}: '{$key}' says \"{$words}\" (hand-pinned)", str_contains($itemOf($body, $key), $e($words)) === true);
+    }
+    check("V05 {$what}: the opening does not claim every company learns your internet address",
+        str_contains((string) preg_replace('/\s+/', ' ', $body), 'the company learns the server\'s address, not yours, unless the entry says that yours is passed on') === true);
+    check("V05b {$what}: the second list is headed as the owner decided (D-195)", str_contains($body, '<strong>Only if this organisation uses it.</strong>') === true);
     check("V06 {$what}: links to the member's own Outside services page", str_contains($body, 'href="/account/outside-services"') === true);
+    check("V06b {$what}: the withdrawn untruths are not back (third-party cookies, recognising people, Google's cookies), on a page that HAS the section",
+        $body !== '' && str_contains($wholePage, 'No third-party tracking') === false && str_contains($wholePage, 'can recognise you') === false
+        && str_contains($wholePage, 'sets Google') === false);
 }
+check('V06c the Privacy page\'s Cookies section points at the companies the browser contacts itself',
+    str_contains(req('', 'GET', '/privacy')['body'], 'whether they keep' . "\n" . '    anything in your browser is up to them') === true);
 check('V07 the two pages print the SAME section, word for word', $notices['/privacy|a visitor'] === $notices['/privacy/policy|a visitor']);
 $sameForAll = true;
 foreach ($notices as $label => $notice) {
