@@ -400,6 +400,10 @@ switch ($uri) {
         echo str_replace(["time='2026-11-13'", "currency='USD' rate='1.1052'"], ["time='2026-11-14'", "currency='USD' rate='1.2'"], $real); break;
     case '/nousd':  // a file that has lost the dollar line, same day
         echo preg_replace("#<Cube currency='USD' rate='[^']*'/>#", '', $real); break;
+    case '/tomorrow':  // dated tomorrow, UTC: the furthest ahead a file may be
+        echo str_replace("time='2026-11-13'", "time='" . gmdate('Y-m-d', time() + 86400) . "'", $real); break;
+    case '/dayafter':  // dated two days ahead: one day too far
+        echo str_replace("time='2026-11-13'", "time='" . gmdate('Y-m-d', time() + 172800) . "'", $real); break;
     case '/future':  // a file dated in 2099
         echo str_replace("time='2026-11-13'", "time='2099-01-01'", $real); break;
     case '/500': http_response_code(500); echo 'boom'; break;
@@ -506,16 +510,37 @@ $got = ExchangeRates::refreshFrom($db, $url('/ok'), false);
 $usd = rows($db, "SELECT `perEuro`, `rateDate` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
 check('E6c a rate held with a date in 2099 is REPLACED by the next real file (USD back to 1.1052, 2026-11-13): a wrong date cannot lock rates out for good',
     $got === '' && $plain((string) $usd['perEuro']) === '1.1052' && $usd['rateDate'] === '2026-11-13', json_encode($usd));
-$tomorrowFile = ExchangeRates::refreshFrom($db, $url('/ok'), false);
-check('E6d a held date a day or less ahead is NOT treated as wrong: an older file still does not replace it',
-    (function () use ($db, $url, $plain): bool {
-        run($db, "UPDATE `tblExchangeRate` SET `rateDate` = ?, `perEuro` = 7.5 WHERE `rateCurrency` = 'USD'", 's', [gmdate('Y-m-d')]);
-        ExchangeRates::refreshFrom($db, $url('/ok'), false);
-        $u = rows($db, "SELECT `perEuro` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
-        run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13', `perEuro` = 1.1052 WHERE `rateCurrency` = 'USD'");
+/** Hold USD at one day with a marker rate, fetch the older real file, answer the rate that is held after. */
+$heldAfterOlderFile = static function (string $day) use ($db, $url, $plain): string {
+    run($db, "UPDATE `tblExchangeRate` SET `rateDate` = ?, `perEuro` = 7.5 WHERE `rateCurrency` = 'USD'", 's', [$day]);
+    ExchangeRates::refreshFrom($db, $url('/ok'), false);
+    $u = rows($db, "SELECT `perEuro` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0];
+    run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13', `perEuro` = 1.1052 WHERE `rateCurrency` = 'USD'");
 
-        return $plain((string) $u['perEuro']) === '7.5';
-    })() === true && $tomorrowFile === '');
+    return $plain((string) $u['perEuro']);
+};
+$todayUtc    = gmdate('Y-m-d');
+$tomorrowUtc = gmdate('Y-m-d', time() + 86400);
+$dayAfterUtc = gmdate('Y-m-d', time() + 172800);
+check('E6d a held date of TODAY is not treated as wrong: an older file does not replace it (USD stays 7.5)', $heldAfterOlderFile($todayUtc) === '7.5');
+check('E6d2 a held date of exactly TOMORROW (UTC) is still not wrong: the older file does not replace it (the allowance is one day, and this is the edge)',
+    $heldAfterOlderFile($tomorrowUtc) === '7.5');
+check('E6d3 a held date TWO days ahead is wrong: the older file replaces it (USD back to 1.1052)', $heldAfterOlderFile($dayAfterUtc) === '1.1052');
+$gotTomorrow = ExchangeRates::refreshFrom($db, $url('/tomorrow'), false);
+check('E6d4 a FILE dated exactly tomorrow (UTC) is accepted (a time zone ahead of UTC is already there), and stored with that date',
+    $gotTomorrow === '' && rows($db, "SELECT `rateDate` FROM `tblExchangeRate` WHERE `rateCurrency` = 'USD'")[0]['rateDate'] === $tomorrowUtc, $gotTomorrow);
+$gotDayAfter = ExchangeRates::refreshFrom($db, $url('/dayafter'), false);
+check('E6d5 a file dated two days ahead is REFUSED (future-date): one day too far', $gotDayAfter === 'future-date', $gotDayAfter);
+// Back to the real file's day for what follows.
+run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13'");
+run($db, "UPDATE `tblExchangeRate` SET `perEuro` = 1.1052 WHERE `rateCurrency` = 'USD'");
+// status() with ONE hand-made future-dated row among good ones.
+run($db, 'UPDATE `tblExchangeRate` SET `rateDate` = ?', 's', [$todayUtc]);
+run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2099-01-01' WHERE `rateCurrency` = 'JPY'");
+$st = ExchangeRates::status($db);
+check('E6d6 one rate dated 2099 does not make every rate read "too old": the newest SANE day is shown, fresh, and the one future row is counted (not used)',
+    is_array($st) === true && $st['rateDate'] === $todayUtc && $st['fresh'] === true && $st['futureRows'] === 1 && $st['count'] === 29, json_encode($st));
+run($db, "UPDATE `tblExchangeRate` SET `rateDate` = '2026-11-13'");
 
 // The net under the tests: the REAL address is never fetched from a selftest_ database.
 $before = $stubCount();

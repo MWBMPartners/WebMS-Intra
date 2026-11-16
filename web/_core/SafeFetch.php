@@ -374,6 +374,19 @@ final class SafeFetch
      */
     public static ?array $testResolverOverride = null;
 
+    /**
+     * Has a test stood something in for this host name? The ONE question
+     * anything outside this file may ask about that test-only seam (#993): it
+     * lets ExchangeRates know a test has pointed the bank's name at its own
+     * stand-in, without mentioning the property, which
+     * tools/safefetch-selftest.php (check G) allows in this file alone. It
+     * only reads; nothing outside the tests can make it answer true.
+     */
+    public static function hasTestStandIn(string $host): bool
+    {
+        return self::$testResolverOverride !== null && isset(self::$testResolverOverride[$host]) === true;
+    }
+
     // =========================================================================
     // 🧹 normaliseUrl() — one standard spelling, or nothing
     // =========================================================================

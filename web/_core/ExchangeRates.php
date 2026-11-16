@@ -212,14 +212,16 @@ final class ExchangeRates
     public static function refresh(\mysqli $db): string
     {
         // A NET UNDER THE TESTS (#993 check, round 1). A self-test database is
-        // named selftest_..., and no real installation's is. A test that runs
+        // named selftest_..., and no real installation's is (the installer does not
+        // forbid the name, and cannot: its own self-test installs into selftest_inst_...
+        // databases; a customer who chose it would see this word on the rates page). A test that runs
         // the job or this method against such a database, with the bank's real
         // address and no stub standing in for it (SafeFetch's test override for
         // that host), must never reach the real bank: it would make CI depend on
         // an outside company and store real rates in a test. The switch is the
         // first guard (each test turns it off); this is the one that holds when
         // a test forgot. It records the same fixed problem word a refusal does.
-        if (self::isSelfTestDatabase($db) === true && isset(SafeFetch::$testResolverOverride[(string) parse_url(self::SOURCE_URL, PHP_URL_HOST)]) === false) {
+        if (self::isSelfTestDatabase($db) === true && SafeFetch::hasTestStandIn((string) parse_url(self::SOURCE_URL, PHP_URL_HOST)) === false) {
             self::touchFetchRow($db, 'attempt');
             self::touchFetchRow($db, 'problem', 'test-blocked');
             if (getenv('EXCHANGE_RATES_BLOCK_LOG') !== false) {
@@ -743,7 +745,7 @@ final class ExchangeRates
     /**
      * What the page shows about the fetch. Null parts mean "never" or "none".
      *
-     * @return array{lastSuccessUtc:?string, lastAttemptUtc:?string, problem:string, rateDate:?string, fresh:bool, count:int}|null
+     * @return array{lastSuccessUtc:?string, lastAttemptUtc:?string, problem:string, rateDate:?string, fresh:bool, count:int, futureRows:int}|null
      */
     public static function status(\mysqli $db): ?array
     {
@@ -752,7 +754,12 @@ final class ExchangeRates
             return null;
         }
         try {
-            $row = $db->query('SELECT MAX(`rateDate`) AS `d`, COUNT(*) AS `n` FROM `tblExchangeRate`')->fetch_assoc();
+            // The newest SANE day: a row dated more than a day ahead (a wrong date that got in
+            // by hand) is not used by rate() and must not make every other rate read "too old".
+            $row = $db->query(
+                'SELECT MAX(CASE WHEN `rateDate` <= UTC_DATE() + INTERVAL 1 DAY THEN `rateDate` END) AS `d`, COUNT(*) AS `n`, '
+                . 'COALESCE(SUM(`rateDate` > UTC_DATE() + INTERVAL 1 DAY), 0) AS `f` FROM `tblExchangeRate`'
+            )->fetch_assoc();
         } catch (\Throwable $ignored) {
             return null;
         }
@@ -765,6 +772,7 @@ final class ExchangeRates
             'rateDate'       => $date,
             'fresh'          => $date !== null && self::isFresh($date),
             'count'          => (int) $row['n'],
+            'futureRows'     => (int) $row['f'],
         ];
     }
 
