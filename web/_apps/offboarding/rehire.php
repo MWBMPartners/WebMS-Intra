@@ -127,8 +127,17 @@ if ($ageDays > $undoWindowDays) {
 
 $userId = (int) $o['userID'];
 
+$mergedAway = false;
 try {
     $db->begin_transaction();
+    // 🔒 #1064 round 8: AccountGuard above refuses a merged-away account, but
+    //    a rehire that passed it just before a merge committed would wait on
+    //    the merge's lock and then switch the closed account back on. Asked
+    //    again here, under the account row's lock, before anything changes.
+    if (\Portal\Core\AccountMerge::mergedAwayUnderLock($db, $userId) === true) {
+        $mergedAway = true;
+        throw new \RuntimeException('merged away');
+    }
     // Reactivate user + site membership. NOT credentials: the password,
     // passkeys and Microsoft or Google links offboarding removed stay
     // removed, and the message after the commit says what the account has.
@@ -310,11 +319,16 @@ try {
     $_SESSION['flash_type'] = 'success';
 } catch (\Throwable $e) {
     $db->rollback();
-    // #982 round 2: the exception's own words went to the page. They are
-    // recorded for whoever investigates, and the page says what happened.
-    \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'REHIRE_FAIL', 'A rehire could not be completed', $e->getMessage());
-    $_SESSION['flash_msg']  = 'The rehire could not be completed, and nothing was changed. The reason has been recorded on Admin, Errors.';
-    $_SESSION['flash_type'] = 'danger';
+    if ($mergedAway === true) {
+        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_REHIRE);
+        $_SESSION['flash_type'] = 'danger';
+    } else {
+        // #982 round 2: the exception's own words went to the page. They are
+        // recorded for whoever investigates, and the page says what happened.
+        \Portal\Core\Logger::errorPlatform('Offboarding', 'Error', 'REHIRE_FAIL', 'A rehire could not be completed', $e->getMessage());
+        $_SESSION['flash_msg']  = 'The rehire could not be completed, and nothing was changed. The reason has been recorded on Admin, Errors.';
+        $_SESSION['flash_type'] = 'danger';
+    }
 }
 
 header('Location: ' . Site::url('offboarding'));

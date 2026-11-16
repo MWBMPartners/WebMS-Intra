@@ -62,6 +62,14 @@ use mysqli;
 
 final class AccountMerge
 {
+    /**
+     * The name a closed (merged-away) account carries. Written by the merge
+     * when it closes the duplicate, and again by an erasure of the account it
+     * was merged into (`GdprEraser::eraseMergeRecords()`), which empties
+     * anything written onto the closed row since.
+     */
+    public const CLOSED_NAME = 'Merged account';
+
     // =========================================================================
     // 🏷️ What completing a merge does to the duplicate's rows in one column
     // =========================================================================
@@ -1655,7 +1663,7 @@ final class AccountMerge
     {
         self::run(
             $db,
-            "UPDATE `tblUsers` SET `isActive` = 0, `fullName` = 'Merged account', "
+            "UPDATE `tblUsers` SET `isActive` = 0, `fullName` = '" . self::CLOSED_NAME . "', "
             . "`emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid'), `phoneNumber` = NULL, `avatarPath` = NULL, "
             . '`notifyPrefs` = NULL, `totpSecret` = NULL, `totpEnabled` = 0, `calendarToken` = NULL, `displayBio` = NULL, '
             . '`displayPhoto` = NULL, `displayPhone` = NULL, `displayAddress` = NULL, `latitude` = NULL, `longitude` = NULL, '
@@ -1676,8 +1684,10 @@ final class AccountMerge
      * administrator replaces it — the notice went to the hostile address and a
      * dead one, never the person's own), and a second change by somebody else
      * could not be told from the first. The cost, stated: a notice can reach an
-     * address the person gave up long ago. It names two account numbers and
-     * links to the page; it holds nothing else about them.
+     * address the person gave up long ago, including one another account holds
+     * now. It names two account numbers and links to the page; it holds nothing
+     * else about them. (An erasure, by contrast, never touches mail sent to an
+     * address another account holds now: `heldByOthers()`.)
      *
      * @return list<string>
      */
@@ -1687,13 +1697,10 @@ final class AccountMerge
         foreach (self::all($db, 'SELECT `emailAddress`, `earlierEmails` FROM `tblUsers` WHERE `userID` IN (?, ?)', $keptId, $dupId) as $row) {
             $candidates = [(string) $row['emailAddress']];
             if ($withEarlier === true) {
-                // Round 7: never an earlier address SOMEBODY ELSE holds now;
-                // the notice would tell a stranger about these two accounts.
-                $earlier    = self::addressList($row['earlierEmails'] ?? null);
-                $candidates = array_merge($candidates, array_values(array_diff(
-                    $earlier,
-                    self::heldByOthers($db, $earlier, [$keptId, $dupId])
-                )));
+                // EVERY earlier address, including one another account holds
+                // now (D-200). Round 7 left those out; that was a decision
+                // taken without the owner and round 8 put it back.
+                $candidates = array_merge($candidates, self::addressList($row['earlierEmails'] ?? null));
             }
             foreach ($candidates as $address) {
                 if (filter_var($address, FILTER_VALIDATE_EMAIL) !== false && in_array($address, $out, true) === false) {
@@ -1811,10 +1818,10 @@ final class AccountMerge
     /**
      * 📧 Which of these addresses another account holds NOW (round 7). An
      *    address an account gave up can be taken by somebody else, and mail to
-     *    it from then on is theirs: an erasure must not search it, and a merge
-     *    notice must not go there. Compared without capitals, as the address
-     *    column's own collation does. `$personIds` are the person's own account
-     *    numbers (and, for a notice, both accounts of the merge). Answers the
+     *    it from then on is theirs: an erasure must not search it. (A merge's
+     *    start notice still goes there, by D-200: see `addressesOf()`.)
+     *    Compared without capitals, as the address column's own collation
+     *    does. `$personIds` are the person's own account numbers. Answers the
      *    addresses as given.
      *
      * @param list<string> $addresses
@@ -1848,11 +1855,21 @@ final class AccountMerge
      *    in one transaction). Call it INSIDE that transaction, before the
      *    UPDATE. It locks the account row first, so a merge in progress, which
      *    holds that lock until it commits, is waited for; then it reads the
-     *    merge record with a LOCKING read, which sees what the merge committed
-     *    (a plain read could answer from a snapshot taken before it). True
-     *    means: roll back and refuse. Asking AccountGuard before the
-     *    transaction is not enough: a save begun before the merge committed
-     *    would wait on the merge's lock and then write over the closed account.
+     *    merge record. That second read is ALSO a locking read, so it reads the
+     *    latest committed rows whatever this transaction has read before. That
+     *    is a choice, not a measured necessity: under REPEATABLE READ a plain
+     *    read takes its snapshot at the transaction's first plain read, so it
+     *    would also see the merge unless the caller had already made a plain
+     *    read earlier in the same transaction (which the callers today do not).
+     *    What is measured (tools/account-merge-selftest.php J16-J18): with the
+     *    merge paused part-way, a save from the duplicate's session waits and
+     *    is then refused with nothing written; with this check removed it
+     *    writes over the closed account. The plain-read variant was planted
+     *    and the same tests stayed green, which is what the paragraph above
+     *    predicts. True means: roll back and refuse. Asking AccountGuard
+     *    before the transaction is not enough: a save begun before the merge
+     *    committed would wait on the merge's lock and then write over the
+     *    closed account.
      */
     public static function mergedAwayUnderLock(mysqli $db, int $userId): bool
     {

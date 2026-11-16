@@ -2510,7 +2510,12 @@ class Auth
 
             if ($userId !== null) {
                 // ♻️ Update existing user's name and avatar
-                $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
+                // 🔒 #1064 round 8: never on an account a merge has closed. The look-up
+                //    above found it switched on, but a merge committing in between
+                //    would otherwise be undone here. The condition is re-read
+                //    after any wait for the merge's lock (`AccountMerge::stillClosedSql()`'s marker).
+                $upd = $mysqli->prepare('UPDATE `tblUsers` SET `fullName` = ?, `avatarPath` = ?, `isActive` = 1 WHERE `userID` = ? '
+                    . "AND `emailAddress` <> CONCAT('merged-', `userID`, '@merged.invalid')");
                 if ($upd !== false) {
                     $upd->bind_param('ssi', $name, $avatar, $userId);
                     $upd->execute();
@@ -2825,7 +2830,12 @@ class Auth
 
             if ($userId !== null) {
                 // ♻️ Update name/avatar from Google profile
-                $upd = $mysqli->prepare('UPDATE tblUsers SET fullName = ?, avatarPath = ?, isActive = 1 WHERE userID = ?');
+                // 🔒 #1064 round 8: never on an account a merge has closed. The look-up
+                //    above found it switched on, but a merge committing in between
+                //    would otherwise be undone here. The condition is re-read
+                //    after any wait for the merge's lock (`AccountMerge::stillClosedSql()`'s marker).
+                $upd = $mysqli->prepare('UPDATE `tblUsers` SET `fullName` = ?, `avatarPath` = ?, `isActive` = 1 WHERE `userID` = ? '
+                    . "AND `emailAddress` <> CONCAT('merged-', `userID`, '@merged.invalid')");
                 if ($upd !== false) {
                     $upd->bind_param('ssi', $name, $avatar, $userId);
                     $upd->execute();

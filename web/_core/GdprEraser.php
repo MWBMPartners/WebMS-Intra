@@ -2473,7 +2473,7 @@ class GdprEraser
             }
 
             if ($failed === 0) {
-                self::closeRequest($db, $requestId, $userId, $processedByID, $steps);
+                self::closeRequest($db, $requestId, $userId, $processedByID, $steps, 0, [], count($takenAddresses));
 
                 return [
                     'changed' => $changed,
@@ -2521,6 +2521,8 @@ class GdprEraser
             //    work; anything else means something recoverable also failed
             //    and running the request again is still the right answer.
             'handWorkOnly' => self::$onlyHandWorkLeft,
+            // #1064 round 8: for `finishByHand()`'s closing line.
+            'addressesNotSearched' => count($takenAddresses),
         ];
     }
 
@@ -2942,7 +2944,8 @@ class GdprEraser
             $processedByID,
             (int) $outcome['steps'],
             $failed,
-            array_keys($hand)
+            array_keys($hand),
+            (int) ($outcome['addressesNotSearched'] ?? 0)
         );
 
         return [
@@ -2961,7 +2964,8 @@ class GdprEraser
         ?int $processedByID,
         int $steps,
         int $handWorkSteps = 0,
-        array $handWorkTables = []
+        array $handWorkTables = [],
+        int $addressesNotSearched = 0
     ): void
     {
         if ($db->begin_transaction() === false) {
@@ -3092,6 +3096,13 @@ class GdprEraser
                     : 'All ' . $steps . ' steps ran; ' . $handWorkSteps . ' could not be completed by any '
                         . 'number of further runs and were dealt with outside the portal (see the line '
                         . 'above). No other step failed.')
+                // 🚫 #1064 round 8: an address this person held before that is
+                //    another account's now is deliberately NOT searched (mail
+                //    to it cannot be told from the new holder's), and that step
+                //    counts as "not failed". Without this the closing line read
+                //    as though every trace had been reached.
+                . ($addressesNotSearched === 0 ? '' : ' ' . $addressesNotSearched . ' address(es) this person held '
+                    . 'before are another account\'s now, so mail sent to them was NOT searched or erased.')
                 . ' The request is closed, and the account number, '
                 . 'name, email address and notes are cleared from it'
                 . ($others === [] ? '.' : ' and from ' . count($others) . ' other open request(s) from the same account.')
@@ -8992,11 +9003,27 @@ class GdprEraser
 
     /**
      * 🔀 #1064 (D-199): empty the addresses recorded for each MERGED-IN account
-     *    (`tblAccountMergeSide.formerEmail` and `formerEarlierEmails`, and any
-     *    `earlierEmails` left on its account row), once the send-log and
-     *    waiting-mail steps have searched by it. The side rows themselves stay:
+     *    (`tblAccountMergeSide.formerEmail` and `formerEarlierEmails`), once the
+     *    send-log and waiting-mail steps have searched by them, and empty the
+     *    personal details on each merged-in ACCOUNT ROW. The side rows stay:
      *    two account numbers and dates, which are how a retried erasure still
      *    finds what was merged into this account.
+     *
+     *    The account row (round 8). The walk skips a merged-in account row (see
+     *    execute()), and the merge emptied it when it closed it, but something
+     *    can be written onto it after that: a save already on its way from the
+     *    duplicate's own session when the merge committed. The pages that write
+     *    a person's own details re-check under the account row's lock, and this
+     *    is the backstop that does not depend on every writer doing so: it
+     *    empties the SAME columns the account's own erasure instruction empties
+     *    (read from `catalogue()`, so the two cannot drift), plus the two photo
+     *    columns, and applies that instruction's switched-off values. Two things
+     *    are left as the merge set them: the e-mail column, which holds the
+     *    merged-account marker (`AccountMerge::stillClosedSql()` and every
+     *    reader of the merge rely on it), and the name, which goes back to
+     *    `AccountMerge::CLOSED_NAME` rather than the erased-person name, so the
+     *    row still reads as a merged account. Only a row still closed is
+     *    touched: one that has been reopened is refused by its own step.
      *
      * @param list<int> $mergedIds The merged-in account numbers.
      */
@@ -9020,11 +9047,28 @@ class GdprEraser
             $stmt->execute();
             $emptied = (int) $stmt->affected_rows;
             $stmt->close();
-            // Round 5: a merged-in account ROW is skipped by the walk (see
-            // execute()), so the earlier addresses on it are emptied here. The
-            // merge itself empties them now; this reaches one closed before that.
-            $stmt = $db->prepare('UPDATE `tblUsers` SET `earlierEmails` = NULL '
-                . 'WHERE `earlierEmails` IS NOT NULL AND `userID` IN (' . $in . ')');
+            // Round 8: the merged-in account rows themselves (see the docblock).
+            // The photo values are read first, so their files can be deleted
+            // once no account names them.
+            [$set, $anyHeld] = self::mergedRowEmptying();
+            $stmt = $db->prepare('SELECT `avatarPath`, `displayPhoto` FROM `tblUsers` `u` WHERE `u`.`userID` IN (' . $in
+                . ') AND ' . AccountMerge::stillClosedSql('`u`'));
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+            $stmt->execute();
+            $photos = [];
+            foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+                foreach (['avatarPath', 'displayPhoto'] as $col) {
+                    if (trim((string) ($row[$col] ?? '')) !== '') {
+                        $photos[] = (string) $row[$col];
+                    }
+                }
+            }
+            $stmt->close();
+            $stmt = $db->prepare('UPDATE `tblUsers` `u` SET ' . $set . ' WHERE `u`.`userID` IN (' . $in . ') AND '
+                . AccountMerge::stillClosedSql('`u`') . ' AND (' . $anyHeld . ')');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
@@ -9032,22 +9076,77 @@ class GdprEraser
             $stmt->execute();
             $emptied += (int) $stmt->affected_rows;
             $stmt->close();
+            foreach (array_unique($photos) as $photo) {
+                if (self::deleteUnusedProfileImage($db, $photo) === false) {
+                    // The column is already empty, so a second run cannot find
+                    // this file again: said plainly, never the path.
+                    self::logAudit($db, $requestId, 'failed', 'tblUsers', null, 'a photo file written onto an account '
+                        . 'merged into this one could not be deleted and needs removing by hand');
+
+                    return self::STEP_FAILED;
+                }
+            }
         } catch (\Throwable $e) {
             // Never the fault's own words: they could quote the address.
-            self::logAudit($db, $requestId, 'failed', 'tblAccountMergeSide', null, 'the address an account merged into this one '
-                . 'held could not be emptied; running the request again will find it');
+            self::logAudit($db, $requestId, 'failed', 'tblAccountMergeSide', null, 'the addresses and details of an account merged '
+                . 'into this one could not be emptied; running the request again will find them');
 
             return self::STEP_FAILED;
         }
         if ($emptied === 0) {
-            self::logAudit($db, $requestId, 'none', 'tblAccountMergeSide', null, 'no address of a merged-in account was still held');
+            self::logAudit($db, $requestId, 'none', 'tblAccountMergeSide', null, 'no address or detail of a merged-in account was still held');
 
             return self::STEP_UNCHANGED;
         }
         self::logAudit($db, $requestId, 'anonymise', 'tblAccountMergeSide', (string) $emptied . ' row(s)', 'the addresses '
-            . 'recorded for the merged-in account(s) are emptied (' . $emptied . ' row(s)); which account was merged into which stays');
+            . 'recorded for the merged-in account(s), and any details on their closed account rows, are emptied (' . $emptied
+            . ' row(s)); which account was merged into which stays');
 
         return self::STEP_CHANGED;
+    }
+
+    /**
+     * The SET list and the "anything still held" test for a merged-in account
+     * row (round 8 of #1064): every column the account's own erasure
+     * instruction empties, except the e-mail column (the merged-account
+     * marker), plus the two photo columns; that instruction's switched-off
+     * values, except the name, which is `AccountMerge::CLOSED_NAME`. Read from
+     * `catalogue()` so a column added to the instruction is emptied here too.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private static function mergedRowEmptying(): array
+    {
+        $entry = null;
+        foreach (self::catalogue() as $candidate) {
+            if (($candidate['table'] ?? '') === 'tblUsers' && ($candidate['userCol'] ?? '') === 'userID'
+                && ($candidate['action'] ?? '') === 'anonymise') {
+                $entry = $candidate;
+                break;
+            }
+        }
+        if ($entry === null) {
+            throw new \RuntimeException('the account erasure instruction is missing');
+        }
+        $cols = array_values(array_unique(array_merge(
+            array_values(array_diff((array) ($entry['nullCols'] ?? []), ['emailAddress'])),
+            ['avatarPath', 'displayPhoto']
+        )));
+        $set  = [];
+        $held = [];
+        foreach ($cols as $col) {
+            $set[]  = '`u`.`' . $col . '` = NULL';
+            $held[] = '`u`.`' . $col . '` IS NOT NULL';
+        }
+        $overrides = (array) ($entry['overrides'] ?? []);
+        $overrides['fullName'] = AccountMerge::CLOSED_NAME;
+        foreach ($overrides as $col => $value) {
+            $literal = is_int($value) === true ? (string) $value : "'" . str_replace("'", "''", (string) $value) . "'";
+            $set[]   = '`u`.`' . $col . '` = ' . $literal;
+            $held[]  = 'NOT (`u`.`' . $col . '` <=> ' . $literal . ')';
+        }
+
+        return [implode(', ', $set), implode(' OR ', $held)];
     }
 
     /**

@@ -1276,7 +1276,8 @@ check('I13e erasing C reaches the history left under A AND under B', ($chainRun[
     && n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` IN ({$ca}, {$cb})") === 0, json_encode($chainRun));
 
 // 📧 ROUND 7, FINDING 1: an earlier address ANOTHER account holds NOW is never
-//    searched by an erasure, nor sent a merge notice. Measured by the check: A
+//    searched by an erasure (a merge notice still goes there: D-200, I14d
+//    below). Measured by the check: A
 //    gave up office@, B took it, and erasing A destroyed B's waiting mail and
 //    B's send-log line. People here are NEVER merged: it reached everybody.
 /** Change an account's address the way both pages do: the replaced one is remembered. */
@@ -1299,12 +1300,22 @@ $insert('tblMailQueue', ['toRecipients' => $office, 'stage' => 'waiting', 'holdR
 $insert('tblEmailLog', ['toRecipients' => $office, 'errorDetail' => '', 'errorCode' => ''], $third);
 $insert('tblEmailLog', ['toRecipients' => $goneTo, 'errorDetail' => '', 'errorCode' => ''], $third);
 $db->query('SET FOREIGN_KEY_CHECKS = 1');
-$taRun = GdprEraser::execute((int) GdprEraser::fileRequest($siteA, $ta, true)['requestID'], $ta, $adminA);
+$taReq = (int) GdprEraser::fileRequest($siteA, $ta, true)['requestID'];
+$taRun = GdprEraser::execute($taReq, $ta, $adminA);
 check('I14 an earlier address SOMEBODY ELSE holds now is not touched by an erasure: their waiting mail and send-log line stay',
     ($taRun['failed'] ?? -1) === 0
     && n($db, "SELECT COUNT(*) AS n FROM `tblMailQueue` WHERE `toRecipients` = '{$office}'") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` = '{$office}'") === 1, json_encode($taRun));
 check('I14b ...while an earlier address NOBODY holds is erased', n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$goneTo}%'") === 0);
+// Round 8: the request still closes ("none failed"), so the CLOSING line itself
+// must say an address was not searched, or it reads as everything reached.
+check('I14f ...and the closing line of the report says one address was NOT searched, never just "none failed"',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$taReq} AND `action` = 'completed' "
+        . "AND `details` LIKE '%none failed.%1 address(es) this person held before are another account''s now, so mail sent to them was NOT searched%'") === 1);
+// ...and a close that skipped nothing (I13e's) says nothing of the kind.
+check('I14g ...while a close that skipped nothing does not say it',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$chainReq} AND `action` = 'completed'") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$chainReq} AND `details` LIKE '%was NOT searched%'") === 0);
 // The merged duplicate's former address, taken by somebody once the merge freed it.
 $fk2 = $user('FormerKept'); $member($fk2, $siteA);
 $fd2 = $user('FormerDup');  $member($fd2, $siteA);
@@ -1321,7 +1332,26 @@ check('I14c ...and the same for a merged duplicate\'s former address that somebo
     // from the log alone they cannot be told from the new holder's mail.)
     $fdMerged === 'completed'
     && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` = '{$fdAddr}' AND `subject` = 'Taker mail {$tag}'") === 1);
-// The start notice: never to an earlier address another account holds now.
+// Capitals: an address is the same address whatever its capitals, as the
+// address column's own collation says. A gave up `Case-…` with capitals, B now
+// holds it in small letters; B's mail stays.
+$ca1 = $user('CaseA'); $member($ca1, $siteA);
+$cb1 = $user('CaseB'); $member($cb1, $siteA);
+$caseOld = 'case-' . $tag . '@selftest.invalid';
+$move($ca1, 'Case-' . $tag . '@selftest.invalid');
+$move($ca1, 'case-own-' . $tag . '@selftest.invalid');
+$move($cb1, $caseOld);
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+$insert('tblEmailLog', ['toRecipients' => $caseOld, 'subject' => 'Case mail ' . $tag, 'errorDetail' => '', 'errorCode' => ''], $third);
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
+$caRun = GdprEraser::execute((int) GdprEraser::fileRequest($siteA, $ca1, true)['requestID'], $ca1, $adminA);
+check('I14e ...and the same when the two spellings differ only in capitals',
+    ($caRun['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` = '{$caseOld}' AND `subject` = 'Case mail {$tag}'") === 1,
+    json_encode($caRun));
+// The start notice goes to EVERY earlier address, including one another account
+// holds now (D-200, the owner's decision). Round 7 left those out without
+// asking; round 8 put it back, and this pins it.
 $na = $user('NoticeA'); $member($na, $siteA);
 $nb = $user('NoticeB'); $member($nb, $siteA);
 $nt = $user('NoticeTaker');
@@ -1330,8 +1360,8 @@ $move($na, 'notice-own-' . $tag . '@selftest.invalid');
 $db->query("UPDATE `tblUsers` SET `emailAddress` = '{$naOld}' WHERE `userID` = {$nt}");
 $naBefore = n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$naOld}%'");
 M::start($db, $adminA, false, false, $siteA, false, $nb, $na);
-check('I14d a merge\'s start notice is NOT sent to an earlier address somebody else holds now, and IS sent to the current one',
-    n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$naOld}%'") === $naBefore
+check('I14d a merge\'s start notice IS sent to an earlier address another account holds now (D-200), and to the current one',
+    n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$naOld}%'") > $naBefore
     && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%notice-own-{$tag}@%'") >= 1);
 
 // 🚩 ROUND 7, FINDING 2 (erasure half): a merged-in account found REOPENED is a
@@ -1357,6 +1387,43 @@ $move($rr, 'repeataddr-' . $tag . '@selftest.invalid');
 $move($rr, 'rep-b-' . $tag . '@selftest.invalid');
 check('I16 the earlier-address list holds each address once, however often an account goes back and forth',
     n($db, "SELECT JSON_LENGTH(`earlierEmails`) AS n FROM `tblUsers` WHERE `userID` = {$rr}") === 2);
+
+// 🧹 ROUND 8, FINDING 1 (the backstop): details written onto a CLOSED account
+//    after its merge (a writer that did not re-check under the lock: here, the
+//    write the directory page made before round 8, by SQL) are emptied by an
+//    erasure of the account it was merged into. The walk skips that row, so
+//    before round 8 nothing ever reached them.
+$wk = $user('WrittenKept'); $member($wk, $siteA);
+$wd = $user('WrittenDup');  $member($wd, $siteA);
+$wMerged = $merge($wk, $wd, false);
+$db->query("UPDATE `tblUsers` SET `fullName` = 'Real Name', `phoneNumber` = '07700 900222', `displayPhone` = '07700 900999', "
+    . "`displayAddress` = '1 Secret Street', `displayBio` = 'my own bio', `latitude` = 52.2, `longitude` = 0.12, "
+    . "`what3words` = 'filled.count.soap', `locale` = 'cy', `calendarToken` = 'tok{$tag}', `totpSecret` = 'SECRET{$tag}', "
+    . "`notifyPrefs` = '{}', `earlierEmails` = '[\"writtendup-old-{$tag}@selftest.invalid\"]', `isAdmin` = 1, `totpEnabled` = 1 "
+    . "WHERE `userID` = {$wd}");
+$wRun = GdprEraser::execute((int) GdprEraser::fileRequest($siteA, $wk, true)['requestID'], $wk, $adminA);
+// Every column the account's own erasure instruction empties, read from the
+// catalogue the eraser reads, except the e-mail column (the merged marker).
+$accountEntry = null;
+foreach (GdprEraser::catalogue() as $entry) {
+    if ($entry['table'] === 'tblUsers' && $entry['userCol'] === 'userID' && $entry['action'] === 'anonymise') {
+        $accountEntry = $entry;
+    }
+}
+$stillHeld = [];
+foreach (array_diff((array) ($accountEntry['nullCols'] ?? []), ['emailAddress']) as $col) {
+    if (n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$wd} AND `{$col}` IS NOT NULL") !== 0) {
+        $stillHeld[] = $col;
+    }
+}
+check('I17 premise: the merge completed and the account instruction names the columns to empty',
+    $wMerged === 'completed' && count((array) ($accountEntry['nullCols'] ?? [])) > 5);
+check('I17b an erasure of the account it went into empties every one of those columns on the closed account',
+    ($wRun['failed'] ?? -1) === 0 && $stillHeld === [], json_encode($stillHeld) . ' ' . json_encode($wRun));
+check('I17c ...and leaves it closed as a merged account: switched off, no administrator, the merged marker, the merged name',
+    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$wd} AND `isActive` = 0 AND `isAdmin` = 0 AND `totpEnabled` = 0 "
+        . "AND `fullName` = '" . M::CLOSED_NAME . "' AND `emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid')") === 1
+    && in_array($wd, M::mergedInto($db, $wk), true));
 
 // =============================================================================
 echo "E. The pages over HTTP\n";
@@ -1947,6 +2014,53 @@ check('J16b ...and the save is REFUSED under the lock: the merge stands and the 
     $sOut === 'completed'
     && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$sd3} AND `isActive` = 0 AND `emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid')") === 1
     && in_array($sd3, M::mergedInto($db, $sk3), true), $sOut);
+// 🔒 ROUND 8, FINDING 1: the duplicate's OWN session, saving its own details
+//    while the merge completes (the independent check's probe, made a test).
+//    Signed in as the duplicate in a second cookie jar, the form token read
+//    BEFORE the merge starts, then posted while the merge sleeps holding the
+//    row. Each save must be refused under the lock and write nothing.
+$raceOwn = static function (string $label, string $path, array $fields, string $getPage) use ($db, $user, $member, $login, $siteOne, $eAdmin, $pauseOn, $spawn, $awaitPause, $finish, $go, $http, $tokenOn, $signIn, &$jar, $jarA, $jarB): array {
+    $k  = $user('Own' . $label . 'Kept'); $member($k, $siteOne);
+    $d  = $user('Own' . $label . 'Dup');  $member($d, $siteOne);
+    $lg = $login($d, 'Own' . $label . 'Dup');
+    $jar = $jarB;
+    @unlink($jar);
+    $in  = $signIn($lg);
+    $tok = $tokenOn($http('GET', $getPage)['body']);
+    $rq  = am_open($db, M::start($db, $eAdmin, false, false, $siteOne, false, $k, $d)['requestId']);
+    $t   = M::agree($db, $rq, $d, true, '', 0, false)['token'];
+    $pauseOn($d);
+    $mid = $spawn($rq, $k, $d, $t);
+    touch($go);
+    $paused = $awaitPause();
+    $fields['csrf_token'] = $tok;
+    $resp = $http('POST', $path, $fields);
+    $out  = $finish($mid);
+    $db->query('DROP TRIGGER IF EXISTS `am_selftest_pause`');
+    @unlink($go);
+    $jar = $jarA;
+
+    return ['premise' => $in === true && $tok !== '' && $paused === true, 'out' => $out, 'resp' => $resp, 'kept' => $k, 'dup' => $d,
+        'row' => q($db, "SELECT `isActive`, `fullName`, `emailAddress`, `phoneNumber`, `displayPhone`, `displayAddress`, `displayBio`, "
+            . "`latitude`, `longitude`, `what3words` FROM `tblUsers` WHERE `userID` = {$d}")[0] ?? []];
+};
+$closedAsMerged = static fn (array $row, int $d): bool => (int) ($row['isActive'] ?? 1) === 0
+    && ($row['fullName'] ?? '') === M::CLOSED_NAME && ($row['emailAddress'] ?? '') === 'merged-' . $d . '@merged.invalid'
+    && $row['phoneNumber'] === null && $row['displayPhone'] === null && $row['displayAddress'] === null
+    && $row['displayBio'] === null && $row['latitude'] === null && $row['longitude'] === null && $row['what3words'] === null;
+$dirRace = $raceOwn('Dir', '/directory/save', ['displayPhone' => '07700 900999', 'displayAddress' => '1 Secret Street',
+    'displayBio' => 'my own bio', 'latitude' => '52.2', 'longitude' => '0.12'], '/directory/my-settings');
+check('J17 premise: the duplicate is signed in on its own, holds the directory form\'s token, and the merge is asleep holding its row',
+    $dirRace['premise'] === true, json_encode($dirRace['premise']));
+check('J17b ...and its directory save is REFUSED under the lock: the merge stands and nothing of the person is written onto the closed account',
+    $dirRace['out'] === 'completed' && $closedAsMerged($dirRace['row'], $dirRace['dup']), $dirRace['out'] . ' ' . json_encode($dirRace['row']));
+$acctRace = $raceOwn('Acct', '/account/save', ['action' => 'update_profile', 'fullName' => 'Real Name Again',
+    'emailAddress' => 'realagain-' . $tag . '@selftest.invalid', 'phoneNumber' => '07700 900111'], '/account');
+check('J18 premise: the same, for the person\'s own account page', $acctRace['premise'] === true, json_encode($acctRace['premise']));
+check('J18b ...and that save is REFUSED too, saying the account was merged, with the account exactly as the merge closed it',
+    $acctRace['out'] === 'completed' && $closedAsMerged($acctRace['row'], $acctRace['dup'])
+    && preg_match('/^Location: *[^\r\n]*error=merged/mi', (string) $acctRace['resp']['head']) === 1,
+    $acctRace['out'] . ' ' . json_encode($acctRace['row']));
 // Offered for ANOTHER merge, it is refused with its own words, never "switch
 // it back on first" (it never can be) nor "needs a global administrator".
 $j14 = $user('J14Kept'); $member($j14, $siteA);
