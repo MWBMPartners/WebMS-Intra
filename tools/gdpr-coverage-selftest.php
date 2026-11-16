@@ -2599,6 +2599,12 @@ $methodBody = static function (string $masked, string $signature): string {
 
 $processEntryBody = $methodBody($eraserMasked, 'function processEntry(');
 $inventoryBody    = $methodBody($eraserMasked, 'function inventory(');
+// 🔀 #1064 (D-199): inventory() now adds up what is held under every account
+//    merged into this one, asking inventoryOf() once per account number; the
+//    clause is built in inventoryOf(). So the check below asks both halves:
+//    that inventory() still hands over to inventoryOf(), and that inventoryOf()
+//    still builds its clause with whereForEntry().
+$inventoryOfBody  = $methodBody($eraserMasked, 'function inventoryOf(');
 
 // 📌 THE OUTER GATE FIRST, because pinning only the inner calls was not enough
 //    and a second check round proved it: `if (false && isset(...))` on the one
@@ -2701,8 +2707,9 @@ check(
 // 📌 "What we hold about you" counts these rows. Reverting this was invisible.
 check(
     'the "what we hold about you" count asks the ONE clause builder too, so a parent-matched instruction is counted rather than skipped',
-    $inventoryBody !== '' && str_contains($inventoryBody, 'self::whereForEntry(') === true,
-    'inventory() no longer builds its clause with whereForEntry(), so parent-matched rows are left out of what the person is told'
+    $inventoryBody !== '' && str_contains($inventoryBody, 'self::inventoryOf(') === true
+        && $inventoryOfBody !== '' && str_contains($inventoryOfBody, 'self::whereForEntry(') === true,
+    'inventory() no longer hands over to inventoryOf(), or inventoryOf() no longer builds its clause with whereForEntry(), so parent-matched rows are left out of what the person is told'
 );
 
 // 📌 Four DIFFERENT names, so swapping any two of them fails. With the real

@@ -1364,7 +1364,7 @@ class GdprEraser
             //    answering after the erasure. `notifyPrefs` is the person's
             //    own choices about what they are sent.
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs'],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs','emailBeforeChangeByOther'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0, 'isAdmin' => 0, 'isRootAdmin' => 0, 'totpEnabled' => 0],
              // 🗣️ #703, D-113: this is the sentence a member reads about their own
              //    account on My data and Request erasure (a hand-written entry is

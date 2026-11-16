@@ -578,6 +578,14 @@ const KNOWN_STILL_NAMED = [
     'kept by the owner\'s decisions D-110 and D-111: who opened a care case, and who checked a child in or out' => [
         'tblCareCase.openedByID', 'tblKidCheckins.checkedInByID', 'tblKidCheckins.checkedOutByID',
     ],
+    // 🔀 #1064 (D-199): a merge record keeps both account NUMBERS, because it is
+    //    the only thing that says the two numbers were one person — what an
+    //    erasure, "what we hold about you" and the data copy follow. Its
+    //    address column (`formerEmail`) IS emptied; the number links only to the
+    //    emptied account. The catalogue's reason for `tblAccountMergeSide` says so.
+    'kept by D-199: which accounts a merge joined (numbers only; the address on the record is emptied)' => [
+        'tblAccountMergeSide.userID',
+    ],
     // (A group of 37 columns stood here on 11 October 2026: every table's
     // SECOND "who did it" column, #492. 31 were built that day. The last six
     // were built on 12 October, on Salem874's decisions: five once the
@@ -733,6 +741,10 @@ require_once $coreDir . 'ErasureReview.php';
 // queue, through this class. (The portal finds its classes by itself; this
 // test names each one it needs.)
 require_once $coreDir . 'MailQueue.php';
+// 🔀 #1064 (D-199): an erasure and "what we hold about you" both ask which
+//    accounts were merged into this one, through this class. No autoloader
+//    here, so without it both stop with "class not found".
+require_once $coreDir . 'AccountMerge.php';
 // GdprEraser::fileRequest() asks PortalAddress for the address in the
 // confirmation e-mail's link (#500). Without this line that call stops with
 // "class not found".

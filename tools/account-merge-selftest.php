@@ -903,17 +903,36 @@ $db->query('DROP TRIGGER IF EXISTS `am_selftest_pause`');
 check('H4 a reply changed part-way through so the two now DIFFER refuses the merge', $rOut === M::R_CHOICES_DIFFER, $rOut);
 check('H5 ...and BOTH replies are still there, as each account left them',
     n($db, "SELECT COUNT(*) AS n FROM `tblEventRSVPs` WHERE `eventID` = 8301 AND ((`userID` = {$rk2} AND `response` = 'going') OR (`userID` = {$rd2} AND `response` = 'not_going'))") === 2);
-// A money record is never deleted on a clash, and a clash is a refusal, never an error.
+// 💷 A money record is never deleted on a clash, and a clash is a refusal,
+//    never an error. The kept account's pledge appears WHILE the merge is
+//    paused, so the preview saw no clash and only the guard inside the merge can
+//    stop the duplicate's pledge being thrown away.
+//    Why an UPDATE and not an INSERT: a new pledge naming the kept account is
+//    checked against that account's row, which the merge holds locked, so it
+//    simply WAITS until the merge has finished (measured: tried as an INSERT,
+//    it deadlocked against the merge and was the one rolled back). Moving the
+//    kept account's existing pledge onto another campaign touches no account
+//    row, so it really does land in the middle of the merge.
 $mk2 = $user('MoneyKept'); $member($mk2, $siteA);
 $md2 = $user('MoneyDup');  $member($md2, $siteA);
+$campaign = $insert('tblPledgeCampaigns', ['siteID' => $siteA, 'createdByID' => $adminA], $adminA);
+$campaignId = (int) $db->insert_id;
+$insert('tblPledgeCampaigns', ['siteID' => $siteA, 'createdByID' => $adminA], $adminA);
+$otherCampaignId = (int) $db->insert_id;
+$db->query("INSERT INTO `tblPledges` (`siteID`, `campaignID`, `userID`, `amountPence`, `currency`) VALUES ({$siteA}, {$campaignId}, {$md2}, 700, 'GBP'), ({$siteA}, {$otherCampaignId}, {$mk2}, 500, 'GBP')");
 $mreq   = am_open($db, M::start($db, $adminA, false, false, $siteA, false, $mk2, $md2)['requestId']);
 $mtoken = M::agree($db, $mreq, $md2, true, '', 0, false)['token'];
-$db->query('SET FOREIGN_KEY_CHECKS = 0');
-$db->query("INSERT INTO `tblPledges` (`siteID`, `campaignID`, `userID`, `amountPence`, `currency`) VALUES ({$siteA}, 8401, {$mk2}, 500, 'GBP'), ({$siteA}, 8401, {$md2}, 700, 'GBP')");
-$db->query('SET FOREIGN_KEY_CHECKS = 1');
-$moneyOut = M::agree($db, $mreq, $mk2, true, $mtoken, $md2, false)['outcome'];
-check('H6 a pledge on BOTH accounts for one campaign added after the preview refuses (a refusal, not an error) and deletes neither',
-    $moneyOut === M::R_CLASH && n($db, "SELECT COUNT(*) AS n FROM `tblPledges` WHERE `campaignID` = 8401 AND `userID` IN ({$mk2}, {$md2})") === 2, $moneyOut);
+$pauseOn($md2);
+$mmid = $spawn($mreq, $mk2, $md2, $mtoken);
+touch($go);
+usleep(1200000); // inside the pause
+$db->query("UPDATE `tblPledges` SET `campaignID` = {$campaignId} WHERE `userID` = {$mk2} AND `campaignID` = {$otherCampaignId}");
+$moneyOut = $finish($mmid);
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_pause`');
+@unlink($go);
+check('H6 a pledge on BOTH accounts for one campaign, appearing part-way through, refuses (a refusal, not an error) and deletes neither',
+    $campaign !== null && $moneyOut === M::R_CLASH
+    && n($db, "SELECT COUNT(*) AS n FROM `tblPledges` WHERE `campaignID` = {$campaignId} AND `userID` IN ({$mk2}, {$md2})") === 2, $moneyOut);
 @unlink($worker);
 @rmdir($scratch);
 
@@ -968,7 +987,14 @@ $db->query("INSERT INTO `tblAuditTrail` (`userID`, `action`, `tableName`, `recor
 $heldBefore = array_sum(array_map(static fn (array $r): int => $r['table'] === 'tblActivityLogs' ? (int) $r['rows'] : 0, GdprEraser::inventory($ek)));
 check('I5 the merge completes', $merge($ek, $ed, false) === 'completed');
 $heldAfter = array_sum(array_map(static fn (array $r): int => $r['table'] === 'tblActivityLogs' ? (int) $r['rows'] : 0, GdprEraser::inventory($ek)));
-check('I5b "what we hold about you" for the kept account now counts the duplicate\'s history too (D-199)', $heldAfter > $heldBefore, "{$heldBefore} → {$heldAfter}");
+// The EXACT sum, never "went up": the merge writes its own new entry under the
+// kept account, so "went up" passed with inventory() ignoring the merge
+// (planted, measured). The duplicate holds at least the made-up row above, so
+// the two answers differ.
+$heldBoth = n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` IN ({$ek}, {$ed})");
+$heldDup  = n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` = {$ed}");
+check('I5b "what we hold about you" for the kept account counts the duplicate\'s history too, exactly (D-199)',
+    $heldDup > 0 && $heldAfter === $heldBoth, "{$heldBefore} before; {$heldAfter} after; {$heldBoth} under both numbers, {$heldDup} under the duplicate's");
 $erasure = null;
 $erasureProblem = '';
 try {
