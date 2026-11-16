@@ -300,6 +300,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         A suggestion still waiting to be approved stays a <strong>Draft</strong> until it is approved on Admin,
         Calendar, Moderation, which is also what e-mails the person who suggested it. Until then, Manage Events,
         the series bulk edit and the events API all refuse to publish, cancel or postpone it.
+        <?php // ⚠️ #1081, D-197: EventSuggestions::cancelledEarlierWarning(), on the moderation page and the edit form. ?>
+        A suggestion that was cancelled earlier, before those refusals existed, carries a warning on the
+        moderation page and on its edit form, because approving it publishes it: to approve it you must
+        tick a box beside <em>Approve</em> to confirm.
     </p>
     <p class="text-muted small">
         Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out

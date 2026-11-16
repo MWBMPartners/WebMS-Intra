@@ -53,7 +53,9 @@
  *     really has at the moment of writing.
  *
  *   • AND EXCEPT A VISITOR'S SUGGESTION STILL WAITING TO BE APPROVED, which
- *     ALWAYS comes back as a draft, with any reason emptied (#1081). D-169
+ *     ALWAYS comes back as a draft, with any reason emptied (#1081; the owner,
+ *     16 November 2026 — D-196, a NARROW exception inside D-146 for a
+ *     suggestion still waiting to be approved and nothing else). D-169
  *     says such a suggestion cannot be published before it is approved, and
  *     #965 refuses cancelled and postponed for it too, because members see
  *     both. Before #965 a suggestion COULD be cancelled; hidden like that,
@@ -69,11 +71,14 @@
  *     writes `published` whatever the status was. So a suggestion cancelled,
  *     hidden, brought back and then approved goes live, with its reason gone.
  *     That is not new: the old "still cancelled" state could be approved
- *     exactly the same way, and went live just the same. And D-146 also rules
- *     out clearing a cancellation reason on the way back; emptying it here
- *     for a waiting suggestion departs from that, and is put to the owner
- *     (the old path left a row "pending and cancelled", which #965 refuses
- *     from every writer).
+ *     exactly the same way, and went live just the same. Two things answer
+ *     it. D-146 rules out clearing a cancellation reason on the way back, and
+ *     D-196 makes the exception for a waiting suggestion on purpose (the old
+ *     path left a row "waiting and cancelled", which #965 refuses from every
+ *     writer). And D-197 makes approving such a suggestion need a warning
+ *     and a confirmation: the fact that it was cancelled is kept in
+ *     `tblEvents.cancelledWhileWaiting`, which this method sets when it
+ *     empties the reason, so the moderation page can still see it.
  *
  *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
  *     a reason is optional (`EventCancelReason`, #998, is the one writer, and
@@ -243,16 +248,18 @@ final class HiddenSeriesDates
      * is REQUIRED (no default) on purpose: a caller that forgot it would
      * silently get the old answer for a suggestion. A suggestion still waiting
      * to be approved (`'pending'`) comes back as a draft WHATEVER it was before
-     * it was hidden (#1081). Before #965 a pending suggestion could be set to
-     * "Cancelled" or "Postponed"; hidden like that, D-146/D-147 would have
-     * brought it back still cancelled or postponed — in front of members,
-     * unapproved, which D-169 rules out. D-146's own reason for keeping the
-     * status (a cancelled date must not go live by accident) is NOT fully met
-     * for a suggestion: the edit pages refuse to publish one, but approving it
-     * on the moderation page publishes it whatever its status — so it was
-     * equally approvable while "still cancelled", and that risk is unchanged,
-     * not removed (see the class comment). The decision is not made here: `EventSuggestions::whyStatusRefused()` is
-     * the ONE rule for what a pending suggestion may hold, and is asked.
+     * it was hidden (#1081; D-196, a narrow exception inside D-146 and D-147).
+     * Before #965 a pending suggestion could be set to "Cancelled" or
+     * "Postponed"; hidden like that, D-146/D-147 would have brought it back
+     * still cancelled or postponed — in front of members, unapproved, which
+     * D-169 rules out. D-146's own reason for keeping the status (a cancelled
+     * date must not go live by accident) is NOT met by this alone: the edit
+     * pages refuse to publish one, but approving it on the moderation page
+     * publishes it whatever its status. That risk was there while it was
+     * "still cancelled" too; D-197's confirmation is what answers it (see the
+     * class comment). The rule for what a pending suggestion may hold is not
+     * made here: `EventSuggestions::whyStatusRefused()` is the ONE rule, and
+     * is asked.
      */
     public static function statusOnReturn(string $was, ?string $submissionStatus): string
     {
@@ -491,20 +498,28 @@ final class HiddenSeriesDates
             //    hidden", and a live row was not. Status: a DRAFT (D-145), or
             //    still CANCELLED / still POSTPONED if it was before it was
             //    hidden (D-146, D-147) — but ALWAYS a draft for a suggestion
-            //    still waiting to be approved (#1081, D-169), both read from
-            //    the row locked in step 3. Such a date keeps its `cancelReason`
-            //    and who changed its status, untouched.
+            //    still waiting to be approved (#1081, D-169, D-196), both read
+            //    from the row locked in step 3. Such a date keeps its
+            //    `cancelReason` and who changed its status, untouched.
+            //
+            //    ⚠️ D-197: when a WAITING suggestion that was CANCELLED comes
+            //    back as a draft, its cancellation is about to vanish from the
+            //    row (the status becomes draft, the reason is emptied below),
+            //    so it is recorded in `cancelledWhileWaiting` in this same
+            //    statement. `GREATEST` only ever sets it: nothing clears it.
             $submission   = $row['submissionStatus'] === null ? null : (string) $row['submissionStatus'];
             $suggestion   = self::isWaitingSuggestion($submission);
             $newStatus    = self::statusOnReturn((string) $row['status'], $submission);
+            $markCancel   = ($suggestion === true && (string) $row['status'] === 'cancelled') ? 1 : 0;
             $write        = $db->prepare(
-                'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ? '
+                'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ?, '
+                . '`cancelledWhileWaiting` = GREATEST(`cancelledWhileWaiting`, ?) '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `isDeleted` = 1 AND `externalFeedID` IS NULL'
             );
             if ($write === false) {
                 throw new \RuntimeException('the date could not be brought back');
             }
-            $write->bind_param('siiii', $newStatus, $userId, $eventId, $siteId, $seriesId);
+            $write->bind_param('siiiii', $newStatus, $userId, $markCancel, $eventId, $siteId, $seriesId);
             $write->execute();
             $changed = $write->affected_rows;
             $write->close();
@@ -520,7 +535,7 @@ final class HiddenSeriesDates
             //    which decides from the status the row now holds: a cancelled
             //    or postponed date keeps its own reason untouched, and a date
             //    that came back as a draft — a pending suggestion that had been
-            //    cancelled before #965 (#1081) — has its reason emptied, so it
+            //    cancelled before #965 (#1081, D-196) — has its reason emptied, so it
             //    can never reappear under a later cancellation it does not
             //    belong to. In this transaction, after the write, so the two
             //    land together; the row is live now, which is what it touches.

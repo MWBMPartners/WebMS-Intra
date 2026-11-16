@@ -373,6 +373,81 @@ final class EventSuggestions
     }
 
     /**
+     * ⚠️ WAS THIS SUGGESTION CANCELLED EARLIER? (#1081; the owner, 16 November
+     * 2026 — D-197). Approving a suggestion publishes it whatever its status,
+     * so one that was cancelled while it waited would go live as though it
+     * were going ahead. D-197: approving it is allowed, but only after the
+     * moderator has seen a warning and confirmed.
+     *
+     * The history is read from TWO facts, because either alone loses cases:
+     *   • the status itself is `cancelled` (a suggestion cancelled before #965
+     *     refused that, and never changed since), or
+     *   • `tblEvents.cancelledWhileWaiting` is 1 — set by migration 300 for
+     *     every waiting-and-cancelled row that existed, and by
+     *     `HiddenSeriesDates::restore()` when it brings one back as a draft and
+     *     empties its reason (D-196). Nothing clears it.
+     * The change history cannot answer this: nothing that writes a
+     * suggestion's status records it in `tblAuditTrail` (checked with
+     * `grep -n "Logger::audit"` over calendar/manage/save.php,
+     * events/api/update.php, calendar/manage/series-edit.php,
+     * admin/calendar/moderate.php and HiddenSeriesDates.php: no match).
+     *
+     * TWO SPELLINGS OF ONE RULE, on purpose, and a test holds them together:
+     * `cancelledEarlierSql()` is asked inside the moderation page's query and
+     * inside the approval's own conditional UPDATE (so the check and the write
+     * are one statement and cannot be raced), and `wasCancelledEarlier()` by
+     * the Manage Events form, which reads its row with `SELECT *`.
+     *
+     * `$alias` is the name `tblEvents` has in the query ('' for none), so the
+     * clause stays unambiguous in a query that joins another table.
+     */
+    public static function cancelledEarlierSql(string $alias): string
+    {
+        $on = $alias === '' ? '' : '`' . str_replace('`', '', $alias) . '`.';
+
+        return '(' . $on . "`status` = 'cancelled' OR " . $on . '`cancelledWhileWaiting` = 1)';
+    }
+
+    /** The PHP spelling of `cancelledEarlierSql()`, for a row already read. */
+    public static function wasCancelledEarlier(array $event): bool
+    {
+        return (string) ($event['status'] ?? '') === 'cancelled' || (int) ($event['cancelledWhileWaiting'] ?? 0) === 1;
+    }
+
+    /**
+     * The posted field that carries the moderator's confirmation (D-197). A
+     * checkbox the moderator ticks; the handler refuses an approval of such a
+     * suggestion without it. The PAGE does not decide whether it is needed —
+     * the handler asks the row itself, so a form that leaves the box out, or a
+     * request built by hand, cannot skip it.
+     */
+    public const CONFIRM_CANCELLED_FIELD = 'confirmCancelledEarlier';
+
+    /**
+     * The warning, the ONE place it is worded: beside Approve on the
+     * moderation page, and on the suggestion's own edit form.
+     */
+    public static function cancelledEarlierWarning(): string
+    {
+        return 'This suggestion was cancelled earlier, while it was waiting to be approved. Approving it publishes it: '
+            . 'members will see it on the calendar as an event that is going ahead, and it will no longer show as cancelled. '
+            . 'If that is what you want, tick the box to confirm before you press Approve.';
+    }
+
+    /** The checkbox's label. */
+    public static function cancelledEarlierConfirmLabel(): string
+    {
+        return 'I know this suggestion was cancelled earlier, and I want to publish it';
+    }
+
+    /** What the moderation page says when an approval of such a suggestion arrives unconfirmed. */
+    public static function cancelledEarlierRefusal(): string
+    {
+        return 'Not approved. This suggestion was cancelled earlier, so approving it needs the box beside Approve ticked, '
+            . 'to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.';
+    }
+
+    /**
      * 🗣️ The same refusal for the series bulk edit, which changes several
      * dates at once and so must say how many of the chosen dates are waiting
      * (the whole change is refused, never applied to the others alone, so the

@@ -54,7 +54,7 @@
  *     its reason so it can come back with it (D-146, D-147); the only thing
  *     that changes a hidden date is `HiddenSeriesDates::restore()`, which
  *     calls `write()` once the date is live again, so a date that comes back
- *     as a draft (a suggestion still waiting to be approved, #1081) loses a
+ *     as a draft (a suggestion still waiting to be approved, #1081, D-196) loses a
  *     reason it can no longer carry.
  *   • It does not touch an imported event (`externalFeedID IS NOT NULL`):
  *     `FeedImporter` is the only writer of those (#514).

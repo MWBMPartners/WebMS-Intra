@@ -28,6 +28,15 @@
  *      Microsoft 365 route throws when it has no sender, which is how this
  *      portal ships.
  *
+ * ⚠️ A SUGGESTION CANCELLED EARLIER NEEDS A CONFIRMATION (#1081; D-197).
+ *    Approving publishes whatever the status was, so a suggestion that was
+ *    cancelled while it waited (`EventSuggestions::cancelledEarlierSql()`) is
+ *    approved only when the moderator ticked the box the moderation page draws
+ *    beside Approve. Without it the approval statement changes nothing, the
+ *    moderator is told why, and nobody is e-mailed. The approval is still ONE
+ *    conditional statement, so the e-mail still goes once only. The status is
+ *    not otherwise changed (published, as for any approval).
+ *
  * ⚠️ This used to say "Reject = status='archived'", which was never true: the
  *    code has always written 'draft' (see the UPDATE below), and the column has
  *    never had an 'archived' value at all, so had it done what the comment
@@ -78,11 +87,21 @@ if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
     exit();
 }
 
+// ⚠️ D-197 (#1081): a suggestion cancelled earlier is approved only with the
+//    moderator's confirmation, a ticked box (`CONFIRM_CANCELLED_FIELD`). The
+//    history is asked INSIDE the approval's own statement
+//    (`cancelledEarlierSql()`), never taken from the page: the row decides
+//    whether a confirmation is needed, and the check and the write are one
+//    statement, so nothing can change in between. The box only ever ANSWERS
+//    that question; posting it for an ordinary suggestion changes nothing.
+$confirmed = (string) ($_POST[EventSuggestions::CONFIRM_CANCELLED_FIELD] ?? '') === '1' ? 1 : 0;
+
 if ($action === 'approve') {
     $stmt = $mysqli->prepare(
         'UPDATE `tblEvents` SET `status` = "published", '
         . '    `submissionStatus` = "approved", `moderatedByID` = ?, `moderatedAt` = NOW() '
-        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0'
+        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0 '
+        . '  AND (? = 1 OR NOT ' . EventSuggestions::cancelledEarlierSql('') . ')'
     );
 } else {
     $stmt = $mysqli->prepare(
@@ -98,7 +117,11 @@ if ($action === 'approve') {
 //    is no longer moderated at all; the moderation list leaves it out too.
 
 if ($stmt !== false) {
-    $stmt->bind_param('iii', $modId, $eventId, $siteId);
+    if ($action === 'approve') {
+        $stmt->bind_param('iiii', $modId, $eventId, $siteId, $confirmed);
+    } else {
+        $stmt->bind_param('iii', $modId, $eventId, $siteId);
+    }
     $stmt->execute();
     $affected = $stmt->affected_rows;
     $stmt->close();
@@ -130,10 +153,31 @@ if ($stmt !== false) {
             );
         }
     } else {
-        // 🔁 Nothing changed: decided already (a second press, a stale page,
-        //    another administrator first) or deleted. Nothing is sent.
-        $_SESSION['moderation_result'] = ['type' => 'info',
-            'words' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.'];
+        // ⚠️ Was it refused only for want of the confirmation (D-197)? Asked
+        //    of the row as it is now, so the words are true: still waiting,
+        //    not deleted, cancelled earlier, and the box was not ticked.
+        $needsConfirm = false;
+        if ($action === 'approve' && $confirmed === 0) {
+            $why = $mysqli->prepare(
+                'SELECT 1 FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" '
+                . 'AND `isDeleted` = 0 AND ' . EventSuggestions::cancelledEarlierSql('') . ' LIMIT 1'
+            );
+            if ($why !== false) {
+                $why->bind_param('ii', $eventId, $siteId);
+                $why->execute();
+                $needsConfirm = $why->get_result()->fetch_row() !== null;
+                $why->close();
+            }
+        }
+        if ($needsConfirm === true) {
+            Logger::activity('EventModerateNeedsConfirm', 'Event #' . $eventId . ' not approved: cancelled earlier, not confirmed');
+            $_SESSION['moderation_result'] = ['type' => 'warning', 'words' => EventSuggestions::cancelledEarlierRefusal()];
+        } else {
+            // 🔁 Nothing changed: decided already (a second press, a stale page,
+            //    another administrator first) or deleted. Nothing is sent.
+            $_SESSION['moderation_result'] = ['type' => 'info',
+                'words' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.'];
+        }
     }
 }
 

@@ -92,6 +92,10 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
             <div class="form-text">This is a suggestion still waiting to be approved. It stays a draft until it is
                 approved on <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/moderation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Calendar, Moderation</a>,
                 which also tells the person who suggested it.</div>
+            <?php if (\Portal\Core\EventSuggestions::wasCancelledEarlier($ev) === true): ?>
+                <?php // ⚠️ D-197 (#1081): the same warning the moderation page shows beside Approve. ?>
+                <div class="alert alert-warning small py-2 mt-2 mb-0" data-cancelled-earlier="<?php echo (int) ($ev['eventID'] ?? 0); ?>"><?php echo htmlspecialchars(\Portal\Core\EventSuggestions::cancelledEarlierWarning(), ENT_QUOTES, 'UTF-8'); ?></div>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 
