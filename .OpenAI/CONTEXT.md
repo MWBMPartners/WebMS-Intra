@@ -1113,7 +1113,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     snapshot went with them. `readWaitingHeldRows()` and
     `carryWaitingHeldRowsThrough()` are the ONE place a waiting row
     survives a restore; do not write a second one.
-    **`WHOLE_DATABASE_ONLY` now has FOUR names** — the holding table
+    **`WHOLE_DATABASE_ONLY` now has FOUR names** (SIX since #1064 added the two merge tables) — the holding table
     joined it, which refuses a ONE-table restore of it (that really
     would throw the rows away, with no carry to save them). **I ALSO
     claimed a "second effect", that an OLD-FORM snapshot now leaves
@@ -1258,7 +1258,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     refuses a person who has gone. Test: `tools/held-texts-selftest.php`.
     **`DbBackup::WHOLE_DATABASE_ONLY` is the ONE list of tables a restore
     of ONE table refuses** (`tblMigrations`, `tblTotpBackupCodes`,
-    `tblSettings`, and `tblRestoreHeldRows` since #697), compared only by
+    `tblSettings`, and `tblRestoreHeldRows` since #697, and `tblAccountMergeSide` and `tblAccountMergeRequest` since #1064), compared only by
     `isWholeDatabaseOnly()` and worded
     only by `wholeDatabaseOnlyReason()`, ignoring capitals because
     `lower_case_table_names` is a server setting; the Backup page asks
