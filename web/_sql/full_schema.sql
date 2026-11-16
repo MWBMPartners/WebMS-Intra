@@ -814,6 +814,7 @@ CREATE TABLE IF NOT EXISTS `tblExpenseClaimPayments` (
     `paidByID`     INT            DEFAULT NULL             COMMENT 'FK to tblUsers.userID — treasury user who processed payment',
     `addedAt`      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the payment record was created',
     PRIMARY KEY (`payID`),
+    KEY `idx_payments_paid_by` (`paidByID`),
     KEY `idx_payments_claim` (`claimID`),
     CONSTRAINT `fk_payments_claim` FOREIGN KEY (`claimID`)
         REFERENCES `tblExpenseClaims` (`claimID`) ON DELETE CASCADE
@@ -1315,6 +1316,12 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `roomID`             INT           DEFAULT NULL COMMENT 'Optional room within venueID — tblVenueRooms.roomID; NULL = whole venue (#436)',
 
     PRIMARY KEY (`eventID`),
+
+    KEY `idx_event_submitted_by` (`submittedByID`),
+
+    KEY `idx_event_status_changed_by` (`statusChangedByID`),
+
+    KEY `idx_event_moderated_by` (`moderatedByID`),
     UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`),
     KEY `idx_event_series`   (`seriesID`),
     KEY `idx_event_category` (`categoryID`),
@@ -1446,6 +1453,7 @@ CREATE TABLE IF NOT EXISTS `tblEventRSVPs` (
     `createdAt`    DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`    DATETIME    DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`rsvpID`),
+    KEY `idx_rsvp_user` (`userID`),
     UNIQUE KEY `uq_event_user`     (`eventID`, `userID`),
     KEY        `idx_event_response` (`eventID`, `response`),
     KEY        `idx_event_rsvp_status` (`eventID`, `status`, `createdAt`)
@@ -1838,6 +1846,7 @@ CREATE TABLE IF NOT EXISTS `tblWorkflowSteps` (
     `timeoutHours`  INT          DEFAULT NULL COMMENT 'Auto-escalate after N hours',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`stepID`),
+    KEY `idx_wfstep_assignee` (`assigneeType`, `assigneeValue`),
     KEY `idx_wfstep_workflow` (`workflowID`),
     CONSTRAINT `fk_wfstep_workflow` FOREIGN KEY (`workflowID`) REFERENCES `tblWorkflows` (`workflowID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -5529,6 +5538,7 @@ CREATE TABLE IF NOT EXISTS `tblErasureRequest` (
     `notes`            TEXT         DEFAULT NULL,
     `subjectKind`      ENUM('account','visitor_address') NOT NULL DEFAULT 'account' COMMENT 'Whose erasure this is. account: a person with an account, found through userID (every request filed before #964, and every request a member files). visitor_address: an e-mail address, filed by an administrator to reach the event suggestions and anonymous-form prayer requests sent with it, whether or not the address also belongs to an account (#964, D-140; #1009, D-176); it reaches only this organisation''s event suggestions, anonymous-form prayer requests and approval e-mails for that address, and nothing found through an account',
     PRIMARY KEY (`requestID`),
+    KEY `idx_er_user` (`userID`),
     KEY `idx_er_status` (`status`),
     KEY `idx_er_due`    (`dueBy`),
     CONSTRAINT `fk_er_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites`(`siteID`)
@@ -6898,6 +6908,7 @@ CREATE TABLE IF NOT EXISTS `tblExternalAudienceMembers` (
     `createdByID` INT DEFAULT NULL COMMENT 'Who added this entry; emptied, never cascaded, if that account is removed.',
     `createdAt`   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`audienceMemberID`),
+    KEY `idx_extaud_kind_ref` (`kind`, `refID`),
     UNIQUE KEY `uq_extaud_owner_member` (`ownerType`,`ownerID`,`kind`,`refID`),
     KEY `idx_extaud_feed` (`feedID`),
     KEY `idx_extaud_user` (`userID`),
@@ -7258,6 +7269,8 @@ CREATE TABLE IF NOT EXISTS `tblKidCheckins` (
     `checkedOutByName`  VARCHAR(255) DEFAULT NULL COMMENT 'The name of the helper who checked the child out, written at check-out. KEPT when that helper is erased, by decision D-111 of the owner (#703, migration 272)',
     `pickupName`        VARCHAR(120) DEFAULT NULL,
     PRIMARY KEY (`checkinID`),
+    KEY `idx_kc_checked_out_by` (`checkedOutByID`),
+    KEY `idx_kc_checked_in_by` (`checkedInByID`),
     KEY `idx_kc_child`     (`childID`, `checkedInAt`),
     KEY `idx_kc_open`      (`checkedOutAt`),
     CONSTRAINT `fk_kc_child` FOREIGN KEY (`childID`) REFERENCES `tblKidProfiles`(`childID`) ON DELETE CASCADE,
@@ -11952,6 +11965,7 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
     `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
     `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
     `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied by that erasure (GdprEraser::eraseMergeRecords)',
+    `formerEarlierEmail` VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the address it held before somebody else changed it (tblUsers.emailBeforeChangeByOther, D-200), to which the start notice was sent. Kept for the same reason as formerEmail and emptied by the same erasure step; the account row''s own copy is emptied at merge',
     PRIMARY KEY (`sideID`),
     UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
     UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),

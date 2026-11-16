@@ -1393,8 +1393,8 @@ return [
         //    DELETE the row by account number and lose the map a retried erasure
         //    needs to find what was merged into the account.
         'decision' => 'unlink',
-        'reason'   => 'Names one of a person\'s two accounts in a request to merge them, and when they agreed; on the duplicate\'s row, the e-mail address it held when it was merged. The address is emptied; which account was merged into which stays, as two account numbers',
-        'columns'  => ['formerEmail', 'userID'],
+        'reason'   => 'Names one of a person\'s two accounts in a request to merge them, and when they agreed; on the duplicate\'s row, the e-mail address it held when it was merged and the one it held before somebody else changed it. Both addresses are emptied; which account was merged into which stays, as two account numbers',
+        'columns'  => ['formerEmail', 'formerEarlierEmail', 'userID'],
         'notEmptiedHere' => [
             'userID' => 'Kept on purpose: it is how an erasure, including a retried one, finds the accounts merged into the one being erased (D-199). It is an account number, and the account it names is emptied by the same erasure.',
         ],

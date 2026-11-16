@@ -173,6 +173,27 @@
  * same rule and records the refusal the same way.
  *
  * -------------------------------------------------------------------------
+ * A MERGED-AWAY ACCOUNT CANNOT BE CHANGED BY ANYBODY EITHER (#1064 round 5)
+ * -------------------------------------------------------------------------
+ * When two accounts are merged, the duplicate is closed, never deleted, and
+ * everything that reads, exports or erases the person's records follows the
+ * merge to it. So if anybody could open it again — tick Active, type a new
+ * name and address — another person's records would be filed under a number
+ * the merge treats as the first person's: shown in their "what we hold
+ * about you", handed over in their data copy, and erased with them. Measured
+ * before this rule, by the independent check.
+ *
+ * So a merged-away account is refused exactly as an erased one is: its own
+ * verdict, `MERGED`, from row 3b of decide(), for every reach but viewing and
+ * for a global administrator too, and from checkNotErased() for the three
+ * places that change an account without check(). The fact is
+ * `AccountMerge::mergedAwaySql()`, read from the merge's OWN record, never
+ * from the account row, so nothing done to the row can make it stop being
+ * one. Nothing else writes such an account: it cannot sign in (switched
+ * off, no password, sign-ins moved or deleted, an address no provider
+ * issues), and import, invitations and the create API only add new rows.
+ *
+ * -------------------------------------------------------------------------
  * WHAT THIS CLASS CANNOT DO (see also DEV_NOTES.md and the #518 commit)
  * -------------------------------------------------------------------------
  *  - The check and the write it guards are two separate steps. A
@@ -291,6 +312,13 @@ final class AccountGuard
     public const ERASED = 'erased';
 
     /**
+     * #1064 round 5: the account was merged into another one, so nobody may
+     * change it. See the class docblock, "A MERGED-AWAY ACCOUNT CANNOT BE
+     * CHANGED BY ANYBODY EITHER".
+     */
+    public const MERGED = 'merged';
+
+    /**
      * Plain-English reason word for each reason code, used ONLY inside the
      * security record's detail text (never shown to the person acting —
      * see message() for what they actually see).
@@ -304,6 +332,7 @@ final class AccountGuard
         'other_org'      => 'the account also belongs, or used to belong, to another organisation',
         'not_admin_here' => 'the person acting is not an administrator of the organisation that was open',
         'erased'         => 'the account was erased on request, and an erased account is never changed (#977)',
+        'merged'         => 'the account was merged into another account, and a merged-away account is never changed (#1064)',
     ];
 
     /** @var bool|null Cached per-request answer to isSingleOrganisation(). Null means "not yet worked out". */
@@ -450,6 +479,13 @@ final class AccountGuard
         // the one definition of an erased account.
         if ($reach !== self::REACH_VIEW && self::flagIsOn($facts['isErased'] ?? null) === true) {
             return ['verdict' => self::ERASED, 'reason' => 'erased'];
+        }
+
+        // Row 3b — #1064 round 5: a MERGED-AWAY account, by the same rule
+        // and for the same reason. See the class docblock, "A MERGED-AWAY
+        // ACCOUNT CANNOT BE CHANGED BY ANYBODY EITHER".
+        if ($reach !== self::REACH_VIEW && self::flagIsOn($facts['isMerged'] ?? null) === true) {
+            return ['verdict' => self::MERGED, 'reason' => 'merged'];
         }
 
         // Row 2 — a global administrator may change anything else.
@@ -631,7 +667,9 @@ final class AccountGuard
         $sql = 'SELECT u.userID, u.isAdmin, u.isRootAdmin, '
             . '(SELECT us.isActive FROM tblUserSites us WHERE us.userID = u.userID AND us.siteID = ? LIMIT 1) AS thisOrgActive, '
             . '(SELECT COUNT(*) FROM tblUserSites o WHERE o.userID = u.userID AND o.siteID <> ?) AS otherOrgRows, '
-            . GdprEraser::emptiedAccountSql('u') . ' AS isErased '
+            . GdprEraser::emptiedAccountSql('u') . ' AS isErased, '
+            // #1064 round 5: read in the same statement, for the same reason.
+            . AccountMerge::mergedAwaySql('u') . ' AS isMerged '
             . 'FROM tblUsers u WHERE u.userID IN (' . $placeholders . ')';
 
         $db   = App::db();
@@ -756,7 +794,12 @@ final class AccountGuard
      * @param int    $userId The account about to be changed.
      * @param string $action Plain-English text of the attempt (see check()).
      *
-     * @return string ALLOW or ERASED.
+     * #1064 round 5: a MERGED-AWAY account is refused here too (rows 3a and 3b
+     * are one rule: an account that must never change again). The caller
+     * shows `message()` of the verdict this returns, never ERASED's words
+     * regardless, because the two sentences say different true things.
+     *
+     * @return string ALLOW, ERASED or MERGED.
      */
     public static function checkNotErased(int $userId, string $action): string
     {
@@ -768,6 +811,11 @@ final class AccountGuard
             self::logRefusal($action, self::ERASED, 'erased', $userId);
 
             return self::ERASED;
+        }
+        if (self::flagIsOn($facts[$userId]['isMerged'] ?? null) === true) {
+            self::logRefusal($action, self::MERGED, 'merged', $userId);
+
+            return self::MERGED;
         }
 
         return self::ALLOW;
@@ -814,7 +862,7 @@ final class AccountGuard
         // record below, which only a global administrator sees.
         if ($verdict === self::NOT_FOUND) {
             $text = 'Refused: ' . $action . '. Not found in this organisation.';
-        } elseif ($verdict === self::ERASED) {
+        } elseif ($verdict === self::ERASED || $verdict === self::MERGED) {
             $text = 'Refused: ' . $action . '. That account cannot be changed.';
         } else {
             $text = 'Refused: ' . $action . '. Only a global administrator can do this.';
@@ -880,6 +928,13 @@ final class AccountGuard
             return 'Nothing was changed. This account was erased on request, so it cannot be changed or switched '
                 . 'back on. What the erasure kept, such as giving records kept for tax, depends on it staying '
                 . 'exactly as the erasure left it.';
+        }
+
+        // #1064 round 5.
+        if ($verdict === self::MERGED) {
+            return 'Nothing was changed. This account was merged into another account, so it cannot be changed or '
+                . 'switched back on: the person\'s records now belong to the account it was merged into, and its old '
+                . 'records are still read as theirs. To add somebody new, create a new account.';
         }
 
         if ($verdict === self::GLOBAL_ONLY) {

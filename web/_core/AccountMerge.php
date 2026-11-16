@@ -116,76 +116,36 @@ final class AccountMerge
      * @var array<string, list<string>>
      */
     public const BY_TREATMENT = [
+        // 🚚 LIVE state of the person, and nothing else (D-199 applied
+        //    consistently, round 5 of #1064). Every record of who DID, decided,
+        //    recorded or was SENT something at a past moment stays (KEEP below).
         self::MOVE => [
-            'tblAnnouncements.createdByID', 'tblAnnouncements.updatedByID', 'tblApiKeys.createdByID',
-            'tblApiKeys.revokedByID', 'tblAssetEventAssignments.assignedByID', 'tblAssetIdentifiers.createdByID',
-            'tblAssetKioskTokens.createdByID', 'tblAssetLicenseAssignments.linkedByID',
-            'tblAssetLicenseAssignments.releasedByID', 'tblAssetLicenseAssignments.userID',
-            'tblAssetLoans.approvedByID', 'tblAssetLoans.counterpartyUserID', 'tblAssetLoans.requestedByID',
-            'tblAssetMaintenance.createdByID', 'tblAssetMaintenance.performedByUserID', 'tblAssetOwners.userID',
-            'tblAssetResources.uploadedByID', 'tblAssetStocktakeItems.scannedByID',
-            'tblAssetStocktakes.closedByID', 'tblAssetStocktakes.startedByID',
-            'tblAssetValueHistory.recordedByID', 'tblAssets.createdByID', 'tblAttendanceSessions.createdByID',
-            'tblAttendanceSessions.updatedByID', 'tblBankImports.importedByID', 'tblBankTxns.matchedByID',
-            'tblCareCase.openedByID', 'tblCareCase.personUserID', 'tblCareVisit.followUpAssignedToID',
-            'tblCareVisit.visitedByID', 'tblCcliUsage.operatorID', 'tblCountEnvelopes.giverID',
-            'tblCountSessions.closedByID', 'tblCountSessions.counter1ID', 'tblCountSessions.counter2ID',
-            'tblCountSessions.createdByID', 'tblDbsChecks.recordedByID', 'tblDbsChecks.userID',
-            'tblDecisionMoments.recordedByID', 'tblDocuments.uploadedByID', 'tblEventAttendance.markedByID',
-            'tblEventBroadcasts.sentByID', 'tblEventCoordinators.grantedByID', 'tblEventCrewMembers.userID',
-            'tblEventHubResources.createdByID', 'tblEventHubVideos.createdByID', 'tblEventJobAssignments.userID',
-            'tblEventOccurrenceOverrides.createdByID', 'tblEventPeople.userID',
-            'tblEventRSVPInvites.createdByID', 'tblEventRegistrations.registeredForUserID',
-            'tblEventRegistrations.reviewedByID', 'tblEventRegistrations.submittedByUserID',
-            'tblEvents.createdByID', 'tblEvents.moderatedByID', 'tblEvents.statusChangedByID',
-            'tblEvents.submittedByID', 'tblEvents.updatedByID', 'tblExpenseClaimApprovals.userID',
-            'tblExpenseClaimPayments.paidByID', 'tblExpenseClaims.userID',
-            'tblExternalAudienceMembers.createdByID', 'tblExternalAudienceMembers.userID',
-            'tblExternalEventApprovals.decidedByID', 'tblExternalEventChoices.createdByID',
-            'tblExternalEventChoices.updatedByID', 'tblExternalFeedRules.createdByID',
-            'tblExternalFeedRules.updatedByID', 'tblExternalFeeds.createdByID', 'tblExternalFeeds.updatedByID',
-            'tblFormResponses.submitterID', 'tblForms.createdByID', 'tblGiftAidDeclaration.donorID',
-            'tblGivingEntry.donorID', 'tblGivingEntry.recordedByID', 'tblGivingStatementLog.createdByID',
-            'tblInvitation.acceptedByID', 'tblInvitation.createdByID', 'tblInvitation.revokedByID',
-            'tblKidCheckins.checkedInByID', 'tblKidCheckins.checkedOutByID', 'tblKidProfiles.parentUserID',
-            'tblLeadershipAssignments.createdByID', 'tblLeadershipAssignments.updatedByID',
-            'tblLeadershipAssignments.userID', 'tblLiveChatMessages.moderatedByID', 'tblLivePrompts.createdByID',
-            'tblNewsletter.createdByID', 'tblNoticeboardPosters.createdByID',
-            'tblNoticeboardPosters.updatedByID', 'tblNoticeboardUploads.createdByID',
-            'tblPathwayEnrolments.enrolledByID', 'tblPathwayProgress.markedByID',
-            'tblPathwayProgress.revokedByID', 'tblPathways.createdByID', 'tblPayment.userID',
-            // A saved card and a device that receives the person's notifications act
-            // FOR the person; the person has proved both accounts, so they move.
-            'tblPaymentMethod.userID', 'tblPushSubscriptions.userID',
-            'tblPhoto.moderatedByID', 'tblPhoto.uploadedByUserID', 'tblPhotoAlbum.createdByID',
-            'tblPledgeCampaigns.createdByID', 'tblPrayerRequests.assignedToUserID',
-            'tblPrayerRequests.moderatorID', 'tblPrayerRequests.submitterID', 'tblProject.createdByID',
-            'tblProjectPledge.donorID', 'tblProjectUpdate.postedByID', 'tblPublicHosts.approvedByID',
-            'tblReadingPlan.createdByID', 'tblRecording.presenterID', 'tblRecording.uploadedByID',
-            'tblRecordingNote.createdByID', 'tblReportDefinitions.createdByID',
-            'tblReportDefinitions.updatedByID', 'tblResourceBooking.approvedByID',
-            'tblResourceBooking.bookedByID', 'tblRotaSlot.assignedToID', 'tblRotaSlot.createdByID',
-            'tblRotaSwapRequest.requestedByID', 'tblRotaSwapRequest.targetUserID',
-            'tblSalvationCards.assignedToID', 'tblServicePlan.preparedByID', 'tblServicePlanItem.presenterID',
-            'tblServicePlanMessages.createdByID', 'tblServicePlanState.updatedByID',
-            'tblServicePlans.createdByID', 'tblSmallGroupMeetingAttendance.markedByID',
-            'tblSmallGroupMeetings.recordedByID', 'tblSmallGroupMembers.addedByID',
-            'tblSmallGroupPlaces.hostUserID', 'tblSmallGroupPlaces.placeEnteredByID',
-            'tblSmallGroups.createdByID', 'tblSmallGroups.hostUserID', 'tblSmallGroups.placeEnteredByID',
-            'tblSmsMessage.recipientUserID', 'tblSongs.createdByID', 'tblTasks.assignedToID',
-            'tblTasks.createdByID', 'tblUserDepts.addedByID', 'tblUserGroups.addedByID',
-            'tblUserMilestone.userID', 'tblUserRoles.grantedByID',
-            // Copies of memberships taken away when somebody was placed in no
-            // organisation (#533). No unique key, so nothing can clash.
+            // records ABOUT the person, or that belong to them: their own claim, form response, prayer
+            // request, booking, card, device, milestone, child's profile, care case, safeguarding check,
+            // visitor record they became.
+            'tblCareCase.personUserID', 'tblDbsChecks.userID', 'tblEventRegistrations.registeredForUserID',
+            'tblExpenseClaims.userID', 'tblFormResponses.submitterID', 'tblKidProfiles.parentUserID',
+            'tblPaymentMethod.userID', 'tblPrayerRequests.submitterID', 'tblPushSubscriptions.userID',
+            'tblResourceBooking.bookedByID', 'tblUserMilestone.userID', 'tblVisitor.convertedUserID',
+            // money about the person: their gifts, declarations, pledges and payments (a clash on a
+            // kept-donor, statement or pledge row refuses instead).
+            'tblCountEnvelopes.giverID', 'tblGiftAidDeclaration.donorID', 'tblGivingEntry.donorID',
+            'tblPayment.userID', 'tblProjectPledge.donorID',
+            // what the person is CURRENTLY given or asked to do, and the copies of memberships taken away
+            // when somebody was placed in no organisation (#533; no unique key, so nothing can clash).
+            'tblAssetLicenseAssignments.userID', 'tblAssetLoans.counterpartyUserID', 'tblAssetOwners.userID',
+            'tblCareVisit.followUpAssignedToID', 'tblEventCrewMembers.userID', 'tblEventJobAssignments.userID',
+            'tblEventPeople.userID', 'tblExternalAudienceMembers.userID', 'tblLeadershipAssignments.userID',
+            'tblPrayerRequests.assignedToUserID', 'tblRotaSlot.assignedToID', 'tblRotaSwapRequest.requestedByID',
+            'tblRotaSwapRequest.targetUserID', 'tblSalvationCards.assignedToID', 'tblServicePlanItem.presenterID',
+            'tblSmallGroupPlaces.hostUserID', 'tblSmallGroups.hostUserID', 'tblTasks.assignedToID',
             'tblUserDeptsUnplaced.userID', 'tblUserGroupsUnplaced.userID', 'tblUserRolesUnplaced.userID',
-            'tblVenueAgreementFiles.uploadedByID',
-            'tblVenueAgreements.createdByID', 'tblVenueBookingGroups.createdByID',
-            'tblVenueBookings.createdByID', 'tblVenueBookings.updatedByID', 'tblVenueImportBatches.createdByID',
-            'tblVenueInvoicePayments.recordedByID', 'tblVenueInvoices.createdByID',
-            'tblVenueUsageTypeWindows.createdByID', 'tblVenues.createdByID', 'tblVisitor.assignedToID',
-            'tblVisitor.convertedUserID', 'tblVisitor.createdByID', 'tblVisitorContact.contactedByID',
-            'tblWebhooks.createdByID', 'tblWorkflowActions.actedByID', 'tblWorkflowInstances.startedByID',
-            'tblZoomMeeting.createdByID',
+            'tblVisitor.assignedToID',
+            // OWNERSHIP of a live record, where the portal uses the creator to decide who sees or may change
+            // it: their own tasks list, their unpublished recording notes, their private saved reports, and
+            // the attendance sessions they may delete (#529).
+            'tblAttendanceSessions.createdByID', 'tblRecordingNote.createdByID', 'tblReportDefinitions.createdByID',
+            'tblTasks.createdByID',
         ],
 
         // 🤝 The two copies say the same thing (the same group, role, meeting,
@@ -227,15 +187,70 @@ final class AccountMerge
         //    (`mergedInto()`; `GdprEraser::execute()`, `inventory()` and the
         //    data copy ask it), so nothing here is out of an erasure's reach.
         //    (An earlier version of this package moved these; D-199 reversed it.)
+        //    Round 5 applied that to EVERY such column, not only the logs: who
+        //    created, changed, approved, decided, recorded, counted, moderated
+        //    or was sent something. 121 columns that had been moving now stay.
+        //    The costs, said once here: a list a page draws by "who made it"
+        //    (an announcement's author, a workflow the person started) does not
+        //    show the kept account the rows made as the duplicate; and an
+        //    approval given as the duplicate is not the kept account's, so a
+        //    claim needing that person's approval asks the kept account again
+        //    (the safe direction: never one person counted twice). A text held
+        //    for quiet hours for the duplicate is refused when it comes due,
+        //    because its account is closed (`Sms::whyNotThisPerson()`).
         self::KEEP => [
-            'tblAccountMergeRequest.requestedByID', 'tblAccountMergeSide.userID',
-            'tblActivityLogs.userID', 'tblAiUsage.userID', 'tblAssetAudit.actorUserID',
-            'tblAssetScanLog.actorUserID', 'tblAuditTrail.userID', 'tblCapabilityMap.decidedByID',
-            'tblCareAccessLog.viewerID', 'tblConsentLog.userID', 'tblErasureRequest.processedByID',
-            'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID', 'tblErrors.userID',
-            'tblExternalFeedRuns.triggeredByID', 'tblMigrations.executedByID',
-            'tblNewsletterRecipient.userID', 'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID',
-            'tblRecordingPlay.userID',
+            'tblAccountMergeRequest.requestedByID', 'tblAccountMergeSide.userID', 'tblActivityLogs.userID',
+            'tblAiUsage.userID', 'tblAnnouncements.createdByID', 'tblAnnouncements.updatedByID',
+            'tblApiKeys.createdByID', 'tblApiKeys.revokedByID', 'tblAssetAudit.actorUserID',
+            'tblAssetEventAssignments.assignedByID', 'tblAssetIdentifiers.createdByID',
+            'tblAssetKioskTokens.createdByID', 'tblAssetLicenseAssignments.linkedByID',
+            'tblAssetLicenseAssignments.releasedByID', 'tblAssetLoans.approvedByID', 'tblAssetLoans.requestedByID',
+            'tblAssetMaintenance.createdByID', 'tblAssetMaintenance.performedByUserID',
+            'tblAssetResources.uploadedByID', 'tblAssetScanLog.actorUserID', 'tblAssetStocktakeItems.scannedByID',
+            'tblAssetStocktakes.closedByID', 'tblAssetStocktakes.startedByID', 'tblAssetValueHistory.recordedByID',
+            'tblAssets.createdByID', 'tblAttendanceSessions.updatedByID', 'tblAuditTrail.userID',
+            'tblBankImports.importedByID', 'tblBankTxns.matchedByID', 'tblCapabilityMap.decidedByID',
+            'tblCareAccessLog.viewerID', 'tblCareCase.openedByID', 'tblCareVisit.visitedByID',
+            'tblCcliUsage.operatorID', 'tblConsentLog.userID', 'tblCountSessions.closedByID',
+            'tblCountSessions.counter1ID', 'tblCountSessions.counter2ID', 'tblCountSessions.createdByID',
+            'tblDbsChecks.recordedByID', 'tblDecisionMoments.recordedByID', 'tblDocuments.uploadedByID',
+            'tblErasureRequest.processedByID', 'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID',
+            'tblErrors.userID', 'tblEventAttendance.markedByID', 'tblEventBroadcasts.sentByID',
+            'tblEventCoordinators.grantedByID', 'tblEventHubResources.createdByID', 'tblEventHubVideos.createdByID',
+            'tblEventOccurrenceOverrides.createdByID', 'tblEventRSVPInvites.createdByID',
+            'tblEventRegistrations.reviewedByID', 'tblEventRegistrations.submittedByUserID', 'tblEvents.createdByID',
+            'tblEvents.moderatedByID', 'tblEvents.statusChangedByID', 'tblEvents.submittedByID',
+            'tblEvents.updatedByID', 'tblExpenseClaimApprovals.userID', 'tblExpenseClaimPayments.paidByID',
+            'tblExternalAudienceMembers.createdByID', 'tblExternalEventApprovals.decidedByID',
+            'tblExternalEventChoices.createdByID', 'tblExternalEventChoices.updatedByID',
+            'tblExternalFeedRules.createdByID', 'tblExternalFeedRules.updatedByID',
+            'tblExternalFeedRuns.triggeredByID', 'tblExternalFeeds.createdByID', 'tblExternalFeeds.updatedByID',
+            'tblForms.createdByID', 'tblGivingEntry.recordedByID', 'tblGivingStatementLog.createdByID',
+            'tblInvitation.acceptedByID', 'tblInvitation.createdByID', 'tblInvitation.revokedByID',
+            'tblKidCheckins.checkedInByID', 'tblKidCheckins.checkedOutByID', 'tblLeadershipAssignments.createdByID',
+            'tblLeadershipAssignments.updatedByID', 'tblLiveChatMessages.moderatedByID',
+            'tblLivePrompts.createdByID', 'tblMigrations.executedByID', 'tblNewsletter.createdByID',
+            'tblNewsletterRecipient.userID', 'tblNoticeboardPosters.createdByID',
+            'tblNoticeboardPosters.updatedByID', 'tblNoticeboardUploads.createdByID',
+            'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID', 'tblPathwayEnrolments.enrolledByID',
+            'tblPathwayProgress.markedByID', 'tblPathwayProgress.revokedByID', 'tblPathways.createdByID',
+            'tblPhoto.moderatedByID', 'tblPhoto.uploadedByUserID', 'tblPhotoAlbum.createdByID',
+            'tblPledgeCampaigns.createdByID', 'tblPrayerRequests.moderatorID', 'tblProject.createdByID',
+            'tblProjectUpdate.postedByID', 'tblPublicHosts.approvedByID', 'tblReadingPlan.createdByID',
+            'tblRecording.presenterID', 'tblRecording.uploadedByID', 'tblRecordingPlay.userID',
+            'tblReportDefinitions.updatedByID', 'tblResourceBooking.approvedByID', 'tblRotaSlot.createdByID',
+            'tblServicePlan.preparedByID', 'tblServicePlanMessages.createdByID', 'tblServicePlanState.updatedByID',
+            'tblServicePlans.createdByID', 'tblSmallGroupMeetingAttendance.markedByID',
+            'tblSmallGroupMeetings.recordedByID', 'tblSmallGroupMembers.addedByID',
+            'tblSmallGroupPlaces.placeEnteredByID', 'tblSmallGroups.createdByID', 'tblSmallGroups.placeEnteredByID',
+            'tblSmsMessage.recipientUserID', 'tblSongs.createdByID', 'tblUserDepts.addedByID',
+            'tblUserGroups.addedByID', 'tblUserRoles.grantedByID', 'tblVenueAgreementFiles.uploadedByID',
+            'tblVenueAgreements.createdByID', 'tblVenueBookingGroups.createdByID', 'tblVenueBookings.createdByID',
+            'tblVenueBookings.updatedByID', 'tblVenueImportBatches.createdByID',
+            'tblVenueInvoicePayments.recordedByID', 'tblVenueInvoices.createdByID',
+            'tblVenueUsageTypeWindows.createdByID', 'tblVenues.createdByID', 'tblVisitor.createdByID',
+            'tblVisitorContact.contactedByID', 'tblWebhooks.createdByID', 'tblWorkflowActions.actedByID',
+            'tblWorkflowInstances.startedByID', 'tblZoomMeeting.createdByID',
         ],
 
         // 🔑 Moved only because the person has just proved BOTH accounts, and
@@ -343,7 +358,8 @@ final class AccountMerge
         // ⚠️ TRUE SINCE D-199, and only since: round 2 of this package moved
         //    these rows while this sentence said they were never rewritten.
         self::KEEP => ['History, left exactly as it is',
-            'The record of who did what and when keeps the account number it was made under and is never rewritten. '
+            'The record of who made, changed, approved, decided, recorded or was sent something, and when, keeps the '
+            . 'account number it was made under and is never rewritten. '
             . 'A new entry records that those earlier actions are now the account that stays. If the person later asks '
             . 'for their details to be erased, these are erased with them.'],
         self::SIGN_IN_IF_TICKED => ['Microsoft or Google sign-ins and passkeys',
@@ -420,6 +436,7 @@ final class AccountMerge
     public const R_SIGN_IN_CHANGED      = 'sign_in_changed';
     public const R_CHANGED_DURING       = 'changed_during';
     public const R_TOO_SOON             = 'too_soon';
+    public const R_MERGED_AWAY          = 'merged_away';
 
     /**
      * What the PERSON reads when their agreement is refused — their own words,
@@ -475,6 +492,8 @@ final class AccountMerge
         self::R_ADMINISTRATOR => 'One of those accounts is an organisation administrator\'s. Remove its administrator '
             . 'access first, then merge it.',
         self::R_CLOSED => 'One of those accounts is switched off. Switch it back on first if it really is a duplicate.',
+        self::R_MERGED_AWAY => 'One of those accounts was already merged into another account, and nothing is left on it '
+            . 'to merge. Use the account it was merged into instead.',
         self::R_REFUSE_IF_ANY => 'One of those accounts has an open erasure request, an offboarding that has not been '
             . 'undone, records a restore is still holding back, or is a made-up person created by Demo Data. Deal with '
             . 'that first; a merge must not hide it.',
@@ -620,6 +639,11 @@ final class AccountMerge
         foreach ([$kept, $dup] as $id) {
             if ($accounts[$id]['guard'] === AccountGuard::ERASED) {
                 return self::R_ERASED;
+            }
+            // Round 5: AccountGuard's row 3b. Never "switch it back on" —
+            // a merged-away account can never be switched back on.
+            if ($accounts[$id]['guard'] === AccountGuard::MERGED) {
+                return self::R_MERGED_AWAY;
             }
         }
         foreach ([$kept, $dup] as $id) {
@@ -1287,7 +1311,13 @@ final class AccountMerge
             //    erasure of the kept account can find mail sent to it (the send
             //    log, waiting mail) after closeDuplicate() has replaced it. That
             //    erasure empties it (GdprEraser::eraseMergeRecords()).
-            $formerEmail = (string) (self::one($db, 'SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = ?', $dupId)['emailAddress'] ?? '');
+            //    Round 5: with it, the address the duplicate held BEFORE somebody
+            //    else changed it (D-200's `emailBeforeChangeByOther`), which the
+            //    start notice was sent to, for the same reason; closeDuplicate()
+            //    then empties it from the account row.
+            $dupNow      = self::one($db, 'SELECT `emailAddress`, `emailBeforeChangeByOther` FROM `tblUsers` WHERE `userID` = ?', $dupId);
+            $formerEmail = (string) ($dupNow['emailAddress'] ?? '');
+            $formerEarly = (string) ($dupNow['emailBeforeChangeByOther'] ?? '');
             try {
                 $photos = self::applyMerge($db, $keptId, $dupId, $moveSignIns);
             } catch (MergeRefused $refused) {
@@ -1295,8 +1325,8 @@ final class AccountMerge
 
                 return ['outcome' => $refused->code(), 'token' => ''];
             }
-            self::run($db, 'UPDATE `tblAccountMergeSide` SET `formerEmail` = ? WHERE `requestID` = ? AND `userID` = ?',
-                $formerEmail, $requestId, $dupId);
+            self::run($db, "UPDATE `tblAccountMergeSide` SET `formerEmail` = ?, `formerEarlierEmail` = NULLIF(?, '') "
+                . 'WHERE `requestID` = ? AND `userID` = ?', $formerEmail, $formerEarly, $requestId, $dupId);
             self::run($db, 'UPDATE `tblAccountMergeSide` SET `confirmedAtUtc` = UTC_TIMESTAMP() WHERE `requestID` = ? AND `userID` = ?',
                 $requestId, $actingUserId);
             self::run($db, "UPDATE `tblAccountMergeRequest` SET `status` = 'completed', `finishedAtUtc` = UTC_TIMESTAMP(), "
@@ -1574,7 +1604,7 @@ final class AccountMerge
             . "`emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid'), `phoneNumber` = NULL, `avatarPath` = NULL, "
             . '`notifyPrefs` = NULL, `totpSecret` = NULL, `totpEnabled` = 0, `calendarToken` = NULL, `displayBio` = NULL, '
             . '`displayPhoto` = NULL, `displayPhone` = NULL, `displayAddress` = NULL, `latitude` = NULL, `longitude` = NULL, '
-            . '`what3words` = NULL, `locale` = NULL WHERE `userID` = ?',
+            . '`what3words` = NULL, `locale` = NULL, `emailBeforeChangeByOther` = NULL WHERE `userID` = ?',
             $dupId
         );
         Auth::endOtherSessionsOf($db, $dupId);
@@ -1623,10 +1653,79 @@ final class AccountMerge
     }
 
     /**
-     * As `mergedInto()`, with the address each duplicate held when it was
-     * merged (`tblAccountMergeSide.formerEmail`, '' once an erasure emptied it).
+     * 🔒 THE ONE DEFINITION of a merged-away account (round 5 of #1064): the
+     * DUPLICATE side of a COMPLETED merge. Read from the merge's own record,
+     * never from the account row, so nothing done to the row (a name typed
+     * in, a tick on Active) can make it stop being one. `AccountGuard` asks
+     * it in `facts()`, so every page that changes an account refuses a
+     * merged-away one exactly as it refuses an erased one; and the readers
+     * that follow a merge ask `stillClosedSql()` below as well, defensively.
+     * Fixed text from code; `$alias` is a table alias written in code.
+     */
+    public static function mergedAwaySql(string $alias): string
+    {
+        return '(EXISTS (SELECT 1 FROM `tblAccountMergeSide` `mas` JOIN `tblAccountMergeRequest` `mar` '
+            . 'ON `mar`.`requestID` = `mas`.`requestID` WHERE `mas`.`userID` = ' . $alias . '.`userID` '
+            . "AND `mas`.`side` = 'duplicate' AND `mar`.`status` = 'completed'))";
+    }
+
+    /**
+     * The account a merged-away account's records now belong to, following a
+     * chain of merges forward (D into K, then K into L, answers L); null when
+     * the account was never merged away. Asked before an erasure files or runs
+     * a request naming an account (#1064 round 5).
+     */
+    public static function survivorOf(mysqli $db, int $userId): ?int
+    {
+        $seen    = [$userId => true];
+        $current = $userId;
+        while (true) {
+            $row = self::one(
+                $db,
+                'SELECT k.`userID` AS `kept` FROM `tblAccountMergeRequest` r '
+                . "JOIN `tblAccountMergeSide` d ON d.`requestID` = r.`requestID` AND d.`side` = 'duplicate' "
+                . "JOIN `tblAccountMergeSide` k ON k.`requestID` = r.`requestID` AND k.`side` = 'kept' "
+                . "WHERE r.`status` = 'completed' AND d.`userID` = ? ORDER BY r.`requestID` DESC LIMIT 1",
+                $current
+            );
+            $kept = $row === null ? 0 : (int) $row['kept'];
+            if ($kept <= 0 || isset($seen[$kept]) === true) {
+                return $current === $userId ? null : $current;
+            }
+            $seen[$kept] = true;
+            $current     = $kept;
+        }
+    }
+
+    /**
+     * Is a merged-away account still exactly as the merge closed it — switched
+     * off, under its made-up address? The readers that FOLLOW a merge (an
+     * erasure, "what we hold about you", the data copy) follow only such an
+     * account. Nothing can reopen one (`AccountGuard` refuses every change),
+     * so this is a second line: if one were ever found open, it may be
+     * somebody else's account now, and following it would hand that person's
+     * records to the survivor, or erase them.
+     */
+    public static function stillClosedSql(string $alias): string
+    {
+        return '(' . $alias . '.`isActive` = 0 AND ' . $alias . ".`emailAddress` = CONCAT('merged-', " . $alias
+            . ".`userID`, '@merged.invalid'))";
+    }
+
+    /**
+     * As `mergedInto()`, with the addresses recorded for each duplicate when
+     * it was merged: the one it held then (`formerEmail`) and the one it held
+     * before somebody else changed it (`formerEarlierEmail`, D-200), each left
+     * out once an erasure has emptied it. Mail was sent to both, so an erasure
+     * searches the send log and the mail queue by both.
      *
-     * @return array<int, string> duplicate number => former address
+     * Follows ONLY a duplicate that is still exactly as the merge closed it
+     * (`stillClosedSql()`): nothing can reopen one (`AccountGuard` refuses every
+     * change), but if one were ever found open it may be somebody else's
+     * account now, and following it would hand their records to the survivor,
+     * or erase them (round 5 of #1064).
+     *
+     * @return array<int, list<string>> duplicate number => recorded addresses
      */
     public static function mergedIntoWithAddresses(mysqli $db, int $survivor): array
     {
@@ -1636,16 +1735,21 @@ final class AccountMerge
             $next = array_shift($todo);
             foreach (self::all(
                 $db,
-                "SELECT d.`userID` AS `dup`, d.`formerEmail` AS `email` FROM `tblAccountMergeRequest` r "
+                "SELECT d.`userID` AS `dup`, d.`formerEmail` AS `email`, d.`formerEarlierEmail` AS `earlier` "
+                . 'FROM `tblAccountMergeRequest` r '
                 . "JOIN `tblAccountMergeSide` k ON k.`requestID` = r.`requestID` AND k.`side` = 'kept' "
                 . "JOIN `tblAccountMergeSide` d ON d.`requestID` = r.`requestID` AND d.`side` = 'duplicate' "
-                . "WHERE r.`status` = 'completed' AND k.`userID` = ?",
+                . 'JOIN `tblUsers` u ON u.`userID` = d.`userID` '
+                . "WHERE r.`status` = 'completed' AND k.`userID` = ? AND " . self::stillClosedSql('u'),
                 $next
             ) as $row) {
                 $dup = (int) $row['dup'];
                 if ($dup !== $survivor && isset($found[$dup]) === false) {
-                    $found[$dup] = (string) ($row['email'] ?? '');
-                    $todo[]      = $dup;
+                    $found[$dup] = array_values(array_unique(array_filter(
+                        [(string) ($row['email'] ?? ''), (string) ($row['earlier'] ?? '')],
+                        static fn (string $a): bool => $a !== ''
+                    )));
+                    $todo[] = $dup;
                 }
             }
         }

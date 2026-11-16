@@ -67,7 +67,9 @@ $canOffboard     = ($offboardVerdict === AccountGuard::ALLOW);
 //    sentence whatever the reason, which would tell a GLOBAL administrator
 //    looking at an erased account to ask a global administrator. It now
 //    names the real reason for that one case.
-$offboardWhyNot  = ($offboardVerdict === AccountGuard::ERASED) ? AccountGuard::ERASED : AccountGuard::GLOBAL_ONLY;
+//    #1064 round 5: a merged-away account likewise, with its own words.
+$offboardWhyNot  = ($offboardVerdict === AccountGuard::ERASED || $offboardVerdict === AccountGuard::MERGED)
+    ? $offboardVerdict : AccountGuard::GLOBAL_ONLY;
 
 $pageTitle   = 'Offboard ' . $u['fullName'];
 $pageSection = 'offboarding';

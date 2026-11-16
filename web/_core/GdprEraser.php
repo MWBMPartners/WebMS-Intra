@@ -2218,6 +2218,33 @@ class GdprEraser
         //       line does not already imply: `closeRequest()` asks the same
         //       question again inside the transaction that closes the request,
         //       so a CLOSED request cannot have an undecided line.
+        // 🔀 #1064 round 5: a request naming an account that was MERGED AWAY.
+        //    Its records now belong to the account it was merged into, and an
+        //    erasure of that account follows the merge; an erasure of this
+        //    number alone would reach only its kept history and leave the
+        //    person's live records behind, reported as done. No page can file
+        //    one (the person cannot sign in to it, and offboarding refuses it
+        //    through AccountGuard), so only a row written by hand reaches
+        //    here. Refused before anything changes, with the number to use.
+        try {
+            $mergedIntoAccount = AccountMerge::survivorOf($db, $userId);
+        } catch (\Throwable $e) {
+            throw self::stopped($db, $requestId, $e);
+        }
+        if ($mergedIntoAccount !== null) {
+            try {
+                self::asOneStep(
+                    $db,
+                    static fn (): string => self::refuseMergedAway($db, $requestId, $mergedIntoAccount)
+                );
+            } catch (\Throwable $e) {
+                throw self::stopped($db, $requestId, $e);
+            }
+            self::putBackToPendingReview($db, $requestId);
+
+            return ['changed' => false, 'steps' => 1, 'failed' => 1, 'handWorkOnly' => []];
+        }
+
         $notReviewedYet = ErasureReview::whyNotReadyToClose($db, $requestId, $userId);
         if ($notReviewedYet !== '') {
             try {
@@ -2269,6 +2296,19 @@ class GdprEraser
             //    address each held when it was merged is found by that address.
             //    Read ONCE, here, before anything changes.
             $mergedIn = AccountMerge::mergedIntoWithAddresses($db, $userId);
+            // 📧 Round 5: EVERY other address the merge machinery recorded for
+            //    this person, because mail was sent to each: this account's
+            //    address before somebody else changed it (D-200; the start notice
+            //    of any merge request went there, completed or not), and each
+            //    merged-in account's address at merge and before such a change.
+            //    The send log and the mail queue keep a recipient only as text,
+            //    so each is searched by each address.
+            $otherAddresses = [];
+            foreach (array_merge(self::earlierAddressOf($db, $userId), ...array_values($mergedIn)) as $address) {
+                if ($address !== '' && $address !== $erasedEmail && in_array($address, $otherAddresses, true) === false) {
+                    $otherAddresses[] = $address;
+                }
+            }
         } catch (\Throwable $e) {
             throw self::stopped($db, $requestId, $e);
         }
@@ -2330,11 +2370,9 @@ class GdprEraser
             //    placeholder, so its current address would find nothing), then
             //    that remembered address itself is emptied. Only when there is a
             //    merge to follow, so an ordinary erasure's steps are unchanged.
-            foreach ($mergedIn as $formerAddress) {
-                if ($formerAddress !== '') {
-                    $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $formerAddress));
-                    $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $formerAddress));
-                }
+            foreach ($otherAddresses as $formerAddress) {
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMailQueueMessages($requestId, $formerAddress));
+                $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseEmailLogRecipients($requestId, $formerAddress));
             }
             if ($mergedIn !== []) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMergeRecords($requestId, array_keys($mergedIn)));
@@ -2356,30 +2394,32 @@ class GdprEraser
             foreach (array_keys($mergedIn) as $mergedId) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseAuditTrailAboutPerson($requestId, $mergedId));
             }
+            // 🔀 #1064 round 5: ONE walk, each instruction run for this account
+            //    and then for every account merged into it before the NEXT
+            //    instruction. Two walks one after the other broke #709's guard:
+            //    the second walk's care-visit step matches through tblCareCase,
+            //    which the FIRST walk had already changed, so the guard rightly
+            //    refused it and the run failed. Interleaved, every look-up through
+            //    a parent table happens before any instruction for that table, on
+            //    both numbers, exactly as the pinned order means it to. The
+            //    account ROW is skipped for a merged-in number: the merge emptied
+            //    and closed it, and the erasure's made-up address is per request,
+            //    so a second account given it would break the address column's
+            //    unique key.
             foreach (self::catalogue() as $entry) {
                 $outcomes[] = self::asOneStep(
                     $db,
                     static fn (): string => self::processEntry($db, $requestId, $userId, $entry)
                 );
-                $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
-            }
-            // 🔀 #1064 (D-199): the same walk for every merged-in number, so the
-            //    history a merge left under it (activity, consent, plays, send
-            //    records, access logs) is reached. The account ROW itself is
-            //    skipped: the merge already emptied it and closed it, and the
-            //    erasure's made-up address is per request, so a second account
-            //    given it would break the address column's unique key.
-            foreach (array_keys($mergedIn) as $mergedId) {
-                foreach (self::catalogue() as $entry) {
-                    if ((string) $entry['table'] === 'tblUsers') {
-                        continue;
+                if ((string) $entry['table'] !== 'tblUsers') {
+                    foreach (array_keys($mergedIn) as $mergedId) {
+                        $outcomes[] = self::asOneStep(
+                            $db,
+                            static fn (): string => self::processEntry($db, $requestId, $mergedId, $entry)
+                        );
                     }
-                    $outcomes[] = self::asOneStep(
-                        $db,
-                        static fn (): string => self::processEntry($db, $requestId, $mergedId, $entry)
-                    );
-                    $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
                 }
+                $lastBeat = self::stillGoing($db, $requestId, $lastBeat);
             }
             // 🧾 Giving statements (#440 Q5): the rendered PDFs, then the
             //    address each was mailed to. Two steps, two audit lines.
@@ -2499,6 +2539,26 @@ class GdprEraser
      * It never quotes the text being judged: `$why` is composed in
      * `ErasureReview` out of table names, column names and counts.
      */
+    /**
+     * 🔀 The one line a run writes when its account was merged away (#1064
+     *    round 5). Account numbers only; nothing is changed.
+     */
+    private static function refuseMergedAway(\mysqli $db, int $requestId, int $survivor): string
+    {
+        self::logAudit(
+            $db,
+            $requestId,
+            'failed',
+            'tblAccountMergeSide',
+            null,
+            'refused before anything was changed: this account was merged into account #' . $survivor . ', which now '
+            . 'holds the person\'s records. Nothing was erased under this request. File the erasure request for account #'
+            . $survivor . ': its erasure reaches everything that was this account\'s as well.'
+        );
+
+        return self::STEP_FAILED;
+    }
+
     private static function refuseUntilReviewed(\mysqli $db, int $requestId, string $why): string
     {
         self::logAudit(
@@ -3284,6 +3344,14 @@ class GdprEraser
         $stmt->close();
         if ($user === null) {
             throw new \RuntimeException('there is no account #' . $userId . ' to file an erasure request for');
+        }
+        // 🔀 #1064 round 5: an account that was merged away holds none of the
+        //    person's live records any more; the account it was merged into
+        //    does, and an erasure of that one follows the merge.
+        $survivor = AccountMerge::survivorOf($db, $userId);
+        if ($survivor !== null) {
+            throw new \RuntimeException('account #' . $userId . ' was merged into account #' . $survivor
+                . ', which now holds the person\'s records; file the erasure request for account #' . $survivor);
         }
         $email = (string) $user['emailAddress'];
         $name  = (string) ($user['fullName'] ?? '');
@@ -8039,7 +8107,11 @@ class GdprEraser
         if ($scope === GivingRetention::SCOPE_ALL) {
             return true;
         }
-        $prefix = 'statement-' . $donorId . '-';
+        // 🔀 #1064 round 5: the number in the NAME may be an account merged
+        //    into this donor (statementFilesOf() finds those too); the period
+        //    follows whichever number it is. The records are still asked by
+        //    `$donorId`, where the merge moved them.
+        $prefix = preg_match('/^statement-(\d+)-/', $fileName, $own) === 1 ? 'statement-' . $own[1] . '-' : 'statement-' . $donorId . '-';
         $period = substr($fileName, strlen($prefix), -4);
         // The month and day are held to 00-12 and 00-31 (#891, #892): that is
         // every day the old statement pages could put in a name (they checked
@@ -8152,10 +8224,24 @@ class GdprEraser
         //    (`Pdf::sweepPartFiles()`) removes such files within a day anyway;
         //    this is what reaches one the MOMENT an erasure runs, which is the
         //    half with a privacy consequence.
-        $found = glob($base . DIRECTORY_SEPARATOR . ($siteId === null ? '*' : (string) $siteId) . DIRECTORY_SEPARATOR
-            . 'statement-' . $donorId . '-*.pdf*');
+        // 🔀 #1064 round 5: a merge MOVES the donor's gifts, kept-donor rows and
+        //    statement records to the kept account but cannot rename the PDFs,
+        //    which are named by the number they were made for. So the files of
+        //    every account merged into this one are this donor's files too: the
+        //    erasure judges them by THIS donor's records (where the gifts now
+        //    are) and the keep-until clearing removes them with this donor's.
+        //    Renaming them at merge time was rejected: a rename that fails half
+        //    way leaves files no rule can find, and following costs nothing.
+        $all = [];
+        foreach (array_merge([$donorId], AccountMerge::mergedInto(App::db(), $donorId)) as $number) {
+            $found = glob($base . DIRECTORY_SEPARATOR . ($siteId === null ? '*' : (string) $siteId) . DIRECTORY_SEPARATOR
+                . 'statement-' . (int) $number . '-*.pdf*');
+            if ($found !== false) {
+                $all = array_merge($all, $found);
+            }
+        }
 
-        return $found === false ? [] : $found;
+        return $all;
     }
 
     /**
@@ -8821,6 +8907,28 @@ class GdprEraser
      *
      * @param list<int> $mergedIds The merged-in account numbers.
      */
+    /**
+     * 📧 The address this account held before somebody else changed it
+     *    (`tblUsers.emailBeforeChangeByOther`, D-200), as a list of zero or one,
+     *    read BEFORE the walk empties it. A merge request's start notice is sent
+     *    there, so an erasure looks for that mail by it (#1064 round 5).
+     *
+     * @return list<string>
+     */
+    private static function earlierAddressOf(\mysqli $db, int $userId): array
+    {
+        $stmt = $db->prepare('SELECT `emailBeforeChangeByOther` AS `earlier` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $earlier = (string) ($stmt->get_result()->fetch_assoc()['earlier'] ?? '');
+        $stmt->close();
+
+        return $earlier === '' ? [] : [$earlier];
+    }
+
     private static function eraseMergeRecords(int $requestId, array $mergedIds): string
     {
         $db = App::db();
@@ -8831,14 +8939,27 @@ class GdprEraser
             return self::STEP_UNCHANGED;
         }
         try {
-            $stmt = $db->prepare('UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL WHERE `formerEmail` IS NOT NULL AND `userID` IN ('
-                . implode(', ', array_fill(0, count($ids), '?')) . ')');
+            $in   = implode(', ', array_fill(0, count($ids), '?'));
+            $stmt = $db->prepare('UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL, `formerEarlierEmail` = NULL '
+                . 'WHERE (`formerEmail` IS NOT NULL OR `formerEarlierEmail` IS NOT NULL) AND `userID` IN (' . $in . ')');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
             $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
             $stmt->execute();
             $emptied = (int) $stmt->affected_rows;
+            $stmt->close();
+            // Round 5: a merged-in account ROW is skipped by the walk (see
+            // execute()), so the earlier address on it is emptied here. The
+            // merge itself empties it now; this reaches one closed before that.
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `emailBeforeChangeByOther` = NULL '
+                . 'WHERE `emailBeforeChangeByOther` IS NOT NULL AND `userID` IN (' . $in . ')');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param(str_repeat('i', count($ids)), ...$ids);
+            $stmt->execute();
+            $emptied += (int) $stmt->affected_rows;
             $stmt->close();
         } catch (\Throwable $e) {
             // Never the fault's own words: they could quote the address.
@@ -8852,8 +8973,8 @@ class GdprEraser
 
             return self::STEP_UNCHANGED;
         }
-        self::logAudit($db, $requestId, 'anonymise', 'tblAccountMergeSide', (string) $emptied . ' row(s)', 'the address '
-            . $emptied . ' merged-in account(s) held when merged is emptied; which account was merged into which stays');
+        self::logAudit($db, $requestId, 'anonymise', 'tblAccountMergeSide', (string) $emptied . ' row(s)', 'the addresses '
+            . 'recorded for the merged-in account(s) are emptied (' . $emptied . ' row(s)); which account was merged into which stays');
 
         return self::STEP_CHANGED;
     }

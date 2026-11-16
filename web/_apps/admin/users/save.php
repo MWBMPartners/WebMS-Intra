@@ -327,8 +327,10 @@ if ($action === 'update') {
     //    would have let that one through. Steps 7 and 8 refuse an erased
     //    account too (row 3a of AccountGuard::decide()); this is the first
     //    of the two locks, not the only one.
-    if (AccountGuard::checkNotErased($userID, 'edit account #' . $userID) !== AccountGuard::ALLOW) {
-        $_SESSION['flash_msg']  = AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT);
+    $neverChanged = AccountGuard::checkNotErased($userID, 'edit account #' . $userID);
+    if ($neverChanged !== AccountGuard::ALLOW) {
+        // #1064 round 5: the verdict's own words (erased, or merged away).
+        $_SESSION['flash_msg']  = AccountGuard::message($neverChanged, AccountGuard::REACH_ACCOUNT);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/users'));
         exit();

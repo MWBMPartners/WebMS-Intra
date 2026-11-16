@@ -470,6 +470,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                           // button out is what leaves the form out. A PHP comment, not an
                           // HTML one, so the note is not sent to the browser. ?>
                     <span class="badge text-bg-light border" title="<?php echo htmlspecialchars(AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>">Erased on request, cannot be changed</span>
+                <?php elseif ($rowVerdict === AccountGuard::MERGED): ?>
+                    <?php // #1064 round 5: merged into another account (row 3b). ?>
+                    <span class="badge text-bg-light border" data-merged-away title="<?php echo htmlspecialchars(AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>">Merged into another account, cannot be changed</span>
                 <?php endif; ?>
                 <?php // A NOT_FOUND verdict here means the account changed between the
                       // list query and this render (e.g. it was offboarded a moment

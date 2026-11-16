@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
     `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
     `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
     `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied by that erasure (GdprEraser::eraseMergeRecords)',
+    `formerEarlierEmail` VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the address it held before somebody else changed it (tblUsers.emailBeforeChangeByOther, D-200), to which the start notice was sent. Kept for the same reason as formerEmail and emptied by the same erasure step; the account row''s own copy is emptied at merge',
     PRIMARY KEY (`sideID`),
     UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
     UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),
@@ -92,6 +93,102 @@ SET @sql := IF(@hasCol = 0,
     'ALTER TABLE `tblUsers` ADD COLUMN `emailBeforeChangeByOther` VARCHAR(255) DEFAULT NULL COMMENT ''The e-mail address this account held before somebody OTHER than it first changed it (admin users page); a merge start notice is sent here too (#1064, D-200). Emptied by an erasure'' AFTER `signInChangedByOtherAtUtc`',
     'SELECT 1'
 );
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 🗂️ Round 5: indexes for the account columns a merge reads with a LOCKING
+--    read. Without one, the read scans and locks the whole table until the
+--    merge commits, so an unrelated person saving an RSVP waited seconds
+--    (measured on a million rows). Each is added only when no index of that
+--    NAME exists yet, with information_schema and PREPARE, never a
+--    MariaDB-only IF NOT EXISTS.
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblEventRSVPs'
+      AND `INDEX_NAME`   = 'idx_rsvp_user'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblEventRSVPs` ADD KEY `idx_rsvp_user` (`userID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblEvents'
+      AND `INDEX_NAME`   = 'idx_event_moderated_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblEvents` ADD KEY `idx_event_moderated_by` (`moderatedByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblEvents'
+      AND `INDEX_NAME`   = 'idx_event_status_changed_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblEvents` ADD KEY `idx_event_status_changed_by` (`statusChangedByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblEvents'
+      AND `INDEX_NAME`   = 'idx_event_submitted_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblEvents` ADD KEY `idx_event_submitted_by` (`submittedByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblKidCheckins'
+      AND `INDEX_NAME`   = 'idx_kc_checked_in_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblKidCheckins` ADD KEY `idx_kc_checked_in_by` (`checkedInByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblKidCheckins'
+      AND `INDEX_NAME`   = 'idx_kc_checked_out_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblKidCheckins` ADD KEY `idx_kc_checked_out_by` (`checkedOutByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblExpenseClaimPayments'
+      AND `INDEX_NAME`   = 'idx_payments_paid_by'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblExpenseClaimPayments` ADD KEY `idx_payments_paid_by` (`paidByID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblWorkflowSteps'
+      AND `INDEX_NAME`   = 'idx_wfstep_assignee'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblWorkflowSteps` ADD KEY `idx_wfstep_assignee` (`assigneeType`, `assigneeValue`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblExternalAudienceMembers'
+      AND `INDEX_NAME`   = 'idx_extaud_kind_ref'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblExternalAudienceMembers` ADD KEY `idx_extaud_kind_ref` (`kind`, `refID`)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @hasIdx := (
+    SELECT COUNT(*) FROM `information_schema`.`STATISTICS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblErasureRequest'
+      AND `INDEX_NAME`   = 'idx_er_user'
+);
+SET @sql := IF(@hasIdx = 0, 'ALTER TABLE `tblErasureRequest` ADD KEY `idx_er_user` (`userID`)', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
