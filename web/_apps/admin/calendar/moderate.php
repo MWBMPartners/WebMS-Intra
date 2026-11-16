@@ -55,6 +55,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventCancelReason;
 use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
 use Portal\Core\Site;
@@ -78,7 +79,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 $eventId = (int) ($_POST['eventID'] ?? 0);
-$action  = (string) ($_POST['action'] ?? '');
+$action  = is_string($_POST['action'] ?? null) === true ? (string) $_POST['action'] : ''; // an array is no action, and is never cast
 $modId   = (int) ($_SESSION['user_id'] ?? 0);
 $siteId  = Site::id();
 
@@ -94,7 +95,12 @@ if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
 //    whether a confirmation is needed, and the check and the write are one
 //    statement, so nothing can change in between. The box only ever ANSWERS
 //    that question; posting it for an ordinary suggestion changes nothing.
-$confirmed = (string) ($_POST[EventSuggestions::CONFIRM_CANCELLED_FIELD] ?? '') === '1' ? 1 : 0;
+//    A request chooses the TYPE of what it sends as well as the value, so
+//    `confirmCancelledEarlier[]=1` arrives as an array: it is not a "1", it
+//    is not confirmed, and it is never cast to a string (that logged a PHP
+//    warning and an error row — round 2 of the check).
+$confirmRaw = $_POST[EventSuggestions::CONFIRM_CANCELLED_FIELD] ?? null;
+$confirmed  = (is_string($confirmRaw) === true && $confirmRaw === '1') ? 1 : 0;
 
 if ($action === 'approve') {
     $stmt = $mysqli->prepare(
@@ -128,6 +134,23 @@ if ($stmt !== false) {
 
     if ($affected > 0) {
         Logger::activity('EventModerated', 'Event #' . $eventId . ' action=' . $action);
+
+        // ✍️ THE REASON FOLLOWS THE STATUS (#998, round 2 of #1081's check).
+        //    An approval publishes; a rejection makes a draft. Neither carries
+        //    a cancellation reason, but a suggestion cancelled or postponed
+        //    before #965 still held one, so an approved event showed members
+        //    a visitor-era reason the next time it was cancelled (a bulk cancel
+        //    with the reason box empty keeps "each reason as it is"). The
+        //    reason's ONE writer decides from the status the row now holds and
+        //    empties it. After the decision is stored and before the e-mail,
+        //    in its own try: a fault here must never undo the decision or
+        //    stop the e-mail, so it is recorded (numbers only) and passed by.
+        try {
+            EventCancelReason::write($mysqli, $siteId, [$eventId], false, null);
+        } catch (\Throwable $e) {
+            Logger::errorPlatform('Calendar', 'Warning', 'MODERATE_REASON_NOT_CLEARED',
+                'a decided suggestion\'s old cancellation reason could not be emptied', 'eventID=' . $eventId);
+        }
 
         // ✉️ D-134: tell the person who suggested it, ONLY here, inside "this
         //    request changed the row", which is what makes it once only. The

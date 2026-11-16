@@ -403,15 +403,32 @@ final class EventSuggestions
      */
     public static function cancelledEarlierSql(string $alias): string
     {
-        $on = $alias === '' ? '' : '`' . str_replace('`', '', $alias) . '`.';
+        $on    = $alias === '' ? '' : '`' . str_replace('`', '', $alias) . '`.';
+        // The statuses are this class's own constants, never anything posted,
+        // so writing them into the statement as quoted words is safe.
+        $words = implode(', ', array_map(static fn (string $s): string => "'" . $s . "'", self::WARN_IF_EVER_STATUSES));
 
-        return '(' . $on . "`status` = 'cancelled' OR " . $on . '`cancelledWhileWaiting` = 1)';
+        return '(' . $on . '`status` IN (' . $words . ') OR ' . $on . '`cancelledWhileWaiting` = 1)';
     }
+
+    /**
+     * 🚦 THE ONE LIST of statuses which, held by a waiting suggestion at any
+     * point, mean approving it needs the warning and the box (D-197: cancelled).
+     * The SQL rule, the PHP rule and `HiddenSeriesDates::restore()`'s mark all
+     * read it. Whether POSTPONED belongs here is a question put to the owner;
+     * adding it here is the one-line part of that change, and the column's
+     * name, the words and an extra migration to mark today's postponed rows
+     * would follow (see the #1081 report).
+     *
+     * @var list<string>
+     */
+    public const WARN_IF_EVER_STATUSES = ['cancelled'];
 
     /** The PHP spelling of `cancelledEarlierSql()`, for a row already read. */
     public static function wasCancelledEarlier(array $event): bool
     {
-        return (string) ($event['status'] ?? '') === 'cancelled' || (int) ($event['cancelledWhileWaiting'] ?? 0) === 1;
+        return in_array((string) ($event['status'] ?? ''), self::WARN_IF_EVER_STATUSES, true) === true
+            || (int) ($event['cancelledWhileWaiting'] ?? 0) === 1;
     }
 
     /**
@@ -424,14 +441,23 @@ final class EventSuggestions
     public const CONFIRM_CANCELLED_FIELD = 'confirmCancelledEarlier';
 
     /**
-     * The warning, the ONE place it is worded: beside Approve on the
-     * moderation page, and on the suggestion's own edit form.
+     * The warning beside Approve on the moderation page, the ONE place it is
+     * worded. (The edit form has neither the box nor the Approve button, so it
+     * has its own sentence below.)
      */
     public static function cancelledEarlierWarning(): string
     {
         return 'This suggestion was cancelled earlier, while it was waiting to be approved. Approving it publishes it: '
             . 'members will see it on the calendar as an event that is going ahead, and it will no longer show as cancelled. '
             . 'If that is what you want, tick the box to confirm before you press Approve.';
+    }
+
+    /** The same warning on the suggestion's own edit form, which says where it is approved. */
+    public static function cancelledEarlierEditFormWarning(): string
+    {
+        return 'This suggestion was cancelled earlier, while it was waiting to be approved. Approving it publishes it: '
+            . 'members will see it on the calendar as an event that is going ahead, and it will no longer show as cancelled. '
+            . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.';
     }
 
     /** The checkbox's label. */

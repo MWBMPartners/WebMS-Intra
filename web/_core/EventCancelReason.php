@@ -221,7 +221,11 @@ final class EventCancelReason
         // 🔢 What is about to be emptied, and what is about to take the
         //    reason, counted FIRST and under a lock, so the counts and the
         //    write describe the same rows. (The lock is real only inside the
-        //    caller's transaction — #697 — which is where every caller is.)
+        //    caller's transaction — #697. Every caller is inside one except
+        //    `admin/calendar/moderate.php`, whose decision is its own
+        //    statement: there the UPDATE below still decides correctly on its
+        //    own, from the status at that moment, and only these two COUNTS
+        //    could be out of step — which that page does not use.)
         //    `status IN (...)` is 1 or 0 in MySQL and MariaDB, so SUM counts.
         $count = $db->prepare(
             'SELECT '

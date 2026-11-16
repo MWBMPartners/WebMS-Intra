@@ -757,8 +757,11 @@ final class SmallGroups
             // This sentence BEGINS with a name. A group whose name could not
             // be read is called "a small group", which would start it in lower
             // case; only that placeholder is capitalised, never a real name
-            // (a group may be named "iGroup" on purpose).
-            if (str_starts_with($start, self::UNNAMED_GROUP) === true) {
+            // (a group may be named "iGroup" on purpose). The FIRST NAME is
+            // compared whole, never the start of the joined text: a group
+            // really named "a small group of friends" must stay as typed
+            // (round 2 of the check).
+            if ((array_values($outcome['noLeader'])[0] ?? '') === self::UNNAMED_GROUP) {
                 $start = 'A' . substr($start, 1);
             }
             $words .= ' ' . $start . ($one === true ? ' has' : ' have') . ' no other current leader to tell, '

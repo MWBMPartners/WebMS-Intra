@@ -507,10 +507,15 @@ final class HiddenSeriesDates
             //    row (the status becomes draft, the reason is emptied below),
             //    so it is recorded in `cancelledWhileWaiting` in this same
             //    statement. `GREATEST` only ever sets it: nothing clears it.
+            //    That matters for a suggestion ALREADY marked (by migration
+            //    300) and then set back to Draft before it was hidden: it is
+            //    a draft here, so `$markCancel` is 0, and `= ?` would wipe the
+            //    mark and let it be approved with no warning (round 2 of the
+            //    check; section B's B10 holds that case).
             $submission   = $row['submissionStatus'] === null ? null : (string) $row['submissionStatus'];
             $suggestion   = self::isWaitingSuggestion($submission);
             $newStatus    = self::statusOnReturn((string) $row['status'], $submission);
-            $markCancel   = ($suggestion === true && (string) $row['status'] === 'cancelled') ? 1 : 0;
+            $markCancel   = ($suggestion === true && in_array((string) $row['status'], EventSuggestions::WARN_IF_EVER_STATUSES, true) === true) ? 1 : 0;
             $write        = $db->prepare(
                 'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ?, '
                 . '`cancelledWhileWaiting` = GREATEST(`cancelledWhileWaiting`, ?) '
