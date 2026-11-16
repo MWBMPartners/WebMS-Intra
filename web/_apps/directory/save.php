@@ -92,7 +92,21 @@ if ($w3wRaw !== '') {
     }
 }
 
+// 🔒 #1064 round 8: the write and a re-check under the account row's lock, in
+//    ONE transaction. A merge closes the duplicate account and ends its
+//    sessions, but a save already on its way from the duplicate's own session
+//    would wait on the merge's lock and then write the person's address,
+//    position and telephone number back onto the closed account. Refused
+//    instead, with nothing written. (An erasure of the surviving account
+//    empties a merged-in account's personal details too, so a write that got
+//    past this some other way is still reached.)
+$mergedAway = false;
+$db->begin_transaction();
 try {
+    if (\Portal\Core\AccountMerge::mergedAwayUnderLock($db, $userId) === true) {
+        $mergedAway = true;
+        throw new \RuntimeException('merged away');
+    }
     $stmt = $db->prepare(
         'UPDATE tblUsers SET '
         . 'displayBio = ?, displayPhone = ?, displayAddress = ?, latitude = ?, longitude = ?, what3words = ?, '
@@ -115,8 +129,16 @@ try {
         $stmt->execute();
         $stmt->close();
     }
+    $db->commit();
 } catch (\Throwable $e) {
-    \Portal\Core\Logger::errorPlatform('Directory', 'Warning', 'SAVE', $e->getMessage(), '');
+    $db->rollback();
+    if ($mergedAway === true) {
+        $_SESSION['flash_msg']  = 'This account has been merged into another one, so nothing was saved here. '
+            . 'Sign in with the account it was merged into.';
+        $_SESSION['flash_type'] = 'danger';
+    } else {
+        \Portal\Core\Logger::errorPlatform('Directory', 'Warning', 'SAVE', $e->getMessage(), '');
+    }
 }
 
 header('Location: ' . Site::url('directory/my-settings'));

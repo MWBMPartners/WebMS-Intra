@@ -39,6 +39,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\GdprEraser;
 use Portal\Core\Roles;
 use Portal\Core\Router;
@@ -267,6 +268,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
            class="btn btn-outline-success" title="Export CSV">
             <i class="fa-solid fa-file-csv"></i>
         </a>
+        <?php // 🔀 #1064: drawn by the same question the merge page asks first, so nobody is shown a link to a refusal. ?>
+        <?php if (App::can(Capabilities::ACCOUNTS_MERGE) === true): ?>
+        <a href="<?php echo htmlspecialchars(Site::url('admin/users/merge'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary" title="Merge two accounts">
+            <i class="fa-solid fa-code-merge"></i>
+        </a>
+        <?php endif; ?>
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addUserModal">
             <i class="fa-solid fa-user-plus me-1"></i> Add User
         </button>
@@ -463,6 +470,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                           // button out is what leaves the form out. A PHP comment, not an
                           // HTML one, so the note is not sent to the browser. ?>
                     <span class="badge text-bg-light border" title="<?php echo htmlspecialchars(AccountGuard::message(AccountGuard::ERASED, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>">Erased on request, cannot be changed</span>
+                <?php elseif ($rowVerdict === AccountGuard::MERGED): ?>
+                    <?php // #1064 round 5: merged into another account (row 3b). ?>
+                    <span class="badge text-bg-light border" data-merged-away title="<?php echo htmlspecialchars(AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_ACCOUNT), ENT_QUOTES, 'UTF-8'); ?>">Merged into another account, cannot be changed</span>
                 <?php endif; ?>
                 <?php // A NOT_FOUND verdict here means the account changed between the
                       // list query and this render (e.g. it was offboarded a moment

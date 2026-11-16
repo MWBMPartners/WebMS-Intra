@@ -156,19 +156,39 @@ if ($existing !== null) {
 // 4. 💾 Update tblUsers
 // -----------------------------------------------------------------------------
 
-$updateStmt = $mysqli->prepare(
-    'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ? WHERE userID = ?'
-);
-
-if ($updateStmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'PROFILE_UPDATE_FAIL', $mysqli->error, '');
+// 📧 #1064 (D-200, round 6): the address being replaced joins the account's
+//    list of earlier addresses, by the ONE fragment the administrator's page
+//    uses too, so a merge's start notice reaches the address the person set
+//    for themselves as well as any somebody else set. FIRST in the SET list:
+//    MySQL applies a SET left to right, so `emailAddress` there is still the
+//    old address.
+// 🔒 #1064 round 7: in ONE transaction with a re-check under the account
+//    row's lock. A merge closes the duplicate and ends its sessions, but a save
+//    already on its way from the duplicate's own session would wait on the
+//    merge's lock and then write a real address over the closed account, after
+//    which nothing would follow the merge to it any more. Refused instead, with
+//    nothing written.
+$mysqli->begin_transaction();
+try {
+    if (\Portal\Core\AccountMerge::mergedAwayUnderLock($mysqli, (int) $userId) === true) {
+        $mysqli->rollback();
+        header('Location: ' . Site::url('account') . '?error=merged', true, 302);
+        exit();
+    }
+    $updateStmt = $mysqli->prepare(
+        'UPDATE tblUsers SET ' . \Portal\Core\AccountMerge::rememberReplacedAddressSql()
+        . 'fullName = ?, emailAddress = ?, phoneNumber = ? WHERE userID = ?'
+    );
+    $updateStmt->bind_param('ssssi', $emailAddress, $fullName, $emailAddress, $phoneNumber, $userId);
+    $updateStmt->execute();
+    $updateStmt->close();
+    $mysqli->commit();
+} catch (\Throwable $e) {
+    $mysqli->rollback();
+    Logger::errorPlatform('MySQL', 'Error', 'PROFILE_UPDATE_FAIL', 'the profile could not be saved', '');
     header('Location: ' . Site::url('account') . '?error=db', true, 302);
     exit();
 }
-
-$updateStmt->bind_param('sssi', $fullName, $emailAddress, $phoneNumber, $userId);
-$updateStmt->execute();
-$updateStmt->close();
 
 // -----------------------------------------------------------------------------
 // 5. 🔄 Update session variables and reset App user cache

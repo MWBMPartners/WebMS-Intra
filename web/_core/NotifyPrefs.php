@@ -274,66 +274,17 @@ final class NotifyPrefs
                 return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
             }
 
-            $read = $db->prepare('SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE');
-            if ($read === false) {
+            $written = self::writeLocked($db, $userId, $changes);
+            if ($written['outcome'] !== self::SAVED) {
                 $db->rollback();
-                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+                return $written;
             }
-            // ⚠️ EVERY ANSWER IS CHECKED, not only by relying on strict error
-            //    reporting. Under the portal's `MYSQLI_REPORT_STRICT |
-            //    MYSQLI_REPORT_ERROR` a refused statement throws and the catch
-            //    below answers FAILED; without it (a caller, a tool or a test
-            //    that did not set it), `execute()` answers false and carrying
-            //    on would read "no row" as NO_ACCOUNT, or report a write that
-            //    never happened as SAVED. The promise "never throws, answers
-            //    FAILED" must not depend on a setting made somewhere else.
-            $read->bind_param('i', $userId);
-            if ($read->execute() === false) {
-                $read->close();
-                $db->rollback();
-                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
-            }
-            $result = $read->get_result();
-            if ($result === false) {
-                $read->close();
-                $db->rollback();
-                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
-            }
-            $row = $result->fetch_assoc();
-            $read->close();
-            if ($row === null) {
-                $db->rollback();
-                return ['outcome' => self::NO_ACCOUNT, 'replacedUnreadable' => false];
-            }
-
-            [$stored, $replacedUnreadable] = self::decodeStored($row['notifyPrefs'] === null ? null : (string) $row['notifyPrefs']);
-            foreach ($changes as $key => $value) {
-                $stored->{$key} = $value;
-            }
-            $json = json_encode(
-                $stored,
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION
-            );
-
-            $write = $db->prepare('UPDATE `tblUsers` SET `notifyPrefs` = ? WHERE `userID` = ?');
-            if ($write === false) {
-                $db->rollback();
-                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
-            }
-            $write->bind_param('si', $json, $userId);
-            if ($write->execute() === false) {
-                $write->close();
-                $db->rollback();
-                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
-            }
-            $write->close();
-
             if ($db->commit() === false) {
                 $db->rollback();
                 return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
             }
 
-            return ['outcome' => self::SAVED, 'replacedUnreadable' => $replacedUnreadable];
+            return $written;
         } catch (\Throwable $e) {
             // Under the portal's strict reporting a refused statement THROWS
             // (a lock wait that ran out is ERROR 1205). Nothing is kept.
@@ -346,6 +297,100 @@ final class NotifyPrefs
             }
             return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
         }
+    }
+
+    /**
+     * 🔀 The account merge (#1064): write the STRICTER of two accounts' choices
+     *    onto the account that stays, inside the merge's OWN transaction.
+     *
+     * Strictest wins (D-058/D-073): for every settable choice the duplicate has
+     * switched OFF, the kept account's is switched off too; nothing is ever
+     * switched on. Only keys on `SETTABLE` are carried, so a stored key no page
+     * draws is never copied. An unreadable stored value on the duplicate means
+     * "nothing chosen" there, which is YES — the merge then changes nothing.
+     *
+     * ⚠️ It does NOT open a transaction, unlike `merge()`: in MySQL beginning a
+     *    transaction silently COMMITS the one already open, which would have
+     *    committed half a merge. The caller must already hold one; the write is
+     *    the same locked read-and-write `merge()` uses (`writeLocked()`), so this
+     *    class is still the one writer of the column. Throws on a database
+     *    fault, so the merge's own transaction rolls back.
+     */
+    public static function stricterInsideTransaction(\mysqli $db, int $keptUserId, ?string $duplicateRaw): void
+    {
+        // "Has the duplicate said no?" is asked of `WebPush::notifyPrefAllows()`,
+        // the ONE test of a notification choice, never worked out again here.
+        $changes = [];
+        foreach (self::SETTABLE as $key) {
+            if (WebPush::notifyPrefAllows($duplicateRaw, $key) === false) {
+                $changes[$key] = false;
+            }
+        }
+        if ($changes === []) {
+            return;
+        }
+        $written = self::writeLocked($db, $keptUserId, $changes);
+        if ($written['outcome'] !== self::SAVED) {
+            throw new \RuntimeException('NotifyPrefs: the kept account\'s choices could not be written');
+        }
+    }
+
+    /**
+     * The locked read-and-write itself, for a caller that holds a transaction.
+     * Answers SAVED, NO_ACCOUNT or FAILED and never commits or rolls back.
+     *
+     * @param array<string,bool> $changes
+     * @return array{outcome:string, replacedUnreadable:bool}
+     */
+    private static function writeLocked(\mysqli $db, int $userId, array $changes): array
+    {
+        // ⚠️ EVERY ANSWER IS CHECKED, not only by relying on strict error
+        //    reporting: without `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` (a
+        //    tool or test that did not set it) `execute()` answers false, and
+        //    carrying on would read "no row" as NO_ACCOUNT or report a write that
+        //    never happened as SAVED. With it, a refused statement THROWS and the
+        //    caller's catch rolls its transaction back.
+        $read = $db->prepare('SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE');
+        if ($read === false) {
+            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+        }
+        $read->bind_param('i', $userId);
+        if ($read->execute() === false) {
+            $read->close();
+            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+        }
+        $result = $read->get_result();
+        if ($result === false) {
+            $read->close();
+            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+        }
+        $row = $result->fetch_assoc();
+        $read->close();
+        if ($row === null) {
+            return ['outcome' => self::NO_ACCOUNT, 'replacedUnreadable' => false];
+        }
+
+        [$stored, $replacedUnreadable] = self::decodeStored($row['notifyPrefs'] === null ? null : (string) $row['notifyPrefs']);
+        foreach ($changes as $key => $value) {
+            $stored->{$key} = $value;
+        }
+        $json = json_encode(
+            $stored,
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION
+        );
+
+        $write = $db->prepare('UPDATE `tblUsers` SET `notifyPrefs` = ? WHERE `userID` = ?');
+        if ($write === false) {
+            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+        }
+        $write->bind_param('si', $json, $userId);
+        if ($write->execute() === false) {
+            $write->close();
+            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+        }
+        $write->close();
+
+        return ['outcome' => self::SAVED, 'replacedUnreadable' => $replacedUnreadable];
     }
 
     /**

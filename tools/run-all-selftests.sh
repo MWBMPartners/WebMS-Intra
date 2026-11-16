@@ -198,6 +198,7 @@ i18n-member-language|tools/i18n-member-language-selftest.php|-|
 i18n-member-language-http|tools/i18n-member-language-http-selftest.php|selftest_i18nhttp|
 notify-prefs|tools/notify-prefs-selftest.php|selftest_notifyprefs|
 rota-swaps|tools/rota-swaps-selftest.php|selftest_rotaswaps|
+account-merge|tools/account-merge-selftest.php|selftest_accountmerge|
 pdf-write|tools/pdf-write-selftest.php|-|
 asset-identifier|tools/asset-identifier-selftest.php|-|
 event-recurrence|tools/event-recurrence-selftest.php|-|

@@ -258,7 +258,16 @@ if ($thisOrgChange === true) {
 // 💾 Transaction: tblUsers (role/active) + tblUserSites (site-membership)
 // -----------------------------------------------------------------------------
 App::beginTransaction();
+$mergedAway = false;
 try {
+    // 🔒 #1064 round 8: AccountGuard above refuses a merged-away account, but
+    //    a request that passed it just before a merge committed would wait on
+    //    the merge's lock and then write over (or switch back on) the closed
+    //    account. Asked again here, under the account row's lock.
+    if (\Portal\Core\AccountMerge::mergedAwayUnderLock($db, $userId) === true) {
+        $mergedAway = true;
+        throw new \RuntimeException('merged away');
+    }
     if (count($userSet) > 0) {
         $userTypes   .= 'i';
         $userParams[] = $userId;
@@ -293,6 +302,9 @@ try {
     App::commit();
 } catch (\Throwable $ex) {
     App::rollback();
+    if ($mergedAway === true) {
+        ApiResponse::error(AccountGuard::message(AccountGuard::MERGED, AccountGuard::REACH_THIS_ORG), 403);
+    }
     Logger::errorPlatform('MySQL', 'Error', 'API_USER_UPDATE_FAIL', $ex->getMessage(), '');
     ApiResponse::error('Database error', 500);
 }

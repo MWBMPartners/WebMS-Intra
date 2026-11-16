@@ -507,6 +507,16 @@ class DbBackup
         //    through (see readWaitingHeldRows()). This entry is about the
         //    one-table button, where there is nothing to carry them past.
         'tblRestoreHeldRows' => 'It is the record of the rows a restore could not put back, kept so somebody can put them back or discard them deliberately. Putting an older copy back on its own throws away every row still waiting — and those rows are the only copy of themselves outside the snapshot you would be restoring from. It also offers rows that have already been returned, and brings back the copy of each one that was deliberately emptied when it went home, which for a sign-in code is a second copy of something somebody signs in with.',
+        // 🔀 Added for #1064 (round 6). The merge record is what says an account
+        //    was merged away: AccountGuard reads it to refuse every change to
+        //    such an account, and an erasure, "what we hold about you" and the
+        //    data copy read it to reach the records the merge left under the
+        //    old number. The request table is refused as well although the side
+        //    rows already point at it, so the rule does not rest on a foreign
+        //    key nobody is watching. A WHOLE restore is untouched: it puts the
+        //    merge records back together with the accounts they describe.
+        'tblAccountMergeSide'    => 'It is the record of which accounts were merged into which. Putting an older copy back on its own forgets every merge made since, so an account a merge closed could be switched back on and changed as if it were somebody new, and an erasure or a copy of somebody\'s data would stop reaching the records the merge left under its old number.',
+        'tblAccountMergeRequest' => 'It holds the merge requests the record of merges belongs to. Putting an older copy back on its own forgets the merges made since, with the same harm as putting back an older record of merges.',
     ];
 
     /**

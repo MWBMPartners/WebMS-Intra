@@ -296,6 +296,17 @@ final class Capabilities
     public const ATTENDANCE_REPORTS = 'attendance.reports';
 
     /**
+     * #1064 (D-185, D-190, D-191): who may START a merge of two accounts that
+     * belong to one person (the person completes it themselves, D-190). Asked on
+     * Admin → Users → Merge two accounts, its start and cancel handlers and the
+     * Users page that links to it; `AccountMerge::factsFor()` asks it again in
+     * EVERY organisation either account belongs to. Ships with
+     * `data_controller` and does NOT fall open for a global administrator: the
+     * owner's decision (D-191).
+     */
+    public const ACCOUNTS_MERGE = 'accounts.merge';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -1043,6 +1054,38 @@ final class Capabilities
                 . 'still record a new session.',
             'askedAt' => [
                 'web/_core/AttendanceAccess.php',
+            ],
+        ],
+
+        // 🔀 MERGING TWO ACCOUNTS (#1064, D-185). A merge moves every record
+        //    one account holds onto another, so whoever can do it can, by
+        //    choosing an account they control as the one that stays, come to
+        //    hold somebody else's records. That is why it ships with the role
+        //    answerable for personal data, and why it is the SECOND capability
+        //    that does not fall open for a global administrator.
+        self::ACCOUNTS_MERGE => [
+            'label' => 'Merge two accounts',
+            'opens' => 'Admin, Users, Merge two accounts: choosing two accounts that belong to one person, seeing '
+                . 'how many of each kind of record would move from the duplicate to the account that stays, and '
+                . 'asking the person to agree. Only counts are shown, never what the records say. The merge '
+                . 'happens only when the person signs in to both accounts and confirms. The permission is needed '
+                . 'in every organisation either account belongs to.',
+            'standard' => ['data_controller'],
+            // ⚠️ FALSE, AND IT DEPARTS FROM D-017's DEFAULT ON PURPOSE: the owner
+            //    decided it on 16 November 2026 (D-191). The installation's
+            //    administrator and an organisation's may be different parties, and
+            //    a merge exposes every record of both accounts, so — as with the
+            //    erasure review (#724) — the organisation must give it.
+            'globalAdminFallsOpen' => false,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'Nobody in this organisation will be able to open the merge page or see what a merge '
+                . 'would move. No record is changed by this. Any administrator can name a role here again on this page.',
+            'askedAt' => [
+                'web/_apps/admin/users/merge.php',
+                'web/_apps/admin/users/merge-start.php',
+                'web/_apps/admin/users/merge-cancel.php',
+                'web/_apps/admin/users/index.php',
+                'web/_core/AccountMerge.php',
             ],
         ],
     ];

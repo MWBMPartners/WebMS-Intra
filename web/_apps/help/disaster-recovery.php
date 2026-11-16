@@ -222,6 +222,15 @@ must-know shortcuts.</p>
             them is still waiting afterwards.) Putting back the one table they are kept in WOULD
             lose them, so the portal refuses to and says why. A backup taken since 27&nbsp;October&nbsp;2026 does not cause
             this loss in the first place.</li>
+        <?php // 🔀 #1064 (round 6): the merge record goes back only with the whole
+              //    database, because on its own an older copy forgets merges, and an
+              //    account a merge closed could then be reopened. The list of such
+              //    tables is DbBackup::WHOLE_DATABASE_ONLY; the Backup page prints it. ?>
+        <li><strong>Merged accounts go back only with the whole database</strong> &mdash; the
+            record of which accounts were merged into which cannot be put back on its own. An older
+            copy of it alone would forget the merges made since, and an account a merge closed could
+            then be switched back on as if it were somebody new. Putting the whole database back is
+            fine: the accounts and the record of their merges go back together.</li>
         <?php // 🌐 #801: the monthly translation limits count what was really spent, so a
               //    restore must not give an organisation its month's allowance back. ?>
         <li><strong>This month&rsquo;s translation figures are not wound back</strong> &mdash; the
