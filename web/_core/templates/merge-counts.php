@@ -77,3 +77,18 @@ foreach ($mergeGroups as $mergeTreatment => [$mergeHeading, $mergeNote]) {
     </div>
     <?php
 }
+// 📜 D-199's three costs, in EVERY preview, the person's and the organisation's
+//    (round 6 of #1064: until then only comments said them). One list of words,
+//    AccountMerge::HISTORY_COSTS, so the two previews cannot say different things.
+$mergeCosts = AccountMerge::HISTORY_COSTS;
+?>
+<div class="mt-4" data-merge-costs>
+    <h2 class="h5"><?php echo htmlspecialchars((string) array_shift($mergeCosts), ENT_QUOTES, 'UTF-8'); ?></h2>
+    <p class="small mb-2"><?php echo htmlspecialchars((string) array_shift($mergeCosts), ENT_QUOTES, 'UTF-8'); ?></p>
+    <ul class="small mb-0">
+        <?php foreach ($mergeCosts as $mergeCost): ?>
+            <li><?php echo htmlspecialchars((string) $mergeCost, ENT_QUOTES, 'UTF-8'); ?></li>
+        <?php endforeach; ?>
+    </ul>
+</div>
+<?php

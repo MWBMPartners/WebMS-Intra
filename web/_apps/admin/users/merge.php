@@ -126,7 +126,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="mb-2">
         Use this when one person has two accounts &mdash; for example when signing in with Microsoft or Google made
         a new, empty account for somebody who already had one. Choose the account that stays and the duplicate. This
-        page shows how many of each kind of record would move, and never what a record says.
+        page shows how many of each kind of record the duplicate holds and what a merge does with each &mdash; moves
+        it, or leaves the record of what was done under the old number &mdash; and never what a record says.
     </p>
     <p class="mb-0">
         <strong>You cannot merge the accounts yourself.</strong> You can ask the person to. They are e-mailed at both

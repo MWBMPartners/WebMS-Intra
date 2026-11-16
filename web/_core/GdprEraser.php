@@ -1364,7 +1364,7 @@ class GdprEraser
             //    answering after the erasure. `notifyPrefs` is the person's
             //    own choices about what they are sent.
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
-             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs','emailBeforeChangeByOther'],
+             'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs','earlierEmails'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0, 'isAdmin' => 0, 'isRootAdmin' => 0, 'totpEnabled' => 0],
              // 🗣️ #703, D-113: this is the sentence a member reads about their own
              //    account on My data and Request erasure (a hand-written entry is
@@ -2504,42 +2504,6 @@ class GdprEraser
     }
 
     /**
-     * 🔗 Run one step so that its change and its audit line are saved together.
-     *
-     * Without this, a step's change was saved the moment it was made and its
-     * audit line a moment later. If that second write failed, the run stopped
-     * with something erased and no record of it; and because the step had
-     * already been done, running the request again found nothing and wrote
-     * "nothing held". The trail then lacked a change that really happened,
-     * for ever. (The Demo Data step met the same hole first: #498, round 5.)
-     *
-     * One transaction PER STEP, never one for the whole run: see "THE POLICY"
-     * at the top of this file for why not.
-     *
-     * What this cannot do: bring back a deleted file. If the audit line for
-     * the giving-statement PDFs cannot be written, the files are already gone
-     * and the trail will not say so.
-     *
-     * @template T
-     * @param callable(): T $step
-     * @return T
-     *
-     * @throws \Throwable Whatever the step threw, after undoing its change.
-     */
-    /**
-     * 🧑‍⚖️ Write down that the run was refused because free text is waiting for
-     *    a person to decide about it (#724), and count as a failed step.
-     *
-     * The words matter as much as the refusal. Somebody reading this on the
-     * request's report has just pressed Execute and been told nothing happened,
-     * so the line says WHAT is waiting, WHO can deal with it, and WHERE — and,
-     * because the role may be held by nobody on a fresh installation, how a
-     * global administrator puts that right.
-     *
-     * It never quotes the text being judged: `$why` is composed in
-     * `ErasureReview` out of table names, column names and counts.
-     */
-    /**
      * 🔀 The one line a run writes when its account was merged away (#1064
      *    round 5). Account numbers only; nothing is changed.
      */
@@ -2559,6 +2523,19 @@ class GdprEraser
         return self::STEP_FAILED;
     }
 
+    /**
+     * 🧑‍⚖️ Write down that the run was refused because free text is waiting for
+     *    a person to decide about it (#724), and count as a failed step.
+     *
+     * The words matter as much as the refusal. Somebody reading this on the
+     * request's report has just pressed Execute and been told nothing happened,
+     * so the line says WHAT is waiting, WHO can deal with it, and WHERE — and,
+     * because the role may be held by nobody on a fresh installation, how a
+     * global administrator puts that right.
+     *
+     * It never quotes the text being judged: `$why` is composed in
+     * `ErasureReview` out of table names, column names and counts.
+     */
     private static function refuseUntilReviewed(\mysqli $db, int $requestId, string $why): string
     {
         self::logAudit(
@@ -2642,6 +2619,29 @@ class GdprEraser
         self::logAudit($db, $requestId, $action, $table, $recordKey, $details);
     }
 
+    /**
+     * 🔗 Run one step so that its change and its audit line are saved together.
+     *
+     * Without this, a step's change was saved the moment it was made and its
+     * audit line a moment later. If that second write failed, the run stopped
+     * with something erased and no record of it; and because the step had
+     * already been done, running the request again found nothing and wrote
+     * "nothing held". The trail then lacked a change that really happened,
+     * for ever. (The Demo Data step met the same hole first: #498, round 5.)
+     *
+     * One transaction PER STEP, never one for the whole run: see "THE POLICY"
+     * at the top of this file for why not.
+     *
+     * What this cannot do: bring back a deleted file. If the audit line for
+     * the giving-statement PDFs cannot be written, the files are already gone
+     * and the trail will not say so.
+     *
+     * @template T
+     * @param callable(): T $step
+     * @return T
+     *
+     * @throws \Throwable Whatever the step threw, after undoing its change.
+     */
     private static function asOneStep(\mysqli $db, callable $step): mixed
     {
         if ($db->begin_transaction() === false) {
@@ -2971,8 +2971,14 @@ class GdprEraser
             // Requests this person HANDLED as an administrator. Done before
             // the status update below, which writes the administrator of
             // THIS run onto this request.
-            $stmt = $db->prepare('UPDATE tblErasureRequest SET processedByID = NULL WHERE processedByID = ?');
-            $stmt->bind_param('i', $userId);
+            //    #1064 round 6: and requests handled under a number MERGED INTO
+            //    this one — the same person, whose handling D-199 kept under the
+            //    old number — exactly as for their own number. An ordinary
+            //    erasure cleared it; a merged one left it.
+            $handlerIds = array_values(array_unique(array_merge([$userId], AccountMerge::mergedInto($db, $userId))));
+            $stmt = $db->prepare('UPDATE tblErasureRequest SET processedByID = NULL WHERE processedByID IN ('
+                . implode(', ', array_fill(0, count($handlerIds), '?')) . ')');
+            $stmt->bind_param(str_repeat('i', count($handlerIds)), ...$handlerIds);
             $stmt->execute();
             $handled = (int) $stmt->affected_rows;
             $stmt->close();
@@ -8899,36 +8905,37 @@ class GdprEraser
     }
 
     /**
-     * 🔀 #1064 (D-199): empty the address each MERGED-IN account held when it
-     *    was merged (`tblAccountMergeSide.formerEmail`), once the send-log and
+     * 📧 Every address this account has held before its current one
+     *    (`tblUsers.earlierEmails`, D-200; round 6 of #1064), read BEFORE the
+     *    walk empties it. A merge request's start notice is sent to each, so an
+     *    erasure looks for that mail by each.
+     *
+     * @return list<string>
+     */
+    private static function earlierAddressOf(\mysqli $db, int $userId): array
+    {
+        $stmt = $db->prepare('SELECT `earlierEmails` AS `earlier` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $earlier = $stmt->get_result()->fetch_assoc()['earlier'] ?? null;
+        $stmt->close();
+
+        return AccountMerge::addressList($earlier);
+    }
+
+    /**
+     * 🔀 #1064 (D-199): empty the addresses recorded for each MERGED-IN account
+     *    (`tblAccountMergeSide.formerEmail` and `formerEarlierEmails`, and any
+     *    `earlierEmails` left on its account row), once the send-log and
      *    waiting-mail steps have searched by it. The side rows themselves stay:
      *    two account numbers and dates, which are how a retried erasure still
      *    finds what was merged into this account.
      *
      * @param list<int> $mergedIds The merged-in account numbers.
      */
-    /**
-     * 📧 The address this account held before somebody else changed it
-     *    (`tblUsers.emailBeforeChangeByOther`, D-200), as a list of zero or one,
-     *    read BEFORE the walk empties it. A merge request's start notice is sent
-     *    there, so an erasure looks for that mail by it (#1064 round 5).
-     *
-     * @return list<string>
-     */
-    private static function earlierAddressOf(\mysqli $db, int $userId): array
-    {
-        $stmt = $db->prepare('SELECT `emailBeforeChangeByOther` AS `earlier` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
-        if ($stmt === false) {
-            throw new \RuntimeException((string) $db->error);
-        }
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $earlier = (string) ($stmt->get_result()->fetch_assoc()['earlier'] ?? '');
-        $stmt->close();
-
-        return $earlier === '' ? [] : [$earlier];
-    }
-
     private static function eraseMergeRecords(int $requestId, array $mergedIds): string
     {
         $db = App::db();
@@ -8940,8 +8947,8 @@ class GdprEraser
         }
         try {
             $in   = implode(', ', array_fill(0, count($ids), '?'));
-            $stmt = $db->prepare('UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL, `formerEarlierEmail` = NULL '
-                . 'WHERE (`formerEmail` IS NOT NULL OR `formerEarlierEmail` IS NOT NULL) AND `userID` IN (' . $in . ')');
+            $stmt = $db->prepare('UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL, `formerEarlierEmails` = NULL '
+                . 'WHERE (`formerEmail` IS NOT NULL OR `formerEarlierEmails` IS NOT NULL) AND `userID` IN (' . $in . ')');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
@@ -8950,10 +8957,10 @@ class GdprEraser
             $emptied = (int) $stmt->affected_rows;
             $stmt->close();
             // Round 5: a merged-in account ROW is skipped by the walk (see
-            // execute()), so the earlier address on it is emptied here. The
-            // merge itself empties it now; this reaches one closed before that.
-            $stmt = $db->prepare('UPDATE `tblUsers` SET `emailBeforeChangeByOther` = NULL '
-                . 'WHERE `emailBeforeChangeByOther` IS NOT NULL AND `userID` IN (' . $in . ')');
+            // execute()), so the earlier addresses on it are emptied here. The
+            // merge itself empties them now; this reaches one closed before that.
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `earlierEmails` = NULL '
+                . 'WHERE `earlierEmails` IS NOT NULL AND `userID` IN (' . $in . ')');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }

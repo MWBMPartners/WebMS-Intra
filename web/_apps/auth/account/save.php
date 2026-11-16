@@ -156,8 +156,15 @@ if ($existing !== null) {
 // 4. 💾 Update tblUsers
 // -----------------------------------------------------------------------------
 
+// 📧 #1064 (D-200, round 6): the address being replaced joins the account's
+//    list of earlier addresses, by the ONE fragment the administrator's page
+//    uses too, so a merge's start notice reaches the address the person set
+//    for themselves as well as any somebody else set. FIRST in the SET list:
+//    MySQL applies a SET left to right, so `emailAddress` there is still the
+//    old address.
 $updateStmt = $mysqli->prepare(
-    'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ? WHERE userID = ?'
+    'UPDATE tblUsers SET ' . \Portal\Core\AccountMerge::rememberReplacedAddressSql()
+    . 'fullName = ?, emailAddress = ?, phoneNumber = ? WHERE userID = ?'
 );
 
 if ($updateStmt === false) {
@@ -166,7 +173,7 @@ if ($updateStmt === false) {
     exit();
 }
 
-$updateStmt->bind_param('sssi', $fullName, $emailAddress, $phoneNumber, $userId);
+$updateStmt->bind_param('ssssi', $emailAddress, $fullName, $emailAddress, $phoneNumber, $userId);
 $updateStmt->execute();
 $updateStmt->close();
 

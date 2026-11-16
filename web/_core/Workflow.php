@@ -1330,6 +1330,16 @@ class Workflow
             return;
         }
         $db = App::db();
+        // 🔀 #1064 round 6: who started a workflow is history and stays under
+        //    the number it was started with (D-199). If that account has since
+        //    been merged away it is closed, so the outcome goes to the account
+        //    it was merged into: the same person, who is still waiting to hear.
+        //    A failure to read the merge record sends nothing extra; the
+        //    switched-off account is then simply not found below, as before.
+        try {
+            $startedById = AccountMerge::survivorOf($db, $startedById) ?? $startedById;
+        } catch (Throwable $ignored) {
+        }
         $stmt = $db->prepare('SELECT emailAddress, notifyPrefs FROM tblUsers WHERE userID = ? AND isActive = 1 LIMIT 1');
         if ($stmt === false) {
             return;

@@ -235,12 +235,14 @@ check('A9 every word the pages use describes a column without its table name',
 //    derived from the list itself would agree with any list.
 $movedActorShaped = array_values(array_filter(M::BY_TREATMENT[M::MOVE],
     static fn (string $n): bool => preg_match('/By(?:User)?ID$/', explode('.', $n)[1]) === 1));
-$ownership = ['tblAttendanceSessions.createdByID', 'tblRecordingNote.createdByID', 'tblReportDefinitions.createdByID',
-    'tblResourceBooking.bookedByID', 'tblRotaSwapRequest.requestedByID', 'tblTasks.createdByID'];
+$ownership = ['tblAssetLoans.requestedByID', 'tblAttendanceSessions.createdByID', 'tblPhoto.uploadedByUserID',
+    'tblRecordingNote.createdByID', 'tblReportDefinitions.createdByID', 'tblResourceBooking.bookedByID',
+    'tblRotaSwapRequest.requestedByID', 'tblTasks.createdByID'];
+sort($ownership);
 sort($movedActorShaped);
 $namedByTheCheck = ['tblWorkflowActions.actedByID', 'tblExpenseClaimApprovals.userID', 'tblExternalEventApprovals.decidedByID',
     'tblAssetValueHistory.recordedByID', 'tblSmsMessage.recipientUserID'];
-check('A10 D-199 applied consistently: no "who did it" column moves except the six that mean ownership of a live record, '
+check('A10 D-199 applied consistently: no "who did it" column moves except the eight that mean ownership of a live record, '
     . 'and the five the check named stay as written',
     $movedActorShaped === $ownership && array_diff($namedByTheCheck, M::BY_TREATMENT[M::KEEP]) === [],
     json_encode(array_values(array_diff($movedActorShaped, $ownership))) . ' ' . json_encode(array_values(array_diff($namedByTheCheck, M::BY_TREATMENT[M::KEEP]))));
@@ -683,6 +685,13 @@ check('F5d ...and so is every history row: "who did it" still names the duplicat
     n($db, "SELECT COUNT(*) AS n FROM `tblAuditTrail` WHERE `userID` = {$fd}") >= 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` = {$fd}") >= 1);
 $record = q($db, "SELECT `activityDescription` AS d, `userID` AS u FROM `tblActivityLogs` WHERE `activityType` = 'AccountsMerged' ORDER BY `logID` DESC LIMIT 1");
+$movedRecord = (string) (q($db, "SELECT `activityDescription` AS d FROM `tblActivityLogs` WHERE `activityType` = 'AccountsMergedRecordsMoved' "
+    . "AND `userID` = {$fk} ORDER BY `logID` DESC LIMIT 1")[0]['d'] ?? '');
+check('F6b a second NEW entry names what MOVED, as fixed words and counts, never a kept history column (round 6: a move is logged, not silent)',
+    str_starts_with($movedRecord, 'Moved from account ' . $fd . ' to account ' . $fk . ' by merge request ')
+    && str_contains($movedRecord, M::describe('tblPhoto.uploadedByUserID') . ' (1)')
+    && str_contains($movedRecord, M::describe('tblAssetLoans.requestedByID') . ' (1)')
+    && str_contains($movedRecord, M::describe('tblActivityLogs.userID')) === false, $movedRecord);
 check('F6 a NEW entry says the earlier actions are now the kept account: two numbers and fixed words, under the kept account (D-199)',
     preg_match('/^The person on the earlier actions of account ' . $fd . ' is now account ' . $fk . ': the two accounts were merged \(request \d+, ways of signing in brought across\)$/', (string) ($record[0]['d'] ?? '')) === 1
     && (int) ($record[0]['u'] ?? 0) === $fk,
@@ -1079,8 +1088,8 @@ $db->query("INSERT INTO `tblAuditTrail` (`userID`, `action`, `tableName`, `recor
 //    goes there. Neither was reachable by any erasure before.
 $earlyDup  = 'early-dup-' . $tag . '@selftest.invalid';
 $earlyKept = 'early-kept-' . $tag . '@selftest.invalid';
-$db->query("UPDATE `tblUsers` SET `emailBeforeChangeByOther` = '{$earlyDup}' WHERE `userID` = {$ed}");
-$db->query("UPDATE `tblUsers` SET `emailBeforeChangeByOther` = '{$earlyKept}' WHERE `userID` = {$ek}");
+$db->query("UPDATE `tblUsers` SET `earlierEmails` = JSON_ARRAY('{$earlyDup}') WHERE `userID` = {$ed}");
+$db->query("UPDATE `tblUsers` SET `earlierEmails` = JSON_ARRAY('{$earlyKept}') WHERE `userID` = {$ek}");
 $db->query('SET FOREIGN_KEY_CHECKS = 0');
 foreach ([$earlyDup, $earlyKept] as $early) {
     $insert('tblEmailLog', ['toRecipients' => $early, 'errorDetail' => '', 'errorCode' => ''], $third);
@@ -1094,11 +1103,16 @@ $stmtDir = $photoRoot . $sep . '_uploads' . $sep . 'giving' . $sep . 'statements
 @mkdir($stmtDir, 0700, true);
 $dupStatement = $stmtDir . $sep . 'statement-' . $ed . '-2026-01-01_2026-12-31.pdf';
 file_put_contents($dupStatement, '%PDF-1.4 made up');
+// Round 6, finding 5: an erasure request the duplicate HANDLED as an
+// administrator (somebody else's, long completed). An ordinary erasure takes
+// the handler's number off it; a merged one left the duplicate's there.
+$db->query("INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `dueBy`, `status`, `processedByID`) "
+    . "VALUES ({$siteA}, {$third}, 'handled-{$tag}@selftest.invalid', '2027-01-01', 'completed', {$ed})");
 $heldBefore = array_sum(array_map(static fn (array $r): int => $r['table'] === 'tblActivityLogs' ? (int) $r['rows'] : 0, GdprEraser::inventory($ek)));
 check('I5 the merge completes', $merge($ek, $ed, false) === 'completed');
 check('I5c the merge empties the duplicate\'s earlier address from its account row, and keeps it on the merge record for an erasure to search by',
-    n($db, "SELECT `emailBeforeChangeByOther` IS NULL AS n FROM `tblUsers` WHERE `userID` = {$ed}") === 1
-    && n($db, "SELECT COUNT(*) AS n FROM `tblAccountMergeSide` WHERE `userID` = {$ed} AND `formerEarlierEmail` = '{$earlyDup}'") === 1);
+    n($db, "SELECT `earlierEmails` IS NULL AS n FROM `tblUsers` WHERE `userID` = {$ed}") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblAccountMergeSide` WHERE `userID` = {$ed} AND JSON_CONTAINS(`formerEarlierEmails`, JSON_QUOTE('{$earlyDup}'))") === 1);
 $heldAfter = array_sum(array_map(static fn (array $r): int => $r['table'] === 'tblActivityLogs' ? (int) $r['rows'] : 0, GdprEraser::inventory($ek)));
 // The EXACT sum, never "went up": the merge writes its own new entry under the
 // kept account, so "went up" passed with inventory() ignoring the merge
@@ -1141,6 +1155,9 @@ check('I9 a search of EVERY text column (' . count($textColumns) . ') finds none
     . 'nor the address either account held before somebody else changed it',
     $stillThere === [], implode(', ', $stillThere));
 check('I10 the duplicate\'s giving statement PDF is deleted by the erasure of the account it was merged into', is_file($dupStatement) === false);
+check('I10c ...and no erasure request still names the duplicate as the administrator who handled it (as for the person\'s own number)',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `processedByID` = {$ed}") === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `subjectEmail` = 'handled-{$tag}@selftest.invalid'") === 1);
 check('I10b ...and that first run of the erasure had no failed step', ($erasure['failed'] ?? -1) === 0, json_encode($erasure));
 
 // 🗂️ Round 5, finding 5: a care case in the merged person's history used to
@@ -1168,6 +1185,72 @@ foreach (['the kept account only' => [true, false], 'the duplicate only' => [fal
     check("I11 [care case on {$which}] the merge completes and the erasure's FIRST run finishes with no failed step",
         $cm === 'completed' && ($run['failed'] ?? -1) === 0, $cm . ' ' . json_encode($run));
 }
+
+// 🗒️ Round 6, finding 1: the erasure REVIEW follows the merge. Lines of free
+//    text kept under the duplicate's number (D-199) must be offered to the
+//    reviewer exactly as the same lines under the person's own number are, or
+//    the request closes over words nobody saw (#724). The same rows, one set
+//    for an ordinary person and one for a merged duplicate, must give the
+//    same review lines.
+$fillReview = static function (int $who) use ($db, $insert, $siteA, $tag): int {
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    $made = 0;
+    foreach (\Portal\Core\ErasureReview::markedColumns() as $table => $columns) {
+        foreach (array_keys($columns) as $column) {
+            if ($insert((string) $table, ['siteID' => $siteA, (string) $column => 'review words ' . $tag], $who) !== null) {
+                $made++;
+            }
+        }
+    }
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+
+    return $made;
+};
+$rp = $user('ReviewPlain'); $member($rp, $siteA);
+$madePlain = $fillReview($rp);
+$reqPlain  = (int) GdprEraser::fileRequest($siteA, $rp, true)['requestID'];
+$plain     = \Portal\Core\ErasureReview::itemsFor($db, $reqPlain, $rp)['counts']['total'];
+$rk = $user('ReviewKept'); $member($rk, $siteA);
+$rd = $user('ReviewDup');  $member($rd, $siteA);
+$madeDup = $fillReview($rd);
+$rm      = $merge($rk, $rd, false);
+$reqKept = (int) GdprEraser::fileRequest($siteA, $rk, true)['requestID'];
+$merged  = \Portal\Core\ErasureReview::itemsFor($db, $reqKept, $rk)['counts']['total'];
+check('I12 premise: the same review rows were written for an ordinary person and for a duplicate, and the merge completed',
+    $madePlain > 0 && $madePlain === $madeDup && $rm === 'completed', "{$madePlain} / {$madeDup} / {$rm}");
+check('I12b the erasure review offers the SAME number of lines for the merged person as for the ordinary one',
+    $plain > 0 && $merged === $plain, "ordinary {$plain}, merged {$merged}");
+check('I12c ...and the request cannot close until they are decided (both asks read the same count)',
+    \Portal\Core\ErasureReview::whyNotReadyToClose($db, $reqKept, $rk) !== '');
+
+// 🔗 Round 6, finding 7: a CHAIN of merges. A into B, then B into C. Filing for A
+//    is refused naming C; C's erasure reaches what was left under A and B.
+$ca = $user('ChainA'); $member($ca, $siteA);
+$cb = $user('ChainB'); $member($cb, $siteA);
+$cc = $user('ChainC'); $member($cc, $siteA);
+$db->query("INSERT INTO `tblActivityLogs` (`siteID`, `userID`, `activityType`, `activityDescription`) VALUES "
+    . "({$siteA}, {$ca}, 'Selftest', 'chain a'), ({$siteA}, {$cb}, 'Selftest', 'chain b')");
+$chain1 = $merge($cb, $ca, false);
+$chain2 = $merge($cc, $cb, false);
+check('I13 a chain of merges completes: A into B, then B into C', $chain1 === 'completed' && $chain2 === 'completed', "{$chain1} {$chain2}");
+check('I13b A\'s records now belong to C, two merges on, and B\'s too', M::survivorOf($db, $ca) === $cc && M::survivorOf($db, $cb) === $cc,
+    json_encode([M::survivorOf($db, $ca), M::survivorOf($db, $cb)]));
+$chainProblem = '';
+try {
+    GdprEraser::fileRequest($siteA, $ca, true);
+} catch (RuntimeException $e) {
+    $chainProblem = $e->getMessage();
+}
+check('I13c filing an erasure for A is refused, naming C, the end of the chain', str_contains($chainProblem, 'merged into account #' . $cc . ','), $chainProblem);
+$followedChain = M::mergedInto($db, $cc);
+sort($followedChain);
+$expectChain = [$ca, $cb];
+sort($expectChain);
+check('I13d C follows both A and B', $followedChain === $expectChain, json_encode($followedChain));
+$chainReq = (int) GdprEraser::fileRequest($siteA, $cc, true)['requestID'];
+$chainRun = GdprEraser::execute($chainReq, $cc, $adminA);
+check('I13e erasing C reaches the history left under A AND under B', ($chainRun['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` IN ({$ca}, {$cb})") === 0, json_encode($chainRun));
 
 // =============================================================================
 echo "E. The pages over HTTP\n";
@@ -1325,6 +1408,16 @@ foreach (['several organisations' => 'true', 'one organisation' => 'false'] as $
     check("E5 [{$mode}] ...counts the prayer request in plain words, never what it says",
         preg_match('#Prayer requests \(the person&\#039;s own\)</div>\s*<div[^>]*data-merge-rows>1</div>#', $page['body']) === 1
         && str_contains($page['body'], 'Secret subject ' . $tag) === false && str_contains($page['body'], 'tblPrayerRequests') === false);
+    $costsShown = static function (string $body): bool {
+        foreach (M::HISTORY_COSTS as $cost) {
+            if (str_contains($body, htmlspecialchars($cost, ENT_QUOTES, 'UTF-8')) === false) {
+                return false;
+            }
+        }
+
+        return str_contains($body, 'data-merge-costs');
+    };
+    check("E4b [{$mode}] ...and says what stays under the old number and the three things that follow from it (D-199)", $costsShown($page['body']) === true);
     check("E6 [{$mode}] ...offers to ASK the person, and no form that merges", str_contains($page['body'], 'data-merge-start')
         && preg_match('#<form[^>]*action="[^"]*account/merge/save"#', $page['body']) === 0);
     $refused = $http('GET', $mergeUrl($eKept, $eAdminT));
@@ -1443,6 +1536,9 @@ check('E22 ...and is offered the final step, with the tick and the typed number'
 check('E22b ...where, both sides proved, the merge\'s own counts are shown', count($revealed($final['body'])) === count($sensitive));
 check('E22f ...and the history heading says it is left exactly as written (true since D-199)',
     str_contains($final['body'], 'History, left exactly as it is') && str_contains($final['body'], 'is never rewritten'));
+check('E22g ...and the PERSON is shown the same three costs, and is told truthfully what moves (never "everything")',
+    $costsShown($final['body']) === true && str_contains($final['body'], 'is never rewritten; it is still counted')
+    && str_contains($final['body'], 'everything that belongs to account') === false);
 check('E22c ...and the number to type is NOT printed beside the box', str_contains($final['body'], 'type the number of the account that will be closed</label>'));
 check('E22d the Account page offers "Merge my accounts" while the request is open (finding 6)', str_contains($http('GET', '/account')['body'], 'data-merge-link'));
 // The made-up "sensitive" rows have done their job; they point at parent rows
@@ -1525,13 +1621,43 @@ check('E34 an administrator changing somebody else\'s e-mail address is recorded
     n($db, "SELECT `signInChangedByOtherAtUtc` IS NOT NULL AS n FROM `tblUsers` WHERE `userID` = {$ex}") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$ex} AND `emailAddress` = 'moved-{$tag}@selftest.invalid'") === 1);
 check('E34b ...and the address it held BEFORE is kept, for a merge notice (D-200)',
-    n($db, "SELECT `emailBeforeChangeByOther` = 'emailtarget-{$tag}@selftest.invalid' AS n FROM `tblUsers` WHERE `userID` = {$ex}") === 1);
+    n($db, "SELECT JSON_CONTAINS(`earlierEmails`, JSON_QUOTE('emailtarget-{$tag}@selftest.invalid')) AS n FROM `tblUsers` WHERE `userID` = {$ex}") === 1);
 // D-200: a merge's start notice goes to that earlier address too.
 $ex2 = $user('EmailPartner'); $member($ex2, $siteOne);
 $page = $http('GET', $mergeUrl($ex2, $ex));
 $http('POST', '/admin/users/merge/start', ['csrf_token' => $tokenOn($page['body']), 'keep' => (string) $ex2, 'duplicate' => (string) $ex]);
 check('E36 the start notice was sent to the address the account held before an administrator changed it',
     n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%emailtarget-{$tag}@selftest.invalid%'") >= 1);
+// 📧 ROUND 6, THE CHECK'S EXACT SEQUENCE: an administrator fixes a typo
+//    (a0 -> a1), the person moves to a mailbox of their own (a1 -> a2, on their
+//    own account page), then a hostile administrator replaces it (a2 ->
+//    attacker). The old single "address before the first change by somebody
+//    else" kept only a0, so the notice went to the attacker and a dead address
+//    and NEVER to a2, the one the person really uses.
+$sq = $user('SeqTarget'); $member($sq, $siteOne); $loginSq = $login($sq, 'SeqTarget');
+$a1 = 'seq-a1-' . $tag . '@selftest.invalid';
+$a2 = 'seq-a2-' . $tag . '@selftest.invalid';
+$at = 'seq-attacker-' . $tag . '@selftest.invalid';
+$adminChange = static function (string $to) use ($http, $tokenOn, $sq): void {
+    $http('POST', '/admin/users/save', ['csrf_token' => $tokenOn($http('GET', '/admin/users')['body']), 'action' => 'update',
+        'userID' => (string) $sq, 'fullName' => 'Merge SeqTarget', 'emailAddress' => $to, 'phoneNumber' => '', 'isActive' => '1']);
+};
+$signIn($loginDc);
+$adminChange($a1);
+$signIn($loginSq);
+$http('POST', '/account/save', ['csrf_token' => $tokenOn($http('GET', '/account')['body']), 'action' => 'update_profile',
+    'fullName' => 'Merge SeqTarget', 'emailAddress' => $a2, 'phoneNumber' => '']);
+$selfChanged = n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$sq} AND `emailAddress` = '{$a2}'") === 1;
+$signIn($loginDc);
+$adminChange($at);
+$sqPartner = $user('SeqPartner'); $member($sqPartner, $siteOne);
+$page = $http('GET', $mergeUrl($sqPartner, $sq));
+$http('POST', '/admin/users/merge/start', ['csrf_token' => $tokenOn($page['body']), 'keep' => (string) $sqPartner, 'duplicate' => (string) $sq]);
+$told = static fn (string $address): bool => n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$address}%'") >= 1;
+check('E36b premise: each step of the sequence really happened (the person changed it themselves, then the attacker\'s address is current)',
+    $selfChanged === true && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$sq} AND `emailAddress` = '{$at}'") === 1);
+check('E36c the start notice reaches the address the person set THEMSELVES (a2), and every other address the account held',
+    $told($a2) === true && $told($a1) === true && $told('seqtarget-' . $tag . '@selftest.invalid') === true);
 
 // Cancel and expiry, over HTTP.
 $ck = $user('CancelKept'); $member($ck, $siteOne); $loginCk = $login($ck, 'CancelKept');
@@ -1675,6 +1801,21 @@ check('J13 a request written by hand for it is REFUSED before anything changes, 
     && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$handReq} AND `details` LIKE '%merged into account #{$eKept}%'") === 1,
     json_encode($handRun));
 $db->query("DELETE FROM `tblErasureRequest` WHERE `requestID` = {$handReq}");
+// 📮 Round 6, finding 3: a workflow STARTED as the duplicate, finished after
+//    the merge. The starter stays as written (D-199), so the outcome e-mail
+//    goes to the account it was merged into, not to nobody.
+$wfk = $user('WfKept'); $member($wfk, $siteA);
+$wfd = $user('WfDup');  $member($wfd, $siteA);
+$wfMerged = $merge($wfk, $wfd, false);
+$notify = new ReflectionMethod(\Portal\Core\Workflow::class, 'notifyOutcome');
+$notify->invoke(null, ['siteID' => $siteA, 'startedByID' => $wfd, 'subjectLabel' => 'Hall booking ' . $tag, 'workflowName' => 'Bookings'], 'approved');
+check('J15 a workflow started as the duplicate tells the account it was merged into its outcome (the starter stays as written)',
+    $wfMerged === 'completed'
+    // The OUTCOME e-mail itself, by its subject: the merge's own notices also
+    // go to this address, so "any mail to it" passed with the fix removed
+    // (planted, measured: round 6's T09 stayed green until this said which).
+    && n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%wfkept-{$tag}@selftest.invalid%' "
+        . "AND `subject` LIKE 'Bookings%Approved%'") === 1, $wfMerged);
 // Offered for ANOTHER merge, it is refused with its own words, never "switch
 // it back on first" (it never can be) nor "needs a global administrator".
 $j14 = $user('J14Kept'); $member($j14, $siteA);

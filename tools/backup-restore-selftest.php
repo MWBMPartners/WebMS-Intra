@@ -3557,8 +3557,11 @@ function brs_proof26(): void
     //    restore of it throws away every row still waiting.
     $list = DbBackup::WHOLE_DATABASE_ONLY;
     brs_check(
-        array_keys($list) === ['tblMigrations', 'tblTotpBackupCodes', 'tblSettings', 'tblRestoreHeldRows'],
-        'the list of tables that may only go back with the whole database is exactly the four it should be',
+        // #1064 round 6: the two merge tables joined (a one-table restore of
+        // either forgets merges, and a merged-away account could be reopened).
+        array_keys($list) === ['tblMigrations', 'tblTotpBackupCodes', 'tblSettings', 'tblRestoreHeldRows',
+            'tblAccountMergeSide', 'tblAccountMergeRequest'],
+        'the list of tables that may only go back with the whole database is exactly the six it should be',
         brs_say(array_keys($list))
     );
     // The tables this database really has, asked for ONCE and compared in PHP:

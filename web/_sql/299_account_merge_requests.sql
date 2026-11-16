@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
     `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
     `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
     `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied by that erasure (GdprEraser::eraseMergeRecords)',
-    `formerEarlierEmail` VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the address it held before somebody else changed it (tblUsers.emailBeforeChangeByOther, D-200), to which the start notice was sent. Kept for the same reason as formerEmail and emptied by the same erasure step; the account row''s own copy is emptied at merge',
+    `formerEarlierEmails` TEXT DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the JSON list of addresses it had held before its last one (tblUsers.earlierEmails), to which start notices went. Kept for the same reason as formerEmail and emptied by the same erasure step; the account row''s own list is emptied at merge',
     PRIMARY KEY (`sideID`),
     UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
     UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),
@@ -80,17 +80,17 @@ SET @sql := IF(@hasCol = 0,
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
--- 📧 tblUsers.emailBeforeChangeByOther (D-200): the address held before
---    somebody else first changed it. Same guard and the same rules about the
---    comment as the column above.
+-- 📧 tblUsers.earlierEmails (D-200, round 6 of #1064): every address the
+--    account has held before its current one, as a JSON list. Same guard
+--    and the same rules about the comment as the column above.
 SET @hasCol := (
     SELECT COUNT(*) FROM `information_schema`.`COLUMNS`
     WHERE `TABLE_SCHEMA` = DATABASE()
       AND `TABLE_NAME`   = 'tblUsers'
-      AND `COLUMN_NAME`  = 'emailBeforeChangeByOther'
+      AND `COLUMN_NAME`  = 'earlierEmails'
 );
 SET @sql := IF(@hasCol = 0,
-    'ALTER TABLE `tblUsers` ADD COLUMN `emailBeforeChangeByOther` VARCHAR(255) DEFAULT NULL COMMENT ''The e-mail address this account held before somebody OTHER than it first changed it (admin users page); a merge start notice is sent here too (#1064, D-200). Emptied by an erasure'' AFTER `signInChangedByOtherAtUtc`',
+    'ALTER TABLE `tblUsers` ADD COLUMN `earlierEmails` TEXT DEFAULT NULL COMMENT ''Every e-mail address this account has held before its current one, as a JSON list, oldest first, appended on every change by anybody (AccountMerge::rememberReplacedAddressSql). A merge request start notice is sent to each, so a person whose address somebody else replaced is still told (#1064, D-200). Emptied by an erasure'' AFTER `signInChangedByOtherAtUtc`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

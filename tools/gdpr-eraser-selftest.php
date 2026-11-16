@@ -643,7 +643,7 @@ const ACCOUNT_AFTER_ERASURE = [
     'calendarToken' => null, 'displayBio' => null, 'displayPhoto' => null, 'displayPhone' => null,
     'displayAddress' => null, 'latitude' => null, 'longitude' => null, 'what3words' => null,
     // #1064 (D-200): the address the account held before somebody else changed it.
-    'emailBeforeChangeByOther' => null,
+    'earlierEmails' => null,
 ];
 // Not about the person: the row's own number and date, and switches that
 // have nothing left to show once the columns above are empty.
@@ -1743,11 +1743,14 @@ function ge_buildWorld(int $person, string $email, string $name): array
     // changed it (D-200)? The made-up account row fills every column, so it
     // usually does, and the erasure then searches the mail queue and the send
     // log by that address too: two more steps, two more lines.
-    $earlier = (string) (ge_one('SELECT emailBeforeChangeByOther AS e FROM tblUsers WHERE userID = ?', 'i', [$person])['e'] ?? '');
+    // (The made-up row fills `earlierEmails` with text that is not a JSON list,
+    // so this is usually 0: the merge test is what drives these steps.)
+    $earlier = count(array_diff(\Portal\Core\AccountMerge::addressList(
+        ge_one('SELECT earlierEmails AS e FROM tblUsers WHERE userID = ?', 'i', [$person])['e'] ?? null), [$email]));
 
     return ['person' => $person, 'email' => $email, 'instructions' => $instructions, 'rows' => $rows,
         'allowed' => $allowed, 'demo' => $demo, 'emailLog' => $emailLog, 'file' => $file, 'photo' => $photo,
-        'linkedBefore' => $extra, 'viaRowsFor' => $viaRowsFor, 'earlier' => $earlier !== '' && $earlier !== $email];
+        'linkedBefore' => $extra, 'viaRowsFor' => $viaRowsFor, 'earlier' => $earlier];
 }
 
 /**
@@ -2313,7 +2316,7 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     // #1064 round 5: the same two steps for the address the person held before
     // somebody else changed it, when they have one. Nothing was sent to it in
     // the made-up world, so both say that nothing was held.
-    if (($world['earlier'] ?? false) === true) {
+    for ($e = 0; $e < (int) ($world['earlier'] ?? 0); $e++) {
         $expected[] = ['tblMailQueue', ['none']];
         $expected[] = ['tblEmailLog', ['none']];
     }
@@ -2575,8 +2578,8 @@ ge_ok('it reports no failed step, and the number of steps it ran',
     // CHANGED by #1064 round 5: + 2 more when the person has an earlier address
     // (the mail queue and send log searched by it too).
     $resultA['failed'] === 0 && $resultA['changed'] === true
-        && $resultA['steps'] === $instructionCount + 8 + ($worldA['earlier'] === true ? 2 : 0),
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 8 + ($worldA['earlier'] === true ? 2 : 0)) . ')');
+        && $resultA['steps'] === $instructionCount + 8 + 2 * $worldA['earlier'],
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 8 + 2 * $worldA['earlier']) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -2712,7 +2715,7 @@ ge_ok('the number of lines is the instructions, the Demo Data step, the giving-r
     // CHANGED by #707: five became six (the change history about the person).
     . ', one per organisation), the six dedicated lines and the closing line',
     // CHANGED by #1064 round 5: + 2 when the person has an earlier address.
-    count($auditA) === $instructionCount + 8 + ($worldA['earlier'] === true ? 2 : 0) + $givingCountA && $givingCountA >= 3,
+    count($auditA) === $instructionCount + 8 + 2 * $worldA['earlier'] + $givingCountA && $givingCountA >= 3,
     count($auditA) . ' lines for ' . $instructionCount . ' instructions and ' . $givingCountA . ' organisations');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 // CHANGED by roll-out package A2b, in two ways. The giving-records step
@@ -3502,7 +3505,7 @@ ge_ok('the run still ends without an exception, and reports exactly one failed s
     // CHANGED by #707: + 7 became + 8 (the change-history step).
     // CHANGED by #1064 round 5: + 2 when the person has an earlier address.
     is_array($resultB1) === true && $resultB1['failed'] === 1
-        && $resultB1['steps'] === $instructionCount + 8 + ($worldB['earlier'] === true ? 2 : 0),
+        && $resultB1['steps'] === $instructionCount + 8 + 2 * $worldB['earlier'],
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -3515,7 +3518,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 8 + ($worldB['earlier'] === true ? 2 : 0)) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 8 + 2 * $worldB['earlier']) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -3614,8 +3617,8 @@ ge_q("UPDATE tblErasureRequest SET status = 'processing' WHERE requestID = ?", '
 // #1064 round 5: an address from before somebody else changed it (the made-up
 // row fills every column) adds two lines after the send log's, read now,
 // before the run empties it.
-$cNow    = ge_one('SELECT emailBeforeChangeByOther AS e, emailAddress AS a FROM tblUsers WHERE userID = ?', 'i', [P_C]);
-$offC    = ((string) ($cNow['e'] ?? '') !== '' && (string) $cNow['e'] !== (string) $cNow['a']) ? 2 : 0;
+$cNow    = ge_one('SELECT earlierEmails AS e, emailAddress AS a FROM tblUsers WHERE userID = ?', 'i', [P_C]);
+$offC    = 2 * count(array_diff(\Portal\Core\AccountMerge::addressList($cNow['e'] ?? null), [(string) ($cNow['a'] ?? '')]));
 $resultC2 = ge_execute(REQ_PC, P_C);
 $reqPc2   = ge_one('SELECT status, userID FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_PC]);
 ge_ok('run again with the audit trail working: completed, and the first step is now recorded',
@@ -3633,7 +3636,7 @@ ge_ok('run again with the audit trail working: completed, and the first step is 
     // also run before the walk, so the first instruction's line is the sixth.
     && (ge_audit(REQ_PC)[2]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[2]['action'] ?? '') === 'none'
     && (ge_audit(REQ_PC)[3]['tableName'] ?? '') === 'tblEmailLog'
-    && ($offC === 0 || ((ge_audit(REQ_PC)[4]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[5]['tableName'] ?? '') === 'tblEmailLog'))
+    && ($offC === 0 || ((ge_audit(REQ_PC)[4]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[3 + $offC]['tableName'] ?? '') === 'tblEmailLog'))
     && (ge_audit(REQ_PC)[4 + $offC]['tableName'] ?? '') === 'tblAuditTrail'
     && (ge_audit(REQ_PC)[5 + $offC]['tableName'] ?? '') === (string) $first['table']
     && in_array(ge_audit(REQ_PC)[5 + $offC]['action'] ?? '', ['anonymise', 'delete'], true),

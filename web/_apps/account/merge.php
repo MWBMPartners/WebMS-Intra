@@ -114,8 +114,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>account <?php echo $keptId; ?></strong>. You are signed in as account <?php echo $me; ?>.
         </p>
         <p class="mb-2">
-            If you agree, everything that belongs to account <?php echo $dupId; ?> will belong to account
-            <?php echo $keptId; ?>, and account <?php echo $dupId; ?> will be closed.
+            If you agree, what is account <?php echo $dupId; ?>'s now &mdash; the records about you, what you
+            belong to, what you have been given to do, your gifts and your choices &mdash; will belong to account
+            <?php echo $keptId; ?>, and account <?php echo $dupId; ?> will be closed. The record of what was done
+            under account <?php echo $dupId; ?> stays under that number and is never rewritten; it is still counted
+            as yours.
             <strong>This cannot be undone.</strong> Only agree if both accounts are yours.
         </p>
         <p class="mb-0">

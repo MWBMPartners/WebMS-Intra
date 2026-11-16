@@ -129,6 +129,9 @@ require_once $coreDir . 'App.php';
 require_once $coreDir . 'GivingRetention.php';
 require_once $coreDir . 'GdprEraser.php';
 require_once $coreDir . 'ErasureReview.php';
+// #1064 round 6: the review follows accounts merged into the person's, through
+// this class. No autoloader here, so without it every count refuses.
+require_once $coreDir . 'AccountMerge.php';
 require_once $coreDir . 'MailQueue.php';
 require_once $coreDir . 'PortalAddress.php';
 require_once $coreDir . 'Giving.php';
@@ -1872,7 +1875,7 @@ $workerCode = '<?php' . "\n"
     . 'define("PORTAL_ROOT", ' . var_export($scratch, true) . ');' . "\n"
     . '$c = ' . var_export($coreDir, true) . ';' . "\n"
     . 'foreach (["App","GivingRetention","GdprEraser","ErasureReview","MailQueue","PortalAddress",'
-    . '"Giving","Site","Logger","AnonymousCheckins"] as $f) { require_once $c . $f . ".php"; }' . "\n"
+    . '"Giving","Site","Logger","AnonymousCheckins","AccountMerge"] as $f) { require_once $c . $f . ".php"; }' . "\n"
     . 'mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);' . "\n"
     . '$mysqli = new mysqli(getenv("W_HOST"), getenv("W_USER"), getenv("W_PASS"), getenv("W_NAME"), (int) getenv("W_PORT"));' . "\n"
     . '$mysqli->set_charset("utf8mb4");' . "\n"

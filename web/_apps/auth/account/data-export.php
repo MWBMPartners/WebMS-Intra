@@ -303,7 +303,7 @@ $payload = [
         //    when it was merged. Export↔erasure parity with
         //    GdprEraser::eraseMergeRecords(), which empties that address.
         'accountMerges' => $fetchUserRows(
-            'SELECT `requestID`, `userID`, `side`, `confirmedAtUtc`, `formerEmail`, `formerEarlierEmail` FROM tblAccountMergeSide WHERE `userID` = ?'
+            'SELECT `requestID`, `userID`, `side`, `confirmedAtUtc`, `formerEmail`, `formerEarlierEmails` FROM tblAccountMergeSide WHERE `userID` = ?'
         ),
         // 🛂 #778 — your own choices about outside services (which outside
         //    companies may be sent something about you). Export↔erasure parity
