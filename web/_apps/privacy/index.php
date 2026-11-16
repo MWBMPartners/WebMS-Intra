@@ -85,7 +85,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <li><strong>Account data</strong> — name, email, optional phone, hashed password (we never store passwords in plain text).</li>
     <li><strong>Authentication events</strong> — login successes, failures, password-reset requests, 2FA verifications. IP address + user agent for security audit.</li>
     <li><strong>Activity logs</strong> — what you did inside the portal (e.g. submitted a prayer request, recorded attendance, approved an expense). Used for incident investigation and reverting accidental changes.</li>
-    <li><strong>Linked SSO accounts</strong> — if you signed in with Microsoft 365 or Google, the provider's "sub" identifier and the email they returned.</li>
+    <?php // 🔑 #808 round 6: this said only "the provider's 'sub' identifier and the email", while Auth.php keeps the
+          //    name and the photo's address too (the Outside companies list says so). ?>
+    <li><strong>Linked sign-in accounts</strong> — if you sign in with a Microsoft or Google account, the identifier that company gives your account, and the name, e-mail address and (where it has one) photo address it returns.</li>
     <?php // 🏠 #1037, D-183: a remembered map position of a home is personal data. Worded in ONE
           //    place (GeocodeCacheRetention::privacyWords()), with the period the clear-out uses. ?>
     <li data-geocode-home-notice="1"><strong>Map positions of homes</strong> — <?php echo htmlspecialchars(GeocodeCacheRetention::privacyWords($mysqli), ENT_QUOTES, 'UTF-8'); ?></li>
@@ -163,9 +165,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h2 class="h4 mt-4">Cookies</h2>
 <p>
-    The portal uses functionally-necessary cookies only: a session cookie for
-    sign-in, a token that stops other websites sending forms in your name, the "trust this device" two-step sign-in cookie (only set if you
-    explicitly tick the box), and small UI preferences (theme, language).
+    <?php // 🍪 #808 round 6: written from the cookies the code really sets (setcookie() in Auth.php for the
+          //    trusted device, privacy/consent.php for the notice; PHP's own session cookie). The form token
+          //    and a changed language live IN the session; the light/dark choice is localStorage. ?>
+    The portal sets only the cookies it needs to work: a session cookie, which keeps you signed in
+    and carries what the portal needs from page to page (such as the token that stops other websites
+    sending forms in your name, and your language if you change it); the "trust this device" cookie for
+    two-step sign-in, set only if you tick that box; and a cookie that remembers your answer to the
+    cookie notice, kept for a year. Choices such as light or dark display are kept in your browser's
+    own storage, not in a cookie, and are not sent to the portal.
     The portal sets no tracking or analytics cookies of its own.
     <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the
           //    Outside companies section, which lists companies the reader's browser contacts

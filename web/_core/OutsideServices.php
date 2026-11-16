@@ -180,8 +180,10 @@ final class OutsideServices
             'setting'    => 'privacy.outside.gravatar',
             'name'       => 'Profile pictures from Gravatar',
             'company'    => 'Gravatar (run by Automattic)',
-            'sends'      => 'A scramble of your e-mail address that Gravatar can match to you, your internet '
-                          . 'address, your browser and the time, every time a page shows your picture.',
+            'sends'      => 'A scramble of the e-mail address of the member whose picture is shown, which Gravatar '
+                          . 'can match to that member, with the internet address and browser of whoever is looking and '
+                          . 'the time, every time a page shows that picture. A member\'s picture is fetched for somebody '
+                          . 'else only when that member allows it and the person looking has not switched it off.',
             'imgSources' => ['https://www.gravatar.com'],
             'maxLevel'   => self::ON,
         ],
@@ -189,8 +191,10 @@ final class OutsideServices
             'setting'    => 'privacy.outside.providerPhoto',
             'name'       => 'Your photo from the account you sign in with',
             'company'    => 'Google (the photo stays on its servers)',
-            'sends'      => 'An address on Google\'s servers that belongs to your photo alone, your internet '
-                          . 'address, your browser and the time, every time a page shows your picture.',
+            'sends'      => 'An address on Google\'s servers that belongs to the shown member\'s photo alone, with the '
+                          . 'internet address and browser of whoever is looking and the time, every time a page shows '
+                          . 'that picture. A member\'s photo is fetched for somebody else only when that member allows '
+                          . 'it and the person looking has not switched it off.',
             'imgSources' => ['https://*.googleusercontent.com'],
             'maxLevel'   => self::ON,
         ],
@@ -294,8 +298,11 @@ final class OutsideServices
             'when'      => 'When somebody presses the button to find an address on the map, and when a form that is '
                          . 'set up to do it by itself is saved -- for example a small group\'s meeting place or a venue '
                          . '-- unless the answer for that address is already remembered.',
-            'sends'     => 'The address that was typed, and its country. The answer is remembered for a while; for a '
-                         . 'home that is personal data, described above.',
+            'sends'     => 'The address that was typed and, where the form has one, its country. Every request to '
+                         . 'OpenStreetMap also carries this portal\'s privacy contact e-mail address (or, if none is '
+                         . 'set, the address the portal sends e-mail from), as OpenStreetMap asks: the organisation\'s '
+                         . 'address, not yours. The answer is remembered for a while; for a home that is personal data, '
+                         . 'described above.',
             'why'       => 'To find where the address is, so that a map can be drawn or directions given.',
             'hosts'     => ['maps.googleapis.com', 'nominatim.openstreetmap.org'],
         ],
@@ -338,8 +345,8 @@ final class OutsideServices
             'companies' => 'jsDelivr, and cdnjs (which is run by Cloudflare): two services that hand out widely used code.',
             'from'      => 'browser',
             'when'      => 'On the portal\'s ordinary pages: your browser fetches the page\'s layout and icons from them, and on some '
-                         . 'pages its maps and charts. The API guide does too, unless this portal is set to use its '
-                         . 'own copy.',
+                         . 'pages its maps and charts. The API guide (the page describing how other programs can talk '
+                         . 'to the portal) does too, unless this portal is set to use its own copy.',
             'sends'     => 'Your internet address, your browser, and the address of this portal. Nothing you type is sent.',
             'why'       => 'So that your browser can use a copy of the code it may already have, which makes pages faster.',
             'hosts'     => ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com'],
@@ -367,7 +374,8 @@ final class OutsideServices
                          . 'choose to send only a share of these reports.',
             'sends'     => 'Your account number if you are signed in, the address of the page, the description your '
                          . 'browser gives of itself, and the fault\'s own message, which can quote what was being '
-                         . 'handled. Not your internet address.',
+                         . 'handled. Not your internet address. On a form that promises not to name you, such as the '
+                         . 'anonymous prayer form, neither your account number nor your browser\'s description is sent.',
             'why'       => 'So that the people running this portal hear about faults and can fix them.',
             'hosts'     => [],
         ],
@@ -446,7 +454,10 @@ final class OutsideServices
             'name'      => 'Sending e-mail',
             'setUp'     => 'installation',
             'companies' => 'The mail route this whole installation uses: Microsoft 365, Google, or a mail server its '
-                         . 'administrator has set up.',
+                         . 'administrator has set up. If the administrator has chosen it, a message Microsoft 365 fails '
+                         . 'to send is then sent through Google instead. An alert about a fault, sent to the people who '
+                         . 'run the portal, can also go out through the server\'s own mail program, which hands it to '
+                         . 'the hosting company\'s mail service.',
             'from'      => 'server',
             'when'      => 'Whenever the portal sends an e-mail.',
             'sends'     => 'Each message whole: who it is to, the subject and what it says.',
@@ -528,7 +539,8 @@ final class OutsideServices
         'translation' => [
             'name'      => 'Translating',
             'setUp'     => 'installation',
-            'companies' => 'Anthropic, OpenAI, Google, DeepL, or a LibreTranslate server',
+            'companies' => 'Anthropic, OpenAI, Google, DeepL, or a LibreTranslate server (a translation program, '
+                         . 'which anybody may run, at an address this installation\'s administrator typed in)',
             'from'      => 'server',
             'when'      => 'When somebody presses Translate on an announcement, a project or a project\'s update, '
                          . 'and no up-to-date translation of it is already stored.',
@@ -572,10 +584,12 @@ final class OutsideServices
                          . 'whoever decided. An event approved or rejected, a filled-in form, or a finished approval '
                          . 'process: reference numbers and the outcome only. The portal keeps a copy of each message. '
                          . 'Once it has been delivered, or given up on after six tries, the nightly clear-out empties '
-                         . 'the copy after the period set for this organisation (by it, or for the whole installation), '
-                         . 'once that scheduled job has been set up, unless keeping them for ever has been chosen. A '
-                         . 'message still waiting to be tried again is kept until then, and the further tries need the '
-                         . 'scheduled retry job.',
+                         . 'the copy after the period that applies to this organisation, once that scheduled job has '
+                         . 'been set up. That period is this organisation\'s own figure where it has set one no longer '
+                         . 'than the whole installation\'s, and otherwise the installation\'s. Copies are kept for ever '
+                         . 'only if the whole installation keeps them for ever and this organisation has not set a '
+                         . 'shorter period. A message still waiting to be tried again is kept until it is delivered or '
+                         . 'given up on, and the further tries need the scheduled retry job.',
             'why'       => 'So that another system the organisation uses hears about it straight away.',
             'hosts'     => [],
         ],
@@ -599,13 +613,12 @@ final class OutsideServices
             'setUp'     => 'installation',
             'companies' => 'CueRCode, at the address this installation\'s administrator typed in.',
             'from'      => 'both',
-            'when'      => 'Only if this installation is set to use it, when the portal draws a QR code of an address '
-                         . 'for a page, such as a form\'s public address or your own calendar subscription.',
-            'sends'     => 'This portal\'s server sends CueRCode the address the QR code is to hold. That can be your '
-                         . 'own private calendar-subscription address, which works like a password for your calendar. '
-                         . 'The code '
-                         . 'then holds CueRCode\'s own address, so the phone of anybody who scans it goes to CueRCode '
-                         . 'first, which receives its internet address and browser.',
+            'when'      => 'Only if this installation is set up with CueRCode, and only when somebody signed in asks '
+                         . 'the portal\'s QR code address for a tracked code themselves. No page of the portal asks for '
+                         . 'one.',
+            'sends'     => 'This portal\'s server sends CueRCode the text that person asked to have in the code (up to '
+                         . '500 characters). The code then holds CueRCode\'s own address, so the phone of anybody who '
+                         . 'scans it goes to CueRCode first, which receives its internet address and browser.',
             'why'       => 'So that the organisation can see how often a code is scanned.',
             'hosts'     => [],
         ],
