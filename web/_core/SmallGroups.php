@@ -686,12 +686,12 @@ final class SmallGroups
                 );
             } catch (\Throwable $e) {
                 Logger::errorPlatform('SmallGroups', 'Warning', 'SG_HOST_LEFT_READ', 'The leaders of a group whose host left could not be read, so they were not told', '');
-                $outcome['notSent'][] = $groupName !== '' ? $groupName : 'a small group';
+                $outcome['notSent'][] = $groupName !== '' ? $groupName : self::UNNAMED_GROUP;
                 continue;
             }
             $addresses = array_values(array_filter(array_map(static fn ($a): string => trim((string) $a), $addresses),
                 static fn (string $a): bool => $a !== '' && filter_var($a, FILTER_VALIDATE_EMAIL) !== false));
-            $label = $groupName !== '' ? $groupName : 'a small group';
+            $label = $groupName !== '' ? $groupName : self::UNNAMED_GROUP;
             if ($addresses === []) {
                 $outcome['noLeader'][] = $label;
                 continue;
@@ -713,6 +713,13 @@ final class SmallGroups
 
         return $told;
     }
+
+    /**
+     * What a group is called in the words below when its name could not be
+     * read. Lower case, because it usually sits mid-sentence; the one
+     * sentence that starts with a name capitalises it (offboardingHomesWords()).
+     */
+    public const UNNAMED_GROUP = 'a small group';
 
     /**
      * 🗣️ What offboarding's page says about the homes it took off small groups,
@@ -745,8 +752,19 @@ final class SmallGroups
             $words .= ' The leaders of ' . $names($outcome['notSent']) . ' could not be e-mailed, so please tell them to choose a new place.';
         }
         if ($outcome['noLeader'] !== []) {
-            $one    = count($outcome['noLeader']) === 1;
-            $words .= ' ' . $names($outcome['noLeader']) . ($one === true ? ' has' : ' have') . ' no other current leader to tell, '
+            $one   = count($outcome['noLeader']) === 1;
+            $start = $names($outcome['noLeader']);
+            // This sentence BEGINS with a name. A group whose name could not
+            // be read is called "a small group", which would start it in lower
+            // case; only that placeholder is capitalised, never a real name
+            // (a group may be named "iGroup" on purpose). The FIRST NAME is
+            // compared whole, never the start of the joined text: a group
+            // really named "a small group of friends" must stay as typed
+            // (round 2 of the check).
+            if ((array_values($outcome['noLeader'])[0] ?? '') === self::UNNAMED_GROUP) {
+                $start = 'A' . substr($start, 1);
+            }
+            $words .= ' ' . $start . ($one === true ? ' has' : ' have') . ' no other current leader to tell, '
                 . 'so please choose a new place for ' . ($one === true ? 'it' : 'them') . ' or name a new leader.';
         }
 

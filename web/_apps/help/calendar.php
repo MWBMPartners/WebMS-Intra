@@ -244,7 +244,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             hidden dates under <em>Hidden dates</em>, each with a button to bring it back. It returns as a
             draft, so members do not see it until you publish it &mdash; except a date that had been
             cancelled or postponed before it was hidden, which comes back still cancelled or still postponed,
-            with its reason if it had one. If
+            with its reason if it had one. A visitor's suggestion that is still waiting to be approved
+            always comes back as a draft, whatever it was before; approve it on Admin, Calendar, Moderation
+            to publish it. If
             the series has since been given another date on that day &mdash; which is what happens if you
             shorten a series and then extend it over the same weeks again &mdash; the first press is
             refused and says so. If you really do want both (a morning and an evening service, say), press
@@ -298,6 +300,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         A suggestion still waiting to be approved stays a <strong>Draft</strong> until it is approved on Admin,
         Calendar, Moderation, which is also what e-mails the person who suggested it. Until then, Manage Events,
         the series bulk edit and the events API all refuse to publish, cancel or postpone it.
+        <?php // ⚠️ #1081, D-197, D-198: EventSuggestions::earlierStatusWarning(), on the moderation page and the edit form. ?>
+        A suggestion that was cancelled or postponed earlier, before those refusals existed, carries a warning on the
+        moderation page and on its edit form, because approving it publishes it: to approve it you must
+        tick a box beside <em>Approve</em> to confirm.
     </p>
     <p class="text-muted small">
         Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out

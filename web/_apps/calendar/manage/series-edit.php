@@ -762,7 +762,8 @@ checkboxes.forEach(function (cb) {
                             <input type="hidden" name="action" value="restore">
                             <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-primary">
-                                <?php $returnsAs = HiddenSeriesDates::statusOnReturn($hd['status']); ?>
+                                <?php // #1081: a suggestion still waiting to be approved comes back as a draft, whatever it was. ?>
+                                <?php $returnsAs = HiddenSeriesDates::statusOnReturn($hd['status'], $hd['submissionStatus']); ?>
                                 <?php if ($returnsAs !== 'draft'): ?>
                                     <?php // 🚫 D-146, D-147: a cancelled or postponed date keeps that status, and the button says so. ?>
                                     <i class="fa-solid fa-rotate-left me-1"></i> Bring back, still <?php echo htmlspecialchars($returnsAs, ENT_QUOTES, 'UTF-8'); ?>

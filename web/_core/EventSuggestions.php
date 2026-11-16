@@ -373,6 +373,159 @@ final class EventSuggestions
     }
 
     /**
+     * 🚦 THE ONE LIST (#1081; the owner, 16 November 2026 — D-197 for
+     * cancelled, D-198 for postponed): each status which, held by a waiting
+     * suggestion at ANY point, means approving it needs a warning and a ticked
+     * box — beside the `tblEvents` column that keeps the fact once the status
+     * itself has moved on. Approving publishes a suggestion whatever its
+     * status, so one members were told was cancelled or postponed would
+     * otherwise go live as though it were going ahead as planned.
+     *
+     * The SQL rule, the PHP rule, `HiddenSeriesDates::restore()`'s mark, the
+     * words and migration 300 all follow this list. ONE COLUMN PER STATUS, not
+     * one flag, because the words must say WHICH (D-198), and a suggestion
+     * can have been both (cancelled once, then postponed).
+     *
+     * Why a column at all: the status and its reason do not last. An edit
+     * page may set such a suggestion back to Draft (#965 allows Draft), and
+     * bringing a hidden one back makes it a draft and empties its reason
+     * (D-196). The change history cannot answer instead: nothing that writes a
+     * suggestion's status records it in `tblAuditTrail` (checked with
+     * `grep -n "Logger::audit"` over calendar/manage/save.php,
+     * events/api/update.php, calendar/manage/series-edit.php,
+     * admin/calendar/moderate.php and HiddenSeriesDates.php: no match).
+     * Each column is set by migration 300 for every waiting suggestion holding
+     * that status, and by `restore()`. Nothing clears one.
+     *
+     * @var array<string, string> status => column
+     */
+    public const WARN_IF_EVER = ['cancelled' => 'cancelledWhileWaiting', 'postponed' => 'postponedWhileWaiting'];
+
+    /**
+     * ⚠️ The SQL spelling of the rule: was this suggestion cancelled or
+     * postponed earlier? Asked by the approval's own conditional UPDATE, so
+     * the check and the write are one statement and cannot be raced.
+     *
+     * `$alias` is the name `tblEvents` has in the query ('' for none), so the
+     * clause stays unambiguous in a query that joins another table. Every
+     * word written in comes from `WARN_IF_EVER`, never from a request.
+     */
+    public static function cancelledOrPostponedEarlierSql(string $alias): string
+    {
+        $on    = $alias === '' ? '' : '`' . str_replace('`', '', $alias) . '`.';
+        $parts = [$on . '`status` IN (' . implode(', ', array_map(static fn (string $s): string => "'" . $s . "'", array_keys(self::WARN_IF_EVER))) . ')'];
+        foreach (self::WARN_IF_EVER as $column) {
+            $parts[] = $on . '`' . $column . '` = 1';
+        }
+
+        return '(' . implode(' OR ', $parts) . ')';
+    }
+
+    /**
+     * The PHP spelling: WHICH of the listed statuses this row's history holds,
+     * in the list's order — its status now, and every kept mark. Empty when
+     * none, so `!== []` is the yes/no the SQL spelling answers. The moderation
+     * list, the edit form and the handler's refusal ask it for their words.
+     *
+     * @return list<string>
+     */
+    public static function earlierStatuses(array $event): array
+    {
+        $now = (string) ($event['status'] ?? '');
+        $out = [];
+        foreach (self::WARN_IF_EVER as $status => $column) {
+            if ($now === $status || (int) ($event[$column] ?? 0) === 1) {
+                $out[] = $status;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The posted field that carries the moderator's confirmation (D-197,
+     * D-198). A checkbox the moderator ticks; the handler refuses an approval
+     * of such a suggestion without it. The PAGE does not decide whether it is
+     * needed — the handler asks the row itself, so a form that leaves the box
+     * out, or a request built by hand, cannot skip it.
+     */
+    public const CONFIRM_FIELD = 'confirmCancelledOrPostponed';
+
+    /**
+     * The statuses in words: "cancelled", "postponed", or "cancelled and
+     * postponed". Built from the list so a sentence names what really happened.
+     * An empty list cannot reach a sentence (each is drawn only when
+     * `earlierStatuses()` found one); if it ever did, every listed status is
+     * named with "or", which stays true.
+     *
+     * @param list<string> $statuses
+     */
+    private static function statusWords(array $statuses, string $join): string
+    {
+        $statuses = array_values(array_intersect(array_keys(self::WARN_IF_EVER), $statuses));
+        if ($statuses === []) {
+            $statuses = array_keys(self::WARN_IF_EVER);
+            $join     = 'or';
+        }
+        if (count($statuses) === 1) {
+            return $statuses[0];
+        }
+        $last = array_pop($statuses);
+
+        return implode(', ', $statuses) . ' ' . $join . ' ' . $last;
+    }
+
+    /**
+     * The warning beside Approve on the moderation page, the ONE place it is
+     * worded. "May have seen" because a suggestion brought back as a draft
+     * (D-196) shows nothing to members now, while it once showed the status.
+     *
+     * @param list<string> $statuses from `earlierStatuses()`
+     */
+    public static function earlierStatusWarning(array $statuses): string
+    {
+        return 'This suggestion was ' . self::statusWords($statuses, 'and') . ' earlier, while it was waiting to be approved, '
+            . 'so members may have seen it marked as ' . self::statusWords($statuses, 'or') . '. Approving it publishes it: '
+            . 'members will see it on the calendar as an event that is going ahead. '
+            . 'If that is what you want, tick the box to confirm before you press Approve.';
+    }
+
+    /**
+     * The same warning on the suggestion's own edit form, which has neither
+     * the box nor the Approve button, so it says where it is approved.
+     *
+     * @param list<string> $statuses
+     */
+    public static function earlierStatusEditFormWarning(array $statuses): string
+    {
+        return 'This suggestion was ' . self::statusWords($statuses, 'and') . ' earlier, while it was waiting to be approved, '
+            . 'so members may have seen it marked as ' . self::statusWords($statuses, 'or') . '. Approving it publishes it: '
+            . 'members will see it on the calendar as an event that is going ahead. '
+            . 'It is approved on Admin, Calendar, Moderation, which asks you to tick a box to confirm first.';
+    }
+
+    /**
+     * The checkbox's label.
+     *
+     * @param list<string> $statuses
+     */
+    public static function earlierStatusConfirmLabel(array $statuses): string
+    {
+        return 'I know this suggestion was ' . self::statusWords($statuses, 'and') . ' earlier, and I want to publish it';
+    }
+
+    /**
+     * What the moderation page says when such an approval arrives unconfirmed.
+     *
+     * @param list<string> $statuses
+     */
+    public static function earlierStatusRefusal(array $statuses): string
+    {
+        return 'Not approved. This suggestion was ' . self::statusWords($statuses, 'and') . ' earlier, so approving it needs '
+            . 'the box beside Approve ticked, to confirm that you want to publish it. Nothing was changed and nobody was e-mailed.';
+    }
+
+    /**
      * 🗣️ The same refusal for the series bulk edit, which changes several
      * dates at once and so must say how many of the chosen dates are waiting
      * (the whole change is refused, never applied to the others alone, so the

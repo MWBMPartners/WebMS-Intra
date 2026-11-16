@@ -52,7 +52,10 @@
  * WHAT IT DOES NOT DO
  *   • It does not touch a HIDDEN date (`isDeleted = 1`). A hidden date keeps
  *     its reason so it can come back with it (D-146, D-147); the only thing
- *     that changes a hidden date is `HiddenSeriesDates::restore()`.
+ *     that changes a hidden date is `HiddenSeriesDates::restore()`, which
+ *     calls `write()` once the date is live again, so a date that comes back
+ *     as a draft (a suggestion still waiting to be approved, #1081, D-196) loses a
+ *     reason it can no longer carry.
  *   • It does not touch an imported event (`externalFeedID IS NOT NULL`):
  *     `FeedImporter` is the only writer of those (#514).
  *   • It does not decide who may change a status. Each caller keeps its own
@@ -218,7 +221,11 @@ final class EventCancelReason
         // 🔢 What is about to be emptied, and what is about to take the
         //    reason, counted FIRST and under a lock, so the counts and the
         //    write describe the same rows. (The lock is real only inside the
-        //    caller's transaction — #697 — which is where every caller is.)
+        //    caller's transaction — #697. Every caller is inside one except
+        //    `admin/calendar/moderate.php`, whose decision is its own
+        //    statement: there the UPDATE below still decides correctly on its
+        //    own, from the status at that moment, and only these two COUNTS
+        //    could be out of step — which that page does not use.)
         //    `status IN (...)` is 1 or 0 in MySQL and MariaDB, so SUM counts.
         $count = $db->prepare(
             'SELECT '

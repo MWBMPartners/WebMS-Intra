@@ -28,6 +28,16 @@
  *      Microsoft 365 route throws when it has no sender, which is how this
  *      portal ships.
  *
+ * ⚠️ A SUGGESTION CANCELLED OR POSTPONED EARLIER NEEDS A CONFIRMATION
+ *    (#1081; D-197 for cancelled, D-198 for postponed). Approving publishes
+ *    whatever the status was, so a suggestion that was cancelled or postponed
+ *    while it waited (`EventSuggestions::cancelledOrPostponedEarlierSql()`) is
+ *    approved only when the moderator ticked the box the moderation page draws
+ *    beside Approve. Without it the approval statement changes nothing, the
+ *    moderator is told why, and nobody is e-mailed. The approval is still ONE
+ *    conditional statement, so the e-mail still goes once only. The status is
+ *    not otherwise changed (published, as for any approval).
+ *
  * ⚠️ This used to say "Reject = status='archived'", which was never true: the
  *    code has always written 'draft' (see the UPDATE below), and the column has
  *    never had an 'archived' value at all, so had it done what the comment
@@ -46,6 +56,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventCancelReason;
 use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
 use Portal\Core\Site;
@@ -69,7 +80,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 }
 
 $eventId = (int) ($_POST['eventID'] ?? 0);
-$action  = (string) ($_POST['action'] ?? '');
+$action  = is_string($_POST['action'] ?? null) === true ? (string) $_POST['action'] : ''; // an array is no action, and is never cast
 $modId   = (int) ($_SESSION['user_id'] ?? 0);
 $siteId  = Site::id();
 
@@ -78,11 +89,26 @@ if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
     exit();
 }
 
+// ⚠️ D-197, D-198 (#1081): a suggestion cancelled or postponed earlier is approved only with the
+//    moderator's confirmation, a ticked box (`CONFIRM_FIELD`). The
+//    history is asked INSIDE the approval's own statement
+//    (`cancelledOrPostponedEarlierSql()`), never taken from the page: the row decides
+//    whether a confirmation is needed, and the check and the write are one
+//    statement, so nothing can change in between. The box only ever ANSWERS
+//    that question; posting it for an ordinary suggestion changes nothing.
+//    A request chooses the TYPE of what it sends as well as the value, so
+//    `confirmCancelledOrPostponed[]=1` arrives as an array: it is not a "1", it
+//    is not confirmed, and it is never cast to a string (that logged a PHP
+//    warning and an error row — round 2 of the check).
+$confirmRaw = $_POST[EventSuggestions::CONFIRM_FIELD] ?? null;
+$confirmed  = (is_string($confirmRaw) === true && $confirmRaw === '1') ? 1 : 0;
+
 if ($action === 'approve') {
     $stmt = $mysqli->prepare(
         'UPDATE `tblEvents` SET `status` = "published", '
         . '    `submissionStatus` = "approved", `moderatedByID` = ?, `moderatedAt` = NOW() '
-        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0'
+        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0 '
+        . '  AND (? = 1 OR NOT ' . EventSuggestions::cancelledOrPostponedEarlierSql('') . ')'
     );
 } else {
     $stmt = $mysqli->prepare(
@@ -98,13 +124,34 @@ if ($action === 'approve') {
 //    is no longer moderated at all; the moderation list leaves it out too.
 
 if ($stmt !== false) {
-    $stmt->bind_param('iii', $modId, $eventId, $siteId);
+    if ($action === 'approve') {
+        $stmt->bind_param('iiii', $modId, $eventId, $siteId, $confirmed);
+    } else {
+        $stmt->bind_param('iii', $modId, $eventId, $siteId);
+    }
     $stmt->execute();
     $affected = $stmt->affected_rows;
     $stmt->close();
 
     if ($affected > 0) {
         Logger::activity('EventModerated', 'Event #' . $eventId . ' action=' . $action);
+
+        // ✍️ THE REASON FOLLOWS THE STATUS (#998, round 2 of #1081's check).
+        //    An approval publishes; a rejection makes a draft. Neither carries
+        //    a cancellation reason, but a suggestion cancelled or postponed
+        //    before #965 still held one, so an approved event showed members
+        //    a visitor-era reason the next time it was cancelled (a bulk cancel
+        //    with the reason box empty keeps "each reason as it is"). The
+        //    reason's ONE writer decides from the status the row now holds and
+        //    empties it. After the decision is stored and before the e-mail,
+        //    in its own try: a fault here must never undo the decision or
+        //    stop the e-mail, so it is recorded (numbers only) and passed by.
+        try {
+            EventCancelReason::write($mysqli, $siteId, [$eventId], false, null);
+        } catch (\Throwable $e) {
+            Logger::errorPlatform('Calendar', 'Warning', 'MODERATE_REASON_NOT_CLEARED',
+                'a decided suggestion\'s old cancellation reason could not be emptied', 'eventID=' . $eventId);
+        }
 
         // ✉️ D-134: tell the person who suggested it, ONLY here, inside "this
         //    request changed the row", which is what makes it once only. The
@@ -130,10 +177,33 @@ if ($stmt !== false) {
             );
         }
     } else {
-        // 🔁 Nothing changed: decided already (a second press, a stale page,
-        //    another administrator first) or deleted. Nothing is sent.
-        $_SESSION['moderation_result'] = ['type' => 'info',
-            'words' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.'];
+        // ⚠️ Was it refused only for want of the confirmation (D-197, D-198)?
+        //    Asked of the row as it is now, so the words are true: still
+        //    waiting, not deleted, cancelled or postponed earlier (WHICH is
+        //    read too, for the words), and the box was not ticked.
+        $earlier = [];
+        if ($action === 'approve' && $confirmed === 0) {
+            $why = $mysqli->prepare(
+                'SELECT `status`, `' . implode('`, `', EventSuggestions::WARN_IF_EVER) . '` FROM `tblEvents` '
+                . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" '
+                . 'AND `isDeleted` = 0 AND ' . EventSuggestions::cancelledOrPostponedEarlierSql('') . ' LIMIT 1'
+            );
+            if ($why !== false) {
+                $why->bind_param('ii', $eventId, $siteId);
+                $why->execute();
+                $earlier = EventSuggestions::earlierStatuses($why->get_result()->fetch_assoc() ?? []);
+                $why->close();
+            }
+        }
+        if ($earlier !== []) {
+            Logger::activity('EventModerateNeedsConfirm', 'Event #' . $eventId . ' not approved: ' . implode(' and ', $earlier) . ' earlier, not confirmed');
+            $_SESSION['moderation_result'] = ['type' => 'warning', 'words' => EventSuggestions::earlierStatusRefusal($earlier)];
+        } else {
+            // 🔁 Nothing changed: decided already (a second press, a stale page,
+            //    another administrator first) or deleted. Nothing is sent.
+            $_SESSION['moderation_result'] = ['type' => 'info',
+                'words' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.'];
+        }
     }
 }
 
