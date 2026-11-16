@@ -112,6 +112,47 @@ class Logger
      *     example) cannot be caught by anything here.
      */
 
+    /**
+     * 🕶️ True once the request has PROMISED the person sending it anonymity
+     * (#1044 round 2): see promiseAnonymity(). From then on every error this
+     * class records for the request - errorPlatform(), errorPlatformForSite(),
+     * the PHP error handler and the exception handler - keeps nothing of the
+     * sender, and every activity() record names nobody.
+     */
+    private static bool $promisesAnonymity = false;
+
+    /**
+     * 🕶️ Say, ONCE, at the top of a page, that this request promises the
+     * person sending it anonymity (#1044 round 2). Today one page:
+     * `prayer-requests/anonymous-save.php`.
+     *
+     * WHY A MARK ON THE REQUEST AND NOT A CHOICE AT EACH CALL. On that page the
+     * Errors-page lines are written by the page itself (a statement that
+     * would not prepare or run), by PrayerChain (reached through
+     * maybeAutoAssign() after the request is saved), by Mailer (an e-mail to
+     * the assigned partner that failed), and by PHP itself (any warning or
+     * exception). Choosing at each call site would mean every one of those
+     * classes knowing whether its caller promised anonymity, and the next one
+     * added would not; a mark on the request covers them all, including the
+     * ones nobody has written yet.
+     *
+     * What it does: errorPlatform() and errorPlatformForSite() write as
+     * errorNamingNobody() does (no account, network address, browser or
+     * headers), which also covers phpError() and exception(); activity()
+     * writes as activityNamingNobody() does. audit() is NOT changed (nothing
+     * on that page writes one; a change history names who changed a record
+     * and is kept for ever, D-116).
+     *
+     * It cannot be undone within the request, on purpose: a promise kept for
+     * half a request is not kept. `check_activity_naming_nobody.py` names the
+     * one page that calls it, and requires it before that page's first
+     * record.
+     */
+    public static function promiseAnonymity(): void
+    {
+        self::$promisesAnonymity = true;
+    }
+
     /** Reference to the global MySQLi connection. */
     private static ?mysqli $db = null;
 
@@ -386,6 +427,12 @@ class Logger
 
     public static function activity(string $type, string $description = '', ?int $userId = null): void
     {
+        // 🕶️ A request that promised anonymity names nobody (#1044 round 2).
+        if (self::$promisesAnonymity === true) {
+            self::activityNamingNobody($type, $description);
+
+            return;
+        }
         // Declared before the try so the fallback line below can use whatever
         // had been worked out before anything failed.
         $siteId = null;
@@ -800,7 +847,9 @@ class Logger
         } catch (Throwable $ignored) {
             $siteId = null;
         }
-        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId);
+        // 🕶️ A request that promised anonymity keeps nothing of the sender
+        //    (#1044 round 2; see promiseAnonymity()).
+        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId, self::$promisesAnonymity);
     }
 
     /**
@@ -850,7 +899,9 @@ class Logger
         string $detail = '',
         ?int $userId = null
     ): void {
-        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId);
+        // 🕶️ A request that promised anonymity keeps nothing of the sender
+        //    (#1044 round 2; see promiseAnonymity()).
+        self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId, self::$promisesAnonymity);
     }
 
     /**
@@ -930,8 +981,17 @@ class Logger
      */
     public static function withoutAddresses(string $words): string
     {
+        // ⏱️ LINEAR, NOT QUADRATIC (#1044/#990 check round 1). The first
+        //    version could start a match at EVERY character of a long run of
+        //    address-like characters and scan to its end each time, so 80 KB
+        //    of "a.a.a…" took over a second where the pattern engine's JIT is
+        //    switched off (pcre.jit=0, which some hosts set). Now a match may
+        //    only START where such a run starts (the look-behind), and no part
+        //    gives back what it took (the possessive `++`), so each character
+        //    is looked at a bounded number of times. Measured by part E of
+        //    tools/error-words-selftest.php with the JIT off.
         $cleaned = preg_replace(
-            '/[A-Za-z0-9._%+\-!#$&*=?^{|}~\x80-\xFF]+@[A-Za-z0-9\-\x80-\xFF]+(?:\.[A-Za-z0-9\-\x80-\xFF]+)+/',
+            '/(?<![A-Za-z0-9._%+\-!#$&*=?^{|}~\x80-\xFF])[A-Za-z0-9._%+\-!#$&*=?^{|}~\x80-\xFF]++@[A-Za-z0-9\-\x80-\xFF]++(?:\.[A-Za-z0-9\-\x80-\xFF]++)++/',
             '[address]',
             $words
         );

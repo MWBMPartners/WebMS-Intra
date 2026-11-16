@@ -196,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 121; // 117 + four in part N (#782)
+const EXPECTED_CHECKS = 122; // 117 + four in part N (#782) + B2b (#1063)
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@held-texts-selftest@@';
@@ -1071,6 +1071,18 @@ ok(
     'B2 the code that confirms a number is sent at once inside quiet hours too (it runs out after ten minutes)',
     $codeSent === true && $codeText[0] === '+447700900777' && str_contains($codeText[1], 'verification code') === true && (int) one("SELECT COUNT(*) AS n FROM tblSmsMessage WHERE status = 'queued'")['n'] === 0,
     json_encode([$codeSent, $codeText[0]])
+);
+// #1063: the code goes to the phone, and the RECORD of the text keeps the
+// sentence with the code masked - the record is shown to administrators and
+// handed over in the member's data copy, which leaves the stored code out on
+// purpose. The code sent must be the one stored, or the masking is vacuous.
+$codeStored = (string) (one('SELECT `verificationCode` FROM `tblUserSmsPreference` WHERE `siteID` = ? AND `userID` = ?', 'ii', [ORG, WHO['verify']])['verificationCode'] ?? '');
+$codeRow    = one("SELECT `body` FROM `tblSmsMessage` WHERE `recipientUserID` = ? AND `category` = 'critical_alerts' ORDER BY `messageID` DESC LIMIT 1", 'i', [WHO['verify']]);
+ok(
+    'B2b the text SENT carries the code that was stored, and the RECORD of it keeps the sentence with the code masked (#1063)',
+    preg_match('/^\d{6}$/', $codeStored) === 1 && str_contains($codeText[1], $codeStored) === true
+        && (string) ($codeRow['body'] ?? '') === \Portal\Core\Sms::VERIFICATION_TEXT_KEPT && str_contains((string) ($codeRow['body'] ?? ''), $codeStored) === false,
+    json_encode([$codeStored, $codeRow])
 );
 $B3 = 'ZQXT B for a person who switched quiet hours off';
 [$went, $outcome] = text('off', 'rota_changes', $B3);

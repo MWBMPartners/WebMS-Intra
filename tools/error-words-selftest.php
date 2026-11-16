@@ -34,6 +34,15 @@
  *      address; an error's carries the title (address taken out) and where it
  *      happened, and NOT the detail's trace, the address or the page address;
  *      an audit record's carries no network address.
+ *   E  The fallback line's REASON - the database's own words, here made to
+ *      quote an address by a trigger - has the address taken out.
+ *   F  The pattern is linear: in a child PHP with the pattern JIT switched off
+ *      (pcre.jit=0), 1 MB of "a.a.a…" is cleaned in under half a second (the
+ *      first version took about 156 s there).
+ *   G  After `Logger::promiseAnonymity()` (#1044 round 2), an ordinary
+ *      errorPlatform() line and an ordinary activity() record both name
+ *      nobody, though the session names a member. Last, because the promise
+ *      cannot be taken back within a request.
  *
  * The anonymous prayer form's own path (a bot check that cannot reach its
  * provider) is driven over HTTP by section N of
@@ -194,12 +203,59 @@ foreach ($byKind as $kind => $line) {
 }
 @unlink((string) $logFile);
 
+echo "E  the fallback line's REASON (the database's own words) loses its addresses too\n";
+// A database refusal that QUOTES the value it refused, made with a trigger on
+// the activity log, so the reason Logger receives holds an address.
+$logFile = tempnam(sys_get_temp_dir(), 'p1044-log-');
+ini_set('error_log', (string) $logFile);
+$db->query('DROP TRIGGER IF EXISTS `p1044_refuse_activity`');
+$db->query("CREATE TRIGGER `p1044_refuse_activity` BEFORE INSERT ON `tblActivityLogs` FOR EACH ROW "
+    . "BEGIN IF NEW.`activityType` = 'P1044Reason' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'refused the value rae@example.org'; END IF; END");
+Logger::activity('P1044Reason', 'words', 77);
+$db->query('DROP TRIGGER IF EXISTS `p1044_refuse_activity`');
+$line = (string) file_get_contents((string) $logFile);
+ew_check('E premise: the database refused the record, quoting a value with an address in it', str_contains($line, 'refused the value'), $line);
+ew_check('E the fallback line\'s reason has the address taken out', str_contains($line, 'refused the value [address]') && str_contains($line, '@') === false, $line);
+@unlink((string) $logFile);
+
+echo "F  a long run of address-like characters is cleaned in linear time, with the pattern JIT OFF\n";
+// In a child PHP with pcre.jit=0 (some hosts set it): the first version of the
+// pattern took about 1 s on 80 KB and 156 s on 1 MB there (measured 16
+// November 2026); the bound below is far above linear and far below that.
+$child = PHP_BINARY . ' -d pcre.jit=0 -r ' . escapeshellarg(
+    'require ' . var_export($core . $sep . 'Logger.php', true) . ';'
+    . '$w = str_repeat("a.", 500000); $t = microtime(true); $o = \\Portal\\Core\\Logger::withoutAddresses($w . " x@y.org");'
+    . 'echo ini_get("pcre.jit"), "|", round(microtime(true) - $t, 3), "|", substr($o, -10);'
+);
+$said  = (string) shell_exec($child);
+$parts = explode('|', trim($said));
+ew_check('F with the JIT off, 1 MB of "a.a.a…" and an address is cleaned in under half a second, and the address still goes',
+    count($parts) === 3 && $parts[0] === '0' && (float) $parts[1] < 0.5 && $parts[2] === ' [address]', $said);
+
+echo "G  once a request PROMISES anonymity, every error and activity record of it names nobody (#1044)\n";
+// LAST, because the promise cannot be taken back within a request (here: this
+// process). A signed-in member, as on the anonymous form.
+$_SESSION = ['user_id' => 42];
+$actMark  = (int) $db->query('SELECT COALESCE(MAX(`logID`), 0) FROM `tblActivityLogs`')->fetch_row()[0];
+Logger::promiseAnonymity();
+Logger::errorPlatform('MySQL', 'Error', 'PR_ANON_INSERT_FAIL', 'a statement would not run', '');
+$row = $lastError();
+ew_check('G an ordinary errorPlatform() line, after the promise, holds no account, network address, browser or headers', $row !== null
+    && (string) $row['errorCode'] === 'PR_ANON_INSERT_FAIL' && $row['userID'] === null && $row['visitorIP'] === null
+    && $row['userAgent'] === null && $row['requestHeaders'] === null, json_encode($row) ?: '');
+Logger::activity('P1044Promised', 'an ordinary activity record');
+$act = $db->query('SELECT * FROM `tblActivityLogs` WHERE `logID` > ' . $actMark . " AND `activityType` = 'P1044Promised'")->fetch_assoc();
+ew_check('G an ordinary activity() record, after the promise, names nobody though the session names a member', is_array($act) === true
+    && $act['userID'] === null && $act['visitorIP'] === null && $act['sessionID'] === null && $act['sessionDataSnapshot'] === null, json_encode($act) ?: '');
+$db->query('DELETE FROM `tblActivityLogs` WHERE `logID` > ' . $actMark);
+unset($_SESSION);
+
 // Tidy: the rows this run wrote.
 $db->query('DELETE FROM `tblErrors` WHERE `errorID` > ' . $mark);
 
 echo "\n" . str_repeat('=', 78) . "\n";
 printf("%d passed, %d failed\n", $passes, $failures);
-const EW_EXPECTED_CHECKS = 25;
+const EW_EXPECTED_CHECKS = 30;
 if ($passes + $failures !== EW_EXPECTED_CHECKS) {
     printf("FAIL: %d checks were made, %d expected - a check was skipped or added without changing EW_EXPECTED_CHECKS\n", $passes + $failures, EW_EXPECTED_CHECKS);
     exit(1);

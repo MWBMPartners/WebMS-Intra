@@ -78,6 +78,13 @@ exactly as above (ERROR_ON_PURPOSE, failing both ways), and the statements in
 Logger that make it keep nothing of the sender are pinned (ERROR_PINS), so the
 method cannot quietly start keeping the address again.
 
+And since #1044 round 2, a page that promises anonymity says so ONCE for the
+whole request: `Logger::promiseAnonymity()`, after which every error and
+activity record of the request names nobody (the page's own, PrayerChain's,
+Mailer's and PHP's). PROMISE_ON_PURPOSE counts its callers both ways, the call
+must come BEFORE the page's first record (or anything that can record), and
+the Logger statements that honour it are pinned (PROMISE_PINS, with counts).
+
 Comments are left out by PHP's own `php -w` (strip comments and white space),
 never a regular expression, so a comment mentioning the method is not a call.
 
@@ -165,6 +172,25 @@ ERROR_PINS = [
     "$ua = $namesNobody === true ? null : ($_SERVER['HTTP_USER_AGENT'] ?? '');",
 ]
 
+# #1044 round 2: the request-wide promise. File -> (calls, why).
+PROMISE_METHOD = "promiseAnonymity"
+PROMISE_ON_PURPOSE = {
+    "_apps/prayer-requests/anonymous-save.php": (
+        1,
+        "the anonymous prayer form: every record made for the rest of the request names nobody (#1044)",
+    ),
+}
+PROMISE_CALL = re.compile(r"Logger::" + PROMISE_METHOD + r"\s*\(\s*\)\s*;")
+# What must come AFTER the promise in that page (as `php -w` prints it): the
+# first thing that can write a record.
+PROMISE_BEFORE = ["Auth::ensureSession(", "Logger::activityNamingNobody(", "Captcha::verify(", "Logger::errorPlatform("]
+# Statements in Logger.php that honour the promise, with how often each appears.
+PROMISE_PINS = {
+    "if (self::$promisesAnonymity === true) { self::activityNamingNobody($type, $description); return; }": 1,
+    "self::writeErrorRow($siteId, $platform, $severity, $code, $title, $detail, $userId, self::$promisesAnonymity);": 2,
+    "public static function promiseAnonymity(): void { self::$promisesAnonymity = true; }": 1,
+}
+
 LOGGER = "_core/Logger.php"
 # The method's own statement: the account and the five browser columns are
 # written as literal NULLs, never bound from anything.
@@ -200,6 +226,7 @@ def method_body(text: str) -> str:
 def problems(web: str) -> list[str]:
     found: dict[str, int] = {}
     error_found: dict[str, int] = {}
+    promise_found: dict[str, int] = {}
     used: dict[str, dict[str, int]] = {needle: {} for needle in USES}
     for root, _dirs, files in os.walk(web):
         for name in files:
@@ -209,13 +236,16 @@ def problems(web: str) -> list[str]:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 raw = fh.read()
             wanted = [needle for needle in USES if needle.strip("'\"") in raw]
-            if METHOD not in raw and ERROR_METHOD not in raw and wanted == []:
+            if METHOD not in raw and ERROR_METHOD not in raw and PROMISE_METHOD not in raw and wanted == []:
                 continue  # the cheap test first: php -w only on files that mention one of them
             text = stripped(path)
             rel = os.path.relpath(path, web).replace(os.sep, "/")
             count = len(CALL.findall(text))
             if count > 0:
                 found[rel] = count
+            promise_count = len(PROMISE_CALL.findall(text))
+            if promise_count > 0:
+                promise_found[rel] = promise_count
             error_count = len(ERROR_CALL.findall(text))
             if error_count > 0:
                 error_found[rel] = error_count
@@ -257,6 +287,31 @@ def problems(web: str) -> list[str]:
                 "a decision (#1044): change the list only on purpose."
             )
 
+    for rel in sorted(set(promise_found) | set(PROMISE_ON_PURPOSE)):
+        want = PROMISE_ON_PURPOSE.get(rel, (0, ""))[0]
+        got = promise_found.get(rel, 0)
+        if got != want:
+            wrong.append(
+                f"{rel} calls Logger::{PROMISE_METHOD}() {got} time(s); PROMISE_ON_PURPOSE says {want}. A request that "
+                "promises anonymity makes every record of it name nobody (#1044): a page added or a promise dropped "
+                "is a decision, so change the list only on purpose."
+            )
+    for rel in PROMISE_ON_PURPOSE:
+        path = os.path.join(web, rel)
+        if os.path.isfile(path) is False:
+            continue
+        text = stripped(path)
+        match = PROMISE_CALL.search(text)
+        if match is None:
+            continue
+        for needle in PROMISE_BEFORE:
+            at = text.find(needle)
+            if at >= 0 and at < match.start():
+                wrong.append(
+                    f"{rel}: `{needle}` comes BEFORE Logger::{PROMISE_METHOD}(), so a record can be made before the "
+                    "request has promised anonymity (#1044): move the promise to the top"
+                )
+
     for needle, expected in USES.items():
         for rel in sorted(set(expected) | set(used[needle])):
             want = expected.get(rel, 0)
@@ -293,6 +348,13 @@ def problems(web: str) -> list[str]:
                 f"({PINNED_INSERT}, bound 'iss'): it must keep nothing that says who sent the record"
             )
         logger_text = stripped(logger)
+        for statement, want in PROMISE_PINS.items():
+            seen = logger_text.count(statement)
+            if seen != want:
+                wrong.append(
+                    f"{LOGGER} holds `{statement}` {seen} time(s), not {want}: a request that promised anonymity "
+                    "must have every error and activity record name nobody (#1044)"
+                )
         for statement in ERROR_PINS:
             seen = logger_text.count(statement)
             if seen != 1:
@@ -326,7 +388,7 @@ def self_test() -> int:
         tmp = tempfile.mkdtemp(prefix="p988-nobody-")
         try:
             web = os.path.join(tmp, "web")
-            for rel in sorted(set(list(ON_PURPOSE) + list(PINNED_STATEMENTS) + [LOGGER])):
+            for rel in sorted(set(list(ON_PURPOSE) + list(PINNED_STATEMENTS) + list(PROMISE_ON_PURPOSE) + [LOGGER])):
                 dst = os.path.join(web, rel)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copyfile(os.path.join(real, rel), dst)
@@ -515,6 +577,50 @@ def self_test() -> int:
     got = with_copy(error_flag_dropped)
     ok("Logger::errorNamingNobody() no longer passing its 'names nobody' flag is reported (#1044)",
        applied16["v"] is True and any("null, true);" in g for g in got), "; ".join(got))
+
+    # 17. #1044 round 2: the page's promise taken out.
+    applied17 = {"v": False}
+
+    def promise_dropped(w: str) -> None:
+        applied17["v"] = replace(w, "_apps/prayer-requests/anonymous-save.php", "Logger::promiseAnonymity();", "")
+    got = with_copy(promise_dropped)
+    ok("the anonymous form no longer promising anonymity for the whole request is reported (#1044)",
+       applied17["v"] is True and any(f"calls Logger::{PROMISE_METHOD}() 0 time(s)" in g for g in got), "; ".join(got))
+
+    # 18. #1044 round 2: the promise moved below the first record.
+    applied18 = {"v": False}
+
+    def promise_late(w: str) -> None:
+        path = os.path.join(w, "_apps/prayer-requests/anonymous-save.php")
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        if text.count("Logger::promiseAnonymity();") != 1 or text.count("// 🚦 Feature gates") != 1:
+            return
+        text = text.replace("Logger::promiseAnonymity();", "", 1)
+        text = text.replace("// 🤖 Captcha", "Logger::promiseAnonymity();\n// 🤖 Captcha", 1)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        applied18["v"] = True
+    got = with_copy(promise_late)
+    ok("the promise moved below the page's first record is reported (#1044)",
+       applied18["v"] is True and any("comes BEFORE" in g for g in got), "; ".join(got))
+
+    # 19. #1044 round 2: errorPlatform() no longer honouring the promise.
+    applied19 = {"v": False}
+
+    def promise_ignored(w: str) -> None:
+        path = os.path.join(w, LOGGER)
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        old = "$title, $detail, $userId, self::$promisesAnonymity);"
+        if text.count(old) != 2:
+            return
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text.replace(old, "$title, $detail, $userId, false);", 1))
+        applied19["v"] = True
+    got = with_copy(promise_ignored)
+    ok("an error method no longer honouring the request's promise is reported (#1044)",
+       applied19["v"] is True and any("self::$promisesAnonymity);` 1 time(s), not 2" in g for g in got), "; ".join(got))
 
     print(f"\n{passed} passed, {failed} failed.")
     return 0 if failed == 0 else 1

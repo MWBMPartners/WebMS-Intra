@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 281; // #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 286; // #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -5095,6 +5095,29 @@ $n964NoteBlock = preg_match('/        <div class="col-md-7">\n.*?\n        <\/di
     (string) file_get_contents($child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'erasure' . $sep . 'index.php'), $nb) === 1
     ? $nb[0] : 'NO NOTE BLOCK FOUND';
 $plantFile = static fn (string $rel): string => $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
+/**
+ * Run $observe with the anonymous form's request-wide promise TAKEN OUT
+ * (#1044 round 2). Since the page says Logger::promiseAnonymity() at its top,
+ * every record of the request names nobody whatever each call does - so a
+ * fault planted in one of the OLDER guards (a call going back to
+ * Logger::activity(), the bot check's own choice) would be covered by the
+ * promise and stay green. Each layer is proved on its own: the older plants
+ * run with the promise gone, and N62 removes the promise alone. Put back
+ * byte for byte, even if $observe throws.
+ */
+$withoutPromise = static function (callable $observe) use ($plantFile): array {
+    $path     = $plantFile('_apps/prayer-requests/anonymous-save.php');
+    $original = (string) file_get_contents($path);
+    if (substr_count($original, 'Logger::promiseAnonymity();') !== 1) {
+        return ['(the promise to take out was not found exactly once)'];
+    }
+    file_put_contents($path, str_replace('Logger::promiseAnonymity();', '', $original));
+    try {
+        return $observe();
+    } finally {
+        file_put_contents($path, $original);
+    }
+};
 $plants = [
     'N11 a match that trusts the database\'s comparison (the PHP test made always true): the accented and longer addresses\' events are emptied too' => [
         // The suggestions' comparison is named with the comment after it: the
@@ -5291,7 +5314,7 @@ foreach ($n988Plants as $label => [$rel, $swaps, $expect]) {
     if ($applied === true) {
         file_put_contents($path, strtr($original, $swaps));
         try {
-            $wrong = $n988Observe();
+            $wrong = $withoutPromise($n988Observe);
         } finally {
             file_put_contents($path, $original);
         }
@@ -5607,7 +5630,7 @@ foreach ($n1017Plants as $label => [$rel, $swaps, $expect]) {
     if ($applied === true) {
         file_put_contents($path, strtr($original, $swaps));
         try {
-            $wrong = $n1017Observe();
+            $wrong = $withoutPromise($n1017Observe);
         } finally {
             file_put_contents($path, $original);
         }
@@ -5706,7 +5729,7 @@ foreach ($n1044Plants as $label => [$rel, $swaps, $expect]) {
     if ($applied === true) {
         file_put_contents($path, strtr($original, $swaps));
         try {
-            $wrong = $n1044Observe();
+            $wrong = $withoutPromise($n1044Observe);
         } finally {
             file_put_contents($path, $original);
         }
@@ -5717,6 +5740,67 @@ foreach ($n1044Plants as $label => [$rel, $swaps, $expect]) {
 }
 $n1044Clean = $n1044Observe();
 ok('N60 with every #1044 plant taken out again, the same run is green (#1044)', $n1044Clean === [], implode('; ', $n1044Clean));
+
+// ── N61-N63. #1044 round 2: EVERY Errors-page line of the anonymous request ───
+// The bot check is not the only thing that can write one: the page's own save
+// can fail, and so can anything PHP reports on the way. The page now PROMISES
+// anonymity once, at its top (Logger::promiseAnonymity()), and every error
+// line for the rest of the request names nobody. Here the database REFUSES the
+// save (a trigger, made for this check and dropped after it) while reCAPTCHA
+// (the stand-in) passes, as May, signed in.
+$n1044bObserve = static function () use (&$jar, $state, $db): array {
+    $wrong = [];
+    httpsStandinAnswers($state['https'], ['www.google.com' => [['path' => '/recaptcha/api/siteverify', 'status' => 200,
+        'json' => ['success' => true, 'action' => 'submit', 'score' => 0.9]]]]);
+    $db->query('DROP TRIGGER IF EXISTS `p1044_refuse_prayer`');
+    $db->query("CREATE TRIGGER `p1044_refuse_prayer` BEFORE INSERT ON `tblPrayerRequests` FOR EACH ROW "
+        . "BEGIN IF NEW.`subject` LIKE 'P1044 refuse%' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p1044 refused'; END IF; END");
+    try {
+        $before  = (int) (one('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')['m'] ?? 0);
+        $subject = 'P1044 refuse ' . bin2hex(random_bytes(4));
+        sendAnonymousPrayer($jar['may'], ['subject' => $subject, 'body' => 'P1044 words', 'g-recaptcha-response' => 'p1044-made-up-token']);
+        if (one('SELECT `requestID` FROM `tblPrayerRequests` WHERE `subject` = ?', 's', [$subject]) !== null) {
+            $wrong[] = 'premise: the database did not refuse the save';
+        }
+        $rows = q('SELECT * FROM `tblErrors` WHERE `errorID` > ? ORDER BY `errorID`', 'i', [$before]);
+        if ($rows === []) {
+            $wrong[] = 'premise: the refused save wrote no Errors-page line at all';
+        }
+        foreach ($rows as $r) {
+            foreach (['userID', 'visitorIP', 'userAgent', 'requestHeaders'] as $col) {
+                if ($r[$col] !== null) {
+                    $wrong[] = 'the refused save\'s Errors-page line holds ' . $col;
+                }
+            }
+        }
+        q('DELETE FROM `tblErrors` WHERE `errorID` > ?', 'i', [$before]);
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `p1044_refuse_prayer`');
+        httpsStandinAnswers($state['https'], []);
+    }
+
+    return $wrong;
+};
+$n1044bFirst = $n1044bObserve();
+ok('N61 A SIGNED-IN MEMBER on the anonymous form whose request the DATABASE refuses: every Errors-page line the request writes (the page\'s own and PHP\'s) holds no account, network address, browser or headers (#1044 round 2)',
+    $n1044bFirst === [], implode('; ', $n1044bFirst));
+$path     = $plantFile('_apps/prayer-requests/anonymous-save.php');
+$original = (string) file_get_contents($path);
+$applied  = substr_count($original, 'Logger::promiseAnonymity();') === 1;
+$wrong    = ['(not run)'];
+if ($applied === true) {
+    file_put_contents($path, str_replace('Logger::promiseAnonymity();', '', $original));
+    try {
+        $wrong = $n1044bObserve();
+    } finally {
+        file_put_contents($path, $original);
+    }
+}
+ok('N62 the page no longer promising anonymity for the whole request - planted, the check goes red, and the file is put back (#1044 round 2)',
+    $applied === true && in_array('the refused save\'s Errors-page line holds visitorIP', $wrong, true) === true && (string) file_get_contents($path) === $original,
+    ($applied === true ? 'applied' : 'NOT APPLIED') . ' | observed: ' . implode('; ', $wrong));
+$n1044bClean = $n1044bObserve();
+ok('N63 with the plant taken out again, the same run is green (#1044 round 2)', $n1044bClean === [], implode('; ', $n1044bClean));
 // The captcha settings back as they were, now: later sections sign in again.
 foreach ($n1017Before as $key => $row) {
     if ($row === null) {
@@ -6779,6 +6863,25 @@ foreach ($r1063Plants as $label => [$rel, $swaps, $expect]) {
 }
 $r1063Clean = $r1063Observe();
 ok('R5 with every #1063 plant taken out again, the same copy is right (#1063)', $r1063Clean === [], implode('; ', $r1063Clean));
+// A HEAVY member: 5,001 recordings played, one more than a kind is cut to.
+// The copy hands over the newest 5,000, says in words that it was cut, and
+// still comes back promptly (measured, and printed).
+$db->query('SET SESSION cte_max_recursion_depth = 10000');
+$db->query('SET SESSION foreign_key_checks = 0');
+$db->query('INSERT INTO `tblRecordingPlay` (`recordingID`, `userID`, `playedAt`) WITH RECURSIVE `n` (`i`) AS (SELECT 1 UNION ALL SELECT `i` + 1 FROM `n` WHERE `i` < 5001) '
+    . 'SELECT 1, ' . FAY . ', NOW() - INTERVAL `i` SECOND FROM `n`');
+$db->query('SET SESSION foreign_key_checks = 1');
+$r1063Took  = microtime(true);
+$r1063Heavy = json_decode(req($jar['fay'], 'GET', '/account/data-export')['body'], true);
+$r1063Took  = microtime(true) - $r1063Took;
+echo '        (the copy for a member with 5,001 recordings played took ' . round($r1063Took, 2) . " s)\n";
+ok('R6 a member with 5,001 recordings played is handed the newest 5,000, and the copy says in words that the rest are not shown (#1063)',
+    count((array) ($r1063Heavy['data']['recordingsPlayed'] ?? [])) === 5000
+        && str_contains((string) ($r1063Heavy['shortened']['recordingsPlayed'] ?? ''), 'Only the newest 5,000') === true
+        && isset($r1063Heavy['shortened']['textMessagesSentToYou']) === false,
+    json_encode([count((array) ($r1063Heavy['data']['recordingsPlayed'] ?? [])), $r1063Heavy['shortened'] ?? null]));
+ok('R7 and that copy comes back within ten seconds', $r1063Took < 10.0, round($r1063Took, 2) . ' s');
+$db->query('DELETE FROM `tblRecordingPlay` WHERE `userID` = ' . FAY);
 $r1063Clear();
 
 head('Nothing went wrong behind the pages, and everything is put back');

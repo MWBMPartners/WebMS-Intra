@@ -1090,7 +1090,10 @@ function testGraphToken(): array
     // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
 
     if ($resp === false) {
-        Logger::activity('IntegrationTest', 'Graph token test failed — cURL error: ' . $curlErr);
+        // #990: a fixed sentence in the activity log; cURL's own words go to
+        //    the Errors page (any e-mail address removed, D-174).
+        Logger::activity('IntegrationTest', 'Graph token test failed: the request did not complete; the reason is on the Errors page');
+        Logger::errorPlatform('Microsoft', 'Warning', 'GRAPH_TOKEN_TEST_FAIL', 'Graph token test failed', $curlErr);
         return ['success' => false, 'message' => 'cURL request failed.', 'details' => $curlErr];
     }
 
@@ -1110,7 +1113,12 @@ function testGraphToken(): array
     // 🔍 Extract error details from the response
     $errCode = $data['error'] ?? 'unknown';
     $errDesc = $data['error_description'] ?? 'No description provided.';
-    Logger::activity('IntegrationTest', 'Graph token test failed — HTTP ' . $httpCode . ': ' . $errCode);
+    // #990: the activity log keeps the HTTP status and the OAuth error CODE,
+    //    which is a word from the standard's fixed list (invalid_client and
+    //    so on) - never the description beside it, and never anything that
+    //    is not shaped like such a code.
+    $codeWord = is_string($errCode) === true && preg_match('/^[a-z_]{1,64}$/', $errCode) === 1 ? $errCode : 'another error';
+    Logger::activity('IntegrationTest', 'Graph token test failed — HTTP ' . $httpCode . ': ' . $codeWord);
 
     return [
         'success' => false,

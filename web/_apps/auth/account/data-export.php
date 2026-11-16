@@ -86,6 +86,36 @@
  *                          opened and closed; each visit's day and kind only.
  *                          Never who opened it, its number, the visiting
  *                          worker or the visit notes — #1015, D-184)
+ *   #1063 — every other kind of record the erasure deletes with you:
+ *   tblAiUsage            (what you asked the AI assistant, its answer, the cost)
+ *   tblAssetOwners        (equipment you own or look after, without the notes)
+ *   tblEventCoordinators  (events you coordinate, without who made you one)
+ *   tblEventCrewMembers, tblEventJobAssignments, tblEventPeople (event crews,
+ *                          jobs and listings you are on)
+ *   tblEventRSVPs         (your answers to events)
+ *   tblInvitation         (the invitation you joined by, without its code)
+ *   tblLeadershipAssignments (leadership roles, without the notes)
+ *   tblNewsletterRecipient (newsletters sent to you, without the unsubscribe code)
+ *   tblOffboarding        (if you were offboarded: when, and what was chosen for
+ *                          your data; without the reason typed, which is an
+ *                          administrator's note)
+ *   tblPathwayEnrolments, tblPathwayProgress (pathways and steps, without notes)
+ *   tblPaymentMethod      (saved ways to pay, without the payment company's
+ *                          references)
+ *   tblPledges, tblProjectPledge (promises to give)
+ *   tblPushSubscriptions  (notification devices, without their address or keys)
+ *   tblReadingPlanEnrollment, tblUserMilestone, tblUserTours
+ *   tblRecordingPlay      (recordings you played, with the scrambled address)
+ *   tblSmsMessage         (texts sent to you; a sign-in code is masked, and a
+ *                          prayer-chain text's words are left out)
+ *   tblCareAccessLog      (when you opened a pastoral care file, nothing else)
+ *   tblVisitor            (your visitor record from before you had an account,
+ *                          without the follow-up notes)
+ *   Left out on purpose, each with its reason in the written list
+ *   (personal-data-catalogue.php, `notInDataCopy`): tblTotpBackupCodes and
+ *   tblRestoreHeldRows.
+ *   A kind that can grow without limit is cut to its newest
+ *   DATA_COPY_ROWS_PER_KIND rows, and `shortened` in the file says so.
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -130,6 +160,16 @@ if ($userId <= 0) {
  * @param string $sql           Prepared SQL whose every '?' is the user ID
  * @param string[] $stripFields Column names to drop from each row
  */
+/**
+ * 📏 How many rows of ONE kind the copy hands over, for the kinds that can
+ * grow without limit (#1063): text messages, AI questions, recordings played,
+ * newsletters, event answers, care files opened. Each such query asks for one
+ * more than this, so the page can tell "exactly this many" from "more", and
+ * `shortened` in the file says, in words, which kinds were cut. The activity
+ * history keeps its own older limit of 5,000 and is not listed there.
+ */
+const DATA_COPY_ROWS_PER_KIND = 5000;
+
 $fetchUserRows = static function (string $sql, array $stripFields = []) use ($mysqli, $userId): array {
     $stmt = $mysqli->prepare($sql);
     if ($stmt === false) {
@@ -730,7 +770,7 @@ $payload = [
         //    to the first 1,000 characters when stored), and what it cost.
         'aiAssistantUse' => $fetchUserRows(
             'SELECT `siteID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costPence`, `inputSample`, `outputSample`, `occurredAt` '
-            . 'FROM `tblAiUsage` WHERE `userID` = ? ORDER BY `occurredAt` DESC'
+            . 'FROM `tblAiUsage` WHERE `userID` = ? ORDER BY `occurredAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         // 🧰 Equipment you are named as an owner, custodian or stakeholder of.
         //    The notes are left out: the asset's administrator writes them.
@@ -764,7 +804,7 @@ $payload = [
             'SELECT `r`.`siteID`, `r`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `r`.`response`, `r`.`guestCount`, `r`.`status`, '
             . '`r`.`waitlistedAt`, `r`.`createdAt`, `r`.`updatedAt` '
             . 'FROM `tblEventRSVPs` AS `r` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` '
-            . 'WHERE `r`.`userID` = ?'
+            . 'WHERE `r`.`userID` = ? ORDER BY `r`.`createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         // ✉️ The invitation you joined by: the address it was sent to, the
         //    role offered and the welcome written to you. The invitation's
@@ -786,14 +826,17 @@ $payload = [
         //    is left out: it works without signing in.
         'newslettersSentToYou' => $fetchUserRows(
             'SELECT `newsletterID`, `emailAddress`, `deliveredAt`, `openedAt`, `clickedAt`, `errorMsg` '
-            . 'FROM `tblNewsletterRecipient` WHERE `userID` = ?'
+            . 'FROM `tblNewsletterRecipient` WHERE `userID` = ? ORDER BY `recipientID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
-        // 🚪 If you were offboarded: when, why, what was chosen for your
-        //    data, and when you came back. Who did it is left out, and so is
-        //    the list of steps the portal carried out (a technical record of
-        //    the portal's own work, which can name other records).
+        // 🚪 If you were offboarded: when, what was chosen for your data, and
+        //    when you came back. Left out: who did it; the REASON, which is
+        //    free text an administrator types on the offboarding page and can
+        //    name other people (an administrator's note, like the notes left
+        //    out above); and the list of steps the portal carried out (a
+        //    technical record of the portal's own work, which can name other
+        //    records).
         'offboarding' => $fetchUserRows(
-            'SELECT `effectiveDate`, `reason`, `dataDisposition`, `offboardedAt`, `rehiredAt` '
+            'SELECT `effectiveDate`, `dataDisposition`, `offboardedAt`, `rehiredAt` '
             . 'FROM `tblOffboarding` WHERE `userID` = ?'
         ),
         // 🪜 Pathways you are enrolled on, and the steps you have completed.
@@ -836,13 +879,25 @@ $payload = [
         //    address each play was recorded from (a network address is
         //    personal data, D-178).
         'recordingsPlayed' => $fetchUserRows(
-            'SELECT `recordingID`, `playedAt`, `ipHash` FROM `tblRecordingPlay` WHERE `userID` = ? ORDER BY `playedAt` DESC'
+            'SELECT `recordingID`, `playedAt`, `ipHash` FROM `tblRecordingPlay` WHERE `userID` = ? ORDER BY `playedAt` DESC, `playID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
-        // 📱 Text messages sent to you: the number, the words, and what
-        //    became of each. The text company's own reference is left out.
+        // 📱 Text messages sent to you: the number, the kind, the words, and
+        //    what became of each. The text company's own reference is left out.
+        //    TWO KINDS ARE NOT HANDED OVER WORD FOR WORD:
+        //    - The code that confirmed your number: its record never held the
+        //      code (Sms::VERIFICATION_TEXT_KEPT masks it as the text is
+        //      recorded), because a file holding a working code would let
+        //      anybody holding it finish a verification in your name - the
+        //      same reason the code is left out of your text-message settings.
+        //    - A prayer-chain text ('prayer_assignment'): its words are
+        //      ANOTHER member's prayer request (its subject), which they asked
+        //      about themselves and can have erased on their own (D-016). So
+        //      only the day, the kind and what became of it are handed over;
+        //      `body` is empty.
         'textMessagesSentToYou' => $fetchUserRows(
-            'SELECT `siteID`, `recipientNumber`, `body`, `category`, `status`, `sentAt`, `createdAt` '
-            . 'FROM `tblSmsMessage` WHERE `recipientUserID` = ? ORDER BY `createdAt` DESC'
+            "SELECT `siteID`, `recipientNumber`, CASE WHEN `category` = 'prayer_assignment' THEN NULL ELSE `body` END AS `body`, "
+            . '`category`, `status`, `sentAt`, `createdAt` '
+            . 'FROM `tblSmsMessage` WHERE `recipientUserID` = ? ORDER BY `createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         // 🎂 The dates you have added to your profile (a birthday, an
         //    anniversary) and who may see each.
@@ -856,7 +911,7 @@ $payload = [
         // 👁️ When you opened a pastoral care file. Only the moment: whose
         //    file it was is somebody else's (the reasoning of D-142).
         'careFilesYouOpened' => $fetchUserRows(
-            'SELECT `viewedAt` FROM `tblCareAccessLog` WHERE `viewerID` = ? ORDER BY `viewedAt` DESC'
+            'SELECT `viewedAt` FROM `tblCareAccessLog` WHERE `viewerID` = ? ORDER BY `viewedAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         // 🚶 Your own visitor record, from before you had an account. The
         //    follow-up notes are left out (the people following you up wrote
@@ -876,6 +931,16 @@ $payload = [
         // sharing the same name/email) that this export must not take.
     ],
 ];
+
+// ✂️ #1063: a kind cut to its newest DATA_COPY_ROWS_PER_KIND rows says so,
+//    in words, rather than looking complete.
+foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened'] as $kind) {
+    if (count($payload['data'][$kind]) > DATA_COPY_ROWS_PER_KIND) {
+        $payload['data'][$kind]   = array_slice($payload['data'][$kind], 0, DATA_COPY_ROWS_PER_KIND);
+        $payload['shortened'][$kind] = 'Only the newest ' . number_format(DATA_COPY_ROWS_PER_KIND)
+            . ' of these are shown here. Ask the organisation\'s office for the rest.';
+    }
+}
 
 // 📝 Audit log — the act of exporting one's own data is itself an event
 Logger::activity('DataExport', 'User downloaded their data export');

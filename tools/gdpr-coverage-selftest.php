@@ -3786,6 +3786,23 @@ foreach ($catalogue as $table => $entry) {
         $copyGaps[] = $table . "'s notInDataCopy is not a reason of a sentence or more";
     }
 }
+// 📌 THE LIST OF DELIBERATE EXCLUSIONS IS PINNED WHOLE (#1063 check round 1).
+//    Without this, taking a block OUT of the copy and writing a plausible
+//    `notInDataCopy` sentence for its table stayed green (measured with
+//    tblVisitor). Leaving a kind of record out of a person's copy is a
+//    decision, so adding a third table here fails ON PURPOSE: change this
+//    list only with that decision, as Captcha::PROMISES_ANONYMITY is pinned.
+$leftOutTables = [];
+foreach ($catalogue as $table => $entry) {
+    if (array_key_exists('notInDataCopy', $entry) === true) {
+        $leftOutTables[] = $table;
+    }
+}
+sort($leftOutTables);
+if ($leftOutTables !== ['tblRestoreHeldRows', 'tblTotpBackupCodes']) {
+    $copyGaps[] = 'the tables named as left out of the data copy are [' . implode(', ', $leftOutTables)
+        . '], not exactly [tblRestoreHeldRows, tblTotpBackupCodes]: leaving a kind of record out is a decision, so this pin changes only with it';
+}
 // Premise: the rule must still be looking at the tables that started this.
 if ($eraseCount < 40) {
     $copyGaps[] = 'premise: fewer than 40 erase tables in the written list (' . $eraseCount . '), so it is not being read as it should';
