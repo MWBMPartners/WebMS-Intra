@@ -307,7 +307,7 @@ final class ScheduledJobs
      */
     public const JOBS = [
         'cron/mail-queue' => [
-            'whatStops' => 'Sending mail that could not go out at once, and text messages held for quiet hours',
+            'whatStops' => 'Sending mail that could not go out at once, text messages held for quiet hours, and fetching the day\'s exchange rates',
             'token'     => 'maintenance.cronToken',
             'overdue'   => self::OVERDUE_MAIL_QUEUE,
             'name'      => 'the mail queue',

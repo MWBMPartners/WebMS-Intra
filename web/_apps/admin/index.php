@@ -1039,6 +1039,12 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-coins fa-lg"></i>
+                    <span class="small">Exchange rates</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="<?php echo htmlspecialchars(Site::url('admin/safeguarding/dbs'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-user-shield fa-lg"></i>
                     <span class="small">Safeguarding</span>

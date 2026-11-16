@@ -270,6 +270,21 @@ if ($settingId > 0) {
         header('Location: ' . Site::url('settings'));
         exit();
     }
+    // 💱 The exchange-rate switch (#993): changed only on Admin, Exchange rates,
+    //    where a global administrator decides it for every organisation. A
+    //    per-organisation row for it would be ignored (the fetch reads the
+    //    installation's row alone), which would read as a setting that works.
+    if (\Portal\Core\ExchangeRates::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is an exchange-rate setting and can only be changed at Admin, Exchange rates',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ExchangeRates::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
     // 🌍 The country (#967), the same: the organisation settings page accepts
     //    only a country on the portal's list, at either level. This editor
     //    stored any text, and "GBR" there silently became "no country" for
@@ -922,6 +937,20 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    // 💱 Nor the exchange-rate switch (#993): a row for it here, for one
+    //    organisation, would be ignored by the fetch (which reads the
+    //    installation's row alone) and read as a setting that works.
+    if (\Portal\Core\ExchangeRates::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is an exchange-rate setting and can only be set at Admin, Exchange rates',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ExchangeRates::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

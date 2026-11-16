@@ -265,6 +265,7 @@ settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_POR
 settings-row-rule-sql|tools/settings-row-rule-sql-selftest.php|selftest_rowrule|
 position-refusal|tools/position-refusal-selftest.php|selftest_position|SELFTEST_WEB_PORT=9030
 currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
+exchange-rates|tools/exchange-rates-selftest.php|selftest_exrates|SELFTEST_WEB_PORT=9993
 assets-api-update|tools/assets-api-update-selftest.php|selftest_assetsapi|SELFTEST_WEB_PORT=9101
 assets-deleted-writes|tools/assets-deleted-writes-selftest.php|selftest_assetsdel|SELFTEST_WEB_PORT=9147
 money-amount|tools/money-amount-selftest.php|selftest_money|SELFTEST_WEB_PORT=9533

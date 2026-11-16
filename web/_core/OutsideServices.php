@@ -434,7 +434,12 @@ final class OutsideServices
      * calendar/zoom-create.php, CloudflareStream.php and calendar/event-hub.php,
      * Transcription.php (AssemblyAI, OpenAI), Translation.php (Anthropic,
      * OpenAI, Google, DeepL, LibreTranslate) and WebPush.php with the push
-     * allow-list seeded in full_schema.sql.
+     * allow-list seeded in full_schema.sql. ExchangeRates.php (the European Central
+     * Bank's daily rate file, #993, added 16 November 2026) is a SafeFetch::get() call
+     * to ONE fixed address that sends no query and nothing about anybody; it is
+     * listed under the look-ups that carry nothing about you, and it runs whenever
+     * the installation's `exchangeRates.fetch` switch is on, so the sentence has no
+     * condition that could go untrue.
      *
      * Round 2 of the check (16 November 2026) found five more untruths or gaps,
      * each fixed against the code it names: a payment company's message to the
@@ -663,14 +668,19 @@ final class OutsideServices
             'name'      => 'Look-ups that carry nothing about you',
             'setUp'     => 'both',
             'companies' => 'The outside calendars this organisation imports, the hymn service, the barcode registry '
-                         . 'and the organisation\'s own website, each at an address an administrator typed in.',
+                         . 'and the organisation\'s own website, each at an address an administrator typed in; and the '
+                         . 'European Central Bank (its daily list of exchange rates).',
             'from'      => 'server',
             'when'      => 'When the portal fetches an outside calendar, searches for a hymn, looks up a barcode, or '
-                         . 'checks the organisation\'s own website is set up.',
+                         . 'checks the organisation\'s own website is set up; and, about once a day while the '
+                         . 'installation\'s exchange-rate switch is on, it fetches the European Central Bank\'s list of '
+                         . 'exchange rates.',
             'sends'     => 'Only what is being looked up: the calendar\'s address, the hymn searched for, the barcode. '
-                         . 'Nothing about you or anybody else.',
-            'why'       => 'To bring that information into the portal.',
-            'hosts'     => [],
+                         . 'Nothing about you or anybody else. For the exchange rates, nothing at all: only the request '
+                         . 'for the published list.',
+            'why'       => 'To bring that information into the portal, and to compare spending with outside companies '
+                         . 'against spending limits.',
+            'hosts'     => ['www.ecb.europa.eu'],
         ],
     ];
 

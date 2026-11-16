@@ -184,6 +184,7 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
     "www.sitemaps.org": (NAME_ONLY, "The sitemap file format's namespace name."),
     "schema.org": (NAME_ONLY, "The vocabulary named in a page's search-engine description."),
     "purl.org": (NAME_ONLY, "A feed format's namespace name."),
+    "www.ecb.int": (NAME_ONLY, "The exchange-rate file format's namespace name (ExchangeRates::ECB_NAMESPACE), compared, never fetched."),
     "www.itunes.com": (NAME_ONLY, "The podcast feed's namespace name."),
     "schemas.openxmlformats.org": (NAME_ONLY, "A spreadsheet format's namespace name."),
     "json-schema.org": (NAME_ONLY, "The schema language a JSON schema file declares."),
@@ -208,7 +209,7 @@ NOT_ABOUT_ANYBODY: dict[str, tuple[str, str]] = {
 #    host is in the code and none is listed. Each is still printed on the
 #    privacy pages. Fails both ways: an entry here that lists hosts, and an
 #    entry with no hosts that is not here.
-TYPED_ADDRESS_ONLY = {"errorMonitoring", "webhooks", "offsiteBackup", "qrTracking", "lookupsAboutNobody"}
+TYPED_ADDRESS_ONLY = {"errorMonitoring", "webhooks", "offsiteBackup", "qrTracking"}
 
 WHOLE_FILES: dict[str, str] = {
     "_core/data/giving-retention-countries.json":
@@ -461,6 +462,10 @@ PER_FILE: dict[str, dict[str, int]] = {
         '_core/PublicDoor.php': 1,
         '_core/api-spec.json': 1,
         '_core/data/public-door-posters.schema.json': 1,
+    },
+    'www.ecb.europa.eu': {
+        '_core/ExchangeRates.php': 1,
+        '_core/OutsideServices.php': 1,
     },
     'www.facebook.com': {
         '_core/Livestream.php': 2,

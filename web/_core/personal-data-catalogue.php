@@ -3214,6 +3214,29 @@ return [
                     . 'counts. It says nothing about which member pressed the button or what was translated',
         'columns'  => [],
     ],
+    'tblExchangeRate' => [
+        'decision' => 'not-personal',
+        // #993, migration 301. Written down rather than left out (#706).
+        'reason'   => 'The European Central Bank\'s published exchange rates: a currency, a rate, the '
+                    . 'bank\'s date and the moment the portal stored it. Nothing about any person',
+        'columns'  => [],
+    ],
+    'tblExchangeRateFetch' => [
+        'decision' => 'not-personal',
+        // #993, migration 301.
+        'reason'   => 'One row: when the daily fetch of exchange rates last ran and one fixed word for why it '
+                    . 'failed. Nothing about any person, and never the reply itself',
+        'columns'  => [],
+    ],
+    'tblExchangeRateEntered' => [
+        'decision' => 'not-personal',
+        // #993, migration 301. Deliberately no column for who typed a rate: that goes to the
+        // activity log, which an erasure reaches through its own userID column.
+        'reason'   => 'Exchange rates an administrator typed: an organisation number (or none for the '
+                    . 'installation), two currencies, a rate and two dates. It has no column for who typed '
+                    . 'one, so it holds no personal data',
+        'columns'  => [],
+    ],
     'tblScheduledJobRun' => [
         'decision' => 'not-personal',
         // #775, migration 253. It had no entry, which reads exactly like the

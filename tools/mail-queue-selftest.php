@@ -1748,6 +1748,11 @@ $state['baseline'] = [
     'mail.queue.retryHours' => ['24', 0], 'mail.queue.maxAgeHours' => ['48', 0], 'mail.queue.keepFailedDays' => ['7', 0], 'mail.queue.holdDays' => ['7', 0],
     // The job's token, stored as plain text and NOT marked as a secret, so that it reads the same whether or not the portal's start-up decrypts secret settings.
     'maintenance.cronToken' => [$jobToken, 0],
+    // The daily exchange-rate fetch (#993) is a third step of this job and ships ON. Left on, every call
+    // of the job here would try to reach the real www.ecb.europa.eu from a test run (and record an
+    // error where the machine has no internet). This test is about mail, so it switches the fetch off;
+    // tools/exchange-rates-selftest.php is the test that drives the fetch, against a stub.
+    'exchangeRates.fetch' => ['0', 0],
     // The portal's own address: a link in an e-mail written by a child process (which has no visitor) points at the server this run started.
     'site.url' => ['http://127.0.0.1:' . $port, 0],
     'auth.passwordReset.tokenExpiry' => ['60', 0],
