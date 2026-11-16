@@ -839,7 +839,6 @@ $http = static function (string $method, string $path, array $post = []) use ($p
     }
     $body = curl_exec($h);
     $code = (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
-    curl_close($h);
 
     return ['status' => $code, 'body' => (string) $body];
 };
