@@ -2798,17 +2798,61 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
 }
 // ✋ V09, round 9: the error-reports entry NAMES which reports carry an account number, so the set
 //    of callers that fill that field is pinned here by PHP's own tokeniser over every file under
-//    web/. A new caller naming a person (the 6th argument of Logger::errorPlatform(), the 7th of
-//    errorPlatformForSite()) turns this red, and the sentence must then be reconsidered.
-$accountFieldCallers = [];
-$webDir = $repo . $sep . 'web';
-$walkErr = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webDir, FilesystemIterator::SKIP_DOTS));
-foreach ($walkErr as $errFile) {
-    $errPath = (string) $errFile;
-    if (substr($errPath, -4) !== '.php') {
-        continue;
+//    web/. A new caller naming a person turns this red, and the sentence must then be reconsidered.
+//    Round 10: a caller fills the field in THREE ways, not one -- by position (the 6th argument of
+//    Logger::errorPlatform(), the 7th of errorPlatformForSite()), by NAME (`userId: 5`; both methods
+//    call the parameter $userId, checked in Logger.php), or by a SPREAD (`...$args`), which can carry
+//    either. Round 9 counted commas only, so a named or spread caller passed green (measured by the
+//    round-10 check). A spread is counted as filling the field because nothing here can see what the
+//    array holds -- the safe direction. V09a-V09f drive this function directly on made-up calls.
+//    What it still cannot see: a call through a variable class or method name, or call_user_func().
+function v09FillsAccountField(array $toks, int $open, string $method): bool
+{
+    $n = count($toks);
+    $depth = 0;
+    $args = 1;
+    $empty = true;
+    for ($m = $open; $m < $n; $m++) {
+        $text = is_array($toks[$m]) === true ? $toks[$m][1] : $toks[$m];
+        if ($text === '(' || $text === '[' || $text === '{') {
+            $depth++;
+            continue;
+        }
+        if ($text === ')' || $text === ']' || $text === '}') {
+            $depth--;
+            if ($depth === 0) {
+                break;
+            }
+            continue;
+        }
+        // 📦 A spread at the call's own level: it can fill the field by position or by name.
+        if ($depth === 1 && is_array($toks[$m]) === true && $toks[$m][0] === T_ELLIPSIS) {
+            return true;
+        }
+        // 🏷️ A named argument `userId:` at the call's own level (a ':' and not '::').
+        if ($depth === 1 && is_array($toks[$m]) === true && $toks[$m][0] === T_STRING && $toks[$m][1] === 'userId') {
+            $q = $m + 1;
+            while ($q < $n && is_array($toks[$q]) === true && $toks[$q][0] === T_WHITESPACE) {
+                $q++;
+            }
+            if ($q < $n && $toks[$q] === ':') {
+                return true;
+            }
+        }
+        if ($depth === 1 && $text === ',') {
+            $args++;
+        }
+        if ($depth >= 1 && trim($text) !== '') {
+            $empty = false;
+        }
     }
-    $toks = token_get_all((string) file_get_contents($errPath));
+    // 🔢 By position.
+    return $empty === false && $args >= ($method === 'errorPlatform' ? 6 : 7);
+}
+function v09Callers(string $code): array
+{
+    $found = [];
+    $toks = token_get_all($code);
     $n = count($toks);
     for ($i = 0; $i < $n; $i++) {
         if (is_array($toks[$i]) === false || $toks[$i][0] !== T_STRING
@@ -2829,33 +2873,34 @@ foreach ($walkErr as $errFile) {
         if ($k >= $n || $toks[$k] !== '(') {
             continue;
         }
-        $depth = 0;
-        $args = 1;
-        $empty = true;
-        for ($m = $k; $m < $n; $m++) {
-            $text = is_array($toks[$m]) === true ? $toks[$m][1] : $toks[$m];
-            if ($text === '(' || $text === '[' || $text === '{') {
-                $depth++;
-                continue;
-            }
-            if ($text === ')' || $text === ']' || $text === '}') {
-                $depth--;
-                if ($depth === 0) {
-                    break;
-                }
-                continue;
-            }
-            if ($depth === 1 && $text === ',') {
-                $args++;
-            }
-            if ($depth >= 1 && trim($text) !== '') {
-                $empty = false;
-            }
+        if (v09FillsAccountField($toks, $k, $toks[$i][1]) === true) {
+            $found[] = $toks[$i][1];
         }
-        $want = $toks[$i][1] === 'errorPlatform' ? 6 : 7;
-        if ($empty === false && $args >= $want) {
-            $accountFieldCallers[] = str_replace($sep, '/', substr($errPath, strlen($webDir) + 1));
-        }
+    }
+    return $found;
+}
+$v09Cases = [
+    'V09a a 6th argument by position'                          => ["<?php Logger::errorPlatform('X', 'W', 'C', 't', '', 5);", 1],
+    'V09b a named userId:'                                     => ["<?php \\Portal\\Core\\Logger::errorPlatform('X', 'Warning', 'C', 't', userId: 5);", 1],
+    'V09c a spread'                                            => ['<?php Logger::errorPlatform(...$a);', 1],
+    'V09d a named userId: on errorPlatformForSite'             => ['<?php Logger::errorPlatformForSite(1, \'X\', \'W\', \'C\', \'t\', userId: $u);', 1],
+    'V09e (stays clear) five arguments, or detail: named'      => ["<?php Logger::errorPlatform('X', 'W', 'C', 't', detail: 'd'); Logger::errorPlatformForSite(1, 'X', 'W', 'C', 't', 'd');", 0],
+    'V09f (stays clear) a userId: inside a nested call'        => ["<?php Logger::errorPlatform('X', 'W', 'C', f(userId: 1));", 0],
+];
+foreach ($v09Cases as $v09Label => [$v09Code, $v09Want]) {
+    check($v09Label . ' is counted as ' . ($v09Want === 1 ? 'filling' : 'not filling') . ' the account-number field (round 10)',
+        count(v09Callers($v09Code)) === $v09Want);
+}
+$accountFieldCallers = [];
+$webDir = $repo . $sep . 'web';
+$walkErr = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webDir, FilesystemIterator::SKIP_DOTS));
+foreach ($walkErr as $errFile) {
+    $errPath = (string) $errFile;
+    if (substr($errPath, -4) !== '.php') {
+        continue;
+    }
+    foreach (v09Callers((string) file_get_contents($errPath)) as $unused) {
+        $accountFieldCallers[] = str_replace($sep, '/', substr($errPath, strlen($webDir) + 1));
     }
 }
 sort($accountFieldCallers);

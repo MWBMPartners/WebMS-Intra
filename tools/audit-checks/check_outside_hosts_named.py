@@ -103,15 +103,33 @@ WHAT THIS CANNOT SEE, said plainly
 5. Measured gaps that stay green, each recorded rather than closed: a bare
    host name in a quoted string ending in a top-level name not in
    REAL_TOP_LEVEL (`'pixel.tracker.xyz'` -- a host written with `//` is read
-   whatever its ending); a host inside a base64 `data:` address, or any other
-   encoding but percent-encoding; a page rule built in pieces
+   whatever its ending); a host inside a base64 `data:` address, or written
+   in ANY encoding -- percent-encoding included: only a percent-encoded
+   `://` in front of the host is read, never percent-encoded characters in
+   the host itself (`https://tracker%2eio/`, `https://198%2e51%2e100%2e7/`);
+   a page rule built in pieces
    (`'img-' . 'src ' . $x`); an internet-number address (an "IP address")
    written as a bare string with no `//` in front; and a punycode name, or
    an address written as one large number, with no `http://` or `https://`
    in front. (Round 8 closed `//198.51.100.7/` and `https://3325256711/`;
-   round 9 replaced the list of number spellings with one rule, NUM_HOST.)
+   round 9 replaced the list of number spellings with one rule, NUM_HOST, which
+   reads every NUMBER spelling of a host -- but only after `//`, see below.)
    Also unseen: a name with no dot at all (`https://intranet/`), which a
    browser looks up like any other name.
+   THE WHOLE CLASS, stated once rather than closed spelling by spelling
+   (D-065, round 10): this reads an address only where `//` (plain, escaped
+   as `\\/\\/`, or percent-encoded as `%2f%2f`) comes DIRECTLY before the
+   host. The URL standard accepts many other spellings and a browser
+   fetches them; none is read here. Measured green in round 10, and really
+   fetched by Edge: backslashes for slashes (`https:\\\\198.51.100.7\\p.gif`,
+   `https:\\\\tracker.io\\p.gif`, `\\\\tracker.io/p.gif`), a mixed pair
+   (`https:/\\tracker.io/p.gif`), a tab after the `//` or a line break inside
+   the host (the standard strips both), and percent-encoded characters in
+   the host (above). Measured green and read as an address by node's URL
+   reader: `http:tracker.io/p.gif`, with no slashes at all. Full-width dots
+   are NOT claimed: Edge did not fetch them. Also not a load place here: an
+   address in `srcset`; and a false red: `//300/400` in a script comment the
+   comment reader keeps (see 4) reads as a number address.
 6. Round 7 of the check planted `<img src="https://198.51.100.7/pixel.gif">`
    and `https://xn--80ak6aa92e.xn--p1ai/p.gif` and both passed green, because
    the top-level-name rule wanted letters only. Both are read now (the
@@ -528,9 +546,14 @@ NUM_HOST = NUM_PART + r"(?:\." + NUM_PART + r"){0,3}"
 USERINFO = r"(?:[^@/\s'\"`<>]+@)?"
 PORT = r"(?::\d+)?"
 TRAILING_DOT = r"\.?"
+# Round 10: a `)` also ends an address, because CSS writes `url(https://198.51.100.7)` and
+# `url(//198.51.100.7)` with nothing after the host, and CSS is a place the browser loads by
+# itself. Measured: both passed green before; Edge fetched the second. A name of its own so the
+# self-test can switch it off. Cost: page text like `(see //1.2.3)` would now read as an address.
+CSS_URL_END = r")"
 ADDRESS_LITERAL = re.compile(
     r"https?(?::|%3a)(?://|\\/\\/|%2f%2f)" + USERINFO
-    + r"(\[[0-9a-f:.]+\]|" + NUM_HOST + r")" + TRAILING_DOT + PORT + r"(?=[/?#'\"`\s<>\\]|$)"
+    + r"(\[[0-9a-f:.]+\]|" + NUM_HOST + r")" + TRAILING_DOT + PORT + r"(?=[/?#'\"`\s<>\\" + CSS_URL_END + r"]|$)"
     + r"|https?(?::|%3a)(?://|\\/\\/|%2f%2f)" + USERINFO
     + r"((?:[\w-]+\.)*xn--[\w-]+(?:\.[\w-]+)*)(?![\w.-])")
 # Round 8: the same internet-number address with NO scheme (`//198.51.100.7/`), which a page loads as
@@ -538,7 +561,7 @@ ADDRESS_LITERAL = re.compile(
 # prose (`//1.2.3.4 notes`) is not read as an address.
 ADDRESS_LITERAL_NO_SCHEME = re.compile(
     r"(?<![\w:%])(?://|\\/\\/)" + USERINFO + r"(\[[0-9a-f:.]+\]|" + NUM_HOST + r")" + TRAILING_DOT + PORT
-    + r"(?=[/?#'\"`])")
+    + r"(?=[/?#'\"`" + CSS_URL_END + r"])")
 GLUED_SUFFIX = re.compile(r"(?<=['\"`])\.((?:" + LABEL + r"\.)+" + TOP + r")(?=[/'\"`])")
 WHOLE_HOSTS = re.compile(r"^\s*((?:" + LABEL + r"\.)+" + TOP + r")(?:\s*,\s*(?:" + LABEL + r"\.)+" + TOP + r")*\s*$")
 QUOTED = re.compile(r"'([^'\\\n]*)'|\"([^\"\\\n]*)\"|`([^`\\]*)`")
@@ -1070,6 +1093,17 @@ def self_test() -> int:
     run("S60 a version number in a path, a decimal in a query, and numbers after // in prose stay green",
         append("_core/templates/footer.php",
                '<a href="https://www.example.org/v1.2.3/?n=1.5&m=2.0">x</a><p>//1.5 seconds, //10 items</p>\n'), None)
+    run("S61 an internet number in CSS url(https://...) with nothing after the host fails (round 10)",
+        append("_core/templates/footer.php", '<div style="background:url(https://198.51.100.20)"></div>\n'),
+        new + " 198.51.100.20")
+    run("S62 an internet number in CSS url(//...) with no scheme fails (round 10)",
+        append("_core/templates/footer.php", '<div style="background:url(//198.51.100.21)"></div>\n'),
+        new + " 198.51.100.21")
+    run("S63 a punycode name in CSS url(https://...) fails",
+        append("_core/templates/footer.php", '<div style="background:url(https://xn--80ak6aa92e.xn--p1ai)"></div>\n'),
+        new + " xn--80ak6aa92e.xn--p1ai")
+    run("S64 a version number in brackets in page text stays green (round 10)",
+        append("_core/templates/footer.php", '<p>(version 1.2.3) and (v2.0)</p>\n'), None)
     # S44: one written host read by two shapes on one line (a page-rule source that is also a whole quoted
     # host name) is reported ONCE. Counted here rather than through run(), which only asks "is it there".
     checks += 1
@@ -1111,7 +1145,9 @@ def main() -> int:
         return 1
     print("✓ Every outside host found in code is accounted for, in the four shapes this check reads (after a //, "
           "plain, escaped or percent-encoded; a glued-on .suffix; a whole quoted host name ending in a known "
-          "top-level name; a source in a page-rule list); %d PER_FILE lines hold; no link, example or server-only company sits where a browser "
+          "top-level name; a source in a page-rule list) -- only where `//` comes directly before the host, so "
+          "any other spelling the URL standard accepts (backslashes, missing slashes, a tab or line break, "
+          "percent-encoded characters in the host, `http:host` with no slashes) is NOT read; %d PER_FILE lines hold; no link, example or server-only company sits where a browser "
           "loads by itself, in the load shapes it knows. It CANNOT see a host built from other pieces, an address "
           "typed by an administrator, a load through a variable, or whether the privacy-page words are true."
           % sum(len(v) for v in PER_FILE.values()))
