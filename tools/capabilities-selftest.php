@@ -612,7 +612,7 @@ cap_check(
 //    pass on a registry where every other entry had quietly flipped.
 //    #1064's exception is NAMED here rather than the loop loosened, so a third
 //    capability that falls closed still turns this red until somebody decides
-//    it on purpose. (#1064's is provisional: owner question 2 on that issue.)
+//    it on purpose. (#1064's is the owner's decision of 16 November 2026, D-191.)
 $FALLS_CLOSED = [Capabilities::ACCOUNTS_MERGE];
 $allOthersFallOpen = true;
 foreach ($OTHERS as $otherCap) {

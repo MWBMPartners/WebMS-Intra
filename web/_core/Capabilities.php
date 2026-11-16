@@ -296,12 +296,13 @@ final class Capabilities
     public const ATTENDANCE_REPORTS = 'attendance.reports';
 
     /**
-     * #1064 (D-185): who may merge two accounts that belong to one person. It
-     * opens Admin → Users → Merge two accounts, asked there and on the Users
-     * page that links to it, and `AccountMerge::factsFor()` asks it again in
+     * #1064 (D-185, D-190, D-191): who may START a merge of two accounts that
+     * belong to one person (the person completes it themselves, D-190). Asked on
+     * Admin → Users → Merge two accounts, its start and cancel handlers and the
+     * Users page that links to it; `AccountMerge::factsFor()` asks it again in
      * EVERY organisation either account belongs to. Ships with
-     * `data_controller` and does NOT fall open for a global administrator —
-     * provisionally, pending owner question 2 on #1064 (see the entry).
+     * `data_controller` and does NOT fall open for a global administrator: the
+     * owner's decision (D-191).
      */
     public const ACCOUNTS_MERGE = 'accounts.merge';
 

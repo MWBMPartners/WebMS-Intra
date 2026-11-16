@@ -961,7 +961,13 @@ $page2 = $http('GET', '/account/merge?request=' . $rid);
 $twice = $http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($page2['body']), 'requestID' => (string) $rid, 'action' => 'agree', 'typedDuplicate' => (string) $eDup]);
 check('E25 a second press is told it is already done, with no error', ($twice['status'] === 302 || $twice['status'] === 303)
     && str_contains($http('GET', '/account/merge?request=' . $rid)['body'], 'data-merge-state="closed"'));
-check('E26 the duplicate can no longer sign in', $signIn($loginDup) === false);
+// ⚠️ Checked in the database, NOT by trying to sign in: a failed sign-in counts
+//    towards the five-per-15-minutes limit on this address, so the fifth run of
+//    this test on one machine locked every later sign-in and turned unrelated
+//    checks red (found while planting faults).
+check('E26 the duplicate has no password left and is switched off, so it cannot sign in',
+    n($db, "SELECT COUNT(*) AS n FROM `tblLocalAccounts` WHERE `userID` = {$eDup}") === 0
+    && n($db, "SELECT `isActive` AS n FROM `tblUsers` WHERE `userID` = {$eDup}") === 0);
 $log = q($db, "SELECT `activityDescription` AS d FROM `tblActivityLogs` WHERE `activityType` LIKE 'AccountMerge%' OR `activityType` = 'AccountsMerged'");
 $named = array_filter($log, static fn (array $r): bool => preg_match('/[A-Za-z]@|Name ' . $tag . '/', (string) $r['d']) === 1);
 check('E27 every activity record of this feature holds no name and no e-mail address', $log !== [] && $named === [], json_encode(array_values($named)));
