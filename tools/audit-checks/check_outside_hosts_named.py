@@ -651,13 +651,14 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
                           low.count("\n", 0, match.start()) + 1))
         for pattern, group in ((CSP_DIRECTIVE, 1), (CSP_EXTRA, 2)):
             for match in pattern.finditer(low):
-                for source in match.group(group).split():
-                    source = source.strip("'\"`,")
+                for one_source in re.finditer(r"\S+", match.group(group)):
+                    source = one_source.group(0).strip("'\"`,")
                     if "//" in source or "$" in source or "{" in source or source.endswith(":"):
                         continue  # a keyword, a scheme, a variable, or an address the `//` shape reads
                     one = CSP_SOURCE_HOST.match(source)
                     if one is not None and one.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
-                        found.append((rel, one.group(1), True, low.count("\n", 0, match.start()) + 1))
+                        found.append((rel, one.group(1), True,
+                                      low.count("\n", 0, match.start(group) + one_source.start()) + 1))
         for match in GLUED_SUFFIX.finditer(low):
             if match.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
                 found.append((rel, match.group(1), False, low.count("\n", 0, match.start()) + 1))
@@ -665,9 +666,11 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
             low_s = (string or "").lower()
             if WHOLE_HOSTS.match(low_s) is None:
                 continue
-            for host in re.split(r"\s*,\s*", low_s.strip()):
+            # Each host's own line: a string can begin with a line break (#808 round 4).
+            for one_host in re.finditer(r"[^\s,]+", low_s):
+                host = one_host.group(0)
                 if host.rsplit(".", 1)[-1] in REAL_TOP_LEVEL:
-                    found.append((rel, host, False, int(string_line)))
+                    found.append((rel, host, False, int(string_line) + low_s.count("\n", 0, one_host.start())))
     return found
 
 
@@ -931,6 +934,20 @@ def self_test() -> int:
         append("public_html/assets/js/portal.js", "\n/* one\ntwo\nthree */\nvar u = 'https://jsline.newcompany.io/';\n"),
         "public_html/assets/js/portal.js (line %d) names the outside host jsline.newcompany.io"
         % (line_after("public_html/assets/js/portal.js") + 4))
+    run("S41 a host after a block comment in CSS is reported at its true line",
+        append("public_html/assets/css/portal.css",
+               "/* one\ntwo\nthree */\n.x { background: url('https://cssline.newcompany.io/a.png'); }\n"),
+        "public_html/assets/css/portal.css (line %d) names the outside host cssline.newcompany.io"
+        % (line_after("public_html/assets/css/portal.css") + 3))
+    run("S42 a host after comment lines in .htaccess is reported at its true line",
+        append("public_html/.htaccess",
+               "# one\n# two\nHeader set X-Test \"https://htline.newcompany.io/\"\n"),
+        "public_html/.htaccess (line %d) names the outside host htline.newcompany.io"
+        % (line_after("public_html/.htaccess") + 2))
+    run("S43 a whole-string host that begins on the string's second line is reported on that line",
+        append("_core/Translation.php", "\n$h = '\napi.nlstart.com';\n"),
+        "_core/Translation.php (line %d) names the outside host api.nlstart.com"
+        % (line_after("_core/Translation.php") + 2))
     print("%d of %d self-test cases passed" % (checks - failures, checks))
     return 0 if failures == 0 else 1
 

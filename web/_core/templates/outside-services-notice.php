@@ -47,6 +47,13 @@ declare(strict_types=1);
 use Portal\Core\OutsideServices;
 use Portal\Core\Site;
 
+/** The words for who sets a service up (#808 round 4). An unknown value prints nothing rather than a guess. */
+$outsideSetUpWords = [
+    'installation' => 'Whoever runs this whole installation, for every organisation on it.',
+    'organisation' => 'This organisation, for itself.',
+    'both'         => 'Partly whoever runs this whole installation, partly this organisation for itself.',
+];
+
 /** The words for who contacts the company. An unknown value prints nothing rather than a guess. */
 $outsideFromWords = [
     'browser' => 'Your browser.',
@@ -86,8 +93,9 @@ $outsideFromWords = [
     <?php else: ?>
         <p>
             <strong>Only if this organisation uses it.</strong> An organisation may use other companies to do a job
-            for it. Each one below is used only if this organisation has set it up; ask the organisation which it
-            uses.
+            for it. Each entry below says who sets it up: this organisation for itself, or whoever runs this whole
+            installation, in which case it covers the members of every organisation on the installation, whether or
+            not this organisation chose it. Ask the organisation which are in use.
         </p>
     <?php endif; ?>
     <ul data-outside-services="<?php echo htmlspecialchars($outsideGroup, ENT_QUOTES, 'UTF-8'); ?>">
@@ -95,6 +103,9 @@ $outsideFromWords = [
             <li data-outside-service="<?php echo htmlspecialchars($outsideKey, ENT_QUOTES, 'UTF-8'); ?>">
                 <strong><?php echo htmlspecialchars($outsideNamed['name'], ENT_QUOTES, 'UTF-8'); ?></strong>
                 &mdash; <?php echo htmlspecialchars($outsideNamed['companies'], ENT_QUOTES, 'UTF-8'); ?>
+                <?php if (isset($outsideNamed['setUp']) === true): ?>
+                    <br><em>Set up by:</em> <?php echo htmlspecialchars($outsideSetUpWords[$outsideNamed['setUp']] ?? '', ENT_QUOTES, 'UTF-8'); ?>
+                <?php endif; ?>
                 <br><em>Who contacts it:</em> <?php echo htmlspecialchars($outsideFromWords[$outsideNamed['from']] ?? '', ENT_QUOTES, 'UTF-8'); ?>
                 <br><em>When:</em> <?php echo htmlspecialchars($outsideNamed['when'], ENT_QUOTES, 'UTF-8'); ?>
                 <br><em>What it receives:</em> <?php echo htmlspecialchars($outsideNamed['sends'], ENT_QUOTES, 'UTF-8'); ?>

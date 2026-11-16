@@ -2650,6 +2650,18 @@ $wantFrom = [
     'videoUploads' => 'both', 'transcription' => 'server', 'translation' => 'server', 'pushNotifications' => 'both',
     'webhooks' => 'server', 'offsiteBackup' => 'server', 'qrTracking' => 'both', 'lookupsAboutNobody' => 'server',
 ];
+// ✋ Who sets each service up, pinned by hand from the level each settings page writes (#808 round 4).
+$wantSetUp = [
+    'signIn' => 'installation', 'email' => 'installation', 'textMessages' => 'installation', 'payments' => 'installation',
+    'videoMeetings' => 'both', 'videoUploads' => 'installation', 'transcription' => 'installation',
+    'translation' => 'installation', 'pushNotifications' => 'installation', 'webhooks' => 'organisation',
+    'offsiteBackup' => 'installation', 'qrTracking' => 'installation', 'lookupsAboutNobody' => 'both',
+];
+$setUpWords = [
+    'installation' => 'Whoever runs this whole installation, for every organisation on it.',
+    'organisation' => 'This organisation, for itself.',
+    'both'         => 'Partly whoever runs this whole installation, partly this organisation for itself.',
+];
 $fromWords = ['browser' => 'Your browser.', 'server' => 'This portal\'s own server, not your browser.', 'both' => 'Your browser, and this portal\'s own server.'];
 // ✋ Sentences that must be in ONE named entry, each a truth a reader relies on.
 $wantSaid = [
@@ -2662,10 +2674,10 @@ $wantSaid = [
     'textMessages'    => 'The telephone number it is sent to and the words of the message.',
     'sharedLibraries' => 'jsDelivr, and cdnjs (which is run by Cloudflare)',
     // ✋ Round 2 of the check: each of these was untrue or missing, and is pinned WHOLE.
-    'payments#kept'     => 'The portal never sees your card details. Afterwards the company sends this portal a message about the payment, which can carry the name, e-mail address and billing or delivery address you gave it; the portal keeps that message whole for the period this installation sets (90 days unless it is changed), and then the nightly clear-out empties it, once that scheduled job has been set up. The message carries the portal\'s own payment number, which links it to your account until an erasure removes that link. An erasure request does not reach the message itself; only the clear-out does.',
+    'payments#kept'     => 'The portal never sees your card details. Afterwards the company sends this portal a message about the payment, which can carry the name, e-mail address and billing or delivery address you gave it; the portal keeps that message whole for the period this installation sets (90 days unless it is changed), and then the nightly clear-out empties it, once that scheduled job has been set up. The message carries the portal\'s own payment number, which links it to your payment record, and through that to your account until an erasure removes the link. A gift paid this way that the organisation must keep for tax is the exception: its record keeps that payment number with your account number and name until its keep-until date, so until then the message can still be matched to you. An erasure request does not reach the message itself; only the clear-out does.',
     'videoMeetings'     => 'where this organisation is set to let each person use their own, any signed-in member can connect theirs on their own account page.',
     'pushNotifications' => 'Your browser registers with that company and stays in touch with it, so the company receives your internet address and browser.',
-    'webhooks'          => 'A short message about what happened, with the organisation\'s number and the time. What else it holds depends on what happened. An event registration: the registered person\'s full name and school year, which is often a child\'s. A suggested event: its name, which may have been typed by a visitor, and the account number of whoever suggested it. A prayer request: its subject, whether it was sent anonymously, and who may see it. A response card (the card somebody fills in after a service): the kind of step they ticked, such as baptism or membership. A registration accepted or turned down: the account number of whoever decided. An event approved or rejected, a filled-in form, or a finished approval process: reference numbers and the outcome only. The portal keeps a copy of each message. Once it has been delivered, or given up on after six tries, the nightly clear-out empties the copy after the period this organisation sets, once that scheduled job has been set up, unless the organisation has chosen to keep them. A message still waiting to be tried again is kept until then, and the further tries need the scheduled retry job.',
+    'webhooks'          => 'A short message about what happened, with the organisation\'s number and the time. What else it holds depends on what happened. An event registration: the registered person\'s full name and school year, which is often a child\'s. A suggested event: its name, which may have been typed by a visitor, and the account number of whoever suggested it. A prayer request: its subject, whether it was sent anonymously, and who may see it. A response card (the card somebody fills in after a service): the kind of step they ticked, such as baptism or membership. A registration accepted, turned down or put on the waiting list: the account number of whoever decided. An event approved or rejected, a filled-in form, or a finished approval process: reference numbers and the outcome only. The portal keeps a copy of each message. Once it has been delivered, or given up on after six tries, the nightly clear-out empties the copy after the period this organisation sets, once that scheduled job has been set up, unless the organisation has chosen to keep them. A message still waiting to be tried again is kept until then, and the further tries need the scheduled retry job.',
     'offsiteBackup#words' => 'an online storage company reached through rclone (a program that copies files to online storage), online storage that works like Amazon\'s storage service S3, or an SFTP server (a computer that accepts files sent to it over a secure connection).',
     'offsiteBackup'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled first with a key that stays on this portal\'s server. Uploaded files are not sent.',
     'qrTracking'        => 'so the phone of anybody who scans it goes to CueRCode first, which receives its internet address and browser.',
@@ -2715,6 +2727,13 @@ foreach (['/privacy' => 'the Privacy & Data Protection page', '/privacy/policy' 
     check("V05 {$what}: the opening does not claim every company learns your internet address",
         str_contains((string) preg_replace('/\s+/', ' ', $body), 'the company learns the server\'s address, not yours, unless the entry says that yours is passed on') === true);
     check("V05b {$what}: the second list is headed as the owner decided (D-195)", str_contains($body, '<strong>Only if this organisation uses it.</strong>') === true);
+    check("V05c {$what}: the second list's opening says who sets each one up, and that an installation-wide one covers every organisation (#808 round 4)",
+        str_contains((string) preg_replace('/\s+/', ' ', $body), 'Each entry below says who sets it up: this organisation for itself, or whoever runs this whole installation, in which case it covers the members of every organisation on the installation, whether or not this organisation chose it. Ask the organisation which are in use.') === true);
+    foreach ($wantSetUp as $key => $level) {
+        check("V05d {$what}: '{$key}' says who sets it up as pinned by hand ({$level})",
+            (OutsideServices::USED_BY_ORGANISATION[$key]['setUp'] ?? '') === $level
+            && str_contains($itemOf($body, $key), '<em>Set up by:</em> ' . $e($setUpWords[$level])) === true);
+    }
     check("V06 {$what}: links to the member's own Outside services page", str_contains($body, 'href="/account/outside-services"') === true);
     check("V06b {$what}: the withdrawn untruths are not back (third-party cookies, recognising people, Google's cookies), on a page that HAS the section",
         $body !== '' && str_contains($wholePage, 'No third-party tracking') === false && str_contains($wholePage, 'can recognise you') === false

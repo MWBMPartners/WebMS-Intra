@@ -410,11 +410,25 @@ final class OutsideServices
      * which answered 33 files on 16 November 2026. Entries whose `hosts` is
      * empty reach an address somebody TYPES, so no host is in the code.
      *
-     * @var array<string, array{name:string, companies:string, from:string, when:string, sends:string, why:string, hosts:list<string>}>
+     * `setUp` (#808 round 4) says WHO sets the service up, read from the level
+     * each settings page writes: `installation` (the page writes the row with
+     * `siteID IS NULL`, so it covers the members of EVERY organisation on the
+     * installation, whether or not this one chose it: sign-in credentials,
+     * the one mail route, texts, payments, Cloudflare Stream, transcription
+     * and translation keys, push keys, the off-site backup, QR tracking),
+     * `organisation` (outgoing webhooks: `tblWebhooks.siteID`), or `both`
+     * (Zoom: the app's keys installation-wide, the connected accounts in
+     * `tblZoomAccount` per organisation; the look-ups: outside calendars and
+     * the website check per organisation, hymns and barcodes installation-
+     * wide). The first heading said "used only if this organisation has set
+     * it up", which was untrue of every installation-wide entry.
+     *
+     * @var array<string, array{name:string, companies:string, setUp:string, from:string, when:string, sends:string, why:string, hosts:list<string>}>
      */
     public const USED_BY_ORGANISATION = [
         'signIn' => [
             'name'      => 'Signing in with a Microsoft or Google account',
+            'setUp'     => 'installation',
             'companies' => 'Microsoft, or Google',
             'from'      => 'both',
             'when'      => 'When you choose to sign in with that account.',
@@ -427,6 +441,7 @@ final class OutsideServices
         ],
         'email' => [
             'name'      => 'Sending e-mail',
+            'setUp'     => 'installation',
             'companies' => 'Microsoft 365 or Google, if this organisation sends its e-mail through one of them; otherwise '
                          . 'the mail server it has set up.',
             'from'      => 'server',
@@ -437,6 +452,7 @@ final class OutsideServices
         ],
         'textMessages' => [
             'name'      => 'Sending text messages',
+            'setUp'     => 'installation',
             'companies' => 'Twilio, MessageBird, or Amazon (its notification service, Amazon SNS)',
             'from'      => 'server',
             'when'      => 'When the portal sends a text message.',
@@ -446,6 +462,7 @@ final class OutsideServices
         ],
         'payments' => [
             'name'      => 'Taking payments',
+            'setUp'     => 'installation',
             'companies' => 'Stripe, or PayPal',
             'from'      => 'both',
             'when'      => 'When you pay for something through the portal.',
@@ -457,13 +474,17 @@ final class OutsideServices
                          . 'delivery address you gave it; the portal keeps that message whole for the period this '
                          . 'installation sets (90 days unless it is changed), and then the nightly clear-out empties it, '
                          . 'once that scheduled job has been set up. The message carries the portal\'s own payment '
-                         . 'number, which links it to your account until an erasure removes that link. An erasure '
-                         . 'request does not reach the message itself; only the clear-out does.',
+                         . 'number, which links it to your payment record, and through that to your account until an '
+                         . 'erasure removes the link. A gift paid this way that the organisation must keep for tax is '
+                         . 'the exception: its record keeps that payment number with your account number and name '
+                         . 'until its keep-until date, so until then the message can still be matched to you. An '
+                         . 'erasure request does not reach the message itself; only the clear-out does.',
             'why'       => 'To take the payment safely.',
             'hosts'     => ['api.stripe.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com'],
         ],
         'videoMeetings' => [
             'name'      => 'Video meetings',
+            'setUp'     => 'both',
             'companies' => 'Zoom',
             'from'      => 'both',
             'when'      => 'When a Zoom account is connected, and when a meeting is created for an event. Usually an '
@@ -480,6 +501,7 @@ final class OutsideServices
         ],
         'videoUploads' => [
             'name'      => 'Uploading a video',
+            'setUp'     => 'installation',
             'companies' => 'Cloudflare (its video service, Cloudflare Stream)',
             'from'      => 'both',
             'when'      => 'When somebody uploads a video to an event.',
@@ -490,6 +512,7 @@ final class OutsideServices
         ],
         'transcription' => [
             'name'      => 'Writing out what a recording says',
+            'setUp'     => 'installation',
             'companies' => 'AssemblyAI, or OpenAI',
             'from'      => 'server',
             'when'      => 'When somebody asks for a recording to be written out.',
@@ -499,6 +522,7 @@ final class OutsideServices
         ],
         'translation' => [
             'name'      => 'Translating',
+            'setUp'     => 'installation',
             'companies' => 'Anthropic, OpenAI, Google, DeepL, or a LibreTranslate server',
             'from'      => 'server',
             'when'      => 'When somebody presses Translate on an announcement, a project or a project\'s update.',
@@ -510,6 +534,7 @@ final class OutsideServices
         ],
         'pushNotifications' => [
             'name'      => 'Notifications on your device',
+            'setUp'     => 'installation',
             'companies' => 'The company that runs your browser\'s notification service: Google, Mozilla, Apple or '
                          . 'Microsoft.',
             'from'      => 'both',
@@ -524,6 +549,7 @@ final class OutsideServices
         ],
         'webhooks' => [
             'name'      => 'Messages to another system (webhooks)',
+            'setUp'     => 'organisation',
             'companies' => 'Whatever address this organisation\'s administrator has typed in, such as a booking or '
                          . 'church-management system.',
             'from'      => 'server',
@@ -535,7 +561,8 @@ final class OutsideServices
                          . 'may have been typed by a visitor, and the account number of whoever suggested it. A prayer '
                          . 'request: its subject, whether it was sent anonymously, and who may see it. A response card '
                          . '(the card somebody fills in after a service): the kind of step they ticked, such as '
-                         . 'baptism or membership. A registration accepted or turned down: the account number of '
+                         . 'baptism or membership. A registration accepted, turned down or put on the waiting list: the '
+                         . 'account number of '
                          . 'whoever decided. An event approved or rejected, a filled-in form, or a finished approval '
                          . 'process: reference numbers and the outcome only. The portal keeps a copy of each message. '
                          . 'Once it has been delivered, or given up on after six tries, the nightly clear-out empties '
@@ -547,6 +574,7 @@ final class OutsideServices
         ],
         'offsiteBackup' => [
             'name'      => 'Off-site backup',
+            'setUp'     => 'installation',
             'companies' => 'The storage service this installation\'s administrator chose: an online storage '
                          . 'company reached through rclone (a program that copies files to online storage), online '
                          . 'storage that works like Amazon\'s storage service S3, or an SFTP server (a computer that '
@@ -560,6 +588,7 @@ final class OutsideServices
         ],
         'qrTracking' => [
             'name'      => 'QR codes that count scans',
+            'setUp'     => 'installation',
             'companies' => 'CueRCode, at the address this installation\'s administrator typed in.',
             'from'      => 'both',
             'when'      => 'Only if this installation is set to use it, when the portal makes a QR code.',
@@ -571,6 +600,7 @@ final class OutsideServices
         ],
         'lookupsAboutNobody' => [
             'name'      => 'Look-ups that carry nothing about you',
+            'setUp'     => 'both',
             'companies' => 'The outside calendars this organisation imports, the hymn service, the barcode registry '
                          . 'and the organisation\'s own website, each at an address an administrator typed in.',
             'from'      => 'server',
