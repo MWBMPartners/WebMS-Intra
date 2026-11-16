@@ -507,10 +507,12 @@ foreach (array_slice($argv, 1) as $f) {
     $strings = [];
     foreach (token_get_all((string) file_get_contents($f)) as $t) {
         if (is_array($t) === true) {
-            if ($t[0] === T_COMMENT || $t[0] === T_DOC_COMMENT) { $text .= ' '; continue; }
-            if ($t[0] === T_INLINE_HTML) { $text .= preg_replace('~<!--.*?-->~s', ' ', $t[1]); continue; }
-            if ($t[0] === T_CONSTANT_ENCAPSED_STRING) { $strings[] = substr($t[1], 1, -1); }
-            if ($t[0] === T_ENCAPSED_AND_WHITESPACE) { $strings[] = $t[1]; }
+            // A comment becomes its own line breaks (or one space), so every later
+            // line number stays true (#808 round 3: a plain space shifted them).
+            if ($t[0] === T_COMMENT || $t[0] === T_DOC_COMMENT) { $nl = substr_count($t[1], "\n"); $text .= $nl > 0 ? str_repeat("\n", $nl) : ' '; continue; }
+            if ($t[0] === T_INLINE_HTML) { $text .= preg_replace_callback('~<!--.*?-->~s', static fn ($m) => str_repeat("\n", substr_count($m[0], "\n")) . ' ', $t[1]); continue; }
+            if ($t[0] === T_CONSTANT_ENCAPSED_STRING) { $strings[] = [substr($t[1], 1, -1), $t[2]]; }
+            if ($t[0] === T_ENCAPSED_AND_WHITESPACE) { $strings[] = [$t[1], $t[2]]; }
             $text .= $t[1];
         } else {
             $text .= $t;
@@ -568,8 +570,9 @@ def strip_c_like(text: str, hash_comments: bool = False, dash_comments: bool = F
             continue
         if text.startswith("/*", i):
             end = text.find("*/", i + 2)
-            i = n if end < 0 else end + 2
-            out.append(" ")
+            stop = n if end < 0 else end + 2
+            out.append("\n" * text.count("\n", i, stop) + " ")
+            i = stop
             continue
         line_comment = (not dash_comments and text.startswith("//", i) and (i == 0 or text[i - 1] not in ":\\"))
         line_comment = line_comment or (hash_comments and c == "#") or (dash_comments and text.startswith("--", i))
@@ -600,14 +603,15 @@ def code_texts(web: Path) -> dict[str, tuple[str, list[str]]]:
         if suffix in (".js", ".mjs"):
             code = strip_c_like(raw)
         elif suffix == ".css":
-            code = re.sub(r"/\*.*?\*/", " ", raw, flags=re.S)
+            code = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n") + " ", raw, flags=re.S)
         elif suffix == ".sql":
             code = strip_c_like(raw, hash_comments=True, dash_comments=True)
         elif path.name == ".htaccess":
-            code = "\n".join(line for line in raw.splitlines() if line.lstrip().startswith("#") is False)
+            code = "\n".join("" if line.lstrip().startswith("#") else line for line in raw.splitlines())
         else:
             code = raw
-        strings = [a or b or c for a, b, c in QUOTED.findall(code)]
+        strings = [(m.group(1) or m.group(2) or m.group(3) or "", code.count("\n", 0, m.start()) + 1)
+                   for m in QUOTED.finditer(code)]
         texts[rel] = (code, strings)
     exe = php()
     for start in range(0, len(php_files), 200):
@@ -657,13 +661,13 @@ def scan(web: Path) -> list[tuple[str, str, bool, int]]:
         for match in GLUED_SUFFIX.finditer(low):
             if match.group(1).rsplit(".", 1)[-1] not in FILE_ENDINGS:
                 found.append((rel, match.group(1), False, low.count("\n", 0, match.start()) + 1))
-        for string in strings:
+        for string, string_line in strings:
             low_s = (string or "").lower()
             if WHOLE_HOSTS.match(low_s) is None:
                 continue
             for host in re.split(r"\s*,\s*", low_s.strip()):
                 if host.rsplit(".", 1)[-1] in REAL_TOP_LEVEL:
-                    found.append((rel, host, False, 0))
+                    found.append((rel, host, False, int(string_line)))
     return found
 
 
@@ -909,6 +913,24 @@ def self_test() -> int:
     run("S36 an entry with no hosts that is not marked typed-address-only fails",
         replace("_core/OutsideServices.php", "'hosts'     => ['api.what3words.com'],", "'hosts'     => [],"),
         "['what3words'] lists no hosts")
+    def line_after(rel: str) -> int:
+        return (real / rel).read_text(encoding="utf-8").count("\n") + 1
+
+    run("S37 a host added at the end of header.php is reported at its true line (comments above it)",
+        append("_core/templates/header.php", "<?php $x = 'https://line.newcompany.io/'; ?>\n"),
+        "_core/templates/header.php (line %d) names the outside host line.newcompany.io"
+        % line_after("_core/templates/header.php"))
+    run("S38 a host added at the end of Qr.php is reported at its true line",
+        append("_core/Qr.php", "\n$x = 'https://qrline.newcompany.io/';\n"),
+        "_core/Qr.php (line %d) names the outside host qrline.newcompany.io" % (line_after("_core/Qr.php") + 1))
+    run("S39 a bare host in a PHP string is reported at its true line, never line 0",
+        append("_core/Translation.php", "\n$h = 'api.linetranslator.com';\n"),
+        "_core/Translation.php (line %d) names the outside host api.linetranslator.com"
+        % (line_after("_core/Translation.php") + 1))
+    run("S40 a host after a block comment in JavaScript is reported at its true line",
+        append("public_html/assets/js/portal.js", "\n/* one\ntwo\nthree */\nvar u = 'https://jsline.newcompany.io/';\n"),
+        "public_html/assets/js/portal.js (line %d) names the outside host jsline.newcompany.io"
+        % (line_after("public_html/assets/js/portal.js") + 4))
     print("%d of %d self-test cases passed" % (checks - failures, checks))
     return 0 if failures == 0 else 1
 

@@ -456,8 +456,9 @@ final class OutsideServices
                          . 'portal a message about the payment, which can carry the name, e-mail address and billing or '
                          . 'delivery address you gave it; the portal keeps that message whole for the period this '
                          . 'installation sets (90 days unless it is changed), and then the nightly clear-out empties it, '
-                         . 'once that scheduled job has been set up. Nothing on the message links it to your account, so '
-                         . 'an erasure request cannot reach it.',
+                         . 'once that scheduled job has been set up. The message carries the portal\'s own payment '
+                         . 'number, which links it to your account until an erasure removes that link. An erasure '
+                         . 'request does not reach the message itself; only the clear-out does.',
             'why'       => 'To take the payment safely.',
             'hosts'     => ['api.stripe.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com'],
         ],
@@ -528,18 +529,28 @@ final class OutsideServices
             'from'      => 'server',
             'when'      => 'When something the administrator chose happens, such as an event registration, a prayer '
                          . 'request, a suggested event or a filled-in form.',
-            'sends'     => 'A short message about what happened. For an event registration it includes the registered '
-                         . 'person\'s full name and school year, which is often a child\'s; for a prayer request, its '
-                         . 'subject; otherwise reference numbers, and the account numbers of whoever acted. The portal '
-                         . 'keeps a copy of each message sent for the period this organisation sets, then empties it, '
-                         . 'unless the organisation has chosen to keep them.',
+            'sends'     => 'A short message about what happened, with the organisation\'s number and the time. What '
+                         . 'else it holds depends on what happened. An event registration: the registered person\'s '
+                         . 'full name and school year, which is often a child\'s. A suggested event: its name, which '
+                         . 'may have been typed by a visitor, and the account number of whoever suggested it. A prayer '
+                         . 'request: its subject, whether it was sent anonymously, and who may see it. A response card '
+                         . '(the card somebody fills in after a service): the kind of step they ticked, such as '
+                         . 'baptism or membership. A registration accepted or turned down: the account number of '
+                         . 'whoever decided. An event approved or rejected, a filled-in form, or a finished approval '
+                         . 'process: reference numbers and the outcome only. The portal keeps a copy of each message. '
+                         . 'Once it has been delivered, or given up on after six tries, the nightly clear-out empties '
+                         . 'the copy after the period this organisation sets, once that scheduled job has been set up, '
+                         . 'unless the organisation has chosen to keep them. A message still waiting to be tried again '
+                         . 'is kept until then, and the further tries need the scheduled retry job.',
             'why'       => 'So that another system the organisation uses hears about it straight away.',
             'hosts'     => [],
         ],
         'offsiteBackup' => [
             'name'      => 'Off-site backup',
-            'companies' => 'The storage service this installation\'s administrator chose: a cloud storage company '
-                         . 'reached through rclone, storage that works like Amazon S3, or an SFTP server.',
+            'companies' => 'The storage service this installation\'s administrator chose: an online storage '
+                         . 'company reached through rclone (a program that copies files to online storage), online '
+                         . 'storage that works like Amazon\'s storage service S3, or an SFTP server (a computer that '
+                         . 'accepts files sent to it over a secure connection).',
             'from'      => 'server',
             'when'      => 'When the scheduled off-site copy runs, if it has been set up and switched on.',
             'sends'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled '
