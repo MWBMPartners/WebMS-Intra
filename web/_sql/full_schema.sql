@@ -343,7 +343,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     -- ends one carrying any other number. A number, not a time: see the migration.
     `signInVersion` BIGINT NOT NULL DEFAULT 0 COMMENT 'Goes up by a RANDOM amount every time the password is reset, changed or set by an administrator (#598, D-104, D-108), so a number never comes back after a restore. A browser session carrying any other number is ended on its next request. Written only by Auth::endOtherSessionsOf().',
     `signInChangedByOtherAtUtc` DATETIME DEFAULT NULL COMMENT 'A MOMENT IN UTC: when somebody OTHER than this account last chose its way in - set its password (Auth::storeHash) or changed its e-mail address (admin users page). Never cleared by the account itself. A merge refuses an agreement from an account whose way in was changed by somebody else recently (#1064, D-190)',
-    `earlierEmails` TEXT DEFAULT NULL COMMENT 'Every e-mail address this account has held before its current one, as a JSON list, oldest first, appended on every change by anybody (AccountMerge::rememberReplacedAddressSql). A merge request start notice is sent to each, so a person whose address somebody else replaced is still told (#1064, D-200). Emptied by an erasure',
+    `earlierEmails` TEXT DEFAULT NULL COMMENT 'Every e-mail address this account has held before its current one, as a JSON list, oldest first, appended on every change by anybody (AccountMerge::rememberReplacedAddressSql). A merge request start notice is sent to each, so a person whose address somebody else replaced is still told (#1064, D-200). An erasure appends the address it replaces too, and empties the list when the request closes (GdprEraser::closeRequest)',
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
     KEY `idx_user_calendar_token` (`calendarToken`)
@@ -11964,8 +11964,8 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
     `userID`          INT        NOT NULL COMMENT 'One of the two accounts',
     `side`            ENUM('kept','duplicate') NOT NULL COMMENT 'kept: the account that stays. duplicate: the one merged into it and closed',
     `confirmedAtUtc`  DATETIME   DEFAULT NULL COMMENT 'A MOMENT IN UTC: when the person, signed in as this account with a fresh proof, agreed. Cleared when the other side restarts',
-    `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied by that erasure (GdprEraser::eraseMergeRecords)',
-    `formerEarlierEmails` TEXT DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the JSON list of addresses it had held before its last one (tblUsers.earlierEmails), to which start notices went. Kept for the same reason as formerEmail and emptied by the same erasure step; the account row''s own list is emptied at merge',
+    `formerEmail`     VARCHAR(255) DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the e-mail address it held before it was closed, so an erasure of the kept account can still find mail sent to that address (send log, waiting mail). Emptied when that erasure request closes (GdprEraser::closeRequest), never earlier, so a retried run can still search by it',
+    `formerEarlierEmails` TEXT DEFAULT NULL COMMENT 'The DUPLICATE side only, written when the merge completes: the JSON list of addresses it had held before its last one (tblUsers.earlierEmails), to which start notices went. Kept for the same reason as formerEmail and emptied at the same point, when the erasure request closes; the account row''s own list is emptied at merge',
     PRIMARY KEY (`sideID`),
     UNIQUE KEY `uq_ams_request_side` (`requestID`, `side`),
     UNIQUE KEY `uq_ams_request_user` (`requestID`, `userID`),

@@ -301,7 +301,8 @@ $payload = [
         // 🔀 #1064 — requests to merge your accounts: which side each account
         //    was, when it agreed, and (on a merged duplicate) the address it held
         //    when it was merged. Export↔erasure parity with
-        //    GdprEraser::eraseMergeRecords(), which empties that address.
+        //    GdprEraser::closeRequest(), which empties those addresses when an
+        //    erasure request closes.
         'accountMerges' => $fetchUserRows(
             'SELECT `requestID`, `userID`, `side`, `confirmedAtUtc`, `formerEmail`, `formerEarlierEmails` FROM tblAccountMergeSide WHERE `userID` = ?'
         ),

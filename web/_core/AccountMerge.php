@@ -65,8 +65,10 @@ final class AccountMerge
     /**
      * The name a closed (merged-away) account carries. Written by the merge
      * when it closes the duplicate, and again by an erasure of the account it
-     * was merged into (`GdprEraser::eraseMergeRecords()`), which empties
-     * anything written onto the closed row since.
+     * was merged into (`GdprEraser::eraseMergeRecords()`), which empties the
+     * personal details written onto the closed row since. (The addresses
+     * recorded for the merged account are emptied separately, when that
+     * erasure request closes: `GdprEraser::closeRequest()`.)
      */
     public const CLOSED_NAME = 'Merged account';
 
@@ -1360,7 +1362,9 @@ final class AccountMerge
             // 📧 The duplicate's address as it is NOW, kept on its side row so an
             //    erasure of the kept account can find mail sent to it (the send
             //    log, waiting mail) after closeDuplicate() has replaced it. That
-            //    erasure empties it (GdprEraser::eraseMergeRecords()).
+            //    erasure empties it when its request closes
+            //    (GdprEraser::closeRequest()), never earlier, so a retried run
+            //    can still search by it.
             //    With it, every address the duplicate had held before (D-200's
             //    `earlierEmails`, round 6), to which start notices went, for the
             //    same reason; closeDuplicate() then empties the account row's list.
@@ -1776,15 +1780,26 @@ final class AccountMerge
      *    by anybody else, so a merge's start notice reaches every address the
      *    account has held (`addressesOf()`). Nothing is added when the address
      *    does not change, when it was empty, or when it is already listed.
-     *    The two writers are the administrator's user page and the person's
-     *    own account page; nothing else changes an address (the users API
+     *    Three statements use it: the administrator's user page, the person's
+     *    own account page, and an erasure's account statement (round 10 of
+     *    #1064, so a retried erasure still searches by the address it
+     *    replaced). Nothing else changes an address, apart from the merge
+     *    itself, which empties the closed account's list (the users API
      *    cannot, measured by reading its update list).
+     *
+     *    A stored value that is not valid JSON is treated as an empty list
+     *    (round 10): the column is TEXT, so it can hold anything, and
+     *    `JSON_CONTAINS()` on such a value is an ERROR, which stopped the
+     *    erasure's account statement outright (measured with the eraser
+     *    self-test's made-up account, whose every column holds plain text).
+     *    `addressList()` already reads such a value as no addresses, so
+     *    nothing that could be read is lost.
      */
     public static function rememberReplacedAddressSql(): string
     {
         return '`earlierEmails` = IF(NOT (`emailAddress` <=> ?) AND COALESCE(`emailAddress`, \'\') <> \'\' '
-            . 'AND NOT JSON_CONTAINS(COALESCE(`earlierEmails`, JSON_ARRAY()), JSON_QUOTE(`emailAddress`)), '
-            . 'JSON_ARRAY_APPEND(COALESCE(`earlierEmails`, JSON_ARRAY()), \'$\', `emailAddress`), `earlierEmails`), ';
+            . 'AND NOT JSON_CONTAINS(IF(JSON_VALID(`earlierEmails`), `earlierEmails`, JSON_ARRAY()), JSON_QUOTE(`emailAddress`)), '
+            . 'JSON_ARRAY_APPEND(IF(JSON_VALID(`earlierEmails`), `earlierEmails`, JSON_ARRAY()), \'$\', `emailAddress`), `earlierEmails`), ';
     }
 
     /**

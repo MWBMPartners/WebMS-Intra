@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 113; // #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 114; // #1064 round 10 added one: section 10b, the addresses emptied at the close. #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -1642,6 +1642,35 @@ check(
     'every table erased by a dedicated step is erased, in time, and exported',
     $dedicatedFaults === [],
     implode('; ', $dedicatedFaults)
+);
+
+// -----------------------------------------------------------------------------
+// 10b. #1064 round 10: `tblAccountMergeSide` is on the list above so that the
+//      walk keeps off it, but the step named there deals with the merged-in
+//      ACCOUNT rows. The side rows' addresses, and the person's own
+//      earlier-address list, are what the mail steps search by, so they are
+//      emptied when the request CLOSES (`closeRequest()`), never by a step a
+//      failed run would already have passed. Check 10 cannot see that, so this
+//      asks closeRequest()'s code (comments removed by PHP's tokeniser) for the
+//      two statements. PRESENCE ONLY: that they run, and only at the close, is
+//      driven by tools/account-merge-selftest.php I18-I18e.
+// -----------------------------------------------------------------------------
+$closeFrom = strpos($eraser, 'private static function closeRequest(');
+$closeTo   = $closeFrom === false ? false : strpos($eraser, "\n    private static function ", $closeFrom + 10);
+$closeCode = '';
+if ($closeFrom !== false && $closeTo !== false) {
+    foreach (token_get_all('<?php ' . substr($eraser, $closeFrom, $closeTo - $closeFrom)) as $token) {
+        if (is_array($token) === true && in_array($token[0], [T_COMMENT, T_DOC_COMMENT], true) === true) {
+            continue;
+        }
+        $closeCode .= is_array($token) === true ? $token[1] : $token;
+    }
+}
+check(
+    'the addresses an erasure searches by are emptied in closeRequest(): the earlier-address list and the merged-in side rows\' two address columns',
+    str_contains($closeCode, "'UPDATE `tblUsers` SET `earlierEmails` = NULL WHERE `earlierEmails` IS NOT NULL AND `userID` IN ('")
+    && str_contains($closeCode, "'UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL, `formerEarlierEmails` = NULL '"),
+    $closeCode === '' ? 'closeRequest() was not found' : 'one of the two statements is missing from closeRequest()'
 );
 
 // -----------------------------------------------------------------------------

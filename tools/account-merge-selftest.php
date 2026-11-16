@@ -1312,6 +1312,14 @@ check('I14b ...while an earlier address NOBODY holds is erased', n($db, "SELECT 
 check('I14f ...and the closing line of the report says one address was NOT searched, never just "none failed"',
     n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$taReq} AND `action` = 'completed' "
         . "AND `details` LIKE '%none failed.%1 address(es) this person held before are another account''s now, so mail sent to them was NOT searched%'") === 1);
+// Round 10: the same closing line then said the emptied addresses were ones
+// "the mail steps searched by", though the list it empties holds the address
+// it had just said was NOT searched. The sealed record must say only what is
+// true of every one of them.
+check('I14h ...and that closing line never says the emptied addresses were all searched by',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$taReq} AND `action` = 'completed' "
+        . "AND `details` LIKE '%The record of the addresses held before by this account and any merged into it is emptied%' "
+        . "AND `details` NOT LIKE '%searched by, are emptied%'") === 1);
 // ...and a close that skipped nothing (I13e's) says nothing of the kind.
 check('I14g ...while a close that skipped nothing does not say it',
     n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$chainReq} AND `action` = 'completed'") === 1
@@ -1401,7 +1409,12 @@ $db->query("UPDATE `tblUsers` SET `fullName` = 'Real Name', `phoneNumber` = '077
     . "`what3words` = 'filled.count.soap', `locale` = 'cy', `calendarToken` = 'tok{$tag}', `totpSecret` = 'SECRET{$tag}', "
     . "`notifyPrefs` = '{}', `earlierEmails` = '[\"writtendup-old-{$tag}@selftest.invalid\"]', `isAdmin` = 1, `totpEnabled` = 1 "
     . "WHERE `userID` = {$wd}");
-$wRun = GdprEraser::execute((int) GdprEraser::fileRequest($siteA, $wk, true)['requestID'], $wk, $adminA);
+// ...and a photo, so the row holds a photo AND other details (round 10: such a
+// row was counted twice in the step's line).
+$wPhoto = $file('written-' . $tag . '.png');
+$db->query("UPDATE `tblUsers` SET `displayPhoto` = '{$wPhoto}' WHERE `userID` = {$wd}");
+$wReq = (int) GdprEraser::fileRequest($siteA, $wk, true)['requestID'];
+$wRun = GdprEraser::execute($wReq, $wk, $adminA);
 // Every column the account's own erasure instruction empties, read from the
 // catalogue the eraser reads, except the e-mail column (the merged marker).
 $accountEntry = null;
@@ -1424,6 +1437,10 @@ check('I17c ...and leaves it closed as a merged account: switched off, no admini
     n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$wd} AND `isActive` = 0 AND `isAdmin` = 0 AND `totpEnabled` = 0 "
         . "AND `fullName` = '" . M::CLOSED_NAME . "' AND `emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid')") === 1
     && in_array($wd, M::mergedInto($db, $wk), true));
+check('I17d ...the photo file is deleted, and the step\'s line counts that ONE account once, not once per kind of detail',
+    is_file($photoRoot . $sep . '_uploads' . $sep . $wPhoto) === false
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$wReq} AND `tableName` = 'tblUsers' "
+        . "AND `action` = 'anonymise' AND `details` LIKE '%closed account(s) merged into this one are emptied (1 row(s))%'") === 1);
 
 // 🔁 ROUND 9 (the independent check's probe, made a test): a run that FAILS
 //    part-way must leave every address it searches by for the next run. Before
@@ -1480,6 +1497,37 @@ check('I18d ...and each run-2 closing line still says one address was NOT search
 check('I18e ...and only at that close are the remembered addresses emptied: the list, the merged-in account\'s addresses',
     n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$rP} AND `earlierEmails` IS NULL") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblAccountMergeSide` WHERE `userID` = {$rD} AND `formerEmail` IS NULL AND `formerEarlierEmails` IS NULL") === 1);
+
+// 🔁 ROUND 10 (the independent check's S1): the account's OWN address changed
+//    AFTER the request was filed. Run 1 searches by the new address and fails;
+//    the walk then replaces that address with the made-up one. Run 2 reads the
+//    request's (older) address and the earlier-address list, so unless the walk
+//    put the address it replaced onto that list, run 2 never searched by it
+//    and closed as "none failed" with its send-log line still there.
+$cp    = $user('ChangedAfterFiling'); $member($cp, $siteA);
+$cpReq = (int) GdprEraser::fileRequest($siteA, $cp, true)['requestID'];
+$cpNew = 'changed-after-' . $tag . '@selftest.invalid';
+$move($cp, $cpNew);
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+$insert('tblEmailLog', ['toRecipients' => $cpNew, 'subject' => 'Changed mail ' . $tag, 'errorDetail' => '', 'errorCode' => ''], $third);
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
+$cpLines = static fn (): int => n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$cpNew}%' AND `subject` = 'Changed mail {$tag}'");
+$cpBefore = $cpLines();
+$db->query("CREATE TRIGGER `am_selftest_retry` BEFORE UPDATE ON `tblEmailLog` FOR EACH ROW BEGIN IF OLD.`toRecipients` LIKE '%{$cpNew}%' "
+    . "THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'transient'; END IF; END");
+$cpRun1 = GdprEraser::execute($cpReq, $cp, $adminA);
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+$cpRun2 = GdprEraser::execute($cpReq, $cp, $adminA);
+check('I20 premise: the request was filed under the old address, the line exists, and run 1 FAILED',
+    $cpBefore === 1 && ($cpRun1['failed'] ?? 0) >= 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$cpReq} AND `subjectEmail` <> '{$cpNew}'") === 1,
+    json_encode($cpRun1));
+check('I20b ...run 2 searched by the address the account held when run 1 replaced it: the line is gone and the request closed',
+    ($cpRun2['failed'] ?? -1) === 0 && $cpLines() === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$cpReq} AND `status` = 'completed'") === 1,
+    json_encode($cpRun2));
+check('I20c ...and the list the walk added it to is emptied at that close',
+    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$cp} AND `earlierEmails` IS NULL") === 1);
 
 // 🖼️ ROUND 9 (polish): a photo written onto a closed account goes FILE FIRST.
 //    Its value names a file the eraser will not delete (not an image in the
