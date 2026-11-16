@@ -1386,6 +1386,21 @@ $sectionO = static function (): void {
 // =============================================================================
 // B. #1081: A HIDDEN SUGGESTION STILL WAITING TO BE APPROVED COMES BACK A DRAFT
 // =============================================================================
+// The two new messages, written out WHOLE here by hand (never read from
+// `HiddenSeriesDates::words()`: a test holding the class's own copy tests
+// nothing), the way event-repeat-pages-selftest pins RESTORE_WORDS_*. Round 1
+// of the check: pinning only the first sentence let the INSTRUCTION half be
+// replaced by "set Status to Published" with every check green.
+const RESTORE_WORDS_SUGGESTION = 'That date is back in the series as a draft, so members cannot see it yet. It is a suggestion '
+    . 'still waiting to be approved, so it comes back as a draft whatever it was before it was hidden. '
+    . 'Approve it on Admin, Calendar, Moderation when it is ready: approving is what publishes it and '
+    . 'tells the person who suggested it.';
+const RESTORE_WORDS_SAME_DAY_SUGGESTION = 'That date is back in the series as a draft, as you confirmed, so members cannot see it yet. It '
+    . 'is a suggestion still waiting to be approved, so it comes back as a draft whatever it was before it '
+    . 'was hidden. This series now has two dates on that day — hide or move one of them if that is not '
+    . 'what you want. Approve it on Admin, Calendar, Moderation when it is ready: approving is what '
+    . 'publishes it and tells the person who suggested it.';
+
 /** A HIDDEN date of a series, written straight in. `$submission` 'pending' makes it a visitor's suggestion. */
 function hiddenDate(int $site, int $series, string $name, string $start, string $status, ?string $submission, ?string $reason): int
 {
@@ -1455,8 +1470,8 @@ $sectionB = static function (): void {
         (int) ($st['isDeleted'] ?? 1) === 0 && ($st['status'] ?? '') === 'draft' && ($st['submissionStatus'] ?? '') === 'pending', json_encode($st));
     check('B02 ...and the cancellation reason it can no longer carry is emptied', array_key_exists('cancelReason', $st) && $st['cancelReason'] === null, json_encode($st));
     $words = flashAfter($jarA, $r);
-    check('B03 ...and the page says it is a suggestion to approve, not a date to publish',
-        str_contains($words, 'It is a suggestion still waiting to be approved, so it comes back as a draft whatever it was before it was hidden.')
+    check('B03 ...and the page says it is a suggestion to approve, not a date to publish (the whole message, word for word)',
+        str_contains($words, RESTORE_WORDS_SUGGESTION)
         // The ordinary draft message's own sentence, which would send them to
         // a Publish the bulk edit refuses. (Not just "set Status to
         // Published": the page's bulk-edit card says that too.)
@@ -1478,9 +1493,9 @@ $sectionB = static function (): void {
     $r     = $bringBack($jarA, $pageA, $seriesA, $sugSameDay, true);
     $st    = hiddenState($sugSameDay);
     $words = flashAfter($jarA, $r);
-    check('B06b confirmed, it comes back as a draft, and the page says both: a suggestion, and two dates on that day',
+    check('B06b confirmed, it comes back as a draft, and the page says both: a suggestion, and two dates on that day (word for word)',
         ($st['status'] ?? '') === 'draft' && (int) ($st['isDeleted'] ?? 1) === 0
-        && str_contains($words, 'is a suggestion still waiting to be approved') && str_contains($words, 'This series now has two dates on that day'),
+        && str_contains($words, RESTORE_WORDS_SAME_DAY_SUGGESTION),
         json_encode($st) . ' ' . aroundWords($words, 'That date'));
 
     // Organisation B: A's administrator cannot reach B's date; B's own can.
@@ -1545,6 +1560,11 @@ $sectionN = static function (): void {
         'N07' => [2, $o([], ['Cedar'], ['Birch'])],
         'N08' => [3, $o(['Ash'], ['Cedar'], ['Birch'])],
         'N09' => [3, $o(['Ash', 'Elm', 'Fir'])],
+        // A group whose name could not be read is called "a small group"
+        // (SmallGroups::UNNAMED_GROUP, written out here by hand).
+        'N10' => [1, $o([], ['a small group'])],
+        'N11' => [2, $o([], [], ['a small group', 'Birch'])],
+        'N12' => [1, $o([], ['iGroup'])],
     ];
     $want = [
         'N00' => ['no home taken off: nothing is said at all', ''],
@@ -1557,6 +1577,9 @@ $sectionN = static function (): void {
         'N07' => ['could not be e-mailed, and one with no other leader', $two . $fail . $alone],
         'N08' => ['all three at once, in that order', ' Their home was taken off 3 small groups as a meeting place.' . $tell . $fail . $alone],
         'N09' => ['three groups e-mailed, named "A, B and C"', ' Their home was taken off 3 small groups as a meeting place. The leaders of Ash, Elm and Fir are being e-mailed to choose a new place.'],
+        'N10' => ['an unreadable name STARTING a sentence is capitalised', ' Their home was taken off 1 small group as a meeting place. A small group has no other current leader to tell, so please choose a new place for it or name a new leader.'],
+        'N11' => ['...and left lower case in the middle of one', $two . ' The leaders of a small group and Birch could not be e-mailed, so please tell them to choose a new place.'],
+        'N12' => ['a real name starting a sentence is left exactly as typed', ' Their home was taken off 1 small group as a meeting place. iGroup has no other current leader to tell, so please choose a new place for it or name a new leader.'],
     ];
     $got = homesWordsFromCopy($cases);
     foreach ($want as $id => [$what, $expected]) {
@@ -1614,6 +1637,12 @@ $plants = [
     // #1084
     ['P27', '_core/SmallGroups.php', "if (\$outcome['notSent'] !== []) {", "if (\$outcome['notSent'] !== [] && \$outcome['told'] === []) {", $sectionN, 'N01', 'the "could not be e-mailed" sentence dropped whenever another group was e-mailed'],
     ['P28', '_core/SmallGroups.php', "(\$one === true ? ' has' : ' have')", "' has'", $sectionN, 'N05', 'two leaderless groups worded as one'],
+    // Round 1 of the check: the INSTRUCTION half of each new message.
+    ['P29', '_core/HiddenSeriesDates.php', "'Approve it on Admin, Calendar, Moderation when it is ready: approving is what publishes it and '",
+        "'Tick it below and set Status to Published: that publishes it and '", $sectionB, 'B03', 'the suggestion message telling them to publish it from the list'],
+    ['P30', '_core/HiddenSeriesDates.php', "'what you want. Approve it on Admin, Calendar, Moderation when it is ready: approving is what '",
+        "'what you want. Tick it below and set Status to Published: that is what '", $sectionB, 'B06b', 'the same-day suggestion message telling them to publish it from the list'],
+    ['P31', '_core/SmallGroups.php', "\$start = 'A' . substr(\$start, 1);", '', $sectionN, 'N10', 'an unnamed group starting a sentence in lower case'],
 ];
 foreach ($plants as [$id, $file, $find, $with, $section, $mustFail, $what]) {
     $path     = $web . str_replace('/', $sep, $file);

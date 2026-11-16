@@ -60,9 +60,20 @@
  *     the rule above would have brought it back cancelled, in front of
  *     members and unapproved. `statusOnReturn()` asks
  *     `EventSuggestions::whyStatusRefused()`, the one rule, rather than
- *     knowing about suggestions itself. D-146's reason for keeping a
- *     cancellation (a draft can be published by accident) does not arise:
- *     publishing a waiting suggestion is refused everywhere.
+ *     knowing about suggestions itself.
+ *
+ *     SAID PLAINLY, BECAUSE IT IS NOT RISK-FREE. D-146 kept a cancellation so
+ *     a cancelled date could not go live again by accident. A waiting
+ *     suggestion cannot be PUBLISHED from the edit pages, but APPROVING it on
+ *     the moderation page does publish it: `admin/calendar/moderate.php`
+ *     writes `published` whatever the status was. So a suggestion cancelled,
+ *     hidden, brought back and then approved goes live, with its reason gone.
+ *     That is not new: the old "still cancelled" state could be approved
+ *     exactly the same way, and went live just the same. And D-146 also rules
+ *     out clearing a cancellation reason on the way back; emptying it here
+ *     for a waiting suggestion departs from that, and is put to the owner
+ *     (the old path left a row "pending and cancelled", which #965 refuses
+ *     from every writer).
  *
  *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
  *     a reason is optional (`EventCancelReason`, #998, is the one writer, and
@@ -236,9 +247,11 @@ final class HiddenSeriesDates
      * "Cancelled" or "Postponed"; hidden like that, D-146/D-147 would have
      * brought it back still cancelled or postponed — in front of members,
      * unapproved, which D-169 rules out. D-146's own reason for keeping the
-     * status (a draft can be published by accident) does not arise for a
-     * suggestion, because publishing one before it is approved is refused.
-     * The decision is not made here: `EventSuggestions::whyStatusRefused()` is
+     * status (a cancelled date must not go live by accident) is NOT fully met
+     * for a suggestion: the edit pages refuse to publish one, but approving it
+     * on the moderation page publishes it whatever its status — so it was
+     * equally approvable while "still cancelled", and that risk is unchanged,
+     * not removed (see the class comment). The decision is not made here: `EventSuggestions::whyStatusRefused()` is
      * the ONE rule for what a pending suggestion may hold, and is asked.
      */
     public static function statusOnReturn(string $was, ?string $submissionStatus): string
