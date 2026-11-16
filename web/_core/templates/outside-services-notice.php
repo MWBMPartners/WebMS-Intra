@@ -87,8 +87,8 @@ $outsideFromWords = [
 <?php foreach (['named' => OutsideServices::NAMED, 'organisation' => OutsideServices::USED_BY_ORGANISATION] as $outsideGroup => $outsideList): ?>
     <?php if ($outsideGroup === 'named'): ?>
         <p>
-            <strong>These have no switch yet.</strong> They are listed so that you know who receives what; a way
-            to switch each one off is planned.
+            <strong>You cannot switch these off for yourself yet.</strong> They are listed so that you know who
+            receives what; a way to switch each one off is planned.
         </p>
     <?php else: ?>
         <p>

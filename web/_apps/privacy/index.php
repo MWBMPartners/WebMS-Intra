@@ -164,7 +164,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h2 class="h4 mt-4">Cookies</h2>
 <p>
     The portal uses functionally-necessary cookies only: a session cookie for
-    sign-in, a CSRF token, the "trust this device" 2FA cookie (only set if you
+    sign-in, a token that stops other websites sending forms in your name, the "trust this device" two-step sign-in cookie (only set if you
     explicitly tick the box), and small UI preferences (theme, language).
     The portal sets no tracking or analytics cookies of its own.
     <?php // 🍪 #808 round 1: this said "No third-party tracking cookies", a few headings above the

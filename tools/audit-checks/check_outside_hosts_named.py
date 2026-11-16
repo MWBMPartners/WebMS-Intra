@@ -715,9 +715,16 @@ def check(web: Path, per_file: dict[str, dict[str, int]] | None = None) -> list[
 
     counted: dict[str, dict[str, int]] = {}
     seen: dict[str, set[str]] = {}
+    # One report per file, host, line and kind of fault (#808 round 5): two shapes
+    # can read the same written host -- a page-rule source can also be a whole
+    # quoted string -- and the reader must be told once, not twice.
+    reported: set[tuple[str, str, int, str]] = set()
     for rel, host, loads, line in scan(web):
         entry = owner_of(host)
         if entry is None:
+            if (rel, host, line, "unlisted") in reported:
+                continue
+            reported.add((rel, host, line, "unlisted"))
             problems.append(
                 "✗ %s (line %d) names the outside host %s, which is in none of the lists.\n"
                 "   A request to another company can tell it something about whoever is looking. If it sends "
@@ -726,7 +733,8 @@ def check(web: Path, per_file: dict[str, dict[str, int]] | None = None) -> list[
                 "nobody's details, add it to NOT_ABOUT_ANYBODY here with its reason." % (rel, line, host))
             continue
         seen.setdefault(entry, set()).add(rel)
-        if loads and browser_ok.get(entry, False) is False:
+        if loads and browser_ok.get(entry, False) is False and (rel, host, line, "loads") not in reported:
+            reported.add((rel, host, line, "loads"))
             problems.append(
                 "✗ %s (line %d) puts %s where a browser fetches it by itself, but it is listed as %s.\n"
                 "   A browser that loads it tells that company the reader's internet address. Either this is a "
@@ -948,6 +956,19 @@ def self_test() -> int:
         append("_core/Translation.php", "\n$h = '\napi.nlstart.com';\n"),
         "_core/Translation.php (line %d) names the outside host api.nlstart.com"
         % (line_after("_core/Translation.php") + 2))
+    # S44: one written host read by two shapes on one line (a page-rule source that is also a whole quoted
+    # host name) is reported ONCE. Counted here rather than through run(), which only asks "is it there".
+    checks += 1
+    with tempfile.TemporaryDirectory(prefix="p808-hosts-") as tmp:
+        web = Path(tmp) / "web"
+        shutil.copytree(real, web, ignore=shutil.ignore_patterns("*.png", "*.woff2", "*.zip", "*.gif"))
+        append("_apps/privacy/index.php", "<?php $cspImgExtra = 'cdn.twice.com'; ?>\n")(web)
+        times = sum(1 for one in check(web) if "names the outside host cdn.twice.com" in one)
+    ok = times == 1
+    print(("  ✓ " if ok else "  ✗ ") + "S44 a host read by two shapes on one line is reported once"
+          + ("" if ok else " (reported %d times)" % times))
+    if not ok:
+        failures += 1
     print("%d of %d self-test cases passed" % (checks - failures, checks))
     return 0 if failures == 0 else 1
 

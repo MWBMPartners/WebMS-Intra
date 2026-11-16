@@ -292,7 +292,8 @@ final class OutsideServices
                          . 'portal is set up to use Google and Google cannot answer, it asks OpenStreetMap as well.',
             'from'      => 'server',
             'when'      => 'When somebody presses the button to find an address on the map, and when a form that is '
-                         . 'set up to do it by itself is saved -- for example a small group\'s meeting place or a venue.',
+                         . 'set up to do it by itself is saved -- for example a small group\'s meeting place or a venue '
+                         . '-- unless the answer for that address is already remembered.',
             'sends'     => 'The address that was typed, and its country. The answer is remembered for a while; for a '
                          . 'home that is personal data, described above.',
             'why'       => 'To find where the address is, so that a map can be drawn or directions given.',
@@ -336,7 +337,7 @@ final class OutsideServices
             'name'      => 'Shared code libraries',
             'companies' => 'jsDelivr, and cdnjs (which is run by Cloudflare): two services that hand out widely used code.',
             'from'      => 'browser',
-            'when'      => 'On every page: your browser fetches the page\'s layout and icons from them, and on some '
+            'when'      => 'On the portal\'s ordinary pages: your browser fetches the page\'s layout and icons from them, and on some '
                          . 'pages its maps and charts. The API guide does too, unless this portal is set to use its '
                          . 'own copy.',
             'sends'     => 'Your internet address, your browser, and the address of this portal. Nothing you type is sent.',
@@ -362,7 +363,8 @@ final class OutsideServices
             'companies' => 'Only if this portal\'s administrator has switched it on: a monitoring service of their '
                          . 'choosing, such as Sentry or GlitchTip.',
             'from'      => 'server',
-            'when'      => 'When something goes wrong while a page is being made for you.',
+            'when'      => 'When something goes wrong while a page is being made for you. The administrator can '
+                         . 'choose to send only a share of these reports.',
             'sends'     => 'Your account number if you are signed in, the address of the page, the description your '
                          . 'browser gives of itself, and the fault\'s own message, which can quote what was being '
                          . 'handled. Not your internet address.',
@@ -407,7 +409,8 @@ final class OutsideServices
      * look-up, PublicWebsiteSetup) were on no list. They were found by
      * enumerating every server call site:
      *     grep -rlE "curl_init\(|SafeFetch::(get|fetch|post|request)|stream_context_create|fsockopen\(|stream_socket_client\(|\bmail\(|proc_open\(|shell_exec\(|exec\(" web/ tools/offsite-backup
-     * which answered 33 files on 16 November 2026. Entries whose `hosts` is
+     * which answered 33 files on 16 November 2026 and 34 after round 2, because this
+     * docblock quotes the pattern itself. Entries whose `hosts` is
      * empty reach an address somebody TYPES, so no host is in the code.
      *
      * `setUp` (#808 round 4) says WHO sets the service up, read from the level
@@ -442,8 +445,8 @@ final class OutsideServices
         'email' => [
             'name'      => 'Sending e-mail',
             'setUp'     => 'installation',
-            'companies' => 'Microsoft 365 or Google, if this organisation sends its e-mail through one of them; otherwise '
-                         . 'the mail server it has set up.',
+            'companies' => 'The mail route this whole installation uses: Microsoft 365, Google, or a mail server its '
+                         . 'administrator has set up.',
             'from'      => 'server',
             'when'      => 'Whenever the portal sends an e-mail.',
             'sends'     => 'Each message whole: who it is to, the subject and what it says.',
@@ -473,12 +476,13 @@ final class OutsideServices
                          . 'portal a message about the payment, which can carry the name, e-mail address and billing or '
                          . 'delivery address you gave it; the portal keeps that message whole for the period this '
                          . 'installation sets (90 days unless it is changed), and then the nightly clear-out empties it, '
-                         . 'once that scheduled job has been set up. The message carries the portal\'s own payment '
+                         . 'once that scheduled job has been set up, unless this installation has chosen to keep them for '
+                         . 'ever. The message carries the portal\'s own payment '
                          . 'number, which links it to your payment record, and through that to your account until an '
                          . 'erasure removes the link. A gift paid this way that the organisation must keep for tax is '
                          . 'the exception: its record keeps that payment number with your account number and name '
                          . 'until its keep-until date, so until then the message can still be matched to you. An '
-                         . 'erasure request does not reach the message itself; only the clear-out does.',
+                         . 'erasure request does not reach the message itself; only the clear-out can empty it.',
             'why'       => 'To take the payment safely.',
             'hosts'     => ['api.stripe.com', 'api-m.paypal.com', 'api-m.sandbox.paypal.com'],
         ],
@@ -488,14 +492,15 @@ final class OutsideServices
             'companies' => 'Zoom',
             'from'      => 'both',
             'when'      => 'When a Zoom account is connected, and when a meeting is created for an event. Usually an '
-                         . 'administrator connects the organisation\'s own Zoom account; where this organisation is set '
-                         . 'to let each person use their own, any signed-in member can connect theirs on their own '
-                         . 'account page. Either way, the browser of whoever connects is sent to Zoom to agree.',
+                         . 'administrator connects the organisation\'s own Zoom account; where this installation is set '
+                         . 'to let each person connect their own Zoom account, any signed-in member can connect theirs on '
+                         . 'their own account page. Either way, the browser of whoever connects is sent to Zoom to agree, '
+                         . 'and the account is connected for one organisation.',
             'sends'     => 'For a meeting: the event\'s name, when it starts, how long it lasts and its time zone. When '
                          . 'an account is connected, the portal receives and keeps that Zoom account\'s e-mail address '
                          . 'and identifier, and the keys that let it act for the account (stored scrambled). When a '
-                         . 'meeting\'s recording is ready, Zoom tells the portal where it is. Joining a meeting is '
-                         . 'between you and Zoom.',
+                         . 'meeting\'s recording is ready, Zoom can tell the portal where it is, if it has been set up '
+                         . 'to. Joining a meeting is between you and Zoom.',
             'why'       => 'To set up the meeting.',
             'hosts'     => ['api.zoom.us', 'zoom.us'],
         ],
@@ -515,7 +520,7 @@ final class OutsideServices
             'setUp'     => 'installation',
             'companies' => 'AssemblyAI, or OpenAI',
             'from'      => 'server',
-            'when'      => 'When somebody asks for a recording to be written out.',
+            'when'      => 'When a recording that somebody asked to have written out is processed.',
             'sends'     => 'The recording\'s sound, which includes the voices of whoever speaks on it.',
             'why'       => 'To turn the speech into text.',
             'hosts'     => ['api.assemblyai.com', 'api.openai.com'],
@@ -525,7 +530,8 @@ final class OutsideServices
             'setUp'     => 'installation',
             'companies' => 'Anthropic, OpenAI, Google, DeepL, or a LibreTranslate server',
             'from'      => 'server',
-            'when'      => 'When somebody presses Translate on an announcement, a project or a project\'s update.',
+            'when'      => 'When somebody presses Translate on an announcement, a project or a project\'s update, '
+                         . 'and no up-to-date translation of it is already stored.',
             'sends'     => 'The organisation\'s own published words being translated, and the language wanted. Not '
                          . 'who asked.',
             'why'       => 'To translate them.',
@@ -535,8 +541,8 @@ final class OutsideServices
         'pushNotifications' => [
             'name'      => 'Notifications on your device',
             'setUp'     => 'installation',
-            'companies' => 'The company that runs your browser\'s notification service: Google, Mozilla, Apple or '
-                         . 'Microsoft.',
+            'companies' => 'The company that runs your browser\'s notification service, such as Google, Mozilla, '
+                         . 'Apple or Microsoft.',
             'from'      => 'both',
             'when'      => 'Only if you have switched on notifications in your browser: when you switch them on, and '
                          . 'whenever one is sent to you.',
@@ -566,9 +572,10 @@ final class OutsideServices
                          . 'whoever decided. An event approved or rejected, a filled-in form, or a finished approval '
                          . 'process: reference numbers and the outcome only. The portal keeps a copy of each message. '
                          . 'Once it has been delivered, or given up on after six tries, the nightly clear-out empties '
-                         . 'the copy after the period this organisation sets, once that scheduled job has been set up, '
-                         . 'unless the organisation has chosen to keep them. A message still waiting to be tried again '
-                         . 'is kept until then, and the further tries need the scheduled retry job.',
+                         . 'the copy after the period set for this organisation (by it, or for the whole installation), '
+                         . 'once that scheduled job has been set up, unless keeping them for ever has been chosen. A '
+                         . 'message still waiting to be tried again is kept until then, and the further tries need the '
+                         . 'scheduled retry job.',
             'why'       => 'So that another system the organisation uses hears about it straight away.',
             'hosts'     => [],
         ],
@@ -580,7 +587,8 @@ final class OutsideServices
                          . 'storage that works like Amazon\'s storage service S3, or an SFTP server (a computer that '
                          . 'accepts files sent to it over a secure connection).',
             'from'      => 'server',
-            'when'      => 'When the scheduled off-site copy runs, if it has been set up and switched on.',
+            'when'      => 'When the off-site copy runs, if it has been set up and switched on: on its schedule, or '
+                         . 'when an administrator presses Run now.',
             'sends'     => 'A copy of the whole database, which holds everything the portal keeps about you, scrambled '
                          . 'first with a key that stays on this portal\'s server. Uploaded files are not sent.',
             'why'       => 'So that the portal can be restored if its own server is lost.',
@@ -591,8 +599,11 @@ final class OutsideServices
             'setUp'     => 'installation',
             'companies' => 'CueRCode, at the address this installation\'s administrator typed in.',
             'from'      => 'both',
-            'when'      => 'Only if this installation is set to use it, when the portal makes a QR code.',
-            'sends'     => 'This portal\'s server sends CueRCode the address or text the QR code is to hold. The code '
+            'when'      => 'Only if this installation is set to use it, when the portal draws a QR code of an address '
+                         . 'for a page, such as a form\'s public address or your own calendar subscription.',
+            'sends'     => 'This portal\'s server sends CueRCode the address the QR code is to hold. That can be your '
+                         . 'own private calendar-subscription address, which works like a password for your calendar. '
+                         . 'The code '
                          . 'then holds CueRCode\'s own address, so the phone of anybody who scans it goes to CueRCode '
                          . 'first, which receives its internet address and browser.',
             'why'       => 'So that the organisation can see how often a code is scanned.',
