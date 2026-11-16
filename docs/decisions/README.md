@@ -258,7 +258,8 @@ appended with its real date and a note that it was added later.
 | [D-200](200-a-merge-waits-seven-days-and-the-old-address-is-told.md) | 2026-11-16 | D-200 · A merge completes no sooner than 7 days after its notice, and the old address is told | in force |
 | [D-201](201-a-merge-moves-the-records-that-decide-who-may-manage-them.md) | 2026-11-16 | D-201 · A merge moves the records the portal uses to decide who may manage them, and logs the move | in force |
 | [D-202](202-plan-with-opus-build-with-haiku-or-sonnet-on-every-llm-system.md) | 2026-11-16 | D-202 · Plan with the strongest tier, build with a cheaper tier, check with the strongest tier — on every LLM system | in force |
+| [D-203](203-correction-a-check-is-never-weaker-than-the-build.md) | 2026-11-16 | D-203 · Correction to the wording of D-202: a check is never run on a weaker tier than the build | in force |
 
-*202 decisions. This index is checked against the folder by
+*203 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
