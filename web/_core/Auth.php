@@ -3856,7 +3856,58 @@ class Auth
             ];
         }
 
+        self::markWayInChangedByOther($db, $userId);
+
         return ['ok' => true, 'created' => $created, 'why' => ''];
+    }
+
+    /**
+     * 🔑 Record that somebody OTHER than this account just chose its way in
+     *    (#1064, D-190): the account merge refuses an agreement from such an
+     *    account for a while, because an administrator who may set a password
+     *    (D-108) could otherwise sign in as both of a member's accounts and
+     *    "agree" to a merge the member never saw.
+     *
+     * "Somebody other" is: a signed-in person who is not this account, or a
+     * request made with a programme key. A request with nobody signed in (the
+     * reset link, the installer, accepting an invitation) is the account's own
+     * person, so nothing is recorded — the address a reset link went to is
+     * covered separately: changing it is recorded by the administrator's user
+     * page.
+     *
+     * ⚠️ NOTHING the account's own session does ever clears this. An
+     *    administrator signed in AS the member could otherwise change the
+     *    password "themselves" and launder it.
+     *
+     * On a database not yet upgraded (no column, error 1054) it records
+     * nothing: the merge's own tables arrive in the same migration, so no merge
+     * can be agreed to there either. Any other error is thrown.
+     */
+    public static function markWayInChangedByOther(\mysqli $db, int $userId): void
+    {
+        // ⚠️ ApiAuth is asked ONLY if it is already loaded (`class_exists(..., false)`
+        //    never autoloads). The installer has no autoloader and requires
+        //    Auth.php by hand (#728), so naming ApiAuth unguarded here would be a
+        //    "class not found" on every installation. A programme-key request has
+        //    always loaded ApiAuth to authenticate, so nothing is missed.
+        $actor   = session_status() === PHP_SESSION_ACTIVE ? (int) ($_SESSION['user_id'] ?? 0) : 0;
+        $byKey   = class_exists(ApiAuth::class, false) === true && ApiAuth::source() === 'apikey';
+        $byOther = ($actor > 0 && $actor !== $userId) || $byKey;
+        if ($byOther === false || $userId <= 0) {
+            return;
+        }
+        try {
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInChangedByOtherAtUtc` = UTC_TIMESTAMP() WHERE `userID` = ?');
+        } catch (\mysqli_sql_exception $unknownColumn) {
+            if ($unknownColumn->getCode() !== 1054) {
+                throw $unknownColumn;
+            }
+
+            return;
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $stmt->close();
     }
 
     /**

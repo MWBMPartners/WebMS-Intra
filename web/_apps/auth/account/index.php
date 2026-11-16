@@ -567,6 +567,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <?php
+    // 🔀 #1064: shown ONLY while an administrator's request to merge this
+    //    account with another is waiting for this person. The e-mail and the
+    //    merge page both point here, so the button must really be here.
+    $mergeOpen = \Portal\Core\AccountMerge::openRequests($mysqli, (int) ((App::user() ?? [])['userID'] ?? 0));
+    ?>
+    <?php if ($mergeOpen !== []): ?>
+    <div class="col-12" data-merge-link>
+        <div class="alert alert-info d-flex flex-wrap justify-content-between align-items-center gap-2 mb-0">
+            <span>An administrator has asked whether two accounts are both yours. Nothing happens unless you agree.</span>
+            <a class="btn btn-primary" href="<?php echo htmlspecialchars(Site::url('account/merge'), ENT_QUOTES, 'UTF-8'); ?>">
+                <i class="fa-solid fa-code-merge me-1"></i> Merge my accounts
+            </a>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- ========================================================== -->
     <!-- 🔐 Change Password Card                                    -->
     <!-- ========================================================== -->

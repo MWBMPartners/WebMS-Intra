@@ -41,16 +41,21 @@ $digits = static function (string $key): int {
 };
 $requestId = $digits('requestID');
 $action    = is_string($_POST['action'] ?? null) === true ? $_POST['action'] : '';
-$token     = is_string($_COOKIE[AccountMerge::BROWSER_COOKIE] ?? null) === true ? $_COOKIE[AccountMerge::BROWSER_COOKIE] : '';
+$https     = ($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off';
+$cookieKey = AccountMerge::cookieName($https);
+$token     = is_string($_COOKIE[$cookieKey] ?? null) === true ? $_COOKIE[$cookieKey] : '';
 $back      = Site::url('account/merge') . '?request=' . $requestId;
 
-$cookie = static function (string $value, int $expires): void {
-    setcookie(AccountMerge::BROWSER_COOKIE, $value, [
+// 🍪 On https the `__Host-` name (AccountMerge::cookieName): Secure, Path=/ and
+//    no Domain, so a neighbouring sub-domain cannot plant a token. Strict, so
+//    no other site's link carries it.
+$cookie = static function (string $value, int $expires) use ($cookieKey, $https): void {
+    setcookie($cookieKey, $value, [
         'expires'  => $expires,
         'path'     => '/',
         'httponly' => true,
-        'samesite' => 'Lax',
-        'secure'   => (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off'),
+        'samesite' => 'Strict',
+        'secure'   => $https,
     ]);
 };
 
@@ -114,7 +119,8 @@ switch ($result['outcome']) {
         $_SESSION['flash_type'] = 'info';
         break;
     default:
-        $_SESSION['flash_msg']  = AccountMerge::refusalWords($result['outcome']) . ' Nothing was changed.';
+        // The PERSON's words, never the administrator's sentence about permissions.
+        $_SESSION['flash_msg']  = AccountMerge::personRefusalWords($result['outcome']);
         $_SESSION['flash_type'] = 'warning';
 }
 header('Location: ' . $back);

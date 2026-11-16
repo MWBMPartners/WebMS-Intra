@@ -60,6 +60,23 @@ CREATE TABLE IF NOT EXISTS `tblAccountMergeSide` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='The two accounts of a merge request, and when each agreed (#1064)';
 
+-- 🔑 tblUsers.signInChangedByOtherAtUtc: when somebody OTHER than the account
+--    last chose its way in. Guarded with information_schema + PREPARE, never
+--    a MariaDB-only IF NOT EXISTS. No apostrophes in the comment (it sits inside
+--    a quoted string PREPARE reads), and word for word the comment in
+--    full_schema.sql, or an upgraded database and a fresh install differ.
+SET @hasCol := (
+    SELECT COUNT(*) FROM `information_schema`.`COLUMNS`
+    WHERE `TABLE_SCHEMA` = DATABASE()
+      AND `TABLE_NAME`   = 'tblUsers'
+      AND `COLUMN_NAME`  = 'signInChangedByOtherAtUtc'
+);
+SET @sql := IF(@hasCol = 0,
+    'ALTER TABLE `tblUsers` ADD COLUMN `signInChangedByOtherAtUtc` DATETIME DEFAULT NULL COMMENT ''A MOMENT IN UTC: when somebody OTHER than this account last chose its way in - set its password (Auth::storeHash) or changed its e-mail address (admin users page). Never cleared by the account itself. A merge refuses an agreement from an account whose way in was changed by somebody else recently (#1064, D-190)'' AFTER `signInVersion`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/users/merge/start',  'admin/users/merge-start.php',  1),
     ('admin/users/merge/cancel', 'admin/users/merge-cancel.php', 1),

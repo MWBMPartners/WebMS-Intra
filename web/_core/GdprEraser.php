@@ -8735,6 +8735,43 @@ class GdprEraser
     }
 
     /**
+     * 🖼️ Delete ONE profile photo file that no account names any more, by the
+     *    same rule as `eraseProfileImages()` (#1064: the account merge closes the
+     *    duplicate and empties its photo columns, after which nothing could ever
+     *    find the file again).
+     *
+     * Only an image inside the portal's uploads folder is ever deleted
+     * (`locateProfileImage()`); a file still named by any account is kept. True
+     * when there is nothing left to delete (gone, an address on another service,
+     * or still in use), false when a file that should go could not be deleted or
+     * is outside the uploads folder. Never says the path.
+     */
+    public static function deleteUnusedProfileImage(\mysqli $db, string $value): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return true;
+        }
+        $found = self::locateProfileImage($value);
+        if ($found['where'] === 'elsewhere') {
+            return false;
+        }
+        if ($found['where'] !== 'uploads') {
+            return true;
+        }
+        $stmt = $db->prepare('SELECT COUNT(*) FROM tblUsers WHERE avatarPath = ? OR displayPhoto = ?');
+        $stmt->bind_param('ss', $value, $value);
+        $stmt->execute();
+        $stillUsed = (int) ($stmt->get_result()->fetch_row()[0] ?? 0);
+        $stmt->close();
+        if ($stillUsed > 0) {
+            return true;
+        }
+
+        return @unlink($found['path']) === true;
+    }
+
+    /**
      * 📂 The endings a profile photo's file name may have. A file with any
      *    other ending is never deleted by eraseProfileImages(), whatever a
      *    column says, so a path that wanders onto a document or a statement
@@ -8898,6 +8935,32 @@ class GdprEraser
         $problem = null;
 
         try {
+            $emptied = self::emptyChangeHistoryAbout($db, $userId);
+        } catch (\Throwable $e) {
+            // Never the fault's own words: a message about a failed UPDATE can
+            // quote the value it was writing over, which is the thing being
+            // erased.
+            $problem = 'the change history about this person could not be emptied';
+        }
+
+        return self::auditTrailAboutPersonOutcome($db, $requestId, $emptied, $problem);
+    }
+
+    /**
+     * 🧾 Empty the recorded VALUES of every change-history row about one
+     *    account and its memberships — the #707 rule, in ONE place.
+     *
+     * Asked by the erasure step above and by the account merge (#1064), which
+     * empties the duplicate's own details in the same transaction and must not
+     * leave copies of them here where no later erasure of the kept account can
+     * reach them. Opens no transaction; throws on a database fault, so a caller
+     * inside one rolls it back.
+     *
+     * @return int How many rows held something and are now emptied.
+     */
+    public static function emptyChangeHistoryAbout(\mysqli $db, int $userId): int
+    {
+        {
             $stmt = $db->prepare(
                 'UPDATE tblAuditTrail SET oldValue = NULL, newValue = NULL, changeSet = NULL '
                 . "WHERE ((tableName = 'tblUsers' AND recordID = ?) "
@@ -8955,13 +9018,14 @@ class GdprEraser
             }
             $emptied = (int) $stmt->affected_rows;
             $stmt->close();
-        } catch (\Throwable $e) {
-            // Never the fault's own words: a message about a failed UPDATE can
-            // quote the value it was writing over, which is the thing being
-            // erased.
-            $problem = 'the change history about this person could not be emptied';
-        }
 
+            return $emptied;
+        }
+    }
+
+    /** The audit line and step answer for eraseAuditTrailAboutPerson(). */
+    private static function auditTrailAboutPersonOutcome(\mysqli $db, int $requestId, int $emptied, ?string $problem): string
+    {
         if ($problem !== null) {
             self::logAudit($db, $requestId, 'failed', 'tblAuditTrail', null, $problem . '. The rows are '
                 . 'unchanged, so running the request again will find them.');

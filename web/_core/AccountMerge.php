@@ -186,6 +186,22 @@ final class AccountMerge
             'tblVisitor.convertedUserID', 'tblVisitor.createdByID', 'tblVisitorContact.contactedByID',
             'tblWebhooks.createdByID', 'tblWorkflowActions.actedByID', 'tblWorkflowInstances.startedByID',
             'tblZoomMeeting.createdByID',
+            // 📜 What the person did, was told or was recorded doing. These were
+            //    "keep" until the adversarial check of 0eb2f2b3 (finding 5): left
+            //    naming the closed duplicate, NO later erasure of the kept account
+            //    could reach them — the newsletter send records even hold the
+            //    duplicate's old address. The same person did all of it, so they
+            //    move. The change history's "who made the change" moves for the
+            //    same reason: an erasure empties the network address on the
+            //    person's own rows, and would otherwise miss these. D-116 keeps
+            //    every change-history ROW; none is deleted.
+            'tblActivityLogs.userID', 'tblAiUsage.userID', 'tblAssetAudit.actorUserID',
+            'tblAssetScanLog.actorUserID', 'tblAuditTrail.userID', 'tblCapabilityMap.decidedByID',
+            'tblCareAccessLog.viewerID', 'tblConsentLog.userID', 'tblErasureRequest.processedByID',
+            'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID', 'tblErrors.userID',
+            'tblExternalFeedRuns.triggeredByID', 'tblMigrations.executedByID',
+            'tblNewsletterRecipient.userID', 'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID',
+            'tblRecordingPlay.userID',
         ],
 
         // 🤝 The two copies say the same thing (the same group, role, meeting,
@@ -216,16 +232,11 @@ final class AccountMerge
             'tblGivingKeptDonors.donorID', 'tblGivingStatementLog.donorID', 'tblPledges.userID',
         ],
 
-        // 📜 History and logs (D-116).
+        // 📜 The merge's own records, which say which account went where.
+        //    (The change-history rows ABOUT the duplicate's own account row are
+        //    the polymorphic `tblAuditTrail.recordID`: kept, values emptied.)
         self::KEEP => [
             'tblAccountMergeRequest.requestedByID', 'tblAccountMergeSide.userID',
-            'tblActivityLogs.userID', 'tblAiUsage.userID', 'tblAssetAudit.actorUserID',
-            'tblAssetScanLog.actorUserID', 'tblAuditTrail.userID', 'tblCapabilityMap.decidedByID',
-            'tblCareAccessLog.viewerID', 'tblConsentLog.userID', 'tblErasureRequest.processedByID',
-            'tblErasureReviewDecisions.decidedByID', 'tblErrors.resolvedByID', 'tblErrors.userID',
-            'tblExternalFeedRuns.triggeredByID', 'tblMigrations.executedByID',
-            'tblNewsletterRecipient.userID', 'tblOffboarding.offboardedByID', 'tblOffboarding.rehiredByID',
-            'tblRecordingPlay.userID',
         ],
 
         // 🔑 Moved only because the person has just proved BOTH accounts, and
@@ -344,8 +355,29 @@ final class AccountMerge
     public const REQUEST_DAYS          = 14;
     public const AGREE_WINDOW_SECONDS  = 1800;
 
-    /** The browser cookie that carries the first agreement to the second. */
+    /**
+     * An agreement is refused from an account whose way in (password, or the
+     * e-mail address a reset link goes to) was chosen by somebody else within
+     * this many days BEFORE the request started, or at any time since
+     * (`tblUsers.signInChangedByOtherAtUtc`). See `R_SIGN_IN_CHANGED`. Ninety
+     * days is a judgement, put to the owner on #1064.
+     */
+    public const SIGN_IN_CHANGE_DAYS = 90;
+
+    /**
+     * The browser cookie that carries the first agreement to the second. On
+     * https it carries the `__Host-` prefix (Secure, Path=/, no Domain), so a
+     * neighbouring sub-domain cannot plant one; on plain http — a test server,
+     * or an installation without a certificate — a browser refuses a `__Host-`
+     * cookie, so the plain name is used there. `cookieName()` is the one rule.
+     */
     public const BROWSER_COOKIE = 'portal_account_merge';
+
+    /** The cookie's name for this request (see BROWSER_COOKIE). */
+    public static function cookieName(bool $https): string
+    {
+        return $https === true ? '__Host-' . self::BROWSER_COOKIE : self::BROWSER_COOKIE;
+    }
 
     // =========================================================================
     // 🚫 Refusals and outcomes — the words are here and nowhere else
@@ -365,6 +397,37 @@ final class AccountMerge
     public const R_CLASH                = 'clash';
     public const R_CHOICES_DIFFER       = 'choices_differ';
     public const R_UNKNOWN_CLASH        = 'unknown_clash';
+    public const R_SIGN_IN_CHANGED      = 'sign_in_changed';
+    public const R_CHANGED_DURING       = 'changed_during';
+
+    /**
+     * What the PERSON reads when their agreement is refused — their own words,
+     * never the administrator's ("you need the permission"), and never a fact
+     * about the OTHER account beyond what the final step shows anyway.
+     */
+    private const PERSON_WORDS = [
+        self::R_SIGN_IN_CHANGED => 'This account\'s password or e-mail address was changed recently by somebody other '
+            . 'than you, so it cannot be used to agree to a merge yet. If you did not expect that change, tell whoever '
+            . 'looks after the portal for your organisation.',
+        self::R_CHANGED_DURING => 'Something changed while the accounts were being merged, so nothing was merged. '
+            . 'Please try again in a minute.',
+        self::R_CHOICES_DIFFER => 'Both accounts have a record that can only be kept once, and the two say different '
+            . 'things, for example two different replies to the same event. Change one of them so they match, then agree again.',
+        self::R_CLASH => 'Both accounts have a money record that can only be kept once, such as a pledge or a Gift Aid '
+            . 'record. The people who look after giving need to sort that out first.',
+    ];
+
+    /**
+     * The person's words for a refusal: their own sentence where one is written,
+     * else one plain sentence that this merge cannot go ahead now and who can help.
+     */
+    public static function personRefusalWords(string $code): string
+    {
+        self::refusalWords($code); // an unknown code still throws
+
+        return self::PERSON_WORDS[$code] ?? 'This merge cannot go ahead at the moment. Nothing was changed. Whoever '
+            . 'looks after the portal for your organisation can tell you why.';
+    }
 
     private const REFUSAL_WORDS = [
         self::R_NO_PERMISSION => 'You cannot merge accounts here. It needs the "Merge two accounts" permission in '
@@ -397,6 +460,9 @@ final class AccountMerge
             . 'Make them the same on one account first, so nothing is decided by guessing.',
         self::R_UNKNOWN_CLASH => 'The portal does not know how to merge one of the kinds of record these accounts '
             . 'have. Nothing has been changed. Please report this.',
+        self::R_SIGN_IN_CHANGED => 'The password or e-mail address of one of those accounts was changed by somebody '
+            . 'other than its owner recently, so its owner cannot agree to a merge yet.',
+        self::R_CHANGED_DURING => 'Something changed while the accounts were being merged, so nothing was merged.',
     ];
 
     /** Words for a refusal code; an unknown code throws rather than printing nothing. */
@@ -440,7 +506,7 @@ final class AccountMerge
 
     /** Words that read wrong when split out of a table name. */
     private const WORD_FIXES = [
-        'Ccli' => 'CCLI song licence', 'Dbs' => 'DBS (criminal record) check', 'Sms' => 'text message',
+        'Ccli' => 'CCLI song licence', 'Dbs' => 'DBS (criminal record)', 'Sms' => 'text message',
         'Ai' => 'AI assistant', 'Api' => 'API (programme access)', 'RSVPs' => 'replies to events',
         'RSVPInvites' => 'event invitations', 'Totp' => 'two-step sign-in', 'Webhooks' => 'web hooks',
         'Kid' => 'children\'s', 'Zoom' => 'Zoom',
@@ -761,6 +827,39 @@ final class AccountMerge
         return ['lines' => $lines, 'refusal' => $refusal, 'unknown' => $unknown];
     }
 
+    /**
+     * One account's counts of ITS OWN records, in the preview's shape, and
+     * NOTHING compared with any other account (clashes and differences are 0).
+     *
+     * ⚠️ This is what a person sees before both agreements are in (adversarial
+     *    check, finding 1). `preview()` counts the DUPLICATE's records and
+     *    compares them with the kept account's, so showing it to either side
+     *    early told a person about an account they had not yet proved was
+     *    theirs — "the victim has a pastoral care case" to anybody who could
+     *    persuade an administrator the victim's account was "my old duplicate".
+     *
+     * @return array{lines: list<array{table: string, column: string, words: string, treatment: string, rows: int, clashes: int, differences: int}>, refusal: string, unknown: list<string>}
+     */
+    public static function ownCounts(mysqli $db, int $userId): array
+    {
+        $lines = [];
+        foreach (self::columns() as $name => $entry) {
+            [$table, $column] = self::split($name);
+            $t    = '`' . $table . '`';
+            $rows = (int) (self::one(
+                $db,
+                'SELECT COUNT(*) AS `n` FROM ' . $t . ' WHERE ' . $t . '.`' . $column . '` = ?' . self::cond($entry['when'], $t),
+                self::bindFor($entry, $userId)
+            )['n'] ?? 0);
+            if ($rows > 0) {
+                $lines[] = ['table' => $table, 'column' => $column, 'words' => self::describe($name),
+                    'treatment' => $entry['treatment'], 'rows' => $rows, 'clashes' => 0, 'differences' => 0];
+            }
+        }
+
+        return ['lines' => $lines, 'refusal' => '', 'unknown' => []];
+    }
+
     /** The NULL-safe "the two copies differ" condition for a same-or-refuse column. */
     private static function differs(string $name): string
     {
@@ -921,13 +1020,18 @@ final class AccountMerge
             $db->rollback();
             throw $e;
         }
+        // ✉️ No name and no record of either account is in the message: only the
+        //    two numbers, and the portal's own address (PortalAddress, never the
+        //    request's host name). Where the portal has no address to give, the
+        //    message says where to go instead of printing a bare "/page".
+        $where = self::pageAddress($siteId);
         self::tell(
             $addresses,
             'Please confirm: two of your accounts may be merged',
             "An administrator has asked to merge two accounts that may both be yours (account numbers {$keptId} and "
-            . "{$duplicateId}).\n\nNothing happens unless you agree. To agree, sign in to either account, open "
-            . "Account, then Merge my accounts, and follow the steps there. If these are not both yours, you can "
-            . "cancel the request on that page.\n",
+            . "{$duplicateId}).\n\nNothing happens unless you agree. To agree, sign in to either account and go to "
+            . ($where === '' ? 'your Account page, where a "Merge my accounts" button is shown while a request is waiting' : $where)
+            . ", then follow the steps there. If these are not both yours, you can cancel the request there.\n",
             $siteId
         );
 
@@ -1084,18 +1188,16 @@ final class AccountMerge
                 return ['outcome' => 'needs_proof', 'token' => ''];
             }
 
-            // The rule again, on locked facts, with the REQUESTER as the actor.
-            $siteId    = (int) $req['siteID'];
-            $requester = (int) ($req['requestedByID'] ?? 0);
-            $root      = self::flag(self::one($db, 'SELECT `isRootAdmin` FROM `tblUsers` WHERE `userID` = ?', $requester)['isRootAdmin'] ?? 0);
-            $why       = self::whyNotAllowed(self::factsFor($db, $requester, $root, $root, $siteId, AccountGuard::isSingleOrganisation(), $keptId, $dupId));
-            if ($why === '') {
-                $why = self::preview($db, $keptId, $dupId)['refusal'];
-            }
-            if ($why !== '') {
+            $siteId = (int) $req['siteID'];
+
+            // 🔑 The ACTING account's own way in (finding 2 of the adversarial
+            //    check). Only this account is asked here: the first agreement
+            //    asks nothing about the other one, whose answers would describe
+            //    an account this person has not yet proved is theirs (finding 1).
+            if (self::wayInChangedRecently($db, $requestId, $actingUserId) === true) {
                 $db->rollback();
 
-                return ['outcome' => $why, 'token' => ''];
+                return ['outcome' => self::R_SIGN_IN_CHANGED, 'token' => ''];
             }
 
             if (self::isSecondStep($state, $actingUserId, $browserToken) === false) {
@@ -1114,21 +1216,72 @@ final class AccountMerge
                 return ['outcome' => 'typed_wrong', 'token' => ''];
             }
 
+            // ⚖️ Both sides have proved themselves in this browser: now EVERY
+            //    refusal, on locked facts, with the REQUESTER as the actor, and
+            //    the way-in rule for BOTH accounts.
+            $requester = (int) ($req['requestedByID'] ?? 0);
+            $root      = self::flag(self::one($db, 'SELECT `isRootAdmin` FROM `tblUsers` WHERE `userID` = ?', $requester)['isRootAdmin'] ?? 0);
+            $why       = self::whyNotAllowed(self::factsFor($db, $requester, $root, $root, $siteId, AccountGuard::isSingleOrganisation(), $keptId, $dupId));
+            if ($why === '') {
+                $why = self::preview($db, $keptId, $dupId)['refusal'];
+            }
+            if ($why === '' && (self::wayInChangedRecently($db, $requestId, $keptId) === true || self::wayInChangedRecently($db, $requestId, $dupId) === true)) {
+                $why = self::R_SIGN_IN_CHANGED;
+            }
+            if ($why !== '') {
+                $db->rollback();
+
+                return ['outcome' => $why, 'token' => ''];
+            }
+
             $addresses = self::addressesOf($db, $keptId, $dupId);
-            self::applyMerge($db, $keptId, $dupId, $moveSignIns);
+            $photos    = self::applyMerge($db, $keptId, $dupId, $moveSignIns);
             self::run($db, 'UPDATE `tblAccountMergeSide` SET `confirmedAtUtc` = UTC_TIMESTAMP() WHERE `requestID` = ? AND `userID` = ?',
                 $requestId, $actingUserId);
             self::run($db, "UPDATE `tblAccountMergeRequest` SET `status` = 'completed', `finishedAtUtc` = UTC_TIMESTAMP(), "
                 . '`movedSignIns` = ?, `browserTokenHash` = NULL WHERE `requestID` = ?', $moveSignIns === true ? 1 : 0, $requestId);
+
+            // 🔒 THE LAST LOOK, WITH A LOCKING READ (finding 3). The checks above
+            //    read a snapshot; a row written meanwhile in a table with no
+            //    foreign key (an erasure request filed for the duplicate, say) is
+            //    not held back by the account lock, and an UPDATE would have
+            //    moved it to the kept account — running that request would then
+            //    erase the whole merged person. So: never move a standing row
+            //    (applyMerge), and here count, locking, everything that still
+            //    names the duplicate. Anything at all refuses the whole merge.
+            $left = self::stillNaming($db, $dupId);
+            if ($left !== '') {
+                $db->rollback();
+
+                return ['outcome' => $left, 'token' => ''];
+            }
+            // The record names the KEPT account explicitly: the person may be
+            // signed in as the duplicate at this moment, and Logger would
+            // otherwise name the account that has just been closed.
             Logger::activity('AccountsMerged', 'Account ' . $dupId . ' was merged into account ' . $keptId
-                . ' (request ' . $requestId . ', ways of signing in ' . ($moveSignIns === true ? 'brought across' : 'not brought across') . ')');
+                . ' (request ' . $requestId . ', ways of signing in ' . ($moveSignIns === true ? 'brought across' : 'not brought across') . ')', $keptId);
             $db->commit();
         } catch (\Throwable $e) {
             $db->rollback();
             throw $e;
         }
 
+        // 🖼️ After the commit: the duplicate's photo file, when it was not moved
+        //    to the kept account. A failure is recorded WITHOUT the path.
+        foreach ($photos as $photo) {
+            try {
+                $gone = GdprEraser::deleteUnusedProfileImage($db, $photo);
+            } catch (\Throwable $e) {
+                $gone = false;
+            }
+            if ($gone === false) {
+                Logger::activity('AccountMergePhotoKept', 'The photo file of merged account ' . $dupId
+                    . ' could not be deleted and needs removing by hand');
+            }
+        }
+
         // ✉️ After the commit, to BOTH addresses as they were before the merge.
+        //    Numbers and fixed words only.
         self::tell(
             $addresses,
             'Two of your accounts have been merged',
@@ -1140,6 +1293,56 @@ final class AccountMerge
         );
 
         return ['outcome' => 'completed', 'token' => ''];
+    }
+
+    /**
+     * Was this account's way in chosen by somebody else within
+     * `SIGN_IN_CHANGE_DAYS` before the request started, or at any time since?
+     */
+    private static function wayInChangedRecently(mysqli $db, int $requestId, int $userId): bool
+    {
+        $row = self::one(
+            $db,
+            'SELECT (u.`signInChangedByOtherAtUtc` IS NOT NULL AND u.`signInChangedByOtherAtUtc` >= r.`requestedAtUtc` - INTERVAL '
+            . self::SIGN_IN_CHANGE_DAYS . ' DAY) AS `changed` FROM `tblUsers` u JOIN `tblAccountMergeRequest` r ON r.`requestID` = ? '
+            . 'WHERE u.`userID` = ?',
+            $requestId,
+            $userId
+        );
+
+        return self::flag($row['changed'] ?? 0);
+    }
+
+    /**
+     * The last look, under a LOCKING read: '' when nothing but history names the
+     * duplicate; R_REFUSE_IF_ANY when a standing record (an erasure request, an
+     * offboarding, a held row, a Demo Data mark) appeared; R_CHANGED_DURING when
+     * anything else still names it. A locking read sees rows committed after the
+     * snapshot and holds the index range until the commit.
+     */
+    private static function stillNaming(mysqli $db, int $dupId): string
+    {
+        $found = '';
+        foreach (self::columns() as $name => $entry) {
+            if ($entry['treatment'] === self::KEEP) {
+                continue;
+            }
+            [$table, $column] = self::split($name);
+            $t = '`' . $table . '`';
+            $n = (int) (self::one(
+                $db,
+                'SELECT COUNT(*) AS `n` FROM ' . $t . ' WHERE ' . $t . '.`' . $column . '` = ?' . self::cond($entry['when'], $t) . ' FOR UPDATE',
+                self::bindFor($entry, $dupId)
+            )['n'] ?? 0);
+            if ($n > 0) {
+                if ($entry['treatment'] === self::REFUSE_IF_ANY) {
+                    return self::R_REFUSE_IF_ANY;
+                }
+                $found = self::R_CHANGED_DURING;
+            }
+        }
+
+        return $found;
     }
 
     /**
@@ -1166,10 +1369,22 @@ final class AccountMerge
 
     /**
      * Apply every treatment, inside the caller's transaction, then close the
-     * duplicate. Public for the self-test only through `agree()`; private here.
+     * duplicate. Answers the duplicate's photo values whose FILES must be deleted
+     * after the commit (empty when the photo moved to the kept account).
+     *
+     * @return list<string>
      */
-    private static function applyMerge(mysqli $db, int $keptId, int $dupId, bool $moveSignIns): void
+    private static function applyMerge(mysqli $db, int $keptId, int $dupId, bool $moveSignIns): array
     {
+        // 🧾 FIRST, before any membership moves (the rule finds rows about the
+        //    duplicate's memberships through their CURRENT account number): the
+        //    change history's values about the duplicate's own account row and
+        //    memberships are emptied, by the eraser's own rule (#707). The
+        //    duplicate's details are emptied below; a copy kept here would be one
+        //    no later erasure of the kept account could reach (finding 5). Every
+        //    ROW stays (D-116): who changed what, and when.
+        GdprEraser::emptyChangeHistoryAbout($db, $dupId);
+
         $keys = self::uniqueKeysOf($db);
         foreach (self::columns() as $name => $entry) {
             [$table, $column] = self::split($name);
@@ -1187,8 +1402,12 @@ final class AccountMerge
                 continue;
             }
             if ($treatment === self::REFUSE_IF_ANY) {
-                // Standing rows refused the merge already; what is left moves.
-                self::run($db, 'UPDATE ' . $t . ' SET `' . $column . '` = ? WHERE ' . $where, $k, $d);
+                // ⚠️ Only rows that do NOT stand move — the condition is in the
+                //    statement itself, never assumed from the earlier count: a
+                //    row filed since that count must never be moved to the kept
+                //    account (finding 3). stillNaming() then refuses on it.
+                self::run($db, 'UPDATE ' . $t . ' SET `' . $column . '` = ? WHERE ' . $where
+                    . ' AND NOT (' . str_replace('{t}', $t, self::REFUSE_WHEN[$name] ?? '1 = 1') . ')', $k, $d);
                 continue;
             }
             foreach ($keys[$table][$column] ?? [] as $others) {
@@ -1222,14 +1441,41 @@ final class AccountMerge
         $raw = self::one($db, 'SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = ?', $dupId)['notifyPrefs'] ?? null;
         NotifyPrefs::stricterInsideTransaction($db, $keptId, $raw === null ? null : (string) $raw);
 
+        // 🖼️ The photo (finding 4). If the kept account has none, the
+        //    duplicate's moves to it — the person's own photo, now reachable by
+        //    an erasure of the kept account. Otherwise its file is deleted after
+        //    the commit: once the columns below are emptied nothing could ever
+        //    find it again.
+        $photos = [];
+        $dup    = self::one($db, 'SELECT `avatarPath`, `displayPhoto` FROM `tblUsers` WHERE `userID` = ?', $dupId) ?? [];
+        $kept   = self::one($db, 'SELECT `avatarPath`, `displayPhoto` FROM `tblUsers` WHERE `userID` = ?', $keptId) ?? [];
+        $hasOwn = trim((string) ($kept['avatarPath'] ?? '')) !== '' || trim((string) ($kept['displayPhoto'] ?? '')) !== '';
+        $dupHas = trim((string) ($dup['avatarPath'] ?? '')) !== '' || trim((string) ($dup['displayPhoto'] ?? '')) !== '';
+        if ($dupHas === true && $hasOwn === false) {
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `avatarPath` = ?, `displayPhoto` = ? WHERE `userID` = ?');
+            $a    = $dup['avatarPath'] ?? null;
+            $p    = $dup['displayPhoto'] ?? null;
+            $stmt->bind_param('ssi', $a, $p, $keptId);
+            $stmt->execute();
+            $stmt->close();
+        } elseif ($dupHas === true) {
+            $photos = array_values(array_unique(array_filter(
+                [trim((string) ($dup['avatarPath'] ?? '')), trim((string) ($dup['displayPhoto'] ?? ''))],
+                static fn (string $v): bool => $v !== ''
+            )));
+        }
+
         self::closeDuplicate($db, $dupId);
+
+        return $photos;
     }
 
     /**
-     * Close the duplicate: switched off, every session ended (its sign-in version
-     * raised), and its own details emptied so no second copy of the person lives
-     * on a row nobody can use. The e-mail column is unique, so it becomes a
-     * placeholder no real address can be. Never deleted (see the class docblock).
+     * Close the duplicate: switched off, its own details emptied so no second
+     * copy of the person lives on a row nobody can use, and every session of it
+     * ended through `Auth::endOtherSessionsOf()` — the ONE writer of the sign-in
+     * version, which raises it by a random amount (#598). The e-mail column is
+     * unique, so it becomes a placeholder no real address can be. Never deleted.
      */
     private static function closeDuplicate(mysqli $db, int $dupId): void
     {
@@ -1239,9 +1485,10 @@ final class AccountMerge
             . "`emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid'), `phoneNumber` = NULL, `avatarPath` = NULL, "
             . '`notifyPrefs` = NULL, `totpSecret` = NULL, `totpEnabled` = 0, `calendarToken` = NULL, `displayBio` = NULL, '
             . '`displayPhoto` = NULL, `displayPhone` = NULL, `displayAddress` = NULL, `latitude` = NULL, `longitude` = NULL, '
-            . '`what3words` = NULL, `locale` = NULL, `signInVersion` = `signInVersion` + 1 WHERE `userID` = ?',
+            . '`what3words` = NULL, `locale` = NULL WHERE `userID` = ?',
             $dupId
         );
+        Auth::endOtherSessionsOf($db, $dupId);
     }
 
     /** Both accounts' addresses, read before anything is changed. @return list<string> */
@@ -1256,6 +1503,20 @@ final class AccountMerge
         }
 
         return $out;
+    }
+
+    /**
+     * The whole address of the person's merge page, or '' when the portal has
+     * no address to give (`PortalAddress::absolute()`). Never throws: an e-mail
+     * without a link is better than no e-mail.
+     */
+    private static function pageAddress(int $siteId): string
+    {
+        try {
+            return PortalAddress::absolute('account/merge', $siteId);
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /** Tell the person. Never throws: the merge has happened, a broken mail route must not hide that. */

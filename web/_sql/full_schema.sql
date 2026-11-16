@@ -342,6 +342,7 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     -- the same statement as the password; Auth::endSessionOfInactiveAccount()
     -- ends one carrying any other number. A number, not a time: see the migration.
     `signInVersion` BIGINT NOT NULL DEFAULT 0 COMMENT 'Goes up by a RANDOM amount every time the password is reset, changed or set by an administrator (#598, D-104, D-108), so a number never comes back after a restore. A browser session carrying any other number is ended on its next request. Written only by Auth::endOtherSessionsOf().',
+    `signInChangedByOtherAtUtc` DATETIME DEFAULT NULL COMMENT 'A MOMENT IN UTC: when somebody OTHER than this account last chose its way in - set its password (Auth::storeHash) or changed its e-mail address (admin users page). Never cleared by the account itself. A merge refuses an agreement from an account whose way in was changed by somebody else recently (#1064, D-190)',
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
     KEY `idx_user_calendar_token` (`calendarToken`)

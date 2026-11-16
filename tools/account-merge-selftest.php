@@ -83,7 +83,14 @@ if (defined('PORTAL_CORE') === false) {
 // deliberately NOT loaded: the merge's e-mails are sent after its commit inside
 // a catch, so here they fail quietly and nothing is sent anywhere.
 const AM_CLASSES = ['App', 'Site', 'Logger', 'Roles', 'InstallationSettings', 'Capabilities', 'ApiAuth', 'GdprEraser',
-    'AccountGuard', 'WebPush', 'NotifyPrefs', 'AccountMerge'];
+    'AccountGuard', 'WebPush', 'NotifyPrefs', 'Auth', 'AccountMerge'];
+// 🖼️ The photo checks (section I) need a portal folder of their own: the
+//    eraser's photo rule deletes only an image inside PORTAL_ROOT/_uploads.
+$photoRoot = sys_get_temp_dir() . $sep . 'account-merge-photos-' . bin2hex(random_bytes(5));
+mkdir($photoRoot . $sep . '_uploads' . $sep . 'avatars', 0700, true);
+if (defined('PORTAL_ROOT') === false) {
+    define('PORTAL_ROOT', $photoRoot);
+}
 foreach (AM_CLASSES as $class) {
     require_once $coreDir . $class . '.php';
 }
@@ -92,6 +99,15 @@ use Portal\Core\AccountGuard;
 use Portal\Core\AccountMerge as M;
 use Portal\Core\GdprEraser;
 use Portal\Core\Roles;
+
+// 🔑 A session in this process, for section F's checks of who set a password.
+//    Started HERE, before any output, sending no headers, saved in the photo
+//    scratch folder; empty (nobody signed in) everywhere it is not set on purpose.
+ini_set('session.use_cookies', '0');
+ini_set('session.cache_limiter', '');
+session_save_path($photoRoot);
+session_start();
+$_SESSION = [];
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 try {
@@ -233,7 +249,11 @@ foreach ([
     check($label, $got === $want, "got '{$got}', wanted '{$want}'");
 }
 $codes = [M::R_NO_PERMISSION, M::R_SAME_ACCOUNT, M::R_NOT_FOUND, M::R_ERASED, M::R_WHOLE_PORTAL_ADMIN, M::R_NEEDS_GLOBAL,
-    M::R_NEEDS_GLOBAL_SINGLE, M::R_IS_YOU, M::R_ADMINISTRATOR, M::R_CLOSED, M::R_REFUSE_IF_ANY, M::R_CLASH, M::R_CHOICES_DIFFER, M::R_UNKNOWN_CLASH];
+    M::R_NEEDS_GLOBAL_SINGLE, M::R_IS_YOU, M::R_ADMINISTRATOR, M::R_CLOSED, M::R_REFUSE_IF_ANY, M::R_CLASH, M::R_CHOICES_DIFFER, M::R_UNKNOWN_CLASH,
+    M::R_SIGN_IN_CHANGED, M::R_CHANGED_DURING];
+// The person never reads the administrator's sentence about permissions.
+check('B17b every refusal has PERSON words that never mention a permission',
+    array_filter($codes, static fn (string $c): bool => str_contains(M::personRefusalWords($c), 'permission') === true) === []);
 check('B17 every refusal has words', array_filter($codes, static fn (string $c): bool => strlen(M::refusalWords($c)) < 20) === []);
 check('B18 the single-organisation words never mention "another organisation"', str_contains(M::refusalWords(M::R_NEEDS_GLOBAL_SINGLE), 'another organisation') === false);
 $threw = false;
@@ -560,6 +580,9 @@ foreach (array_keys($listed) as $name) {
 }
 $db->query('SET FOREIGN_KEY_CHECKS = 1');
 $db->query("UPDATE `tblUsers` SET `phoneNumber` = '01234 567890', `notifyPrefs` = NULL WHERE `userID` = {$fd}");
+$db->query("UPDATE `tblAuditTrail` SET `oldValue` = '{\"emailAddress\":\"old-{$tag}@selftest.invalid\"}', `newValue` = 'x' "
+    . "WHERE `tableName` = 'tblUsers' AND `recordID` = {$fd}");
+$versionBefore = n($db, "SELECT `signInVersion` AS n FROM `tblUsers` WHERE `userID` = {$fd}");
 // ⚠️ FOREIGN-KEY CHECKS OFF FOR THIS ONE MERGE, said plainly: the made-up rows
 //    point at organisations and parent rows that do not exist, and InnoDB
 //    re-checks those links when a row is updated. Every OTHER merge in this file
@@ -603,6 +626,11 @@ $closedRow = q($db, "SELECT `isActive`, `fullName`, `emailAddress`, `phoneNumber
 check('F5 the duplicate is closed, not deleted, and its own details are emptied',
     (int) $closedRow['isActive'] === 0 && $closedRow['fullName'] === 'Merged account'
     && $closedRow['emailAddress'] === "merged-{$fd}@merged.invalid" && $closedRow['phoneNumber'] === null, json_encode($closedRow));
+check('F5b every session of the duplicate ends: its sign-in version changed, through its one writer (#598)',
+    (int) $closedRow['signInVersion'] !== $versionBefore, $closedRow['signInVersion'] . ' vs ' . $versionBefore);
+check('F5c the change history ABOUT the duplicate\'s own account keeps its row, its values emptied (finding 5, #707\'s rule)',
+    n($db, "SELECT COUNT(*) AS n FROM `tblAuditTrail` WHERE `tableName` = 'tblUsers' AND `recordID` = {$fd}") >= 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblAuditTrail` WHERE `tableName` = 'tblUsers' AND `recordID` = {$fd} AND (`oldValue` IS NOT NULL OR `newValue` IS NOT NULL OR `changeSet` IS NOT NULL)") === 0);
 $record = q($db, "SELECT `activityDescription` AS d FROM `tblActivityLogs` WHERE `activityType` = 'AccountsMerged' ORDER BY `logID` DESC LIMIT 1");
 check('F6 the record holds two numbers and fixed words only',
     preg_match('/^Account ' . $fd . ' was merged into account ' . $fk . ' \(request \d+, ways of signing in brought across\)$/', (string) ($record[0]['d'] ?? '')) === 1,
@@ -691,6 +719,50 @@ check('F30 an administrator of ANOTHER organisation cannot cancel it', M::cancel
 check('F31 either of the two accounts can cancel it', M::cancel($db, $req, $pd2, false, 0) === 'cancelled');
 check('F32 a cancelled request cannot be agreed to', M::agree($db, $req, $pk2, true, $t5['token'], $pd2, false)['outcome'] === 'cancelled');
 
+// ⚖️ EVERY REFUSAL IS ASKED AGAIN AT COMPLETION. Deleting that re-check left the
+//    previous version of this file green (the adversarial check's P15): each
+//    of these happens BETWEEN the two agreements and must stop the merge.
+foreach ([
+    'the duplicate is made an organisation administrator' => ["UPDATE `tblUserSites` SET `isSiteAdmin` = 1 WHERE `userID` = %D%", M::R_ADMINISTRATOR],
+    'the duplicate is switched off'                       => ["UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = %D%", M::R_CLOSED],
+    'an erasure request is filed for the duplicate'      => ["INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `dueBy`, `status`) VALUES ({$siteA}, %D%, 'e@selftest.invalid', '2027-01-01', 'pending_review')", M::R_REFUSE_IF_ANY],
+    'somebody else changes the duplicate\'s way in'      => ["UPDATE `tblUsers` SET `signInChangedByOtherAtUtc` = UTC_TIMESTAMP() WHERE `userID` = %D%", M::R_SIGN_IN_CHANGED],
+    'somebody else changes the kept account\'s way in'   => ["UPDATE `tblUsers` SET `signInChangedByOtherAtUtc` = UTC_TIMESTAMP() WHERE `userID` = %K%", M::R_SIGN_IN_CHANGED],
+] as $what => [$sql, $want]) {
+    $lk = $user('LateKept' . md5($what)); $member($lk, $siteA);
+    $ld = $user('LateDup' . md5($what));  $member($ld, $siteA);
+    $lreq   = M::start($db, $adminA, false, false, $siteA, false, $lk, $ld)['requestId'];
+    $ltoken = M::agree($db, $lreq, $ld, true, '', 0, false)['token'];
+    $db->query(str_replace(['%D%', '%K%'], [(string) $ld, (string) $lk], $sql));
+    $late = M::agree($db, $lreq, $lk, true, $ltoken, $ld, false)['outcome'];
+    check("F33 at completion: {$what} → refused, nothing merged", $late === $want
+        && n($db, "SELECT `fullName` = 'Merged account' AS n FROM `tblUsers` WHERE `userID` = {$ld}") === 0, $late);
+}
+// The first agreement asks about the ACTING account's own way in.
+$wk = $user('WayKept'); $member($wk, $siteA);
+$wd = $user('WayDup');  $member($wd, $siteA);
+$wreq = M::start($db, $adminA, false, false, $siteA, false, $wk, $wd)['requestId'];
+$db->query("UPDATE `tblUsers` SET `signInChangedByOtherAtUtc` = UTC_TIMESTAMP() - INTERVAL 30 DAY WHERE `userID` = {$wd}");
+check('F34 an account whose way in somebody else changed 30 days BEFORE the request cannot agree', M::agree($db, $wreq, $wd, true, '', 0, false)['outcome'] === M::R_SIGN_IN_CHANGED);
+$db->query("UPDATE `tblUsers` SET `signInChangedByOtherAtUtc` = UTC_TIMESTAMP() - INTERVAL 91 DAY WHERE `userID` = {$wd}");
+check('F35 ...but one changed more than ' . M::SIGN_IN_CHANGE_DAYS . ' days before the request can', M::agree($db, $wreq, $wd, true, '', 0, false)['outcome'] === 'agreed_first');
+// The mark itself, written by the ONE password writer.
+$markOf = static fn (int $id): bool => n($db, "SELECT `signInChangedByOtherAtUtc` IS NOT NULL AS n FROM `tblUsers` WHERE `userID` = {$id}") === 1;
+$mk = $user('MarkTarget');
+\Portal\Core\Auth::setPassword($db, $mk, 'Mk' . bin2hex(random_bytes(6)) . '!9x', 'am-mark-' . $tag);
+check('F36 a password set with nobody signed in (reset link, installer) is NOT marked', $markOf($mk) === false);
+// (The session was started at the top, before any output, empty until now.)
+$_SESSION['user_id'] = $mk;
+\Portal\Core\Auth::setPassword($db, $mk, 'Mk' . bin2hex(random_bytes(6)) . '!9y');
+check('F37 a password the account sets for ITSELF is not marked', $markOf($mk) === false);
+$_SESSION['user_id'] = $adminA;
+\Portal\Core\Auth::setPassword($db, $mk, 'Mk' . bin2hex(random_bytes(6)) . '!9z');
+check('F38 a password set by somebody ELSE is marked (D-190: an administrator cannot then agree for them)', $markOf($mk) === true);
+$_SESSION['user_id'] = $mk;
+\Portal\Core\Auth::setPassword($db, $mk, 'Mk' . bin2hex(random_bytes(6)) . '!9w');
+check('F39 ...and the account changing it again afterwards does NOT clear the mark (no laundering)', $markOf($mk) === true);
+$_SESSION = [];
+
 // =============================================================================
 echo "G. Two processes complete the same request at once\n";
 // =============================================================================
@@ -703,8 +775,9 @@ mkdir($scratch, 0700);
 $worker = $scratch . $sep . 'worker.php';
 file_put_contents($worker, '<?php
 declare(strict_types=1);
-[, $core, $host, $user, $pass, $name, $port, $req, $k, $d, $token, $go] = $argv;
+[, $core, $host, $user, $pass, $name, $port, $req, $k, $d, $token, $go, $root] = $argv;
 define("PORTAL_CORE", $core);
+define("PORTAL_ROOT", $root);
 foreach (' . var_export(AM_CLASSES, true) . ' as $c) { require_once $core . "/" . $c . ".php"; }
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 $mysqli = new mysqli($host, $user, $pass, $name, (int) $port);
@@ -713,25 +786,117 @@ for ($i = 0; $i < 400 && is_file($go) === false; $i++) { usleep(10000); }
 echo \\Portal\\Core\\AccountMerge::agree($mysqli, (int) $req, (int) $k, true, $token, (int) $d, false)["outcome"];
 ');
 $go = $scratch . $sep . 'go';
-$procs = [];
-foreach ([1, 2] as $i) {
-    $procs[$i] = proc_open([PHP_BINARY, $worker, rtrim($coreDir, $sep), $dbHost, $dbUser, $dbPass, $dbName, (string) $dbPort,
-        (string) $greq, (string) $gk, (string) $gd, $gtoken, $go], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes[$i]);
-}
+/** Start one worker that completes request $r as $k (duplicate $d) once $go appears. @return array{0: resource, 1: array} */
+$spawn = static function (int $r, int $k, int $d, string $token) use ($worker, $coreDir, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $go, $photoRoot): array {
+    $proc = proc_open([PHP_BINARY, $worker, rtrim($coreDir, $sep), $dbHost, $dbUser, $dbPass, $dbName, (string) $dbPort,
+        (string) $r, (string) $k, (string) $d, $token, $go, $photoRoot], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+
+    return [$proc, $pipes];
+};
+$finish = static function (array $w): string {
+    $out = trim((string) stream_get_contents($w[1][1])) . trim((string) stream_get_contents($w[1][2]));
+    proc_close($w[0]);
+
+    return $out;
+};
+$workers = [$spawn($greq, $gk, $gd, $gtoken), $spawn($greq, $gk, $gd, $gtoken)];
 usleep(300000);
 touch($go);
-$outs = [];
-foreach ([1, 2] as $i) {
-    $outs[] = trim((string) stream_get_contents($pipes[$i][1])) . trim((string) stream_get_contents($pipes[$i][2]));
-    proc_close($procs[$i]);
-}
+$outs = [$finish($workers[0]), $finish($workers[1])];
 @unlink($go);
-@unlink($worker);
-@rmdir($scratch);
 sort($outs);
 check('G1 two processes completing at once: exactly one merges, the other is told it is done', $outs === ['completed', 'done_already'], json_encode($outs));
 check('G2 ...and the duplicate\'s rows moved once', n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$gk}") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$gd}") === 0);
+
+// =============================================================================
+echo "H. An erasure request filed for the duplicate WHILE the merge runs (finding 3)\n";
+// =============================================================================
+// ⚠️ The measured fault: the merge read "nothing stands in the way" from a
+//    snapshot, a request was filed for the duplicate meanwhile (no foreign key,
+//    so the account lock does not hold it back), and the merge's UPDATE moved
+//    it to the kept account — running it would then erase the whole merged
+//    person. A trigger makes the merge pause at its FIRST write (emptying the
+//    duplicate's change history), and this process files the request during the
+//    pause, on its own connection, committed.
+$hk = $user('MidKept'); $member($hk, $siteA);
+$hd = $user('MidDup');  $member($hd, $siteA);
+$db->query("INSERT INTO `tblAuditTrail` (`userID`, `action`, `tableName`, `recordID`, `oldValue`) VALUES ({$adminA}, 'update', 'tblUsers', {$hd}, 'x')");
+$hreq   = M::start($db, $adminA, false, false, $siteA, false, $hk, $hd)['requestId'];
+$htoken = M::agree($db, $hreq, $hd, true, '', 0, false)['token'];
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_pause`');
+$db->query("CREATE TRIGGER `am_selftest_pause` BEFORE UPDATE ON `tblAuditTrail` FOR EACH ROW BEGIN IF OLD.`tableName` = 'tblUsers' AND OLD.`recordID` = {$hd} THEN DO SLEEP(3); END IF; END");
+$mid = $spawn($hreq, $hk, $hd, $htoken);
+touch($go);
+usleep(1200000); // the merge is now inside its pause
+$db->query("INSERT INTO `tblErasureRequest` (`siteID`, `userID`, `subjectEmail`, `dueBy`, `status`) VALUES ({$siteA}, {$hd}, 'mid@selftest.invalid', '2027-01-01', 'pending_review')");
+$midOut = $finish($mid);
+$db->query('DROP TRIGGER IF EXISTS `am_selftest_pause`');
+@unlink($go);
+check('H1 the merge REFUSES when an erasure request appears for the duplicate part-way through', $midOut === M::R_REFUSE_IF_ANY, $midOut);
+check('H2 ...the request still names the DUPLICATE, never the kept account',
+    n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `subjectEmail` = 'mid@selftest.invalid' AND `userID` = {$hd}") === 1);
+check('H3 ...and nothing was merged', n($db, "SELECT `isActive` AS n FROM `tblUsers` WHERE `userID` = {$hd}") === 1
+    && n($db, "SELECT `status` = 'waiting' AS n FROM `tblAccountMergeRequest` WHERE `requestID` = {$hreq}") === 1);
+@unlink($worker);
+@rmdir($scratch);
+
+// =============================================================================
+echo "I. Photos, and a real erasure after a merge (findings 4 and 5)\n";
+// =============================================================================
+$file = static function (string $name) use ($photoRoot, $sep): string {
+    file_put_contents($photoRoot . $sep . '_uploads' . $sep . 'avatars' . $sep . $name, "\x89PNG made up");
+
+    return 'avatars/' . $name;
+};
+// The kept account has no photo: the duplicate's MOVES to it.
+$ik = $user('PhotoKept'); $member($ik, $siteA);
+$id = $user('PhotoDup');  $member($id, $siteA);
+$p1 = $file('dup-' . $tag . '.png');
+$db->query("UPDATE `tblUsers` SET `avatarPath` = '{$p1}' WHERE `userID` = {$id}");
+check('I1 the merge completes', $merge($ik, $id, false) === 'completed');
+check('I2 the kept account had no photo, so the duplicate\'s photo is now the kept account\'s, file and all',
+    (q($db, "SELECT `avatarPath` FROM `tblUsers` WHERE `userID` = {$ik}")[0]['avatarPath'] ?? '') === $p1
+    && is_file($photoRoot . $sep . '_uploads' . $sep . $p1));
+// The kept account has its own: the duplicate's FILE is deleted.
+$jk = $user('PhotoKept2'); $member($jk, $siteA);
+$jd = $user('PhotoDup2');  $member($jd, $siteA);
+$p2 = $file('kept-' . $tag . '.png');
+$p3 = $file('dup2-' . $tag . '.png');
+$db->query("UPDATE `tblUsers` SET `avatarPath` = '{$p2}' WHERE `userID` = {$jk}");
+$db->query("UPDATE `tblUsers` SET `avatarPath` = '{$p3}' WHERE `userID` = {$jd}");
+check('I3 the merge completes', $merge($jk, $jd, false) === 'completed');
+check('I4 the kept account keeps its own photo, and the duplicate\'s FILE is deleted (no orphan nothing could find)',
+    is_file($photoRoot . $sep . '_uploads' . $sep . $p2) && is_file($photoRoot . $sep . '_uploads' . $sep . $p3) === false);
+
+// A REAL erasure of the kept account after a merge reaches what was the duplicate's.
+spl_autoload_register(static function (string $class) use ($coreDir): void {
+    if (str_starts_with($class, 'Portal\\Core\\') === true && is_file($coreDir . substr($class, 12) . '.php') === true) {
+        require_once $coreDir . substr($class, 12) . '.php';
+    }
+});
+$ek = $user('EraseKept'); $member($ek, $siteA);
+$ed = $user('EraseDup');  $member($ed, $siteA);
+$oldAddress = 'old-' . $tag . '@selftest.invalid';
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+$db->query("INSERT INTO `tblNewsletterRecipient` (`newsletterID`, `userID`, `emailAddress`, `unsubToken`) VALUES (9101, {$ed}, '{$oldAddress}', '" . bin2hex(random_bytes(20)) . "')");
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
+$db->query("INSERT INTO `tblActivityLogs` (`siteID`, `userID`, `activityType`, `activityDescription`) VALUES ({$siteA}, {$ed}, 'Selftest', 'made up')");
+$db->query("INSERT INTO `tblAuditTrail` (`userID`, `action`, `tableName`, `recordID`, `oldValue`) VALUES ({$ed}, 'update', 'tblUsers', {$ed}, '{\"emailAddress\":\"{$oldAddress}\"}')");
+check('I5 the merge completes', $merge($ek, $ed, false) === 'completed');
+$erasure = null;
+$erasureProblem = '';
+try {
+    $filed   = GdprEraser::fileRequest($siteA, $ek, true);
+    $erasure = GdprEraser::execute((int) ($filed['requestId'] ?? $filed['requestID'] ?? 0), $ek, $adminA);
+} catch (Throwable $e) {
+    $erasureProblem = get_class($e) . ': ' . $e->getMessage();
+}
+check('I6 a real erasure of the kept account runs', $erasure !== null, $erasureProblem . json_encode($filed ?? null));
+check('I7 ...and the duplicate\'s old e-mail address is nowhere it was: the newsletter send record and the change history',
+    n($db, "SELECT COUNT(*) AS n FROM `tblNewsletterRecipient` WHERE `emailAddress` = '{$oldAddress}'") === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblAuditTrail` WHERE `oldValue` LIKE '%{$oldAddress}%' OR `newValue` LIKE '%{$oldAddress}%'") === 0);
+check('I8 ...and no activity record names the duplicate', n($db, "SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `userID` = {$ed}") === 0);
 
 // =============================================================================
 echo "E. The pages over HTTP\n";
@@ -849,7 +1014,7 @@ for ($i = 0; $i < 80 && $http('GET', '/login')['status'] === 0; $i++) {
 $tokenOn = static fn (string $html): string => preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $m) === 1
     ? $m[1] : (preg_match('/<meta\s+name="csrf-token"\s+content="([^"]+)"/i', $html, $n) === 1 ? $n[1] : '');
 /** Sign in through the real form; $fresh=false keeps the browser's other cookies (the merge token). */
-$signIn = static function (string $username) use ($http, $tokenOn, $pass): bool {
+$signIn = static function (string $username) use ($http, $tokenOn, &$pass): bool {
     $http('GET', '/logout');
     $page = $http('GET', '/login');
     $in   = $http('POST', '/login', ['csrf_token' => $tokenOn($page['body']), 'username' => $username, 'password' => $pass]);
@@ -923,12 +1088,34 @@ $noSuch   = $http('GET', '/account/merge?request=2000000000');
 check('E14 the person-side page: "not yours" and "no such request" are BYTE-IDENTICAL 404s',
     $notYours['status'] === 404 && $noSuch['status'] === 404 && $plain($notYours['body']) === $plain($noSuch['body']));
 
+// 🙈 FINDING 1: the duplicate is a "victim" holding every sensitive kind of
+//    record. Until BOTH accounts have agreed in one browser, the other side
+//    must learn nothing of them — the attack was persuading an administrator
+//    that a victim's account was "my old duplicate", then reading its counts.
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+foreach (['tblCareCase' => 'personUserID', 'tblDbsChecks' => 'userID', 'tblKidProfiles' => 'parentUserID', 'tblGiftAidDeclaration' => 'donorID'] as $kindTable => $kindColumn) {
+    $insert($kindTable, [$kindColumn => $eDup], $third);
+}
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
+$sensitive = ['Care case', 'DBS (criminal record)', 'Children&#039;s profiles', 'Gift aid declaration', 'Prayer requests'];
+$revealed  = static fn (string $body): array => array_values(array_filter($sensitive, static fn (string $k): bool => str_contains($body, $k) === true));
+$jar = $jarB;
+@unlink($jar);
+$signIn($loginKept);
+$keptEarly = $http('GET', '/account/merge?request=' . $rid);
+check('E14b the KEPT side, freshly signed in, before anybody agreed: NOTHING about the duplicate\'s records',
+    $keptEarly['status'] === 200 && $revealed($keptEarly['body']) === [], json_encode($revealed($keptEarly['body'])));
+$jar = $jarA;
+
 check('E15 the duplicate signs in', $signIn($loginDup));
 $first = $http('GET', '/account/merge?request=' . $rid);
 check('E16 ...sees the first step, the two NUMBERS, and none of the other account\'s details',
     str_contains($first['body'], 'data-merge-state="first"') && str_contains($first['body'], 'account ' . $eKept)
     && str_contains($first['body'], 'Kept Name ' . $tag) === false && str_contains($first['body'], 'Secret body ' . $tag) === false);
 check('E17 ...and is told plainly it cannot be undone', str_contains($first['body'], 'This cannot be undone'));
+check('E17b the duplicate, freshly signed in, sees counts of ITS OWN records',
+    count($revealed($first['body'])) === count($sensitive), json_encode($revealed($first['body'])));
+check('E17c ...but nothing that compares them with the other account', str_contains($first['body'], 'The other account has one too') === false);
 $agree1 = $http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($first['body']), 'requestID' => (string) $rid, 'action' => 'agree']);
 check('E18 agreeing for the duplicate is recorded and the browser is given its token',
     ($agree1['status'] === 302 || $agree1['status'] === 303) && str_contains((string) file_get_contents($jar), M::BROWSER_COOKIE)
@@ -942,6 +1129,8 @@ $jar = $jarB;
 $signIn($loginKept);
 $other = $http('GET', '/account/merge?request=' . $rid);
 check('E20 the other account in a browser WITHOUT the token is offered only the first step', str_contains($other['body'], 'data-merge-state="first"'));
+check('E20b ...and, although the duplicate HAS agreed, still sees nothing about the duplicate\'s records',
+    $revealed($other['body']) === [], json_encode($revealed($other['body'])));
 $jar = $jarA;
 
 // Back in the first browser: sign out, sign in as the kept account, finish.
@@ -949,6 +1138,17 @@ check('E21 the kept account signs in, in the SAME browser', $signIn($loginKept))
 $final = $http('GET', '/account/merge?request=' . $rid);
 check('E22 ...and is offered the final step, with the tick and the typed number', str_contains($final['body'], 'data-merge-state="final"')
     && str_contains($final['body'], 'name="moveSignIns"') && str_contains($final['body'], 'name="typedDuplicate"'));
+check('E22b ...where, both sides proved, the merge\'s own counts are shown', count($revealed($final['body'])) === count($sensitive));
+check('E22c ...and the number to type is NOT printed beside the box', str_contains($final['body'], 'type the number of the account that will be closed</label>'));
+check('E22d the Account page offers "Merge my accounts" while the request is open (finding 6)', str_contains($http('GET', '/account')['body'], 'data-merge-link'));
+// The made-up "sensitive" rows have done their job; they point at parent rows
+// that do not exist, which the real merge's foreign-key checks would refuse.
+foreach (['tblCareCase' => 'personUserID', 'tblDbsChecks' => 'userID', 'tblKidProfiles' => 'parentUserID', 'tblGiftAidDeclaration' => 'donorID'] as $kindTable => $kindColumn) {
+    $db->query("DELETE FROM `{$kindTable}` WHERE `{$kindColumn}` = {$eDup}");
+}
+$forged = $http('POST', '/account/merge/save', ['requestID' => (string) $rid, 'action' => 'agree', 'typedDuplicate' => (string) $eDup]);
+check('E22e a post with NO form token is refused (400) and merges nothing (the check\'s P17)',
+    $forged['status'] === 400 && n($db, "SELECT `isActive` AS n FROM `tblUsers` WHERE `userID` = {$eDup}") === 1);
 $wrong = $http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($final['body']), 'requestID' => (string) $rid, 'action' => 'agree', 'typedDuplicate' => (string) $eKept]);
 check('E23 the wrong number typed merges nothing', n($db, "SELECT `isActive` AS n FROM `tblUsers` WHERE `userID` = {$eDup}") === 1);
 $final = $http('GET', '/account/merge?request=' . $rid);
@@ -970,6 +1170,51 @@ check('E26 the duplicate has no password left and is switched off, so it cannot 
 $log = q($db, "SELECT `activityDescription` AS d FROM `tblActivityLogs` WHERE `activityType` LIKE 'AccountMerge%' OR `activityType` = 'AccountsMerged'");
 $named = array_filter($log, static fn (array $r): bool => preg_match('/[A-Za-z]@|Name ' . $tag . '/', (string) $r['d']) === 1);
 check('E27 every activity record of this feature holds no name and no e-mail address', $log !== [] && $named === [], json_encode(array_values($named)));
+check('E27b once merged, the Account page no longer offers it', str_contains($http('GET', '/account')['body'], 'data-merge-link') === false);
+
+// 🔑 FINDING 2: an administrator who resets BOTH passwords cannot then sign in
+//    as each and "agree" for the person (D-190). Driven through the REAL
+//    administrator's page, then the real sign-in and the real agree.
+$ak = $user('ResetKept'); $member($ak, $siteOne); $loginAk = $login($ak, 'ResetKept');
+$ad = $user('ResetDup');  $member($ad, $siteOne); $loginAd = $login($ad, 'ResetDup');
+$signIn($loginDc);
+$page = $http('GET', $mergeUrl($ak, $ad));
+check('E30 an administrator post with NO form token cannot start a request (400)',
+    $http('POST', '/admin/users/merge/start', ['keep' => (string) $ak, 'duplicate' => (string) $ad])['status'] === 400);
+$http('POST', '/admin/users/merge/start', ['csrf_token' => $tokenOn($page['body']), 'keep' => (string) $ak, 'duplicate' => (string) $ad]);
+$arid = (int) q($db, "SELECT MAX(`requestID`) AS r FROM `tblAccountMergeRequest`")[0]['r'];
+check('E31 ...nor cancel one (400)', $http('POST', '/admin/users/merge/cancel', ['requestID' => (string) $arid])['status'] === 400
+    && n($db, "SELECT `status` = 'waiting' AS n FROM `tblAccountMergeRequest` WHERE `requestID` = {$arid}") === 1);
+foreach ([[$ak, 'ResetKept'], [$ad, 'ResetDup']] as [$who, $name]) {
+    $users = $http('GET', '/admin/users');
+    $http('POST', '/admin/users/save', ['csrf_token' => $tokenOn($users['body']), 'action' => 'update', 'userID' => (string) $who,
+        'fullName' => 'Merge ' . $name, 'emailAddress' => strtolower($name) . '-' . $tag . '@selftest.invalid', 'phoneNumber' => '',
+        'isActive' => '1', 'password' => $pass . 'R']);
+}
+check('E32 the administrator\'s password reset of both accounts is recorded as somebody else choosing their way in',
+    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` IN ({$ak}, {$ad}) AND `signInChangedByOtherAtUtc` IS NOT NULL") === 2);
+$passBefore = $pass;
+$pass .= 'R';
+$signIn($loginAd);
+$try1 = $http('GET', '/account/merge?request=' . $arid);
+$http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($try1['body']), 'requestID' => (string) $arid, 'action' => 'agree']);
+$signIn($loginAk);
+$try2 = $http('GET', '/account/merge?request=' . $arid);
+$http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($try2['body']), 'requestID' => (string) $arid, 'action' => 'agree', 'typedDuplicate' => (string) $ad]);
+$pass = $passBefore;
+check('E33 THE ATTACK: signing in with the passwords the administrator set and agreeing on BOTH sides is refused',
+    n($db, "SELECT COUNT(*) AS n FROM `tblAccountMergeSide` WHERE `requestID` = {$arid} AND `confirmedAtUtc` IS NOT NULL") === 0
+    && n($db, "SELECT `status` = 'waiting' AS n FROM `tblAccountMergeRequest` WHERE `requestID` = {$arid}") === 1
+    && n($db, "SELECT `isActive` AS n FROM `tblUsers` WHERE `userID` = {$ad}") === 1);
+// Changing somebody else's e-mail address (where their reset link would go) is recorded the same way.
+$ex = $user('EmailTarget'); $member($ex, $siteOne);
+$signIn($loginDc);
+$users = $http('GET', '/admin/users');
+$http('POST', '/admin/users/save', ['csrf_token' => $tokenOn($users['body']), 'action' => 'update', 'userID' => (string) $ex,
+    'fullName' => 'Merge EmailTarget', 'emailAddress' => 'moved-' . $tag . '@selftest.invalid', 'phoneNumber' => '', 'isActive' => '1']);
+check('E34 an administrator changing somebody else\'s e-mail address is recorded too',
+    n($db, "SELECT `signInChangedByOtherAtUtc` IS NOT NULL AS n FROM `tblUsers` WHERE `userID` = {$ex}") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$ex} AND `emailAddress` = 'moved-{$tag}@selftest.invalid'") === 1);
 
 // Cancel and expiry, over HTTP.
 $ck = $user('CancelKept'); $member($ck, $siteOne); $loginCk = $login($ck, 'CancelKept');
@@ -985,6 +1230,13 @@ $db->query("UPDATE `tblAccountMergeRequest` SET `expiresAtUtc` = UTC_TIMESTAMP()
 $page = $http('GET', '/account/merge?request=' . $crid);
 $http('POST', '/account/merge/save', ['csrf_token' => $tokenOn($page['body']), 'requestID' => (string) $crid, 'action' => 'cancel']);
 check('E29 the person can cancel it', n($db, "SELECT `status` = 'cancelled' AS n FROM `tblAccountMergeRequest` WHERE `requestID` = {$crid}") === 1);
+
+// The photo scratch folder (made by this run, random name, under the system temp folder).
+$tidy = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($photoRoot, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+foreach ($tidy as $entry) {
+    $entry->isDir() === true ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
+}
+@rmdir($photoRoot);
 
 echo "\n" . $GLOBALS['am_pass'] . ' passed, ' . $GLOBALS['am_fail'] . " failed\n";
 exit($GLOBALS['am_fail'] === 0 ? 0 : 1);

@@ -24,8 +24,15 @@ declare(strict_types=1);
 use Portal\Core\AccountMerge;
 
 /** @var array{lines: list<array<string, mixed>>} $mergePreview */
+// `$mergeShowClashes` (default true): whether to show the two columns that
+// compare with the OTHER account. The person's page passes false before both
+// agreements are in, because those numbers describe an account they have not
+// yet proved is theirs (#1064, adversarial check finding 1).
+$mergeShowClashes = ($mergeShowClashes ?? true) === true;
 if ($mergePreview['lines'] === []) {
-    echo '<p class="text-muted">The duplicate holds no records at all apart from the account itself.</p>';
+    echo '<p class="text-muted">' . ($mergeShowClashes === true
+        ? 'The duplicate holds no records at all apart from the account itself.'
+        : 'This account holds no records apart from the account itself.') . '</p>';
 }
 foreach (AccountMerge::TREATMENT_WORDS as $mergeTreatment => [$mergeHeading, $mergeNote]) {
     $mergeLines = array_values(array_filter(
@@ -44,15 +51,19 @@ foreach (AccountMerge::TREATMENT_WORDS as $mergeTreatment => [$mergeHeading, $me
         <div class="portal-data-row portal-data-header d-none d-md-flex">
             <div class="col-md-6">Kind of record</div>
             <div class="col-md-2 text-md-end">How many</div>
-            <div class="col-md-2 text-md-end">The other account has one too</div>
-            <div class="col-md-2 text-md-end">And it says something different</div>
+            <?php if ($mergeShowClashes === true): ?>
+                <div class="col-md-2 text-md-end">The other account has one too</div>
+                <div class="col-md-2 text-md-end">And it says something different</div>
+            <?php endif; ?>
         </div>
         <?php foreach ($mergeLines as $mergeLine): ?>
             <div class="portal-data-row">
                 <div class="col-12 col-md-6"><?php echo htmlspecialchars((string) $mergeLine['words'], ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-4 col-md-2 text-md-end" data-merge-rows><?php echo (int) $mergeLine['rows']; ?></div>
-                <div class="col-4 col-md-2 text-md-end"><?php echo (int) $mergeLine['clashes']; ?></div>
-                <div class="col-4 col-md-2 text-md-end"><?php echo (int) $mergeLine['differences']; ?></div>
+                <?php if ($mergeShowClashes === true): ?>
+                    <div class="col-4 col-md-2 text-md-end"><?php echo (int) $mergeLine['clashes']; ?></div>
+                    <div class="col-4 col-md-2 text-md-end"><?php echo (int) $mergeLine['differences']; ?></div>
+                <?php endif; ?>
             </div>
         <?php endforeach; ?>
     </div>

@@ -51,7 +51,8 @@ if ($requestId > 0) {
     }
 }
 
-$token = $_COOKIE[AccountMerge::BROWSER_COOKIE] ?? '';
+$https = ($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off';
+$token = $_COOKIE[AccountMerge::cookieName($https)] ?? '';
 $token = is_string($token) === true ? $token : '';
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -119,17 +120,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php if ($open === false): ?>
         <p class="text-muted" data-merge-state="closed">This request is no longer open.</p>
     <?php else: ?>
-        <?php $mergePreview = AccountMerge::preview($mysqli, $keptId, $dupId); ?>
-        <?php if ($mergePreview['refusal'] !== ''): ?>
+        <?php
+        // 🙈 WHAT THIS PERSON MAY SEE (adversarial check, finding 1). Until both
+        //    accounts have agreed in this browser, nothing about the OTHER
+        //    account is shown — not its records, not its counts, not a refusal
+        //    that would describe it: they have not proved it is theirs. With a
+        //    fresh sign-in they see counts of THIS account's own records. Only at
+        //    the final step, both proofs in, are the merge's own counts shown.
+        $mergePreview = null;
+        $mergeShowClashes = false;
+        if ($second === true && $fresh === true) {
+            $mergePreview = AccountMerge::preview($mysqli, $keptId, $dupId);
+            $mergeShowClashes = true;
+        } elseif ($fresh === true) {
+            $mergePreview = AccountMerge::ownCounts($mysqli, $me);
+        }
+        ?>
+        <?php if ($mergeShowClashes === true && $mergePreview['refusal'] !== ''): ?>
             <div class="alert alert-warning" data-merge-refusal="<?php echo $e($mergePreview['refusal']); ?>">
-                <?php echo $e(AccountMerge::refusalWords($mergePreview['refusal'])); ?>
+                <?php echo $e(AccountMerge::personRefusalWords($mergePreview['refusal'])); ?>
             </div>
         <?php endif; ?>
 
         <?php if ($fresh === false): ?>
             <p data-merge-state="needs-proof">
-                To agree, first <a href="<?php echo $e(Site::url('logout')); ?>">sign out</a> and sign in to
-                account <?php echo $me; ?> again, then come back to Account, Merge my accounts.
+                To agree, first <a href="<?php echo $e(Site::url('logout')); ?>">sign out</a>, sign in to
+                account <?php echo $me; ?> again, then come back to
+                <a href="<?php echo $e(Site::url('account/merge')); ?>?request=<?php echo (int) $request['requestID']; ?>">this page</a>
+                (it is also linked from your Account page while the request is open).
             </p>
         <?php elseif ($second === true): ?>
             <form method="post" action="<?php echo $e(Site::url('account/merge/save')); ?>" class="card card-body mb-4" data-merge-state="final">
@@ -145,7 +163,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         Account <?php echo $dupId; ?>'s password is never moved.
                     </label>
                 </div>
-                <label for="mergeTyped" class="form-label">To confirm, type the number of the account that will be closed (<?php echo $dupId; ?>)</label>
+                <?php // The number is deliberately NOT printed in this label: typing it must mean knowing which account closes. ?>
+                <label for="mergeTyped" class="form-label">To confirm, type the number of the account that will be closed</label>
                 <input type="text" inputmode="numeric" id="mergeTyped" name="typedDuplicate" class="form-control mb-3" required>
                 <button type="submit" class="btn btn-danger">Merge the accounts. This cannot be undone</button>
             </form>
@@ -165,7 +184,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <button type="submit" class="btn btn-outline-secondary">These are not both mine: cancel the request</button>
         </form>
 
-        <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'merge-counts.php'; ?>
+        <?php if ($mergePreview !== null): ?>
+            <h2 class="h5 mt-4"><?php echo $mergeShowClashes === true ? 'What the merge would do' : 'This account\'s own records'; ?></h2>
+            <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'merge-counts.php'; ?>
+        <?php endif; ?>
     <?php endif; ?>
 <?php endif; ?>
 

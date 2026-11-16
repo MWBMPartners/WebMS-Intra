@@ -730,23 +730,31 @@ if ($action === 'update') {
     //    point has written anything.
     App::beginTransaction();
     try {
+        // 🔑 #1064 (D-190): changing SOMEBODY ELSE's e-mail address chooses where
+        //    their reset link goes, so it is recorded as their way in being
+        //    changed by somebody else. It is written FIRST in the SET list on
+        //    purpose: MySQL applies a SET left to right, so `emailAddress` here
+        //    is still the OLD address. Nothing is recorded when the address does
+        //    not change, or when an administrator edits their own account.
+        $markWayIn = ((int) ($_SESSION['user_id'] ?? 0)) !== (int) $userID ? 1 : 0;
+        $wayInSql  = '`signInChangedByOtherAtUtc` = IF(? = 1 AND NOT (`emailAddress` <=> ?), UTC_TIMESTAMP(), `signInChangedByOtherAtUtc`), ';
         if ($actorGlobal === true) {
             $stmt = $mysqli->prepare(
-                'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ?, '
+                'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, '
                 . 'isActive = ?, isAdmin = ?, isRootAdmin = ? WHERE userID = ?'
             );
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('sssiiii', $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
+            $stmt->bind_param('issssiiii', $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $newIsAdmin, $newIsRoot, $userID);
         } else {
             $stmt = $mysqli->prepare(
-                'UPDATE tblUsers SET fullName = ?, emailAddress = ?, phoneNumber = ?, isActive = ? WHERE userID = ?'
+                'UPDATE tblUsers SET ' . $wayInSql . 'fullName = ?, emailAddress = ?, phoneNumber = ?, isActive = ? WHERE userID = ?'
             );
             if ($stmt === false) {
                 throw new \RuntimeException('Failed to prepare user update: ' . $mysqli->error);
             }
-            $stmt->bind_param('sssii', $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
+            $stmt->bind_param('issssii', $markWayIn, $emailAddress, $fullName, $emailAddress, $phoneNumber, $isActive, $userID);
         }
         $stmt->execute();
         $stmt->close();
