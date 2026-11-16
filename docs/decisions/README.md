@@ -249,7 +249,11 @@ appended with its real date and a note that it was added later.
 | [D-191](191-the-installation-administrator-needs-the-merge-role.md) | 2026-11-16 | The installation's own administrator needs the merge permission in an organisation, like anyone else | in force |
 | [D-192](192-exchange-rates-are-fetched-daily-with-administrator-fallback.md) | 2026-11-16 | Exchange rates are fetched daily from a public service, with administrator-entered rates as the fallback | in force |
 | [D-193](193-removing-someone-from-an-organisation-leaves-their-group-memberships.md) | 2026-11-16 | Removing somebody from an organisation does not end their small-group memberships | in force |
+| [D-194](194-outside-company-spending-limits-are-in-the-organisations-own-currency.md) | 2026-11-16 | D-194 · Spending limits for outside companies are written in each organisation's own currency | in force |
+| [D-195](195-the-privacy-pages-list-the-companies-an-organisation-uses-from-its-server.md) | 2026-11-16 | D-195 · The privacy pages list the companies an organisation uses from its own server, as a second short list | in force |
+| [D-196](196-a-hidden-waiting-suggestion-comes-back-as-a-draft.md) | 2026-11-16 | D-196 · A hidden event suggestion still waiting for approval comes back as a draft, with any cancellation reason removed | in force |
+| [D-197](197-approving-a-suggestion-that-was-cancelled-shows-a-warning.md) | 2026-11-16 | D-197 · Approving a suggestion that was cancelled earlier is allowed, with a visible warning | in force |
 
-*193 decisions. This index is checked against the folder by
+*197 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
