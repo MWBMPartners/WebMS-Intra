@@ -594,7 +594,10 @@ return [
                     . 'address and notes are cleared from it as the last step, once everything else has succeeded. '
                     . 'On other people\'s requests that this person handled as an administrator, only who handled '
                     . 'it is cleared.',
-        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID'],
+        // `replacedEmail` (#1064 round 11): the address the account held when
+        //    the erasure replaced it, so a retried run can still search by it.
+        //    Cleared by the same last step as the rest.
+        'columns'  => ['userID', 'subjectEmail', 'subjectName', 'notes', 'processedByID', 'replacedEmail'],
     ],
     'tblErasureReviewDecisions' => [
         'decision' => 'unlink',

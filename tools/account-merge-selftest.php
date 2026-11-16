@@ -1501,10 +1501,16 @@ check('I18e ...and only at that close are the remembered addresses emptied: the 
 // 🔁 ROUND 10 (the independent check's S1): the account's OWN address changed
 //    AFTER the request was filed. Run 1 searches by the new address and fails;
 //    the walk then replaces that address with the made-up one. Run 2 reads the
-//    request's (older) address and the earlier-address list, so unless the walk
-//    put the address it replaced onto that list, run 2 never searched by it
-//    and closed as "none failed" with its send-log line still there.
+//    request's (older) address and the earlier-address list, so unless the
+//    replaced address is kept somewhere a later run reads, run 2 never searched
+//    by it and closed as "none failed" with its send-log line still there.
+//    Round 11: it is kept ON THE REQUEST (`replacedEmail`), never appended to
+//    the account's list, which could be too full to take it (I22).
+//    ROUND 11 (the check's S1d): between the two runs the OLD address, the one
+//    the request was filed with, passes to another account (Zed). Run 2 takes
+//    that address from the request and used to search it, erasing Zed's line.
 $cp    = $user('ChangedAfterFiling'); $member($cp, $siteA);
+$cpOld = q($db, "SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = {$cp}")[0]['emailAddress'];
 $cpReq = (int) GdprEraser::fileRequest($siteA, $cp, true)['requestID'];
 $cpNew = 'changed-after-' . $tag . '@selftest.invalid';
 $move($cp, $cpNew);
@@ -1513,21 +1519,95 @@ $insert('tblEmailLog', ['toRecipients' => $cpNew, 'subject' => 'Changed mail ' .
 $db->query('SET FOREIGN_KEY_CHECKS = 1');
 $cpLines = static fn (): int => n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` LIKE '%{$cpNew}%' AND `subject` = 'Changed mail {$tag}'");
 $cpBefore = $cpLines();
+$cpList   = q($db, "SELECT `earlierEmails` FROM `tblUsers` WHERE `userID` = {$cp}")[0]['earlierEmails'];
 $db->query("CREATE TRIGGER `am_selftest_retry` BEFORE UPDATE ON `tblEmailLog` FOR EACH ROW BEGIN IF OLD.`toRecipients` LIKE '%{$cpNew}%' "
     . "THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'transient'; END IF; END");
 $cpRun1 = GdprEraser::execute($cpReq, $cp, $adminA);
 $db->query('DROP TRIGGER IF EXISTS `am_selftest_retry`');
+$cpAfter1 = q($db, "SELECT `r`.`subjectEmail`, `r`.`replacedEmail`, `u`.`earlierEmails` FROM `tblErasureRequest` `r` "
+    . "JOIN `tblUsers` `u` ON `u`.`userID` = {$cp} WHERE `r`.`requestID` = {$cpReq}")[0] ?? [];
+// Zed takes the old address now, and mail is sent to Zed at it.
+$zed = $user('ZedTaker'); $member($zed, $siteA);
+$db->query("UPDATE `tblUsers` SET `emailAddress` = '{$cpOld}' WHERE `userID` = {$zed}");
+$db->query('SET FOREIGN_KEY_CHECKS = 0');
+$insert('tblEmailLog', ['toRecipients' => $cpOld, 'subject' => 'Zed mail ' . $tag, 'errorDetail' => '', 'errorCode' => ''], $third);
+$db->query('SET FOREIGN_KEY_CHECKS = 1');
 $cpRun2 = GdprEraser::execute($cpReq, $cp, $adminA);
 check('I20 premise: the request was filed under the old address, the line exists, and run 1 FAILED',
-    $cpBefore === 1 && ($cpRun1['failed'] ?? 0) >= 1
-    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$cpReq} AND `subjectEmail` <> '{$cpNew}'") === 1,
-    json_encode($cpRun1));
+    $cpBefore === 1 && ($cpRun1['failed'] ?? 0) >= 1 && ($cpAfter1['subjectEmail'] ?? '') === $cpOld, json_encode($cpRun1));
+check('I20a ...run 1 kept the address it replaced ON THE REQUEST, and left the account\'s earlier-address list exactly as it was',
+    ($cpAfter1['replacedEmail'] ?? '') === $cpNew && ($cpAfter1['earlierEmails'] ?? null) === $cpList, json_encode($cpAfter1));
 check('I20b ...run 2 searched by the address the account held when run 1 replaced it: the line is gone and the request closed',
     ($cpRun2['failed'] ?? -1) === 0 && $cpLines() === 0
     && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$cpReq} AND `status` = 'completed'") === 1,
     json_encode($cpRun2));
-check('I20c ...and the list the walk added it to is emptied at that close',
-    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$cp} AND `earlierEmails` IS NULL") === 1);
+check('I20c ...and at that close the list and the request\'s kept address are both emptied',
+    n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$cp} AND `earlierEmails` IS NULL") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$cpReq} AND `replacedEmail` IS NULL") === 1);
+check('I20d ...run 2 did NOT search the request\'s own address once another account held it: Zed\'s line stays, and the closing line counts it as not searched',
+    n($db, "SELECT COUNT(*) AS n FROM `tblEmailLog` WHERE `toRecipients` = '{$cpOld}' AND `subject` = 'Zed mail {$tag}'") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureAudit` WHERE `requestID` = {$cpReq} AND `action` = 'completed' "
+        . "AND `details` LIKE '%1 address(es) this person held before are another account''s now%'") === 1);
+
+// 🧾 ROUND 11: the shared address-list fragment on a stored value that is not
+//    a list of addresses. The column is plain text, so it can hold anything:
+//    not JSON at all, or JSON that is not a list. JSON_CONTAINS() on text that
+//    is not JSON is an ERROR, which stopped the erasure outright (round 10).
+//    Each must be read as no addresses, and a change must still store the
+//    replaced address and nothing else readable.
+$junkOk = [];
+foreach (['plain text, not JSON', '{}', '"x"', '[1,2]'] as $i => $junk) {
+    $jw = $user('JunkList' . $i);
+    $jwOld = q($db, "SELECT `emailAddress` FROM `tblUsers` WHERE `userID` = {$jw}")[0]['emailAddress'];
+    $st = $db->prepare('UPDATE `tblUsers` SET `earlierEmails` = ? WHERE `userID` = ?');
+    $st->bind_param('si', $junk, $jw);
+    $st->execute();
+    $st->close();
+    $before = M::addressList($junk);
+    try {
+        $move($jw, 'junk-new-' . $i . '-' . $tag . '@selftest.invalid');
+        $stored = q($db, "SELECT `earlierEmails` FROM `tblUsers` WHERE `userID` = {$jw}")[0]['earlierEmails'];
+        $junkOk[$junk] = $before === [] && M::addressList($stored) === [$jwOld];
+    } catch (Throwable $e) {
+        $junkOk[$junk] = 'threw: ' . $e->getMessage();
+    }
+}
+check('I21 a stored list that is not JSON, or JSON that is not a list, reads as no addresses, and an address change through the shared fragment stores the replaced address',
+    array_filter($junkOk, static fn ($ok): bool => $ok !== true) === [], json_encode($junkOk));
+
+// 📏 ROUND 11 (the check's S4): an account whose earlier-address list is LONGER
+//    than a TEXT column can hold (65,535 bytes). Round 10's erasure appended to
+//    the list, so with the column nearly full the erasure's account step failed
+//    "Data too long" on every run and the account could never be erased. The
+//    column is MEDIUMTEXT now, and the erasure never appends to it.
+$lw   = $user('LongList'); $member($lw, $siteA);
+$long = [];
+for ($i = 0; $i < 2400; $i++) {
+    $long[] = sprintf('long-%04d-%s@selftest.invalid', $i, $tag);
+}
+$longJson = json_encode($long);
+// A column too small for the list REFUSES it (strict mode), which is the
+// fault this pins; caught so it is a red check, not a crash.
+try {
+    $st = $db->prepare('UPDATE `tblUsers` SET `earlierEmails` = ? WHERE `userID` = ?');
+    $st->bind_param('si', $longJson, $lw);
+    $st->execute();
+    $st->close();
+    $move($lw, 'long-now-' . $tag . '@selftest.invalid');
+} catch (Throwable $e) {
+    echo '    (the list could not be stored: ' . $e->getMessage() . ")\n";
+}
+$lwLen   = n($db, "SELECT LENGTH(`earlierEmails`) AS n FROM `tblUsers` WHERE `userID` = {$lw}");
+$lwCount = count(M::addressList(q($db, "SELECT `earlierEmails` FROM `tblUsers` WHERE `userID` = {$lw}")[0]['earlierEmails'] ?? null));
+$lwReq = (int) GdprEraser::fileRequest($siteA, $lw, true)['requestID'];
+$lwRun = GdprEraser::execute($lwReq, $lw, $adminA);
+check('I22 premise: the list is longer than a TEXT column can hold, and an address change still stored onto it',
+    $lwLen > 65535 && $lwCount === 2401, $lwLen . ' bytes, ' . $lwCount . ' addresses');
+check('I22b ...and the erasure of that account runs with no failed step, closes, and empties the list',
+    ($lwRun['failed'] ?? -1) === 0
+    && n($db, "SELECT COUNT(*) AS n FROM `tblErasureRequest` WHERE `requestID` = {$lwReq} AND `status` = 'completed'") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblUsers` WHERE `userID` = {$lw} AND `earlierEmails` IS NULL") === 1,
+    json_encode($lwRun));
 
 // 🖼️ ROUND 9 (polish): a photo written onto a closed account goes FILE FIRST.
 //    Its value names a file the eraser will not delete (not an image in the

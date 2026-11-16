@@ -2310,7 +2310,7 @@ class GdprEraser
             //    The send log and the mail queue keep a recipient only as text,
             //    so each is searched by each address.
             $otherAddresses = [];
-            foreach (array_merge(self::earlierAddressOf($db, $userId), ...array_values($mergedIn)) as $address) {
+            foreach (array_merge(self::earlierAddressOf($db, $userId), self::replacedAddressOf($db, $requestId), ...array_values($mergedIn)) as $address) {
                 if ($address !== '' && $address !== $erasedEmail && in_array($address, $otherAddresses, true) === false) {
                     $otherAddresses[] = $address;
                 }
@@ -2323,6 +2323,17 @@ class GdprEraser
             //    Such an address is left out, and a line says so.
             $takenAddresses = AccountMerge::heldByOthers($db, $otherAddresses, array_merge([$userId], array_keys($mergedIn)));
             $otherAddresses = array_values(array_diff($otherAddresses, $takenAddresses));
+            // 🚫 Round 11: the SAME rule for the main address. On a later run
+            //    it comes from the request (the account row holds the made-up
+            //    one), and the request's address can have passed to another
+            //    account in between: searching it erased that account's
+            //    send-log line (measured by the independent check). Its two
+            //    steps still run with no address, so the step count is the
+            //    same, and it is counted with the others in the closing line.
+            if ($erasedEmail !== '' && AccountMerge::heldByOthers($db, [$erasedEmail], array_merge([$userId], array_keys($mergedIn))) !== []) {
+                $takenAddresses[] = $erasedEmail;
+                $erasedEmail      = '';
+            }
             // 🚩 Round 7: an account the merge record says was merged into this
             //    one but which is no longer as the merge closed it. Only a
             //    hand-written change can do that now; its old records may be
@@ -2753,9 +2764,12 @@ class GdprEraser
      * the address is taken from the request instead. That is why a request is
      * left completely untouched until every step has succeeded.
      *
-     * What this cannot do: if the person changed their address between asking
-     * and the first run, a second run searches for the OLDER address on the
-     * request. Nothing records the newer one once the account is emptied.
+     * An address that changed after the request was filed is not lost: the
+     * erasure's account step keeps the address it replaces on the request
+     * (`replacedEmail`, round 11 of #1064), and `execute()` searches by that
+     * too. Neither this address nor that one is searched when ANOTHER account
+     * holds it now (round 11: the request's address can pass to somebody else
+     * between two runs); `execute()` decides that, and says so.
      *
      * @return string The address, or '' when none is known. Never a made-up
      *   `deleted-…` address.
@@ -3071,9 +3085,10 @@ class GdprEraser
             //    person never merged as well as for a merged-in address). Here
             //    they go only with a request every step of which succeeded, or
             //    which an administrator has finished by hand, in the same
-            //    transaction as the close. The person's current address needs
-            //    nothing of the kind: it stays on the request itself
-            //    (`addressToScrub()`).
+            //    transaction as the close. The request's own two addresses
+            //    (the one it was filed with, and `replacedEmail`, the one the
+            //    account held when the erasure replaced it) are emptied with
+            //    the rest of the request's details just below.
             $addressesEmptied = 0;
             $stmt = $db->prepare('UPDATE `tblUsers` SET `earlierEmails` = NULL WHERE `earlierEmails` IS NOT NULL AND `userID` IN ('
                 . implode(', ', array_fill(0, count($handlerIds), '?')) . ')');
@@ -3198,7 +3213,7 @@ class GdprEraser
             // Then the person's details, on every request from this account.
             [$before, $after] = explode('{rid}', self::TOMBSTONE_EMAIL);
             $stmt = $db->prepare(
-                'UPDATE tblErasureRequest SET subjectName = NULL, notes = NULL, confirmToken = NULL, '
+                'UPDATE tblErasureRequest SET subjectName = NULL, notes = NULL, confirmToken = NULL, replacedEmail = NULL, '
                 . 'subjectEmail = CONCAT(?, requestID, ?), userID = NULL WHERE userID = ? OR requestID = ?'
             );
             $stmt->bind_param('ssii', $before, $after, $userId, $requestId);
@@ -4485,7 +4500,8 @@ class GdprEraser
     private static function statusSentence(string $status): string
     {
         if ($status === 'pending_review') {
-            return 'The request is back at pending review with everything on it unchanged, and every address it searches by is still recorded, so it can be run again.';
+            return 'The request is back at pending review with the person\'s details still on it and every address '
+                . 'it searches by still recorded, so it can be run again.';
         }
 
         return 'The request could NOT be put back to pending review'
@@ -6215,19 +6231,20 @@ class GdprEraser
             // For tblUsers, the user-row anonymisation also nulls the email/etc.
             if ($table === 'tblUsers') {
                 $madeUp = "'" . $db->real_escape_string(str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL)) . "'";
-                // 📧 #1064 round 10: the address being replaced goes onto the
-                //    earlier-address list FIRST (MySQL applies a SET left to
-                //    right), by the one fragment every address change uses. A
-                //    person whose address changed after the request was filed
-                //    otherwise lost that address here: a later run reads the
-                //    request's (older) address and the list, and never searched
-                //    by the replaced one again (measured by the independent
-                //    check). `closeRequest()` empties the list at the close.
-                $remember = AccountMerge::rememberReplacedAddressSql();
-                if (substr_count($remember, '?') !== 1) {
-                    throw new \RuntimeException('the address-list fragment no longer has exactly one value to fill in');
-                }
-                array_unshift($sets, rtrim(str_replace('?', $madeUp, $remember), ', '));
+                // 📧 #1064 round 11: the address being replaced is kept ON THE
+                //    REQUEST first (`replacedEmail`), in this step's own
+                //    transaction, so a later run of the same request can still
+                //    search by it: the account row will not hold it, and it may
+                //    differ from the address the request was filed with (it
+                //    changed after filing). Round 10 appended it to the
+                //    account's earlier-address list instead, and an account
+                //    whose list was nearly full could then NEVER be erased
+                //    ("Data too long"; measured by the independent check). A
+                //    VARCHAR(255) beside the request always fits, because it
+                //    holds one address the size of the column it came from.
+                //    Never overwritten by the made-up address on a later run.
+                //    Done just before the statement below, inside its guard, so
+                //    a failure is this step's failure like any other.
                 $sets[] = '`emailAddress` = ' . $madeUp;
                 $sql = 'UPDATE `' . $table . '` SET ' . implode(', ', array_unique($sets)) . ' WHERE ' . $where;
                 // The address may not be empty, so it was "refused" above -
@@ -6325,6 +6342,9 @@ class GdprEraser
         $affected = 0;
         $problem  = null;
         try {
+            if ($table === 'tblUsers') {
+                self::keepReplacedAddressOnRequest($db, $requestId, $userId, str_replace('{rid}', (string) $requestId, self::TOMBSTONE_EMAIL));
+            }
             $stmt = $db->prepare($sql);
             if ($stmt === false) {
                 $problem = (string) $db->error;
@@ -9064,6 +9084,49 @@ class GdprEraser
         $stmt->close();
 
         return AccountMerge::addressList($earlier);
+    }
+
+    /**
+     * 📧 The address the account held when this request's erasure replaced
+     *    it (`tblErasureRequest.replacedEmail`, round 11 of #1064), as a list
+     *    of none or one. Searched by on every run until the request closes.
+     *
+     * @return list<string>
+     */
+    private static function replacedAddressOf(\mysqli $db, int $requestId): array
+    {
+        $stmt = $db->prepare('SELECT `replacedEmail` AS `a` FROM `tblErasureRequest` WHERE `requestID` = ? LIMIT 1');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $requestId);
+        $stmt->execute();
+        $address = trim((string) ($stmt->get_result()->fetch_assoc()['a'] ?? ''));
+        $stmt->close();
+
+        return $address === '' || filter_var($address, FILTER_VALIDATE_EMAIL) === false ? [] : [$address];
+    }
+
+    /**
+     * 📧 Keep, on the request, the address the erasure's account step is about
+     *    to replace (round 11 of #1064). Runs inside that step's transaction,
+     *    so the two land together or not at all. Skipped when the account
+     *    already holds this request's made-up address (a later run: the real
+     *    one was kept by the first) or holds none.
+     */
+    private static function keepReplacedAddressOnRequest(\mysqli $db, int $requestId, int $userId, string $madeUp): void
+    {
+        $stmt = $db->prepare(
+            'UPDATE `tblErasureRequest` `r` JOIN `tblUsers` `u` ON `u`.`userID` = ? '
+            . 'SET `r`.`replacedEmail` = `u`.`emailAddress` '
+            . "WHERE `r`.`requestID` = ? AND COALESCE(`u`.`emailAddress`, '') <> '' AND `u`.`emailAddress` <> ?"
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('iis', $userId, $requestId, $madeUp);
+        $stmt->execute();
+        $stmt->close();
     }
 
     /**

@@ -1667,7 +1667,7 @@ if ($closeFrom !== false && $closeTo !== false) {
     }
 }
 check(
-    'the addresses an erasure searches by are emptied in closeRequest(): the earlier-address list and the merged-in side rows\' two address columns',
+    'closeRequest()\'s code (comments removed) contains the two statements that empty the earlier-address list and the merged-in side rows\' two address columns (presence only; account-merge I18e drives them)',
     str_contains($closeCode, "'UPDATE `tblUsers` SET `earlierEmails` = NULL WHERE `earlierEmails` IS NOT NULL AND `userID` IN ('")
     && str_contains($closeCode, "'UPDATE `tblAccountMergeSide` SET `formerEmail` = NULL, `formerEarlierEmails` = NULL '"),
     $closeCode === '' ? 'closeRequest() was not found' : 'one of the two statements is missing from closeRequest()'
