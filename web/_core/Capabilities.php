@@ -307,6 +307,13 @@ final class Capabilities
     public const ACCOUNTS_MERGE = 'accounts.merge';
 
     /**
+     * #1151: who may see and change the first-time visitor list (names, e-mail
+     * addresses, telephone numbers). Ships with `visitor_coordinator`. Asked by
+     * every page and handler in `web/_apps/visitors/` except the public form.
+     */
+    public const VISITORS_FOLLOW_UP = 'visitors.followup';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -1086,6 +1093,31 @@ final class Capabilities
                 'web/_apps/admin/users/merge-cancel.php',
                 'web/_apps/admin/users/index.php',
                 'web/_core/AccountMerge.php',
+            ],
+        ],
+
+        // 👋 FIRST-TIME VISITOR FOLLOW-UP (#1151). The list holds strangers'
+        //    names, e-mail addresses and telephone numbers, so it is not open
+        //    to every signed-in member.
+        self::VISITORS_FOLLOW_UP => [
+            'label' => 'Follow up first-time visitors',
+            'opens' => 'The first-time visitor board, each visitor\'s details, adding a visitor, '
+                . 'recording a contact, and the "My visitor follow-ups" list.',
+            'standard' => ['visitor_coordinator'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will open the visitor pages. Administrators of this organisation '
+                . 'will still be able to, because the gate lets an administrator in as well. No visitor '
+                . 'record is changed by this.',
+            'askedAt' => [
+                'web/_apps/visitors/index.php',
+                'web/_apps/visitors/profile.php',
+                'web/_apps/visitors/new.php',
+                'web/_apps/visitors/save.php',
+                'web/_apps/visitors/contact-save.php',
+                'web/_apps/visitors/my-follow-ups.php',
+                'web/_core/templates/nav.php',
+                'web/_apps/dashboard/index.php',
             ],
         ],
     ];

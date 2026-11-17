@@ -523,6 +523,8 @@ foreach ([
     // #529 (D-106): who, beside administrators, sees the attendance totals.
     // Added HERE in the same change that adds it to the registry (#739's rule).
     Capabilities::ATTENDANCE_REPORTS => 'Cap Attendance',
+    // #1151: first-time visitor follow-up. Added HERE with the registry entry (#739's rule).
+    Capabilities::VISITORS_FOLLOW_UP => 'Cap Visitors',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -582,6 +584,8 @@ $OTHERS = [
     // #1064 (D-185): who may merge two accounts. Falls CLOSED for a global
     // administrator; pinned beside #724's check in section C.
     Capabilities::ACCOUNTS_MERGE,
+    // #1151: who follows up first-time visitors.
+    Capabilities::VISITORS_FOLLOW_UP,
 ];
 
 // =============================================================================
@@ -1543,6 +1547,8 @@ $shouldShipWith = [
     // replaced was seeded to. NOT `event_coordinator`: shipping it there would
     // hand every event coordinator the totals on upgrade.
     Capabilities::ATTENDANCE_REPORTS => 'attendance_coordinator',
+    // #1151: ships with the role the visitors app already names for this work.
+    Capabilities::VISITORS_FOLLOW_UP => 'visitor_coordinator',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(

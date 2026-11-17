@@ -360,6 +360,14 @@ foreach ($SETTINGS as $key => $arr) {
         continue;
     }
 
+    // 🛡️ Nor the Visitors app, for somebody who may not open it (#1151): its pages
+    //    now refuse them, so a link would only lead to a refusal. The nav menu and
+    //    the dashboard cards ask the same test; change both together.
+    if ($key === 'visitors' && App::isAdmin() !== true
+        && App::can(\Portal\Core\Capabilities::VISITORS_FOLLOW_UP) !== true) {
+        continue;
+    }
+
     $apps[] = [
         'key'   => $key,
         'name'  => $arr['displayName'] ?? ($appRegistryEntries[$key]['name'] ?? ucfirst($key)),
