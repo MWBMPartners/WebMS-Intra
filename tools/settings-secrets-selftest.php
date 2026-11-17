@@ -338,7 +338,14 @@ const OWN_PREFIX = 'selftest_s597.';
  * because it cannot tell "added since" from "214 forgot it".
  */
 const NAMED_BY_214 = 57;
-const SEEDED_SINCE = [];
+/*
+ * Marked as secrets after 214, so 214 rightly does not name them. The two job
+ * tokens were seeded long before #597 (migrations 122 and 129) but with the
+ * mark at 0, so 214 had no mark to put back on them; migration 306 (#1154,
+ * commit 9ab209b9) marks them. Without this line part E reads them as "214
+ * forgot it", which is the one thing that check exists to catch.
+ */
+const SEEDED_SINCE = ['feeds.cron_token', 'reminders.cron_token'];
 /** Ordinary (not secret) installation-wide settings this test sets for the run. */
 const ORDINARY_KEYS = [
     'mail.provider', 'mail.fallbackProvider', 'mail.ms365.sharedMailbox', 'mail.defaultFromAddress', 'mail.google.delegateUser',
