@@ -28,7 +28,7 @@ commit (D-135 ends).**
 folder>`; the package self-test passed 340 of 340. Three independent local rehearsals (fresh install, first-use journey,
 every fix re-proved over real HTTP and a real browser) found no data leak, wrongful access, money misstatement or broken
 install in the last one. The whole suite (169 tests) was run once after the last package; six reds were test faults and are
-fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.**
+fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.** A DRAFT (not public) GitHub release `pilot-alpha-a0ab6b67` also holds the zip and checksum (D-224): visible only to people with write access; delete and recreate it if the zip is rebuilt; publishing it is the owner's decision.
 
 ## Waiting on the owner
 
