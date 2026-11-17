@@ -32,8 +32,10 @@ fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.*
 
 ## Waiting on the owner
 
-- A spare DreamHost subdomain and an empty database for the real-host rehearsal (secrets never in chat), then the pilot
-  install itself (the owner's action).
+- **The owner runs the real-host rehearsal themselves, as the customer would** (a spare DreamHost subdomain and an empty
+  database, entered in the installer; nothing is given to the assistant): follow `docs/INSTALL.md` from the zip, then
+  report what differs or breaks (secrets removed). The assistant triages, fixes through the check process and rebuilds.
+  Then the pilot install itself.
 - #1140: may an API key holder open `/api-docs`? Built as No.
 
 ## GitHub records (kept current by the commissioning session)
