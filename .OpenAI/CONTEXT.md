@@ -581,7 +581,8 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     refuse a short one. `Captcha::verify()` takes the form's name as its second
     argument; there is no default. A form with no widget shows
     `Captcha::closedNotice()` itself. An address that is recorded or sent goes
-    through `Logger::withoutJobToken()`.
+    through `Logger::recordableAddress()` (which calls `withoutJobToken()` first and also takes e-mail addresses out of
+    the path and query, #1096).
 
     **Text messages held for quiet hours (#610).** `Portal\Core\Sms` holds
     every statement that moves a held text; `sendHeld()` is called only by
