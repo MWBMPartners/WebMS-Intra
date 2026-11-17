@@ -81,6 +81,19 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### A whole-database restore ends every sign-in (#1137)
+
+- A whole-database restore now ends every session, the restorer's included. At the end of the restore, inside its transaction,
+  every account's sign-in number moves by a fresh random amount (`Auth::endEverySessionAfterRestore()`, called only by
+  `DbBackup::restoreAllWork()`), so every session is refused on its next request. Reason: a snapshot from another installation
+  can put a different person under the same account number, and the rehearsal measured the restorer staying signed in as
+  someone else. A rehearsal ("check only") and a refused one-table restore change nothing. After ANY whole restore everybody
+  signs in again. The backup page's wording and the confirmation box say so; the activity line names no account when the row
+  under the restorer's number is a different person. Measured by the independent check on two real installations. Open: the
+  restorer's result sentence still talks as if their own account survives, a restore with the `mysql` command (runbook 9.2)
+  moves no numbers, a restored installation cannot read the other installation's two-factor secrets (different `enc.key`).
+  Codex has not reviewed this.
+
 ### Administrators are told of a waiting erasure request; Offboard is reachable; Remove is hidden on a one-organisation portal (#1136, #1142; D-223)
 
 - Administrators are now e-mailed when a member's own erasure request reaches "waiting for an administrator" (the e-mailed

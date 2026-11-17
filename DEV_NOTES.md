@@ -25250,3 +25250,15 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   `askedAt`, `check_capability_registry.py`).
 - `admin/sites/users.php`: Remove is drawn only when `AccountGuard::isSingleOrganisation() === false` (a failed read answers
   false, so nothing is hidden or refused wrongly); a posted `remove` on one organisation is refused first.
+
+### A whole restore ends every session (#1137)
+
+- Compare-the-person was rejected: the same administrator, with the same e-mail, is account 1 on both a test and a live
+  installation, so only a number nobody can predict ends the session. `brs_fingerprint()` exempts `tblUsers.signInVersion` BY
+  NAME and proof 32 requires it to MOVE. backup-page-selftest re-signs-in its standard browsers after a whole restore (the
+  helper, `$bps['resign']`); D3 turns that off. The column comment changed in `full_schema.sql` (the e2e harness does not compare
+  comments: no migration). Overflow: adding 2,147,483,647 to a value near the column's maximum fails with ERROR 1690 on MySQL and
+  MariaDB and the restore rolls back whole (about 4.3e9 bumps: hand-edited data only).
+- Known, from the independent check: kiosk sessions need a token in the restored `tblKioskTokens`, so another installation's kiosk
+  browser cannot act; a kiosk member number could point at a reused account number for up to its 90-second idle window after
+  restoring an older snapshot of the same installation; the ended-session lines are written against the session's account number.
