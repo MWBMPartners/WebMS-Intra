@@ -25009,3 +25009,14 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - #606: an organisation's name AND time zone are edited at Admin, Organisations (`admin/sites`); `site.name` and
   `tblSites.siteName` are both still read and not merged (product change). Item 3: the package carries no local
   Bootstrap or Font Awesome copy (gitignored, fetched by `tools/download-cdn-fallbacks.sh`, not added by `build.sh`).
+
+### Addresses out of error records (#1096)
+
+- `Logger::recordableAddress()` runs `withoutJobToken()` first, then reads each query name and value once through
+  `withoutAddresses()`, replacing a changed part with `[address]`; path parts the same, one `/` part at a time.
+  Used by `Logger::requestAddress()`, `ErrorMonitor::currentUrl()` and `Debug.php`; `requestHeaders()` cleans every
+  header value (Cookie, Authorization, X-CSRF-Token and X-API-Key stay `[redacted]`).
+- Known, from the independent check: `Auth::requireLogin()` urlencodes `REQUEST_URI` into `?redirect=` (about five
+  places), which produces the `%2540` blind spot; a raw `#` keeps everything after it; the `userAgent` column and the
+  User-Agent sent to the monitor are not cleaned; `tblErrors.requestURL` is VARCHAR(2048) and nothing shortens a longer
+  address first (older); the Referer path cleaning, `Debug.php` and the alert e-mail's `url` are reverted by no test.

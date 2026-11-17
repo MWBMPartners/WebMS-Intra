@@ -4,6 +4,17 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No e-mail address in the error records (#1096; D-174)
+
+- An e-mail address typed into an admin search box (`?q=`), written into a path part or held in a request header is no
+  longer kept in the error records, the alert e-mail or the report sent to an outside monitoring service.
+  `Logger::recordableAddress()` is the one place; it cleans each query value and path part, never the whole address,
+  so the page name survives. `Referer` already lost its whole query (#580); its path and every other header value are
+  now cleaned. Old rows are not rewritten (none exist on a fresh pilot). Limits: a typed name still passes; an address
+  encoded twice (`%2540`), split across parameters or with no dot after the @ is not seen, and the portal's own
+  sign-in redirect (`/login?redirect=…`) double-encodes the address, so an error recorded on that request keeps it.
+  Codex has not reviewed this.
+
 ### Invitations grant their role; the tax-receipt wording follows the organisation; the administrator's first ten minutes (#539, #939, #606)
 
 - Invitations for "volunteer" and "staff" now grant that role when accepted (#539). Both are judged by D-093 (asked of
