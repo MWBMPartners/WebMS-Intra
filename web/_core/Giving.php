@@ -486,6 +486,29 @@ class Giving
     }
 
     /**
+     * 🏛️ The name a giving statement carries as its issuer (#1156): the
+     * organisation's `giving.charityName` if one was typed, else the
+     * organisation's own name. Read for the GIVEN organisation only.
+     */
+    public static function issuerName(int $siteId): string
+    {
+        $typed = trim((string) (App::settingForSite('giving.charityName', $siteId) ?? ''));
+        if ($typed !== '') {
+            return $typed;
+        }
+        $stmt = App::db()->prepare('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ? LIMIT 1');
+        if ($stmt === false) {
+            return '';
+        }
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? trim((string) $row['siteName']) : '';
+    }
+
+    /**
      * 🧾 The statement document's HTML — every word and figure the PDF will
      * carry — or false where renderStatementPdf() would refuse (an unreal date
      * range, an erased donor, a donor with no tie to this organisation). Split
@@ -561,9 +584,15 @@ class Giving
             $stmt->close();
         }
 
-        $settings    = App::settings()['giving'] ?? [];
-        $charityName = (string) ($settings['charityName'] ?? '');
-        $charityNo   = (string) ($settings['charityNumber'] ?? '');
+        // 🏛️ WHO ISSUED IT (#1156, D-217: the statement is the tax receipt). Read
+        //    for THIS statement's organisation, never from the request's merged
+        //    settings, because a scheduled job builds statements for every
+        //    organisation in one process (#683). The charity name is the
+        //    organisation's own `giving.charityName`; where none was typed, the
+        //    organisation's own name (`tblSites.siteName`), so a statement is
+        //    never anonymous. The charity number is shown only where one is held.
+        $charityName = self::issuerName($siteId);
+        $charityNo   = trim((string) (App::settingForSite('giving.charityNumber', $siteId) ?? ''));
         // The organisation's currency, for a total; each line shows its own (#966).
         $currency    = Currency::ofOrganisation($siteId);
 
@@ -1211,7 +1240,7 @@ class Giving
         // bootstrap $SETTINGS snapshot reflects only the FIRST resolved
         // site of that request (venues/asset cron precedent —
         // cron/venue-reminders.php's own header note).
-        $charityName = (string) (App::settingForSite('giving.charityName', $siteId) ?? '');
+        $charityName = self::issuerName($siteId);
         $charityNo   = (string) (App::settingForSite('giving.charityNumber', $siteId) ?? '');
         $subjectTpl  = (string) (App::settingForSite('giving.statements.emailSubject', $siteId) ?? 'Your {year} giving statement');
 

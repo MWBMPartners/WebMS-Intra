@@ -1113,6 +1113,35 @@ check('H2i the REAL statement (Giving::statementHtml()) marks this donor\'s poun
     && array_filter($poundsLines, static fn (array $c): bool => $c[1] !== 'Yes') === []
     && array_filter($otherLines, static fn (array $c): bool => $c[1] !== '–') === [],
     json_encode($giftAidCells, JSON_UNESCAPED_UNICODE));
+// 🏛️ H2n (#1156, D-217: the statement is the tax receipt): the REAL statement
+//    NAMES THE ORGANISATION THAT ISSUED IT, for each organisation separately.
+//    Organisation A has typed a charity name (with HTML in it, which must come
+//    out escaped) and number; organisation B has typed nothing, so it carries
+//    its own organisation name and no charity number. Each statement must hold
+//    its own name and NEITHER of the other's. Both are built in ONE process
+//    with App::settings() left as it was, as the statements job does.
+run($db, "INSERT INTO `tblSites` (`siteKey`, `siteName`, `timezone`, `isActive`) VALUES ('selftest-currency-issuer-b', 'Selftest issuer B Ltd', 'UTC', 1)");
+$siteIssuerB = (int) $db->insert_id;
+run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?, ?, 1)', 'ii', [$siteIssuerB, CU_ADMIN]);
+$setting('giving.charityName', 'Issuer A <b>Trust</b> & Co', $site);
+$setting('giving.charityNumber', '1234567', $site);
+$appDb->setValue(null, $db);
+try {
+    $issuerA = \Portal\Core\Giving::statementHtml($site, CU_ADMIN, date('Y-01-01'), date('Y-12-31'), 'H2n');
+    $issuerB = \Portal\Core\Giving::statementHtml($siteIssuerB, CU_ADMIN, date('Y-01-01'), date('Y-12-31'), 'H2n');
+} finally {
+    $appDb->setValue(null, $appDbBefore);
+}
+check('H2n each statement names its OWN issuing organisation: A its escaped charity name and number, B its organisation name with no charity number, and neither names the other',
+    is_string($issuerA) === true && is_string($issuerB) === true
+    && str_contains($issuerA, 'Issuer A &lt;b&gt;Trust&lt;/b&gt; &amp; Co') && str_contains($issuerA, 'Charity 1234567')
+    && str_contains($issuerA, 'Selftest issuer B Ltd') === false && str_contains($issuerA, '<b>Trust</b>') === false
+    && str_contains($issuerB, 'Selftest issuer B Ltd') && str_contains($issuerB, 'Issuer A') === false
+    && str_contains($issuerB, 'Charity 1234567') === false && str_contains($issuerB, 'Charity ') === false,
+    is_string($issuerA) === true && is_string($issuerB) === true ? substr($issuerA, strpos($issuerA, '<h1>'), 200) . ' || ' . substr($issuerB, strpos($issuerB, '<h1>'), 200) : 'a statement was refused');
+run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` IN (\'giving.charityName\', \'giving.charityNumber\') AND `siteID` = ?', 'i', [$site]);
+run($db, 'DELETE FROM `tblUserSites` WHERE `siteID` = ?', 'i', [$siteIssuerB]);
+run($db, 'DELETE FROM `tblSites` WHERE `siteID` = ?', 'i', [$siteIssuerB]);
 // ⚠️ NOTHING HERE CAN RUN renderStatementPdf() (it ends in dompdf, which no test
 //    copy ships), so nothing proved it hands Pdf::create() the text
 //    statementHtml() built. Round 3 of #999's check kept
