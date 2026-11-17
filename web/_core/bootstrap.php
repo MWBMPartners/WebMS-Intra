@@ -735,8 +735,20 @@ if (headers_sent() === false) {
     }
 
     // 📌 Referrer-Policy — limit what's sent to cross-origin links.
+    //    (#1095) Only the eight standard values are sent. Anything else (a typo)
+    //    gets the default: a browser ignores an unknown value and would then use
+    //    its own, which is not what the administrator meant. An EMPTY value is
+    //    still the documented "send nothing".
     $referrer = (string) ($SETTINGS['portal']['headers']['referrer_policy']
                        ?? 'strict-origin-when-cross-origin');
+    if ($referrer !== '') {
+        $referrer = strtolower(trim($referrer));
+        if (in_array($referrer, ['no-referrer', 'no-referrer-when-downgrade', 'origin',
+            'origin-when-cross-origin', 'same-origin', 'strict-origin',
+            'strict-origin-when-cross-origin', 'unsafe-url'], true) === false) {
+            $referrer = 'strict-origin-when-cross-origin';
+        }
+    }
     if ($referrer !== '') {
         header('Referrer-Policy: ' . $referrer);
     }
