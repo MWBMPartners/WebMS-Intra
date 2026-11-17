@@ -34,8 +34,20 @@ fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.*
 
 - A spare DreamHost subdomain and an empty database for the real-host rehearsal (secrets never in chat), then the pilot
   install itself (the owner's action).
-- Run `gh auth refresh -s read:project -s project` so the plan board (#1132) can be made.
 - #1140: may an API key holder open `/api-docs`? Built as No.
+
+## GitHub records (kept current by the commissioning session)
+
+Plan board: <https://github.com/orgs/MWBMPartners/projects/16> (organisation project 16, linked to the repository; every open
+issue of the three milestones is on it; #1132 can be closed once the owner has seen it). Milestones 19 (Pilot install), 20
+(Release) and 21 (After release) carry descriptions. The wiki (Home, Roadmap) names the pilot state and where records live;
+its local clone is `/tmp/claude-501/wiki` and **one wiki commit (`acdfb56`) is waiting for a push**: the dev-team push guard
+refuses the wiki's default branch, so the owner pushes it (from the clone: `git push origin HEAD`) or allows it.
+
+**Cleanup done 17 November:** 103 builder worktrees and their branches were removed (each clean, and its commits already in
+`claude/alpha-wip`, by ancestry or by patch equivalence). **37 were kept on purpose** because they hold commits not found in
+`claude/alpha-wip` (the `ro-*`, `p514-*`, and about a dozen older `p*-build` branches), one is dirty (`p941-build`), two are
+locked. Do not delete those without reviewing each.
 
 ## In flight
 
@@ -56,7 +68,7 @@ Get the live list with `gh issue list --state open --milestone "<name>" --limit 
 holds only #1157 (narrow rehearsal findings, none blocking). Groups in the Release milestone, in the order to take them:
 1. *Rehearsal and pilot follow-ups:* #1143-#1150, #1157-#1162 (guide/help wording, several-organisation gaps in
    offboarding return and statements, noticeboard timeout/notice, statement PDF em dash, snapshot names, visitor role in two
-   places), #1132 (plan board: needs the owner's `gh auth refresh -s read:project -s project`), #1140 (owner question).
+   places), #1132 (plan board: DONE, see below), #1140 (owner question).
 2. *Dated or time-boxed (D-055):* #777 (time zones, reading half; before 28 March 2027), #1077/#1078 (keeping periods, within
    months), #591, #1082, #754 (six workflows never run on GitHub; first run at the final merge).
 3. *Money and erasure limits raised by #993/#1064:* #1097-#1105, #1107/#1108, #1121-#1130.
