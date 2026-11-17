@@ -9,6 +9,11 @@
  *   B. /live: the page rule admits the player's own host (YouTube, Vimeo, Twitch) and not one
  *      the slot did not name. P4 plants the missing $cspFrameExtra and must go red.
  *   C. Livestream::frameOriginFor() answers only an https origin.
+ *   D. The robot check (#1092): for each provider, the pages that draw its widget admit that
+ *      provider's hosts in the page rule, and NO other provider's. P1 drops the append in
+ *      header.php; P2 makes the class answer a second provider's hosts.
+ *   E. The same, asked of a real browser: tools/page-rule-browser-selftest.mjs is run once per
+ *      provider against this test's own server (needs node, a Chromium-family browser).
  *
  * Needs: SELFTEST_DB_NAME (selftest_*) holding full_schema.sql, curl, proc_open.
  * WHAT IT CANNOT DO: it reads the header; it does not prove a browser then plays the video.
@@ -409,6 +414,235 @@ $cases = [['https://www.youtube.com/embed/x?y=1', 'https://www.youtube.com'], ['
 foreach ($cases as $i => [$in, $want]) {
     $got = \Portal\Core\Livestream::frameOriginFor($in);
     $got === $want ? ok('C0' . ($i + 1), 'frameOriginFor(' . json_encode($in) . ') = ' . json_encode($want)) : bad('C0' . ($i + 1), 'wrong', $got);
+}
+
+
+echo "\n=== D. The robot check's hosts are admitted for the ACTIVE provider only (#1092) ===\n";
+/** Does one CSP source expression admit this https URL? scheme + host, optional leading *. wildcard, no path. */
+$admits = static function (string $source, string $url): bool {
+    $u = parse_url($url);
+    if (is_array($u) === false || ($u['scheme'] ?? '') !== 'https' || isset($u['host']) === false) {
+        return false;
+    }
+    if (preg_match('#^https://(\*\.)?([a-z0-9.-]+)$#i', $source, $m) !== 1) {
+        return false;
+    }
+    $host = strtolower($u['host']);
+    $want = strtolower($m[2]);
+    return $m[1] === '' ? $host === $want : (str_ends_with($host, '.' . $want) === true);
+};
+/** The sources of one directive of the page's rule, or null when the directive is absent. */
+$directive = static function (array $h, string $name): ?array {
+    foreach ($h['content-security-policy'] ?? [] as $csp) {
+        foreach (explode(';', $csp) as $part) {
+            $words = preg_split('/\s+/', trim($part)) ?: [];
+            if (($words[0] ?? '') === $name) {
+                return array_slice($words, 1);
+            }
+        }
+    }
+    return null;
+};
+$allows = static function (?array $sources, string $url) use ($admits): bool {
+    foreach ($sources ?? [] as $src) {
+        if ($admits($src, $url) === true) {
+            return true;
+        }
+    }
+    return false;
+};
+$keyNames = ['turnstile', 'recaptcha', 'hcaptcha'];
+$setProvider = static function (?string $which) use ($keyNames, $setSetting, $clearSetting): void {
+    foreach ($keyNames as $k) {
+        $clearSetting('auth.' . $k . '.siteKey');
+        $clearSetting('auth.' . $k . '.secretKey');
+    }
+    $clearSetting('auth.captcha.priority');
+    if ($which !== null) {
+        $setSetting('auth.' . $which . '.siteKey', 'selftest-site-key-' . $which);
+        $setSetting('auth.' . $which . '.secretKey', 'selftest-secret-key-' . $which);
+    }
+};
+// Pages that draw a widget through header.php and answer anybody: the public decision card and
+// the public event suggestion form (open to visitors, robot check required, both by default).
+$setSetting('calendar.publicSubmit.enabled', 'true');
+$setSetting('calendar.publicSubmit.allowAnonymous', 'true');
+$setSetting('calendar.publicSubmit.requireCaptcha', 'true');
+$widgetPages = ['/decision-card', '/calendar/submit'];
+// What each provider's widget loads: script URL, frame URL, and (reCAPTCHA) its second script host.
+$loads = [
+    'turnstile' => ['https://challenges.cloudflare.com/turnstile/v0/api.js', 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/x'],
+    'recaptcha' => ['https://www.google.com/recaptcha/api.js', 'https://www.google.com/recaptcha/api2/anchor', 'https://www.gstatic.com/recaptcha/releases/x/recaptcha__en.js'],
+    'hcaptcha'  => ['https://js.hcaptcha.com/1/api.js', 'https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html', 'https://hcaptcha.com/checksiteconfig'],
+];
+$collect = static function (string $path) use ($fetch): array {
+    [, $h, $body] = $fetch($path);
+    return [$h, $body];
+};
+$n = 0;
+$nextId = static function () use (&$n): string {
+    $n++;
+    return 'D' . str_pad((string) $n, 2, '0', STR_PAD_LEFT);
+};
+$ownHost = ['turnstile' => 'cloudflare', 'recaptcha' => 'google.com/recaptcha', 'hcaptcha' => 'hcaptcha'];
+foreach ($keyNames as $prov) {
+    $setProvider($prov);
+    foreach ($widgetPages as $page) {
+        [$h, $body] = $collect($page);
+        $id = $nextId();
+        preg_match_all('#<script[^>]+src="(https://[^"]+)"#i', $body, $mm);
+        $own = array_values(array_filter($mm[1], static fn (string $s): bool => str_contains($s, $ownHost[$prov])));
+        if ($own === []) {
+            bad($id, "{$prov} on {$page}: the page drew no {$prov} script (premise)", substr($body, 0, 160));
+            continue;
+        }
+        $all = true;
+        foreach ($own as $src) {
+            if ($allows($directive($h, 'script-src'), $src) === false) {
+                $all = false;
+            }
+        }
+        $all === true ? ok($id, "{$prov} on {$page}: the widget's script is admitted by script-src") : bad($id, "{$prov} on {$page}: script refused by script-src", json_encode($directive($h, 'script-src')));
+    }
+}
+// Every address a provider's widget goes on to load is admitted for it, in the right directive.
+foreach ($keyNames as $prov) {
+    $setProvider($prov);
+    [$h] = $collect('/decision-card');
+    $id = $nextId();
+    $wants = [];
+    foreach ($loads[$prov] as $i => $url) {
+        $wants[] = [($i === 0 || str_ends_with($url, '.js') === true) ? 'script-src' : 'frame-src', $url];
+    }
+    if ($prov === 'recaptcha') {
+        $wants[] = ['connect-src', 'https://www.google.com/recaptcha/api2/clr'];
+    }
+    if ($prov === 'hcaptcha') {
+        $wants[] = ['style-src', 'https://newassets.hcaptcha.com/x.css'];
+        $wants[] = ['connect-src', 'https://hcaptcha.com/checksiteconfig'];
+    }
+    $why = [];
+    foreach ($wants as [$dir, $url]) {
+        if ($allows($directive($h, $dir), $url) === false) {
+            $why[] = "{$dir} refuses {$url}";
+        }
+    }
+    $why === [] ? ok($id, "{$prov}: every address its widget loads is admitted") : bad($id, "{$prov}: something its widget loads is refused", implode("\n", $why));
+}
+// The inactive providers' hosts are ABSENT: only what the provider in use needs.
+$foreign = [
+    'turnstile' => ['https://www.gstatic.com/x', 'https://recaptcha.google.com/x', 'https://newassets.hcaptcha.com/x', 'https://hcaptcha.com/x', 'https://www.google.com/recaptcha/api.js'],
+    'recaptcha' => ['https://newassets.hcaptcha.com/x', 'https://hcaptcha.com/x', 'https://js.hcaptcha.com/x'],
+    'hcaptcha'  => ['https://www.gstatic.com/x', 'https://recaptcha.google.com/x', 'https://www.google.com/recaptcha/api.js'],
+];
+$foreignCheck = static function (string $prov) use ($setProvider, $collect, $directive, $allows, $foreign): array {
+    $setProvider($prov);
+    [$h] = $collect('/decision-card');
+    $bad = [];
+    foreach ($foreign[$prov] as $url) {
+        foreach (['script-src', 'frame-src', 'style-src', 'connect-src'] as $dir) {
+            if ($allows($directive($h, $dir), $url) === true) {
+                $bad[] = "{$dir} admits {$url}";
+            }
+        }
+    }
+    return $bad;
+};
+foreach ($keyNames as $prov) {
+    $id  = $nextId();
+    $bad = $foreignCheck($prov);
+    $bad === [] ? ok($id, "{$prov} active: no other provider's host is in the page rule") : bad($id, "{$prov} active but other hosts admitted", implode("\n", $bad));
+}
+// No provider: nothing from any of them.
+$setProvider(null);
+[$h] = $collect('/help');
+$id   = $nextId();
+$leak = [];
+foreach (['https://www.gstatic.com/x', 'https://recaptcha.google.com/x', 'https://hcaptcha.com/x', 'https://newassets.hcaptcha.com/x', 'https://www.google.com/recaptcha/api.js'] as $url) {
+    foreach (['script-src', 'frame-src', 'style-src', 'connect-src'] as $dir) {
+        if ($allows($directive($h, $dir), $url) === true) {
+            $leak[] = "{$dir} admits {$url}";
+        }
+    }
+}
+$leak === [] ? ok($id, 'no provider: none of the other providers\' hosts is in the page rule') : bad($id, 'a host is admitted with no provider', implode("\n", $leak));
+// The test's own matcher: wildcard needs a sub-name, look-alikes and plain http are refused.
+$id = $nextId();
+($admits('https://*.hcaptcha.com', 'https://newassets.hcaptcha.com/a') === true
+    && $admits('https://*.hcaptcha.com', 'https://hcaptcha.com/a') === false
+    && $admits('https://hcaptcha.com', 'https://evil-hcaptcha.com/a') === false
+    && $admits('https://hcaptcha.com', 'http://hcaptcha.com/a') === false)
+    ? ok($id, 'the source matcher itself: wildcard, bare name, look-alike and scheme') : bad($id, 'matcher wrong');
+// P1: the header stops adding the sources -> the widget's script is refused again.
+$setProvider('recaptcha');
+$o = $plant('_core/templates/header.php', '$captchaSources    = \Portal\Core\Captcha::cspSources();', '$captchaSources    = [\'script\' => \'\', \'frame\' => \'\', \'style\' => \'\', \'connect\' => \'\'];');
+if ($o === null) {
+    bad('D-P1', 'plant P1 did not apply');
+} else {
+    [$h] = $collect('/decision-card');
+    $restore('_core/templates/header.php', $o);
+    ($allows($directive($h, 'script-src'), 'https://www.gstatic.com/recaptcha/x.js') === false) ? ok('D-P1', 'P1: dropping the append is caught (reCAPTCHA script refused again)') : bad('D-P1', 'P1 not caught');
+    [$h] = $collect('/decision-card');
+    ($allows($directive($h, 'script-src'), 'https://www.gstatic.com/recaptcha/x.js') === true) ? ok('D-P1b', 'P1 restored: green again') : bad('D-P1b', 'not restored');
+}
+// P2: the class answers a second provider's hosts as well -> the "no other provider" check goes red.
+$o = $plant('_core/Captcha.php', "            return self::RECAPTCHA_PAGE_RULE;", "            return ['script' => self::RECAPTCHA_PAGE_RULE['script'] . self::HCAPTCHA_HOSTS, 'frame' => '', 'style' => '', 'connect' => ''];");
+if ($o === null) {
+    bad('D-P2', 'plant P2 did not apply');
+} else {
+    $bad = $foreignCheck('recaptcha');
+    $restore('_core/Captcha.php', $o);
+    $bad !== [] ? ok('D-P2', 'P2: an extra provider\'s hosts are caught') : bad('D-P2', 'P2 not caught');
+    $foreignCheck('recaptcha') === [] ? ok('D-P2b', 'P2 restored: green again') : bad('D-P2b', 'not restored');
+}
+
+
+echo "\n=== E. The same, asked of a real browser (securitypolicyviolation) ===\n";
+$browserRun = static function (string $prov) use ($setProvider, $port, $repo, $sep): array {
+    $setProvider($prov === 'none' ? null : $prov);
+    $out = [];
+    $code = 0;
+    exec('node ' . escapeshellarg($repo . $sep . 'tools' . $sep . 'page-rule-browser-selftest.mjs') . ' '
+        . escapeshellarg('http://127.0.0.1:' . $port) . ' ' . escapeshellarg($prov) . ' 2>&1', $out, $code);
+    return [$code, $out];
+};
+$browserOk = true;
+foreach (['turnstile', 'recaptcha', 'hcaptcha', 'none'] as $prov) {
+    [$code, $out] = $browserRun($prov);
+    if ($code === 2) {
+        refuse('the browser check cannot run: ' . implode(' / ', array_slice($out, -2)));
+    }
+    $line = (string) end($out);
+    $code === 0 ? ok('E-' . $prov, "browser, {$prov} active: " . $line) : bad('E-' . $prov, "browser, {$prov} active", implode("\n", array_filter($out, static fn (string $l): bool => str_starts_with($l, 'FAIL'))));
+}
+// P1 again, in the browser: the header stops adding the sources -> the browser refuses reCAPTCHA's script.
+$o = $plant('_core/templates/header.php', '$captchaSources    = \Portal\Core\Captcha::cspSources();', '$captchaSources    = [\'script\' => \'\', \'frame\' => \'\', \'style\' => \'\', \'connect\' => \'\'];');
+if ($o === null) {
+    bad('E-P1', 'plant P1 did not apply');
+} else {
+    [$code] = $browserRun('recaptcha');
+    $restore('_core/templates/header.php', $o);
+    $code === 1 ? ok('E-P1', 'P1: the real browser goes red when the header drops the sources') : bad('E-P1', 'P1 not caught by the browser', 'exit ' . $code);
+    [$code] = $browserRun('recaptcha');
+    $code === 0 ? ok('E-P1b', 'P1 restored: the browser is green again') : bad('E-P1b', 'not restored', 'exit ' . $code);
+}
+// P3: reCAPTCHA loses its connect-src host -> the browser and the header both go red.
+$o = $plant('_core/Captcha.php', "'connect' => ' https://www.google.com',", "'connect' => '',");
+if ($o === null) {
+    bad('E-P3', 'plant P3 did not apply');
+} else {
+    [$code] = $browserRun('recaptcha');
+    [$h] = $collect('/decision-card');
+    $restore('_core/Captcha.php', $o);
+    ($code === 1 && $allows($directive($h, 'connect-src'), 'https://www.google.com/recaptcha/api2/clr') === false)
+        ? ok('E-P3', 'P3: dropping reCAPTCHA\'s connect-src host is caught by the browser and by the header check')
+        : bad('E-P3', 'P3 not caught', 'browser exit ' . $code);
+    [$code] = $browserRun('recaptcha');
+    $code === 0 ? ok('E-P3b', 'P3 restored: green again') : bad('E-P3b', 'not restored', 'exit ' . $code);
+}
+$setProvider(null);
+foreach (['enabled', 'allowAnonymous', 'requireCaptcha'] as $k) {
+    $clearSetting('calendar.publicSubmit.' . $k);
 }
 
 echo "\n{$passed} passed, {$failed} failed\n";

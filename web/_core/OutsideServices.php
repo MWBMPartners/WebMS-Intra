@@ -382,7 +382,7 @@ final class OutsideServices
                          . 'in the company\'s own privacy notice. When you send the form, this portal\'s server sends the '
                          . 'company the check\'s answer and your internet address, to ask whether you passed.',
             'why'       => 'To stop automatic programs from flooding the forms or guessing passwords.',
-            'hosts'     => ['challenges.cloudflare.com', 'www.google.com', 'js.hcaptcha.com', 'hcaptcha.com'],
+            'hosts'     => ['challenges.cloudflare.com', 'www.google.com', 'www.gstatic.com', 'recaptcha.google.com', 'js.hcaptcha.com', 'hcaptcha.com'],
         ],
         'errorMonitoring' => [
             'name'      => 'Error reports',

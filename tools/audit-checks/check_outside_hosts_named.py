@@ -369,7 +369,7 @@ PER_FILE: dict[str, dict[str, int]] = {
         '_core/OutsideServices.php': 1,
     },
     'hcaptcha.com': {
-        '_core/Captcha.php': 1,
+        '_core/Captcha.php': 3,
         '_core/OutsideServices.php': 1,
     },
     'ico.org.uk': {
@@ -432,6 +432,10 @@ PER_FILE: dict[str, dict[str, int]] = {
         '_sql/177_web_push_sender.sql': 2,
         '_sql/full_schema.sql': 2,
     },
+    'recaptcha.google.com': {
+        '_core/Captcha.php': 1,
+        '_core/OutsideServices.php': 1,
+    },
     'rest.messagebird.com': {
         '_core/OutsideServices.php': 1,
         '_core/Sms.php': 1,
@@ -472,8 +476,12 @@ PER_FILE: dict[str, dict[str, int]] = {
     },
     'www.google.com': {
         '_apps/admin/captcha/index.php': 1,
-        '_core/Captcha.php': 2,
+        '_core/Captcha.php': 5,
         '_core/GeoLocation.php': 2,
+        '_core/OutsideServices.php': 1,
+    },
+    'www.gstatic.com': {
+        '_core/Captcha.php': 1,
         '_core/OutsideServices.php': 1,
     },
     'www.googleapis.com': {
@@ -1001,7 +1009,7 @@ def self_test() -> int:
         append("_apps/privacy/index.php", "<?php $cspFrameExtra = 'https://github.com'; ?>\n"),
         "puts github.com where a browser fetches it by itself")
     run("S30 a host with no scheme added to the page rule's script-src fails",
-        replace("_core/templates/header.php", "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; ",
+        replace("_core/templates/header.php", "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com{$cspCaptchaScript}; ",
                 "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com cdn.newtracker.io; "),
         new + " cdn.newtracker.io")
     run("S31 a wildcard host with no scheme in a page's $cspImgExtra fails",
