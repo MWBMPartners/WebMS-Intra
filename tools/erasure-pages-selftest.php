@@ -4302,6 +4302,12 @@ ok('M13w with several organisations, switching an offboarded account ON with the
     && $m2hDate($m2hTicked, M2H_ORG_X) === M2H_OLD && $m2hDate($m2hTicked, M2H_ORG_Y) === null,
     json_encode($m2hTicked));
 
+// #1152: the Active tick above now ALSO marks the offboarding as undone (the same as Rehire), so a
+// Rehire pressed afterwards is correctly refused as already done. M13t is about what Rehire itself
+// does to the memberships, so the state from before the tick is put back first: the account off and
+// the offboarding row open. (The tick's own marking is driven by tools/offboarding-return-selftest.php.)
+q('UPDATE `tblOffboarding` SET `rehiredAt` = NULL, `rehiredByID` = NULL WHERE `userID` = ?', 'i', [M2H_GLOBAL]);
+q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [M2H_GLOBAL]);
 $m2hRehire1 = $rehireM(M2H_GLOBAL);
 $m2hAfterRe = $m2hRows(M2H_GLOBAL);
 $m2hAllOnEmpty = true;
