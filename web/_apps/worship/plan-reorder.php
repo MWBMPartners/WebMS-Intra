@@ -34,12 +34,25 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     http_response_code(400); echo json_encode(['ok' => false, 'error' => 'csrf']); exit();
 }
 
+// 🔑 THE TOKEN WAS JUST SPENT (#1134). verifyCsrf() replaced it (#768), and the
+//    plan page's script posts again on the next drag, so every answer from
+//    here on carries the replacement as a top-level `csrfToken` (the page hands
+//    it to Portal.rememberCsrf()). ONE closure makes every answer, so an exit
+//    added later cannot forget it. Answers above were given before anything
+//    was spent. This stays outside `api/*`, so no ApiResponse envelope.
+$answer = static function (int $status, array $body): never {
+    $body['csrfToken'] = Auth::csrfToken();
+    http_response_code($status);
+    echo json_encode($body);
+    exit();
+};
+
 $planId = (int) ($_POST['planID'] ?? 0);
 $items  = (array) ($_POST['items'] ?? []);
 $siteId = Site::id();
 
 if ($planId <= 0 || count($items) === 0) {
-    http_response_code(400); echo json_encode(['ok' => false, 'error' => 'input']); exit();
+    $answer(400, ['ok' => false, 'error' => 'input']);
 }
 
 $stmt = $mysqli->prepare('SELECT planID, eventID FROM tblServicePlans WHERE planID = ? AND siteID = ? AND isActive = 1');
@@ -48,13 +61,13 @@ $stmt->execute();
 $plan = $stmt->get_result()->fetch_assoc() ?: null;
 $stmt->close();
 if ($plan === null) {
-    http_response_code(404); echo json_encode(['ok' => false, 'error' => 'plan']); exit();
+    $answer(404, ['ok' => false, 'error' => 'plan']);
 }
 
 $canWrite = App::isAdmin() === true
          || ((int) ($plan['eventID'] ?? 0) > 0 && Auth::isCoordinatorOf((int) $plan['eventID']));
 if ($canWrite === false) {
-    http_response_code(403); echo json_encode(['ok' => false, 'error' => 'forbidden']); exit();
+    $answer(403, ['ok' => false, 'error' => 'forbidden']);
 }
 
 // 🛡️ Sanitise the itemID list — must all be integers AND must all belong to
@@ -66,7 +79,7 @@ foreach ($items as $raw) {
     $idList[] = $id;
 }
 if (count($idList) === 0) {
-    http_response_code(400); echo json_encode(['ok' => false, 'error' => 'empty']); exit();
+    $answer(400, ['ok' => false, 'error' => 'empty']);
 }
 
 // 🔍 Verify ALL submitted IDs belong to this plan. Refuse partial matches.
@@ -81,7 +94,7 @@ $stmt->execute();
 $match = (int) ($stmt->get_result()->fetch_assoc()['c'] ?? 0);
 $stmt->close();
 if ($match !== count($idList)) {
-    http_response_code(400); echo json_encode(['ok' => false, 'error' => 'mismatch']); exit();
+    $answer(400, ['ok' => false, 'error' => 'mismatch']);
 }
 
 // 💾 Rewrite sortOrder. Single prepared statement reused across N updates.
@@ -95,4 +108,4 @@ $update->close();
 
 Logger::activity('ServicePlanReordered', 'Plan #' . $planId . ' new order: ' . implode(',', $idList));
 
-echo json_encode(['ok' => true, 'count' => count($idList)]);
+$answer(200, ['ok' => true, 'count' => count($idList)]);
