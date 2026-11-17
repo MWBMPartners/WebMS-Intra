@@ -263,7 +263,9 @@ appended with its real date and a note that it was added later.
 | [D-205](205-the-first-install-is-a-pilot-for-the-owners-own-organisation.md) | 2026-11-17 | D-205 · The first install is a pilot for the owner's own organisation; the full backlog still applies before any release | in force |
 | [D-206](206-no-codex-review-before-the-pilot-install.md) | 2026-11-17 | D-206 · No Codex review before the pilot install; Claude (Opus) checks carry it | in force |
 | [D-207](207-the-pilot-runs-with-the-five-paid-outside-services-switched-off.md) | 2026-11-17 | D-207 · The pilot runs with the paid outside services (AI, translation, transcription, text messages, online payments) switched off | in force |
+| [D-208](208-linking-a-sign-in-account-never-creates-an-account.md) | 2026-11-17 | D-208 · Linking a Microsoft or Google account never creates an account | in force |
+| [D-209](209-an-erasure-removes-remembered-map-positions-that-match-the-persons-own-address.md) | 2026-11-17 | D-209 · An erasure removes remembered map positions that match the person's own address | in force |
 
-*207 decisions. This index is checked against the folder by
+*209 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
