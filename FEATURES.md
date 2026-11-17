@@ -2392,3 +2392,6 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Events: the "a public place" mark decides whether the event page shows an OpenStreetMap map (`tblEvents.locationNotAHome`, #1088).
 
 - Invitations: volunteer and staff roles really granted on acceptance (#539). Giving records: "We issue tax receipts" tick (#939). Admin home: Upgrade, Organisation settings and E-mail tiles (#606).
+
+- Exchange rates: daily fetch from the European Central Bank (no key, no account), administrator-typed fallback at installation and organisation level, a page showing the rate each limit would use, Fetch now (#993).
+- Spend in the company's own currency: each outside company's charge is shown in the currency it charges in; each limit is in the currency of the level that set it; the AI Assist, Translation, Transcription and text-message pages say what the month's spending counts as against each limit, and why spending is stopped (#993).

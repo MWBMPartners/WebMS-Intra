@@ -25020,3 +25020,85 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   places), which produces the `%2540` blind spot; a raw `#` keeps everything after it; the `userAgent` column and the
   User-Agent sent to the monitor are not cleaned; `tblErrors.requestURL` is VARCHAR(2048) and nothing shortens a longer
   address first (older); the Referer path cleaning, `Debug.php` and the alert e-mail's `url` are reverted by no test.
+
+### Exchange rates (#993, package A)
+
+- ECB chosen: free, no key, rates as XML attributes so they stay text from file to database (no float ever touches a
+  rate). Rejected: Frankfurter and open.er-api.com (JSON floats; open.er-api requires attribution).
+- `ExchangeRates::rate($db, $from, $to, ?$siteId)`: `$siteId === null` means "for the INSTALLATION's limit" and never
+  reads any organisation's typed rate (D-013). Order: same, fresh fetched, (organisation purpose only) organisation
+  typed, installation typed, null. Conversion is in MySQL DECIMAL, ceiling, null on anything not a sane figure.
+- `ExchangeRates::refresh()` refuses the real address (`test-blocked`) when the connection's database name starts
+  `selftest_` and `SafeFetch::hasTestStandIn()` says there is no stand-in, so no test can reach the real bank; the
+  installer does not forbid such a name (a customer who chose it would fetch nothing and the page says why).
+- `www.ecb.int` (the XML namespace name) is NAME_ONLY in `check_outside_hosts_named.py`.
+
+### Outside-company spending in the company's own currency (#993, package B)
+
+- **The formula fault, with the arithmetic.** `Translation::anthropicTranslate` and `AiAssistant::anthropicCall` computed
+  `ceil((in*0.00008 + out*0.0004)*100)` pence. At $1 in / $5 out per million tokens, 300 in and 250 out cost 1,550
+  millionths of a dollar (0.155 of a US cent); the old formula said 13 pence (about 100 times too big). The OpenAI formula
+  `*0.00015 ... *100` was about 1,000 times too big. Nothing noticed: the only route a test can drive reports no cost.
+- **Design: two checks, not one converted figure.** `ProviderSpend::whyRefused()` compares (a) the month's spend converted
+  to the INSTALLATION's currency with the installation's figure and (b), when the organisation has its own row, the spend
+  converted to the ORGANISATION's currency with that figure. Refused if either is reached. The installation's check never
+  uses an organisation's typed rate (`ExchangeRates::rate($db, $a, $b, null)`): otherwise an organisation could type a low
+  rate and spend past the installation's limit. Pinned by W5/W5b/W5c.
+- **A request and an admin page ask ONE question**, `ProviderSpend::whyRefusedFor($db, $site, $service, $provider)`
+  (the company's own currency is part of the question). Round 1 found the pages asking with no currency, so a missing rate
+  showed nothing on the page; round 2 found no test failing when AI or transcription asked with no currency, so a new
+  installation could make one paid call per organisation unchecked: S4b, S15 and J13 now pin it at the AI class, the
+  transcription sweep and the recordings page and handler. `Translation.php` (pinned) still calls `whyRefused()` with
+  `currencyOf()`, which is the same question spelled out.
+- **Zero is per service**: `ZERO_MEANS_NO_LIMIT = ['translation']`. A figure of 0 returns `no-budget`, never "used up".
+- **Units and rounding.** Millionths of one unit, whole numbers only; prices are whole millionths per million tokens / per
+  million characters / per hour / per text; a cost is `intdiv(sum + div - 1, div)` (ceiling). Conversion to hundredths is
+  `ExchangeRates::toHundredths()` (MySQL exact DECIMAL, ceiling).
+- **Model names are untrusted free text.** The first version matched a loose PREFIX, so `o1-pro` was priced 60x under,
+  `o1` 6x, `gpt-4` 7.2x, `gpt-5-pro` 10.8x and `gpt-4o-2024-05-13` 1.6x (the bare `gpt-4o` prefix). Now: exact name, or
+  name plus a date only where the entry says `dated` (gpt-4o-mini, claude-haiku-4-5); anything else is charged at `unknown`,
+  the dearest known price of that company: Anthropic Opus 4.1 ($15/$75, verified), OpenAI the recalled o1-pro price
+  ($150/$600 per million tokens, NOT VERIFIED). A model dearer than that is still under-counted.
+- **Prices checked / not.** Checked 16 Nov 2026 and re-confirmed by the round-2 check: Anthropic Haiku 4.5 $1/$5, Opus 4.1
+  $15/$75, OpenAI gpt-4o $2.50/$10, gpt-4o-mini $0.15/$0.60, Whisper $0.006/min. Google Translation $20 per million
+  characters was read from Google's page at build but not re-confirmable by the check. AssemblyAI lists $0.15 and $0.21 an
+  hour plus add-ons; the $0.37 already in the code is kept (dearer). NOT confirmable: DeepL EUR 20 per million characters
+  (left labelled "recalled"), the o1-pro fallback. Text prices are the old 4p/5p/6p at the 13 Nov 2026 ECB rate, not
+  company prices.
+- **Not exact under concurrency (known limit, issue #1105).** The check runs before the paid call and the charge is recorded
+  after it, and a lock cannot span a call to another company, so two requests at once can both pass and both be charged
+  (measured with two processes: $66.10 spent, both allowed, ending $106.10 against a $50-ish limit). The old code behaved
+  the same. Translation's number-of-requests limit IS exact (one conditional UPDATE before the call). Stated in
+  `ProviderSpend`'s header.
+- **Erasure.** `tblAiUsage` and `tblSmsMessage` rows are deleted by an erasure; the old spend was a SUM over them so an
+  erasure lowered the month. `tblProviderSpend` names nobody and is not in the erasure (catalogue entry says why).
+- **Migration traps.** (1) Migration 254's backfill read `tblContentTranslation.costPence`; the e2e replay over today's
+  install script failed with "Unknown column". The backfill now runs only if `costPence` exists in BOTH tables it names
+  (phase 7 leaves an old table beside a new one; asking one was not enough). Any later column drop needs the same question
+  asked of EVERY earlier migration that names the column. (2) In 302 the new column comments sit inside a string inside a
+  PREPARE string, so an apostrophe must be written FOUR times. (3) New columns sit where `costPence` sat. The 254 guard has
+  a mixed case (one table old, one new) not separately tested.
+- **Restore.** `DbBackup::readThisMonthsTranslationUse()` also reads this month's `tblProviderSpend`;
+  `keepThisMonthsTranslationUse()` writes the larger figure per (organisation, service, currency). All five dropped columns
+  are on `REMOVED_COLUMNS`. The GREATEST and the skip-if-already-larger test guard each other, so removing one alone is not
+  visible; removing the read is (proof 30 section G).
+- **Pinned engine.** `Translation.php` was re-pinned twice after re-reading the bypass table (the money check moved to
+  `ProviderSpend`; one new mapping arm for `no-currency`). The money check is now OUTSIDE the pin; only
+  `tools/provider-spend-selftest.php` covers it (the gate says so in its header and its printed line).
+- **Test seams.** `Transcription::providerTranscribe()` is protected (as `Sms::providerSend()`), so S12-S15 drive
+  `processQueue()` with a stand-in that reports a cost; nothing else proved a transcription's cost is recorded.
+- **Month-end.** `held-texts-selftest.php` L4 used to move the database clock across a month end to prove "the cost lands in
+  the month it went"; the ledger's month is PHP's `gmdate()`, which a test cannot move, so L4 proves exactly-once and
+  only-when-sent. R5b checks only the shape of the month (it cannot tell UTC from local while PHP runs in UTC).
+- **Names that DEV_NOTES.md and CLAUDE.md must now replace.** `Transcription::capFrom()`, `Transcription::monthSpendPence()`,
+  `Transcription::installationAllowsPence()`, `Sms::monthSpendPence()`, `AiAssistant::monthSpendPence()`,
+  `Translation::capPence()`, `Translation::moneyReached()`, `Translation::recordSpend()` and the `costPence` columns are
+  gone; the replacements are `ProviderSpend::whyRefused()` / `whyRefusedFor()`, `monthTotals()`, `record()`,
+  `installationFigure()`. The CLAUDE.md sections that mention them (transcription budget, #668 limits, #762 translation
+  money, "Transcription::capFrom() is the ONE place", the J-section of the transcription test) read wrongly now.
+- **Known and left (found by the checks, not fixed):** the cost is not recorded when a company charges but the portal sees a
+  failure (a timeout after the company accepted); `ProviderSpend::cost()` throws a TypeError on an absurd overflow;
+  texts are counted once per message and have no limit; the 254 guard's mixed case is untested.
+- Other known limits, to raise as issues: hard maxima are bare numbers in the level's own currency; settings keys still say
+  `Pence`; DeepL and the text companies may bill in other currencies or by country; no page lets an organisation set its OWN
+  spending limit; a removed organisation's typed exchange rates are never cleared.

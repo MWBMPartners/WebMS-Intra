@@ -474,6 +474,16 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   `AccountMerge::mergedInto()`. A merged-away account is never changed again (`AccountGuard` row 3b, from
   `AccountMerge::mergedAwaySql()`). Only the person, signed in to both accounts in one browser, at least 7 days after
   the notice, completes it.
+- **Exchange rates, and spending with outside companies, in each company's own currency (#993; D-173, D-192, D-194).**
+  `Portal\Core\ExchangeRates` is the ONE place a rate is fetched (the ECB's daily file through `SafeFetch`, as the mail
+  job's third step), stored, typed and chosen; `ProviderSpend` is the ONE place a charge is priced (`cost()`), recorded
+  (`record()`, into `tblProviderSpend`, which an erasure does not touch) and checked (`whyRefused()` / `whyRefusedFor()`: the
+  installation's figure in the installation's currency, an organisation's own in its own, the stricter wins; no rate or
+  no currency refuses before the call). Nothing else computes a price, sums a month or compares one with a limit; a page
+  asks what a request asks. Zero is "no limit" for translation only. Rates are text and money is whole millionths: never a
+  float (`check_no_float_money.py`). The limit is not exact under two simultaneous requests (#1105). Tests:
+  `tools/exchange-rates-selftest.php`, `tools/provider-spend-selftest.php`; record: DEV_NOTES.md, "Outside-company spending
+  in the company's own currency (#993)". This bullet replaces what older bullets say about `Transcription::capFrom()`, `monthSpendPence()`, `Translation::capPence()`, `moneyReached()` and the `costPence` columns: those names are gone.
 - **Invitations grant volunteer and staff (#539; D-093) and the receipt phrase has one place (#939; D-167).** `invites/accept.php` grants through `Roles::grant()` inside its transaction; D-093 is asked of the INVITER at save and again under `lockMappingOf()` at acceptance (test `tools/invite-roles-selftest.php`). `GivingRetention::receiptedGiftWords()` is the ONE place "tax receipt" can be written, and only where the organisation ticked `giving.retention.taxReceipts`.
 - **An event's map (#1088; D-120, D-128, D-183).** `OutsideServices::allowsEventPlaceMap()` is the ONE decision whether an event page may show a map: only for an event whose `locationNotAHome` is 1, and then on the viewer's tiers. `calendar/event.php` never names the tile host. Guard: `check_outside_services_gated.py` rule 8; test `tools/event-place-map-selftest.php`.
 - **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place

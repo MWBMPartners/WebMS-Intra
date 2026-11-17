@@ -4,6 +4,42 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Exchange rates, and spending with outside companies in each company's own currency (#993; D-173, D-192, D-194)
+
+- **Exchange rates (package A, migration 301).** The portal holds exchange rates, fetched once a day from the European
+  Central Bank's published file as a third step of the existing `cron/mail-queue` job (no new scheduler line), with
+  rates an administrator types as the fallback (the installation's, or one organisation's own). A fetched rate counts
+  as fresh for 7 days; a file dated more than a day ahead is refused. New page Admin, Exchange rates. The installation's
+  fetch switch (`exchangeRates.fetch`, on by default) is a global administrator's. The fetch is named on both privacy
+  pages under "Look-ups that carry nothing about you". The job's answer gains `ratesRan`, `ratesStored`, `ratesError`
+  and `ratesSkipped`.
+- **Spend in the company's own currency (package B, migration 302).**
+  - Each charge from an AI, translation, transcription or text-message company is priced in whole millionths of the
+    currency that company charges in (US dollars or euros) and added to a monthly record an erasure does not touch.
+  - A monthly limit is checked twice: the installation's figure in the installation's currency, and an organisation's own
+    figure (if it has one) in its own. The stricter wins; an exchange rate an organisation types can never loosen the
+    installation's limit.
+  - A limit that has to be checked and has no exchange rate now stops spending BEFORE the call, saying to add one under
+    Admin, Exchange rates. If no currency is chosen it says to choose one (Admin, Settings, Organisation): a different
+    message, because a rate would fix nothing. A budget of nothing says so; it never says "reached". Translation 0 still
+    means no limit (and then needs neither a rate nor a currency); AI and transcription 0 still mean nothing may be spent.
+  - The AI limit is now held by the installation (it was read from the merged settings, so an organisation could raise it).
+  - AI and text-message spending no longer drops when somebody is erased.
+  - A typed model name (free text on the AI and translation pages) is matched exactly, or exact plus a date for the two
+    models whose price does not change by date; every other name is charged at the dearest known price of that company.
+  - The five `costPence` columns are dropped (migration 302); the old figures were in no currency and 100 to 1,000 times
+    too large for Anthropic and OpenAI.
+  - A month turns over at the start of the UTC month for all four services.
+  - A restore keeps this month's money figure per organisation, service and currency (as it already did for the number of
+    translation requests, #801).
+  - Package A leftovers: a line break at the end of a fetch's purpose label is refused (only a middle one was); the website
+    set-up check names itself in its User-Agent; the privacy notice says the exchange-rate fetch is once a day, retried
+    hourly after a failure, and on request; the exchange-rate page no longer says typed rates "are not shown to you" when
+    they could not be read.
+- Open: #1098 to #1105 (an organisation cannot set its own limit, hard maxima per currency, the "Pence" setting keys,
+  other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
+  limits not exact under two simultaneous requests). Codex has not reviewed this.
+
 ### No e-mail address in the error records (#1096; D-174)
 
 - An e-mail address typed into an admin search box (`?q=`), written into a path part or held in a request header is no
