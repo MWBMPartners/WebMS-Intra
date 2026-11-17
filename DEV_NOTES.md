@@ -25209,3 +25209,19 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   the real harm was a visitor's event suggestion and any member form on a page with the banner. The geo-token test's section C
   still tests the handler; its label describes a path the interface does not have.
 - Not covered by the guard: faults in page scripts (`api/` is excluded and the noticeboard's save ignores the answer: #1141).
+
+### Why gifts were missing from the data copy (#1135)
+
+- Section 27 of `gdpr-coverage-selftest.php` (#1063) read only `decision = erase`, while My data counts every instruction in
+  `GdprEraser::catalogue()` with an account column whatever its decision: two lists built from two questions. Fixed at the
+  class: rule 27b reads `catalogue()` itself; every instruction whose column is in `LINK_COLUMNS` and not in `ACTOR_COLUMNS`
+  (a record ABOUT the person), kept or erased, must be handed over by `data-export.php` or named with `notInDataCopy`. The
+  pinned exclusion list is unchanged: exactly `[tblRestoreHeldRows, tblTotpBackupCodes]`.
+- `DataKinds::WORDS` (table to phrase) and `MADE` (the phrase for what you MADE as a worker, used when the instruction's column
+  is an actor column) are guarded both ways by section 28. Merging them with `array_merge` lets a MADE phrase hide a WORDS
+  phrase of the same table: iterate both lists separately. A page test that finds a row by table name in `<code>` must now
+  read the plain words and map them back through `DataKinds` (`inventoryKindTable()`).
+- The error log's address is cut at the question mark in SQL with `SUBSTRING_INDEX(requestURL, CHAR(63), 1)`: a literal `'?'`
+  would be counted as a bound value by `$fetchUserRows` and `data-copy-selftest.php`.
+- Section 27b reads "handed over" table by table, so `WHERE 0 = ?` on a block stays green there; the HTTP checks R10-R15 catch
+  it for the twelve new blocks only.

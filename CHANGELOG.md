@@ -81,6 +81,21 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### The full data copy hands over the member's own records; My data uses plain names (#1135, #1138 item 9)
+
+- The full data copy (`account/data-export`) now hands over the records ABOUT the person that an erasure keeps, which it used
+  to leave out although My data counted them: gifts, offering envelopes, giving statements, the kept name and address beside
+  gift records, payments, event attendance, room bookings, equipment loans, software seats, errors while signed in (the page
+  without its query string), the change history the person made (kinds only, never values) and expense decisions they made,
+  each in plain rows with amounts and currencies, and without the treasurer's notes, other people's account numbers,
+  payment-company references or server file paths. It also lists EVERY kind My data lists ("what we hold about you": plain
+  name, count, what an erasure would do): the 71 kinds of record the person made as a worker are counted, never handed over
+  row by row. A kind that cannot be read says so and carries no number. Long kinds are capped and reported as shortened.
+  My data and Request erasure print each kind in plain words (`Portal\Core\DataKinds`, 154 phrases) instead of the table name;
+  the JSON download keeps `table` beside the new `kind`. Open: one phrase misdescribes (errors an administrator resolved),
+  "changes you made" shows a record number that for a change to somebody's account is their number, change history rows
+  ABOUT the member are still not in the copy, the care visit phrase covers two instructions. Codex has not reviewed this.
+
 ### A background request hands back the replacement form token (#1134)
 
 - A background request that spends the form token now hands back the new one, so the next Save is not refused. "Look up
