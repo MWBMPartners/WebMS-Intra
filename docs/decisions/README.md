@@ -267,7 +267,9 @@ appended with its real date and a note that it was added later.
 | [D-209](209-an-erasure-removes-remembered-map-positions-that-match-the-persons-own-address.md) | 2026-11-17 | D-209 · An erasure removes remembered map positions that match the person's own address | in force |
 | [D-210](210-a-visitors-cookie-record-is-replaced-when-its-cookie-runs-out.md) | 2026-11-17 | D-210 · A visitor's cookie-choice record counts as replaced when its cookie runs out | in force |
 | [D-211](211-a-membership-records-when-it-was-switched-off.md) | 2026-11-17 | D-211 · A membership records when it was switched off, so consent records can be cleared after a member leaves | in force |
+| [D-212](212-removing-a-person-from-an-organisation-stays-a-deletion.md) | 2026-11-17 | D-212 · "Remove" on the organisation users page stays a deletion; no leaving date is recorded for it | in force |
+| [D-213](213-switching-an-account-off-is-not-leaving.md) | 2026-11-17 | D-213 · Switching an account off (unticking Active) does not count as the member leaving | in force |
 
-*211 decisions. This index is checked against the folder by
+*213 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
