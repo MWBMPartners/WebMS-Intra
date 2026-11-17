@@ -823,8 +823,16 @@ brs_check(
     'organisations: ' . $sitesHeld . '; ' . substr($said, (int) strpos($said, 'Accounts with no organisation'), 300)
 );
 brs_check(
-    str_contains($said, 'more than one organisation') === false && str_contains($said, 'The likeliest reason is that somebody was removed from the organisation.') === true,
-    'on a ONE-organisation portal the card does not claim there is more than one organisation, and gives the real likeliest reason'
+    str_contains($said, 'more than one organisation') === false && str_contains($said, 'A likely reason is that somebody was removed from the organisation.') === true
+    && str_contains($said, 'calendar subscription stops working') === true,
+    'on a ONE-organisation portal the card does not claim there is more than one organisation, and says what is true of the account'
+);
+// An account with no membership STILL SIGNS IN on a one-organisation portal (multisite off), so the
+// card must never say nobody can open it or that it cannot sign in. With the old clause put back in
+// upgrade.php by hand, this check goes red.
+brs_check(
+    preg_match('/nobody can open|cannot (sign|log) in|can\'?not (sign|log) in|can\'t (sign|log) in|locked out/i', $said) !== 1,
+    'and the card does not claim the account cannot sign in or cannot be opened'
 );
 unlink($sqlDir . '/' . UPS_WAITS);
 Brs::$writer->query("DELETE FROM tblMigrations WHERE filename = '" . UPS_WAITS . "'");

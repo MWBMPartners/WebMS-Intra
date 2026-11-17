@@ -102,7 +102,7 @@ $cleanUp = static function () use ($db, &$state): void {
     $db->query('DELETE FROM `tblLocalAccounts` WHERE `userID` IN (' . PP_ADMIN . ', ' . PP_MEMBER . ')');
     $db->query('DELETE FROM `tblUsers` WHERE `userID` IN (' . PP_ADMIN . ', ' . PP_MEMBER . ')');
     if ($state['saved'] !== null) {
-        $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL')");
+        $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL', 'privacy.erasureContact')");
         foreach ($state['saved'] as $row) {
             $stmt = $db->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, ?)');
             $stmt->bind_param('isssi', $row['siteID'], $row['settingKey'], $row['settingValue'], $row['defaultValue'], $row['isSensitive']);
@@ -281,10 +281,10 @@ $signIn('admin');
 $signIn('member');
 
 // ⚙️ Remember the privacy settings, then set the three as the tests need them.
-$state['saved'] = $db->query("SELECT `siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive` FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL')")->fetch_all(MYSQLI_ASSOC);
+$state['saved'] = $db->query("SELECT `siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive` FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL', 'privacy.erasureContact')")->fetch_all(MYSQLI_ASSOC);
 $setSettings = static function (string $controller, string $email) use ($db): void {
-    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL')");
-    foreach (['privacy.controllerName' => $controller, 'privacy.contactEmail' => $email, 'privacy.policyURL' => ''] as $key => $value) {
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('privacy.controllerName', 'privacy.contactEmail', 'privacy.policyURL', 'privacy.erasureContact')");
+    foreach (['privacy.controllerName' => $controller, 'privacy.contactEmail' => $email, 'privacy.policyURL' => '', 'privacy.erasureContact' => $email] as $key => $value) {
         $stmt = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, '', 0)");
         $stmt->bind_param('ss', $key, $value);
         $stmt->execute();
@@ -325,6 +325,22 @@ foreach ($r as $who => $one) {
 }
 pp_check('C1 everybody, the administrator included, sees the name and nobody sees the notice', $allNamed);
 
+echo "\nC2. The policy page's contact line, with no erasure contact set\n";
+$setSettings('', '');
+$r = [];
+foreach (['visitor', 'member', 'admin'] as $who) {
+    $page = $http($jars[$who], 'GET', '/privacy/policy');
+    $r[$who] = ['status' => $page['status'], 'text' => preg_replace('/\s+/', ' ', strip_tags($page['body'])) ?? ''];
+}
+$generic = static fn (array $one): bool => $one['status'] === 200 && str_contains($one['text'], 'not configured') === false
+    && str_contains($one['text'], 'Only administrators see this') === false
+    && str_contains($one['text'], 'please ask the organisation that runs this portal') === true;
+pp_check('C2a a member reads the generic line, with no "not configured" and no administrator note', $generic($r['member']), $r['member']['status'] . ' ' . substr($r['member']['text'], -300));
+pp_check('C2b a visitor (if the page opens to one) reads the generic line; otherwise it is a clean refusal',
+    $r['visitor']['status'] === 200 ? $generic($r['visitor']) : in_array($r['visitor']['status'], [302, 303, 401, 403], true) === true, (string) $r['visitor']['status']);
+pp_check('C2c an administrator is told it is unset and where to set it',
+    $r['admin']['status'] === 200 && str_contains($r['admin']['text'], 'Only administrators see this: no erasure contact is set') === true, $r['admin']['status'] . ' ' . substr($r['admin']['text'], -300));
+
 echo "\nD. Plant: the administrator-only condition removed in a copy of the page\n";
 $setSettings('', '');
 $path = $child . $sep . 'web' . $sep . '_apps' . $sep . 'privacy' . $sep . 'index.php';
@@ -342,6 +358,22 @@ if (substr_count($orig, $from) !== 1) {
     }
     pp_check('D1 with the condition gone the visitor and member checks go red, and the copy is put back byte for byte',
         $red === true && (string) file_get_contents($path) === $orig);
+}
+
+$ppath = $child . $sep . 'web' . $sep . '_apps' . $sep . 'privacy' . $sep . 'policy.php';
+$porig = (string) file_get_contents($ppath);
+$pfrom = '<?php elseif (App::isAdmin() === true): ?>';
+if (substr_count($porig, $pfrom) !== 1) {
+    pp_check('D2 the policy line to plant is present exactly once', false, 'found ' . substr_count($porig, $pfrom));
+} else {
+    file_put_contents($ppath, str_replace($pfrom, '<?php elseif (true): ?>', $porig));
+    try {
+        $red = str_contains($http($jars['member'], 'GET', '/privacy/policy')['body'], 'Only administrators see this') === true;
+    } finally {
+        file_put_contents($ppath, $porig);
+    }
+    pp_check('D2 with the policy page\'s administrator condition gone a member sees the administrator note (so C2a goes red), and the copy is put back byte for byte',
+        $red === true && (string) file_get_contents($ppath) === $porig);
 }
 
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));

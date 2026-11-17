@@ -918,14 +918,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card-body">
                         <p class="mb-2">
                             <?php echo (int) $unplacedAfterUpgrade; ?> account<?php echo $unplacedAfterUpgrade !== 1 ? 's' : ''; ?>
-                            still belong<?php echo $unplacedAfterUpgrade === 1 ? 's' : ''; ?> to no organisation. Nothing was
-                            guessed.
+                            still belong<?php echo $unplacedAfterUpgrade === 1 ? 's' : ''; ?> to no organisation.
                             <?php if ($siteCountAfterUpgrade > 1): ?>
-                                This portal has more than one organisation, so this migration could not
+                                Nothing was guessed: this portal has more than one organisation, so this migration could not
                                 safely decide which one each account belongs to.
                             <?php else: ?>
-                                These accounts belong to no organisation, so nobody can open them until they are placed.
-                                The likeliest reason is that somebody was removed from the organisation.
+                                <?php // #1138 item 7: NOT "nobody can open them" — with the default one-organisation set-up an
+                                      //   account with no membership still signs in. What is true is what Admin, Users, "Accounts
+                                      //   with no organisation" says: no administrator sees them, calendar links fail. ?>
+                                No organisation's administrator can see <?php echo $unplacedAfterUpgrade === 1 ? 'it' : 'them'; ?> on the Users page,
+                                and <?php echo $unplacedAfterUpgrade === 1 ? 'its' : 'their'; ?> calendar subscription stops working, until
+                                <?php echo $unplacedAfterUpgrade === 1 ? 'it is' : 'they are'; ?> placed.
+                                A likely reason is that somebody was removed from the organisation.
                             <?php endif; ?>
                         </p>
                         <a href="<?php echo htmlspecialchars(Site::url('admin/users/unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-warning">
