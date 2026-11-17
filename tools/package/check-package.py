@@ -381,9 +381,14 @@ SQL_NAME = re.compile(r"_sql/(full_schema|\d{3}_[A-Za-z0-9_]+)\.sql")
 # changed, then put its new checksum here; the failure message prints it.
 ALLOWED_HTACCESS = {
     WEB + "/.htaccess": (
-        "5b5f189a2330046e95172e0e5f2731f1133ff3c2e33538368e24e44c0ea7b7b7",
+        "1a1315369b640ab5a6ccdee32fee3367716957f399941b7a7248cd889feee482",
         "the web folder's own rules: every address goes to index.php, and a direct .php address is refused "
-        "(read 9 November 2026, #493 P4a: ONE rule line changed and it is STRICTER — the deny condition "
+        "(read 17 November 2026, #1153, commit 9ab209b9: ONE rule line ADDED, after the deny rule and "
+        "before the rules that hand a request on — `RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`, "
+        "which copies the Authorization header into PHP's environment so an API key reaches PHP under "
+        "Apache module hosting; it rewrites no address and carries no [L], and the deny rule's text is "
+        "unchanged (check_htaccess_php_denied.py). The other eleven added lines are its comment. "
+        "Before that, read 9 November 2026, #493 P4a: ONE rule line changed and it is STRICTER — the deny condition "
         "now also refuses .php followed by more path (/x.php/y, PHP path info), the other PHP endings "
         "(.php5, .phtml, .phar) and capitals; it is driven on a real Apache by "
         "tools/htaccess-apache-selftest.php. Every other change is a comment, rewritten to say what really "

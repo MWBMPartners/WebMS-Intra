@@ -2448,6 +2448,11 @@ if (part('Q12B', 'A backup carries waiting mail, and a restore HOLDS it (three c
     $tryWords = implode(' ', (array) ($try['result']['warnings'] ?? []));
     // The real restore.
     $back  = $taken === true ? child(['task' => 'restore', 'directory' => (string) $snap['result']['directory']]) : ['threw' => 'no snapshot to restore'];
+    // A whole restore ends every sign-in (#1137, Auth::endEverySessionAfterRestore()),
+    // so the global administrator's session from before it is refused from here on,
+    // and every later part pressing a page with $rootJar would be sent to the sign-in
+    // page instead. Sign in again, as a real administrator would after a restore.
+    $rootJar = signIn('root', $password, ip(1));
     $after = $keep(rowOf('Q12 carried through a backup'));
     $rows  = queued();
     $said  = implode(' ', (array) ($back['result']['warnings'] ?? []));

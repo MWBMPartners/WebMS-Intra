@@ -1460,6 +1460,11 @@ ok(
     (string) ($restored['error'] ?? '') . ' ' . $brought
 );
 ok('the key and the backup codes are readable in the log again, which is exactly what must not be left like that', logHolds($key['keyed']) >= 1 && logHolds($oldCodes[0]) >= 1);
+// A whole restore ends every sign-in (#1137, Auth::endEverySessionAfterRestore()),
+// so the administrator's session from before it is refused from here on and the
+// press below would be sent to the sign-in page. Sign in again, as a real
+// administrator would after a restore, so this part tests the upgrade button.
+$admin   = signIn('admin');
 $page    = req($admin, 'GET', '/admin/upgrade');
 $pressed = req($admin, 'POST', '/admin/upgrade', ['csrf_token' => token($page['body'])]);
 $cleanedAgain = upgradeState();

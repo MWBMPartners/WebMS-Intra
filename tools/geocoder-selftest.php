@@ -625,6 +625,13 @@ $lookup = static function (string $address, string $country = '', ?string $kind 
     }
     $answer = $http('POST', '/geo/lookup', $fields);
     $decoded = json_decode($answer['body'], true);
+    // Since #1134 every answer carries the REPLACEMENT form token, which is new on
+    // every accepted post, so a fresh answer and a cached one can never hold the
+    // same value. Keep the field (its presence is still compared) and drop only
+    // its value; whether the token is right is tools/geo-token-selftest.php's job.
+    if (is_array($decoded) === true && is_string($decoded['csrfToken'] ?? null) === true) {
+        $decoded['csrfToken'] = '(a replacement form token)';
+    }
     return is_array($decoded) === true ? $decoded : null;
 };
 

@@ -1295,8 +1295,11 @@ if ($only === []) {
     $page = req($nobody, 'GET', B . '/no-such-page');
     ok('J01 the cookie banner\'s script sends the choice to B\'s own address', str_contains($page['body'], "fetch('" . B . "/privacy/consent', {") === true, 'the page holds: ' . implode(' ', array_filter(addressesIn($page['body']), static fn (string $a): bool => str_contains($a, 'consent'))));
     $page = req($jarAdmin, 'GET', B . '/admin/settings/organisation');
-    ok('J02 the map script asks B\'s own addresses for a place and for three-word suggestions', $page['status'] === 200 && str_contains($page['body'], "fetch('" . B . "/geo/lookup', {") === true
-        && str_contains($page['body'], "fetch('" . B . "/geo/w3w-suggest', {") === true, said($page) . ' ' . implode(' ', array_filter(addressesIn($page['body']), static fn (string $a): bool => str_contains($a, 'geo/'))));
+    // Since #1134 the map script sends both through its own post() helper (one
+    // request at a time, the replacement form token kept), so the address is the
+    // first argument of post( rather than of fetch(.
+    ok('J02 the map script asks B\'s own addresses for a place and for three-word suggestions', $page['status'] === 200 && str_contains($page['body'], "post('" . B . "/geo/lookup', function () {") === true
+        && str_contains($page['body'], "post('" . B . "/geo/w3w-suggest', function () {") === true, said($page) . ' ' . implode(' ', array_filter(addressesIn($page['body']), static fn (string $a): bool => str_contains($a, 'geo/'))));
     $page = req($nobody, 'GET', '/no-such-page');
     ok('J03 control: with no first part, the banner\'s script is exactly what it always was', str_contains($page['body'], "fetch('/privacy/consent', { method: 'POST', body: fd, credentials: 'same-origin' })") === true);
     $tour    = req($nobody, 'GET', '/assets/js/portal-tour.js')['body'];
