@@ -256,7 +256,6 @@ PER_FILE: dict[str, dict[str, int]] = {
     },
     '.tile.openstreetmap.org': {
         '_apps/admin/settings/organisation/index.php': 1,
-        '_apps/calendar/event.php': 1,
         '_apps/venues/venue.php': 1,
         '_core/OutsideServices.php': 2,
         '_core/partials/location-map-assets.php': 1,
@@ -1001,7 +1000,7 @@ def self_test() -> int:
                 "'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com cdn.newtracker.io; "),
         new + " cdn.newtracker.io")
     run("S31 a wildcard host with no scheme in a page's $cspImgExtra fails",
-        replace("_apps/calendar/event.php", "$cspImgExtra = 'https://*.tile.openstreetmap.org';",
+        replace("_apps/venues/venue.php", "$cspImgExtra = 'https://*.tile.openstreetmap.org';",
                 "$cspImgExtra = 'https://*.tile.openstreetmap.org *.tiles.newmaps.io';"),
         new + " tiles.newmaps.io")
     run("S32 an example host sent by sendBeacon fails (a browser load)",

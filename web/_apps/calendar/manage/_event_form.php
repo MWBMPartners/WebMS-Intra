@@ -395,20 +395,23 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
     <div class="col-12 col-md-6">
         <label class="form-label">Address</label>
         <textarea class="form-control" name="locationAddress" rows="2"><?php echo htmlspecialchars($ev['locationAddress'] ?? '', ENT_QUOTES, 'UTF-8'); ?></textarea>
-        <?php // 🏠 #1037, D-183: an event's address can be somebody's home (a meeting in a
-              //    member's house) or a public place, so the person says which. It decides only
-              //    how the remembered map answer for this address is kept: a home's is personal
-              //    data. It is not stored on the event, so it starts at "home" — the safe
-              //    direction — every time the form is drawn. ?>
+        <?php // 🏠 #1037, D-183, #1088: an event's address can be somebody's home (a meeting in a
+              //    member's house) or a public place, so the person says which. The answer is now
+              //    STORED on the event (`locationNotAHome`): it decides how the remembered map
+              //    answer for the address is kept AND whether the event page may show a map from
+              //    OpenStreetMap (only for a public place). A new event, or one with nothing
+              //    stored, starts at "home" — the safe direction. ?>
+        <?php $evNotAHome = (int) ($ev['locationNotAHome'] ?? 0) === 1; ?>
         <div class="mt-1 small" role="radiogroup" aria-label="What kind of address this is">
             <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="locationAddressKind" id="locationAddressKindHome" value="home" checked>
+                <input class="form-check-input" type="radio" name="locationAddressKind" id="locationAddressKindHome" value="home"<?php echo $evNotAHome === true ? '' : ' checked'; ?>>
                 <label class="form-check-label" for="locationAddressKindHome">This is someone's home</label>
             </div>
             <div class="form-check form-check-inline">
-                <input class="form-check-input" type="radio" name="locationAddressKind" id="locationAddressKindPublic" value="public">
+                <input class="form-check-input" type="radio" name="locationAddressKind" id="locationAddressKindPublic" value="public"<?php echo $evNotAHome === true ? ' checked' : ''; ?>>
                 <label class="form-check-label" for="locationAddressKindPublic">This is a public place</label>
             </div>
+            <div class="form-text">Choosing "a public place" lets anybody who opens the event see a map of it. Do not choose it for somebody's home: that would show their home on a map.</div>
         </div>
     </div>
 

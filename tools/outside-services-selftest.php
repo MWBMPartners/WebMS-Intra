@@ -2677,7 +2677,8 @@ $wantSaid = [
     'fontConnection#sends' => 'Your internet address and the time. Nothing is asked for over the connection.',
     'fontConnection#when'  => 'When you open the noticeboard. Its script tells your browser to get ready to fetch fonts from Google, so the browser looks up Google\'s font servers and opens a connection to them. The portal tells your browser not to fetch the fonts themselves, and gives the noticeboard its own copy of them instead.',
     'embeddedContent#web2' => 'and this portal\'s web address unless the page has been set to send none.',
-    'placeMaps'       => 'and can be somebody\'s home: its map is drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
+    // #1088: an event's map is drawn only for a place marked not anybody's home, so the sentence pinned here is the new one.
+    'placeMaps'       => 'A map of where an event is held is drawn only when whoever set the event marked the place as not anybody\'s home, and only if maps are allowed for the person looking: the installation, the organisation and, when you are signed in, your own choice on Account, Outside services.',
     'signIn'          => 'Your browser is sent to the company\'s own sign-in page',
     'payments'        => 'Your browser is then sent to the company\'s own payment page',
     'textMessages'    => 'The telephone number it is sent to and the words of the message.',

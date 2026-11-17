@@ -46,6 +46,7 @@ use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\EventVisibility;
+use Portal\Core\OutsideServices;
 use Portal\Core\PublicWebsite;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -158,7 +159,7 @@ $stmt = $mysqli->prepare(sprintf(
     'SELECT `e`.`eventID`, `e`.`siteID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
     . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, '
     . '`e`.`locationName`, `e`.`locationAddress`, `e`.`locationWebURL`, `e`.`locationPhone`, '
-    . '`e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`locationW3W`, `e`.`hostOrgName`, `e`.`partnerOrgs`, `e`.`heroImage`, '
+    . '`e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`locationNotAHome`, `e`.`locationW3W`, `e`.`hostOrgName`, `e`.`partnerOrgs`, `e`.`heroImage`, '
     . '`e`.`status`, `e`.`isFeatured`, `e`.`capacity`, `e`.`cancelReason`, `e`.`statusChangedAt`, '
     . '`e`.`externalFeedID`, `e`.`externalUidHash`, '
     . '`c`.`categoryName`, `t`.`typeName`, `s`.`seriesName`, `ef`.`name` AS `importedFrom`, %s '
@@ -291,8 +292,15 @@ if ($canSeeFull === false) {
 // 🗺️ #456 Chunk A — page-scoped CSP widening for OSM tiles, ONLY when the
 // event has coordinates (conditional, #386 precedent). Must be set BEFORE
 // header.php is required below.
-if ($event['locationGeoLat'] !== null && $event['locationGeoLng'] !== null) {
-    $cspImgExtra = 'https://*.tile.openstreetmap.org';
+// 🏠 #1088 (D-120, D-128, D-183): the map is OpenStreetMap's, so showing it sends the
+//    place's area to an outside company for every viewer. An event names no host, so
+//    it is drawn ONLY for a place whoever set the event marked "not anybody's home",
+//    and only when the viewer's maps are allowed: `OutsideServices` decides, and the
+//    page names no tile host. The widening below happens only on a yes.
+$showPlaceMap = $event['locationGeoLat'] !== null && $event['locationGeoLng'] !== null
+    && OutsideServices::allowsEventPlaceMap((int) ($event['locationNotAHome'] ?? 0) === 1);
+if ($showPlaceMap === true) {
+    $cspImgExtra = OutsideServices::mapTileSource();
 }
 
 // 🔗 Links to other portal pages go through Site::url() (#503 round 2)
@@ -991,7 +999,7 @@ endif;
                             'lat'     => $event['locationGeoLat'] !== null ? (float) $event['locationGeoLat'] : null,
                             'lng'     => $event['locationGeoLng'] !== null ? (float) $event['locationGeoLng'] : null,
                             'w3w'     => $event['locationW3W'] ?? null,
-                            'showMap' => true,
+                            'showMap' => $showPlaceMap,
                             'mapId'   => 'eventMap',
                         ]); ?>
                     </div>

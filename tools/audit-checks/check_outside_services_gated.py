@@ -30,8 +30,9 @@ WHAT IT LOOKS FOR
    note or use has gone -- change the count on purpose).
      gravatar.com, googleusercontent.com  -- ONLY OutsideServices.php.
      tile.openstreetmap.org                -- OutsideServices.php, the shared
-        map script, and the three pages whose map is of a BUILDING (a venue,
-        an event's venue, an organisation's own address). The member directory
+        map script, and the two pages whose map is of a BUILDING (a venue,
+        an organisation's own address). An EVENT's page may NOT name it
+        (#1088): where an event is held can be somebody's home. The member directory
         may NOT name it: its map is of a member's home and must take the host
         from OutsideServices after deciding. Nor may a small group's page
         (#809, D-120): a group often meets in somebody's home, so its map is
@@ -57,6 +58,10 @@ WHAT IT LOOKS FOR
 7. `web/_apps/small-groups/meeting.php`, in code, decides the shown place's map
    with `OutsideServices::allowsMeetingPlaceMap(` and widens the rule only
    inside `if ($showPlaceMap === true)`.
+8. `web/_apps/calendar/event.php`, in code, decides the event place's map with
+   `OutsideServices::allowsEventPlaceMap(` (#1088, D-120, D-128), widens the rule
+   only inside `if ($showPlaceMap === true)`, and hands the location partial
+   `'showMap' => $showPlaceMap` rather than `true`.
 
 WHAT THIS CANNOT SEE, said plainly because an overstated guarantee is worse
 than none
@@ -117,7 +122,6 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         "_core/partials/location-map-assets.php": (
             2, "The shared map script: its tile address template, and a note telling callers which "
                "source to allow. It draws nothing until a page puts a map on itself."),
-        "_apps/calendar/event.php": (1, "An event's VENUE map: a building, not a member's home."),
         "_apps/admin/settings/organisation/index.php": (1, "The organisation's OWN address map."),
         "_apps/venues/venue.php": (1, "A venue's map: a building, not a member's home."),
         # 🏠 `_apps/small-groups/group.php` is deliberately NOT here any more
@@ -157,6 +161,9 @@ DECIDE_CALL = "OutsideServices::allowsMeetingPlaceMap("
 MEETING_WIDEN = re.compile(
     r"if\s*\(\s*\$showPlaceMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
 )
+EVENT = "_apps/calendar/event.php"
+EVENT_DECIDE_CALL = "OutsideServices::allowsEventPlaceMap("
+EVENT_PARTIAL = re.compile(r"'showMap'\s*=>\s*\$showPlaceMap\s*,")
 GROUP_PARTIAL = re.compile(r"'showMap'\s*=>\s*\$showMap\s*,")
 CSP_ASSIGN = re.compile(r"\$cspImgExtra\s*(?:\.?=)[^;]*;", re.S)
 
@@ -248,6 +255,7 @@ def main() -> int:
         profile = code_only(WEB / PROFILE)
         group = code_only(WEB / GROUP)
         meeting = code_only(WEB / MEETING)
+        event = code_only(WEB / EVENT)
         php_files = sorted(WEB.rglob("*.php"))
         all_code = {p.relative_to(WEB).as_posix(): code_only(p) for p in php_files
                     if "cspImgExtra" in p.read_text(encoding="utf-8", errors="ignore")}
@@ -314,6 +322,18 @@ def main() -> int:
         problems.append(
             "✗ %s no longer decides the shown place's map with %s and widens the page rule only inside "
             "`if ($showPlaceMap === true)` (#809, D-120, D-123)." % (MEETING, DECIDE_CALL)
+        )
+    if EVENT_DECIDE_CALL not in event or MEETING_WIDEN.search(event) is None:
+        problems.append(
+            "✗ %s no longer decides an event place's map with %s and widens the page rule only inside "
+            "`if ($showPlaceMap === true)` (#1088, D-120, D-128).\n"
+            "   Where an event is held can be somebody's home, and a map of it goes to OpenStreetMap "
+            "for every viewer." % (EVENT, EVENT_DECIDE_CALL)
+        )
+    if EVENT_PARTIAL.search(event) is None:
+        problems.append(
+            "✗ %s no longer hands the location partial `'showMap' => $showPlaceMap`. Handing it `true` "
+            "draws the map whatever was decided (#1088)." % EVENT
         )
     if GROUP_PARTIAL.search(group) is None:
         problems.append(

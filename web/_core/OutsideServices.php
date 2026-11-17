@@ -310,12 +310,15 @@ final class OutsideServices
             'name'      => 'Maps of venues and of where events are held',
             'companies' => 'OpenStreetMap',
             'from'      => 'browser',
-            'when'      => 'When you open a page that shows a map of a venue, of where an event is held, or (for this '
-                         . 'organisation\'s administrators) of the organisation\'s own address. An event\'s page can be '
-                         . 'open to visitors who have not signed in. The maps choice on Account, Outside services does '
-                         . 'not switch these maps off. A venue and the organisation\'s address are buildings, but where '
-                         . 'an event is held is whatever its organiser typed, and can be somebody\'s home: its map is '
-                         . 'drawn whenever the portal knows the position, whatever anybody\'s maps choice says.',
+            'when'      => 'When you open a page that shows a map of a venue, of a place an event is held, or (for '
+                         . 'this organisation\'s administrators) of the organisation\'s own address. A venue and the '
+                         . 'organisation\'s address are buildings and their maps are drawn whenever the portal knows '
+                         . 'the position, whatever anybody\'s maps choice says. A map of where an event is held is '
+                         . 'drawn only when whoever set the event marked the place as not anybody\'s home, and only '
+                         . 'if maps are allowed for the person looking: the installation, the organisation and, when '
+                         . 'you are signed in, your own choice on Account, Outside services. An event page can be '
+                         . 'open to visitors who have not signed in. A place not marked is treated as somebody\'s '
+                         . 'home and gets no map.',
             'sends'     => 'Which map squares to draw, which tells OpenStreetMap the area around the place, together '
                          . 'with your internet address, your browser and this portal\'s web address.',
             'why'       => 'To show where the place is.',
@@ -1227,6 +1230,41 @@ final class OutsideServices
         $viewerDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, $viewer, $openSite));
 
         return self::meetingPlaceMapFrom($agreed, $stillCounts, $hostDecision, $viewerDecision);
+    }
+
+    /**
+     * 🚦 May an event's page draw a map of where the event is held? (#1088)
+     *
+     * The ONE place this is decided; `calendar/event.php` asks it and then,
+     * only on a yes, widens the page rule with `mapTileSource()`. The page
+     * never names the tile host itself.
+     *
+     * An event names no host, so nobody can AGREE to a map of it (D-120). The
+     * only way to a map is that whoever set the event's place marked it "not
+     * anybody's home" (`tblEvents.locationNotAHome`, D-128, D-183): then the
+     * viewer's own tiers decide, exactly as for a meeting place with no host.
+     * An event that is not marked is treated as held at a home: no map, and
+     * so nothing is sent to OpenStreetMap for any viewer, signed in or not.
+     *
+     * Any read that fails is a no, as everywhere in this class.
+     *
+     * @param bool $notAHome The event's `locationNotAHome` = 1.
+     */
+    public static function allowsEventPlaceMap(bool $notAHome): bool
+    {
+        if ($notAHome === false) {
+            return false;
+        }
+        try {
+            $db = App::db();
+            $viewerDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, self::viewerId(), Site::id()));
+        } catch (\Throwable $e) {
+            self::logOnce('whether an event place\'s map may be drawn could not be read, so no map is drawn: ' . $e->getMessage());
+
+            return false;
+        }
+
+        return self::markedPlaceMapFrom($notAHome, false, $viewerDecision);
     }
 
     /**
