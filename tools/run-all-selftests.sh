@@ -246,6 +246,7 @@ event-address|tools/event-address-selftest.php|selftest_eventaddress|
 event-date-range|tools/event-date-range-selftest.php|selftest_eventdaterange|
 event-suggester-privacy|tools/event-suggester-privacy-selftest.php|selftest_eventsuggester|
 page-head|tools/page-head-selftest.php|selftest_pagehead|SELFTEST_WEB_PORT=9674
+care-case-person|tools/care-case-person-selftest.php|selftest_carecase|SELFTEST_WEB_PORT=9162
 site-modes|tools/site-modes-selftest.php|selftest_sitemodes|web:site-modes SELFTEST_WEB_PORT=9461
 channel|tools/channel-selftest.php|selftest_channel|web:channel SELFTEST_WEB_PORT=9590
 portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:portal-address SELFTEST_WEB_PORT=9660

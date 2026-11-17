@@ -2386,3 +2386,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Merge two accounts: administrator preview and request; the person's confirmation (`/account/merge`, linked from
   the Account page while a request waits), from 7 days after the notice. Permission `accounts.merge` (Data
   Controller; never falls open, D-191). A merged-away account shows "Merged into another account, cannot be changed".
+
+- Care register, "Open new case": required "Who is this case about?" list (`Site::membersForPicker()`); typed name only for people with no account (#1066).

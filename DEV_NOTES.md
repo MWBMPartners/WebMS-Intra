@@ -24960,3 +24960,17 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   stop is the pre-push hook.
 - Trap: reading `<script>` bodies out of a PHP file with a regex breaks on the nonce's `?>`; strip PHP blocks first.
 
+
+### A care case names its member (#1066)
+
+- `Site::membersForPicker()` is the ONE list of members a care case may be about: same ground as `organisationsFor()`
+  plus not erased. `care/case-save.php` asks `Site::isOwnOrganisation()` and `AccountGuard::checkNotErased()` for the
+  person given, and asks `array_key_exists('personUserID', $_POST)`, never `?? ''` (#677). Field absent keeps the old
+  typed-name behaviour so older posters (including `erasure-pages-selftest.php`) still work; the FORM forces the choice.
+- The erased-account test in the handler is belt and braces: an erased account is also switched off, so
+  `Site::isOwnOrganisation()` refuses it first, and no honest state reaches the second test.
+- Known, from the independent check: the list shows members who hid their name from the directory (only the directory
+  honours that choice; other role-gated pickers do the same); installation-wide root administrators appear in every
+  organisation's list; the list relies on a merge switching the duplicate off rather than excluding merged-away
+  accounts itself; the 20,000-option draw would want a search box on a very large organisation; choosing "none" with an
+  empty name box still saves a case about nobody (as before).

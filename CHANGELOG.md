@@ -4,6 +4,15 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A care case records which member it is about (#1066)
+
+- Care register: "Open new case" now makes the worker choose which member of the organisation the case is about, or
+  "somebody without an account here" and type a name. A case about a member now shows in that member's My data and
+  data copy and is reached by an erasure (visit notes included). A refused choice (another organisation's member, an
+  erased or switched-off account, anything not a plain number) saves nothing and says so; a failed save now says so
+  too. Open: editing who an existing case is about, and the care picker listing every member of the organisation
+  (see DEV_NOTES). Codex has not reviewed this.
+
 ### The noticeboard can no longer fetch Babel from a public server (#575)
 
 - The noticeboard page defines a stand-in `window.Babel` before the generated bundle, so the bundle can never fetch
