@@ -24,5 +24,6 @@ The three most important rules, in one line each:
   5 October 2026) — and reviewed again after each fix, until a round finds no
   real problem (what counts as one is defined in `.OpenAI/CONTEXT.md`,
   rule 2).
+- **One source of truth per job (D-214):** `.claude/HANDOFF.md` (the one handoff) and `docs/PROJECT.md` (goals, requirements and prerequisites, plans) are kept current as the work happens and are written for any LLM platform to resume from; GitHub issues and milestones are the source of truth for what is done; documentation and the API description are corrected with every change.
 - **Keep `.claude/HANDOFF.md` current as the work happens**, so any AI
   coding tool can resume the work cold at any point.

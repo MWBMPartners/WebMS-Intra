@@ -176,6 +176,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    one of Codex's own global rules in `~/.codex/AGENTS.md`. Full text:
    `.claude/CLAUDE.md` → "When one system runs out".)*
 
+5a. **One source of truth per job, kept current at every stage, usable by any LLM platform (D-214).** One handoff (`.claude/HANDOFF.md`) plus `docs/PROJECT.md` (goals, requirements and prerequisites, plan pointers), kept current as the work happens and written so any model or platform can resume from the files; the repository's issues and milestones are the source of truth for what is done (so work can continue from any device); project documentation (Markdown, in-app help and guides, wiki) is corrected as part of each change; a web application with an API keeps its OpenAPI/Swagger description current and a browsable Swagger UI area for API users (may be restricted to them). Full wording and the repository specifics are in `.claude/CLAUDE.md`, "One source of truth per job"; change both together.
 5. **One job per document, and NOTHING NOT-DONE LIVES ONLY IN PROSE
    (owner, 30 October 2026, #678).** GitHub issues are the record of what is
    and is not done **and of every deferral or open decision**;

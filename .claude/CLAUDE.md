@@ -1201,6 +1201,40 @@ once, and the fix is to stop that rather than to archive more carefully.
 | **`DEV_NOTES.md`** | Technical lessons worth keeping | Append-only |
 | **`.claude/plans/`** | Point-in-time thinking | Terminal status line, then `.claude/history/plans/` (see its README) |
 
+**ONE SOURCE OF TRUTH PER JOB, KEPT CURRENT AT EVERY STAGE, USABLE BY ANY LLM PLATFORM.** Set by the owner on 17 November 2026
+(D-214), for every project on this machine and every platform that works on it (Claude, Codex, Ollama and any
+other). It extends and, where it differs, replaces the older "one job per document" paragraph. Every project keeps:
+
+1. **One handoff** (current state only, overwritten, about one screen: where the work is, branch and HEAD, what is in flight,
+   what is next, what waits on the owner) **and a small set of project documents that each do one job**: **project goals**
+   (what it is for and what "done" means), **requirements and prerequisites** (what must be true or in place before it can be
+   built, installed or used), and **plans** (the order of the work, with a terminal line when a plan's work lands). Each is
+   written so that a different model or platform can pick the project up cold from the files alone: plain English, no
+   reliance on a particular tool's memory, every pointer a file path, issue number or commit hash. Keep them current AS THE
+   WORK HAPPENS (at every landing and every change of a package's state), not in a sweep afterwards. They are the single
+   point of tracking that makes switching models and platforms accurate and cheap, and they support orchestration: a plan
+   names which tier does which step (D-202), and the handoff names the boundary a new session starts from. One handoff per
+   project, never one per tool; a tool's own memory or instruction folder carries POINTERS to it, never a copy.
+2. **A repository tracker that is the source of truth for what is and is not done.** Where a repository exists (Git, GitHub,
+   GitLab or any other), its **issues** (and every deferral and open decision as an issue, in the same action that decides it)
+   and its **plans** (milestones, projects or boards; the equivalent where a platform differs) are kept fully up to date as
+   the work goes, so that work can continue from any machine or device and the tracker, not a chat or a local file, says the
+   truth. Close an issue only when it is done, mark it done, and link the commit.
+3. **Project documentation kept up to date as the work goes**, whatever form it takes: Markdown files in the repository, the
+   in-app help, guides and user documentation, and a repository wiki where one is used. Documentation is part of the change,
+   not a later task: a change is not finished until the documents it makes untrue are corrected.
+4. **For a web application that offers an API, a published API description kept in step with the code** (OpenAPI / Swagger,
+   or the project's equivalent), and a **browsable Swagger UI (or equivalent) area** so that people who use the API can see
+   how to use it. That area may be restricted to API users only; where it is public that is a stated choice, never an
+   accident. Keep the description and the viewer correct with every API change, and check the description against the code
+   by an automatic check where one can be written.
+
+If a document, issue board or description is found stale, fixing it is part of the task that found it. If a repository
+feature cannot be used (a missing token scope, no project board), say so plainly and raise it to the owner; do not pretend it
+is maintained.
+
+**For this repository, specifically:** the handoff is `.claude/HANDOFF.md` (the only one; `AGENTS.md` and `.OpenAI/CONTEXT.md` point at it); goals, requirements and prerequisites and plan pointers are in `docs/PROJECT.md`; the tracker is GitHub Issues and Milestones on MWBMPartners/WebMS-Intra (a GitHub Project board is not in use and `gh` here lacks the `read:project` scope: raise it to the owner rather than pretend); the API description is `web/_core/api-spec.json` with the Swagger UI at `/api-docs` (public on the live portal today, so that is a stated choice: restricting it to API users is a decision for the owner, tracked on its issue).
+
 **The rule that makes it work: anything NOT-DONE gets a GitHub issue in the same action that
 decides it.** A deferral, an open question, a "moved to the next package" — an issue, there and
 then. If it is not worth an issue, it is not worth recording. Nothing checks prose.

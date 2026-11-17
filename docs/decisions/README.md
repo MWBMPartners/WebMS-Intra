@@ -269,7 +269,8 @@ appended with its real date and a note that it was added later.
 | [D-211](211-a-membership-records-when-it-was-switched-off.md) | 2026-11-17 | D-211 · A membership records when it was switched off, so consent records can be cleared after a member leaves | in force |
 | [D-212](212-removing-a-person-from-an-organisation-stays-a-deletion.md) | 2026-11-17 | D-212 · "Remove" on the organisation users page stays a deletion; no leaving date is recorded for it | in force |
 | [D-213](213-switching-an-account-off-is-not-leaving.md) | 2026-11-17 | D-213 · Switching an account off (unticking Active) does not count as the member leaving | in force |
+| [D-214](214-one-source-of-truth-per-job-kept-current-and-usable-by-any-llm-platform.md) | 2026-11-17 | D-214 · One source of truth per job, kept current at every stage, and usable by any LLM platform | in force |
 
-*213 decisions. This index is checked against the folder by
+*214 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
