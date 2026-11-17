@@ -39,10 +39,10 @@ $installWideDiffering = InstallationSettings::differsHere('ai_assist');
 // 💷 The summary cards say what THIS organisation is really held to and using,
 //    which is what AiAssistant::improve() reads: the merged settings. Kept apart
 //    from the boxes on purpose. Only the provider card's label says so ("in use
-//    here"); the cap card's wording ("of £X cap") was left as it was.
+//    here"); the spend card now says each limit in ITS OWN currency, read from
+//    the database at each level and never from this merged array (#993, D-194).
 $inForce         = App::settings()['ai_assist'] ?? [];
 $inForce         = is_array($inForce) === true ? $inForce : [];
-$capInForce      = (int) ($inForce['monthCapPence'] ?? 5000);
 $providerInForce = (string) ($inForce['provider'] ?? 'anthropic');
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $provider = (string) ($settings['provider'] ?? 'anthropic');
@@ -54,7 +54,9 @@ $hasAnth = ((string) ($settings['anthropic']['apiKey'] ?? '')) !== '';
 $hasOa   = ((string) ($settings['openai']['apiKey']    ?? '')) !== '';
 $localBase = (string) ($settings['local']['baseUrl'] ?? '');
 
-$spend = AiAssistant::monthSpendPence($siteId);
+// 💷 What this month has cost and what each limit allows, in each currency's own
+//    terms, from the ONE place that works it out (ProviderSpend, #993).
+$spendLines = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'ai', $providerInForce));
 
 $callsToday = 0;
 $rs = $db->query('SELECT COUNT(*) AS n FROM tblAiUsage WHERE siteID = ' . (int) $siteId . ' AND DATE(occurredAt) = CURDATE()');
@@ -66,7 +68,7 @@ if ($rs !== false) {
 
 $recent = [];
 $stmt = $db->prepare(
-    'SELECT u.usageID, u.promptKind, u.provider, u.inputTokens, u.outputTokens, u.costPence, u.occurredAt, '
+    'SELECT u.usageID, u.promptKind, u.provider, u.inputTokens, u.outputTokens, u.costCurrency, u.costMillionths, u.occurredAt, '
     . '       us.fullName '
     . 'FROM tblAiUsage u LEFT JOIN tblUsers us ON us.userID = u.userID '
     . 'WHERE u.siteID = ? ORDER BY u.occurredAt DESC LIMIT 30'
@@ -119,8 +121,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="row g-3 mb-3">
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">This month spend</div>
-        <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($spend / 100, 2); ?></div>
-        <div class="small text-muted">of <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capInForce / 100, 2); ?> cap</div>
+        <div class="h4"><?php echo htmlspecialchars($spendLines['spent'], ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php foreach ($spendLines['limits'] as $limitLine): ?>
+            <div class="small text-muted"><?php echo htmlspecialchars($limitLine, ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php endforeach; ?>
+        <?php if ($spendLines['refusal'] !== ''): ?>
+            <div class="small text-danger mt-1"><?php echo htmlspecialchars($spendLines['refusal'], ENT_QUOTES, 'UTF-8'); ?>
+                <?php if (\Portal\Core\ProviderSpend::whyRefusedFor($db, $siteId, 'ai', $providerInForce) === 'no-rate'): ?>
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a>
+                <?php endif; ?></div>
+        <?php endif; ?>
     </div></div></div>
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">Calls today</div>
@@ -223,7 +233,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $r['promptKind'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $r['provider'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo (int) $r['inputTokens']; ?> in / <?php echo (int) $r['outputTokens']; ?> out</div>
-                        <div class="col-md-1 text-end">p<?php echo (int) $r['costPence']; ?></div>
+                        <div class="col-md-1 text-end"><?php echo htmlspecialchars(\Portal\Core\ProviderSpend::spendWords($r['costCurrency'] === null ? null : (string) $r['costCurrency'], $r['costMillionths'] === null ? null : (int) $r['costMillionths']), ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                 <?php endforeach; ?>
             </div>

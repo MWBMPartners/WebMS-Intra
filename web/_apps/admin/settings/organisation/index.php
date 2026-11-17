@@ -490,8 +490,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="form-text" id="installationCurrencyHelp">
                         The currency new records take in organisations that follow the installation. Changing it affects new
                         records only: every amount already recorded keeps the currency it was recorded in. Spending with
-                        outside providers (AI assistant, translation, text messages, transcription) and its monthly limits
-                        are shown in this currency and are not converted if it changes.
+                        outside companies (AI assistant, translation, text messages, transcription) is recorded in each
+                        company&rsquo;s own currency and is not affected. A monthly limit you have already saved keeps its
+                        number and is read in the new currency: it is not converted.
                     </div>
                     <?php if ($installCurrencyText !== '' && $currencyInstallation === ''): ?>
                         <div class="alert alert-warning small mt-2 mb-0" role="note" data-installation-currency-unusable><?php echo $e(

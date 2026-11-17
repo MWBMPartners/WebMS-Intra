@@ -37,9 +37,13 @@
  * WHOSE MONEY, AND WHOSE DATA. One API key, stored installation-wide, pays for
  * every organisation on the installation, and the audio leaves the server for
  * a third party. So everything here is scoped to one organisation —
- * `processQueue()`, `monthSpendPence()`, `queueStatsFor()`, `recentFor()` — and
- * the monthly ceiling follows the owner's rule for a limit: the installation's
- * value caps the organisation's (`capFrom()`, #668).
+ * `processQueue()`, `queueStatsFor()`, `recentFor()` — and the monthly ceiling
+ * follows the owner's rule for a limit: the installation's value caps the
+ * organisation's (#668). Since #993 the money side is `ProviderSpend`: each
+ * finished job's cost is worked out in the company's own currency, added to
+ * the month's record, and every limit is checked by
+ * `ProviderSpend::whyRefused()`, the installation's figure in the
+ * installation's currency and an organisation's own in its own (D-173, D-194).
  *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/276
@@ -56,14 +60,14 @@ class Transcription
     // 💳 What may be spent, and who decides 🏢
     // -------------------------------------------------------------------------
 
-    /** The installation-wide setting that holds the monthly ceiling, in pence. */
+    /** The setting that holds the monthly ceiling, in hundredths of the currency of the level that stores it. */
     public const CAP_KEY = 'transcription.monthCapPence';
 
-    /** £50 a month — roughly 100 hours of Whisper at list price. */
+    /** 50.00 a month — roughly 100 hours of Whisper at list price. */
     public const DEFAULT_CAP_PENCE = 5000;
 
     /**
-     * £5,000 a month: the hard maximum in code, which no setting can raise.
+     * 5,000.00 a month: the hard maximum in code, which no setting can raise.
      *
      * Three tiers, each unable to loosen the one above it: code, then the
      * installation, then the organisation. This is the first of them, and it
@@ -87,113 +91,6 @@ class Transcription
      */
     public const STUCK_AFTER_MINUTES = 120;
 
-    /**
-     * 🏢 The monthly ceiling this organisation may actually spend, in pence.
-     *
-     * THE INSTALLATION CAPS THE ORGANISATION. One installation may serve many
-     * organisations, and the administrator of the installation may be a
-     * different person from the administrators of the organisations on it — a
-     * hosting provider and its customers. Here that is not a nicety: ONE API
-     * key, stored installation-wide, pays for every organisation's
-     * transcription. So an organisation may hold itself to LESS than the
-     * installation allows, and may never give itself more. The owner's rule,
-     * 29 October 2026 (#668); `EventRecurrence::limitsFrom()` was the first
-     * reader built this way and this is the same shape deliberately.
-     *
-     * `$installWide` is `InstallationSettings::layer()` — the installation's
-     * own rows, with nothing laid over them. Pass it EMPTY rather than passing
-     * the merged array: an empty layer means "the installation allows the
-     * built-in default", which holds this organisation to £50 until start-up
-     * can read the layer again. That is visibly less than an installation
-     * which raised its cap asked for, and never more than it allowed. For a
-     * boundary between two parties over somebody else's money, allowing too
-     * little is recoverable and allowing too much is not — which is the case
-     * `InstallationSettings::layer()` exists for.
-     *
-     * @param array<string,mixed> $settings    The MERGED settings ($SETTINGS).
-     * @param array<string,mixed> $installWide The installation-wide layer alone.
-     */
-    public static function capFrom(array $settings, array $installWide): int
-    {
-        // 🏢 What the installation allows, resolved — so an installation that
-        //    has chosen nothing still has a number.
-        $allowed = self::installationAllowsPence($installWide);
-
-        // 🏢 What this organisation asked for, UNRESOLVED: null means nothing
-        //    anywhere has chosen a figure.
-        //
-        //    WHAT ACTUALLY STOPS THE DEFAULT CAPPING THE INSTALLATION, said
-        //    precisely, because the first version of this comment overstated it
-        //    and a planted fault proved the claim false. `$settings` is the
-        //    MERGED array: when an organisation has chosen nothing, it already
-        //    holds the INSTALLATION'S figure. So an installation that raises its
-        //    ceiling to £200 gives min(20000, 20000) and the raise sticks. The
-        //    merge is what carries that, not the test below — changing this line
-        //    to resolve null to the default changes no answer in any reachable
-        //    state, which was measured rather than reasoned about.
-        //
-        //    The test is still here, and is not decoration: it is the only thing
-        //    that keeps the answer right if this is ever handed an UNMERGED
-        //    array holding one organisation's own rows alone. Then "chose
-        //    nothing" really is null, and resolving it to the built-in default
-        //    would cap a £200 installation at £50 — the shape of the fault
-        //    `EventRecurrence::limitsFrom()` shipped once and check H04 caught.
-        //
-        //    So the guard that section J really tests is the LAYER this reads:
-        //    `$allowed` must come from the installation's own rows. Reading it
-        //    from `$settings` instead would let an organisation's figure become
-        //    its own ceiling, and min(x, x) is x. That is what J03 and J05 pin.
-        $wanted = self::rawCapPence($settings);
-        if ($wanted === null) {
-            return $allowed;
-        }
-
-        return min($wanted, $allowed);
-    }
-
-    /**
-     * 🏢 What the installation permits, for a page that wants to say so.
-     *
-     * @param array<string,mixed> $installWide
-     */
-    public static function installationAllowsPence(array $installWide): int
-    {
-        $raw = self::rawCapPence($installWide);
-
-        return $raw === null ? self::DEFAULT_CAP_PENCE : $raw;
-    }
-
-    /**
-     * The cap as stored, or null when nothing has been chosen at this layer.
-     *
-     * A value that is not a whole number, or is negative, counts as "not
-     * chosen": a setting nobody can read must never be the thing that decides
-     * what may be spent.
-     *
-     * A STORED ZERO IS ACCEPTED, and means "spend nothing" — a real choice for
-     * an installation that wants transcription available but not in use. It is
-     * NOT treated as "not chosen", because that would quietly turn a deliberate
-     * zero into £50. `whyNotQueueable()` has its own reason for it, so nobody
-     * is told a budget "has been used up" when none was ever set.
-     *
-     * The hard maximum is applied here, so no caller can forget it.
-     *
-     * @param array<string,mixed> $layer
-     */
-    private static function rawCapPence(array $layer): ?int
-    {
-        $value = $layer['transcription']['monthCapPence'] ?? null;
-        if (is_string($value) === false && is_int($value) === false) {
-            return null;
-        }
-        $text = trim((string) $value);
-        if ($text === '' || preg_match('/^\d+$/', $text) !== 1) {
-            return null;
-        }
-
-        return min((int) $text, self::HARD_MAX_CAP_PENCE);
-    }
-
     // -------------------------------------------------------------------------
     // 🎚️ Whether a recording may be queued at all — ONE place
     // -------------------------------------------------------------------------
@@ -216,7 +113,10 @@ class Transcription
      * thing that is true of THAT recording rather than sent to ask their
      * administrator for an API key that would not help.
      *
-     * @param array{appIsOn:bool, hasMedia:bool, providerReady:bool, stillRunning:bool, capPence:int, spentPence:int} $facts
+     * `moneyRefusal` is `ProviderSpend::whyRefused()`'s answer for this
+     * organisation ('' when the month's money allows another job).
+     *
+     * @param array{appIsOn:bool, hasMedia:bool, providerReady:bool, stillRunning:bool, moneyRefusal:string} $facts
      */
     public static function whyNotQueueable(array $facts): string
     {
@@ -236,14 +136,18 @@ class Transcription
         //    would be untrue: an administrator told "this month's budget has
         //    been used up" when none was ever set goes looking for spending
         //    that never happened.
-        if ($facts['capPence'] <= 0) {
-            return 'no-budget';
-        }
-        if ($facts['spentPence'] >= $facts['capPence']) {
-            return 'over-cap';
-        }
-
-        return '';
+        //    The word comes from `ProviderSpend::whyRefused()`, which asks BOTH
+        //    levels (the installation's figure in its currency, an organisation's
+        //    own in its own) and cannot be asked twice differently by a page and
+        //    a handler (#647).
+        return match ((string) $facts['moneyRefusal']) {
+            ''                                         => '',
+            'no-budget'                                => 'no-budget',
+            'installation-limit', 'organisation-limit' => 'over-cap',
+            'no-rate'                                  => 'no-rate',
+            'no-currency'                              => 'no-currency',
+            default                                    => 'unreadable',
+        };
     }
 
     /**
@@ -261,6 +165,9 @@ class Transcription
             'busy'        => 'This recording is being transcribed right now. Waiting for it to finish costs nothing; asking again would send the same audio twice and be charged twice.',
             'over-cap'    => 'This month\'s transcription budget has been used up. It starts again at the beginning of next month, or a global administrator can raise it under Admin, Transcription.',
             'no-budget'   => 'No transcription budget has been set, so nothing can be sent. A global administrator can set one under Admin, Transcription.',
+            'no-rate'     => 'Transcription cannot be used right now: there is no exchange rate to check this month\'s spending limit. An administrator can add one under Admin, Exchange rates.',
+            'no-currency' => 'Transcription cannot be used right now: no currency has been chosen to check this month\'s spending limit in. An administrator can choose one under Admin, Settings, Organisation.',
+            'unreadable'  => 'Transcription is not available just now, because the portal could not check this month\'s spending. Nothing was sent.',
             default       => 'This recording cannot be transcribed at the moment.',
         };
     }
@@ -309,13 +216,13 @@ class Transcription
      * `stillRunning` is worked out BY THE DATABASE, against the same clock the
      * column was written on, so no PHP time zone enters into it.
      *
-     * @return array{status:string, stillRunning:bool, startedAt:?string, generatedAt:?string, errorMsg:?string, costPence:?int, hasText:bool}|null
+     * @return array{status:string, stillRunning:bool, startedAt:?string, generatedAt:?string, errorMsg:?string, costCurrency:?string, costMillionths:?int, hasText:bool}|null
      */
     public static function stateFor(int $recordingId, int $siteId): ?array
     {
         $db   = App::db();
         $stmt = $db->prepare(
-            'SELECT t.status, t.startedAt, t.generatedAt, t.errorMsg, t.costPence, '
+            'SELECT t.status, t.startedAt, t.generatedAt, t.errorMsg, t.costCurrency, t.costMillionths, '
             . '       (t.fullText IS NOT NULL AND t.fullText <> \'\') AS hasText, '
             . '       (t.status = \'processing\' AND t.startedAt IS NOT NULL '
             . '        AND TIMESTAMPDIFF(MINUTE, t.startedAt, NOW()) < ?) AS stillRunning '
@@ -340,7 +247,8 @@ class Transcription
             'startedAt'    => $row['startedAt'] !== null ? (string) $row['startedAt'] : null,
             'generatedAt'  => $row['generatedAt'] !== null ? (string) $row['generatedAt'] : null,
             'errorMsg'     => $row['errorMsg'] !== null ? (string) $row['errorMsg'] : null,
-            'costPence'    => $row['costPence'] !== null ? (int) $row['costPence'] : null,
+            'costCurrency'   => $row['costCurrency'] !== null ? (string) $row['costCurrency'] : null,
+            'costMillionths' => $row['costMillionths'] !== null ? (int) $row['costMillionths'] : null,
             'hasText'      => (int) $row['hasText'] === 1,
         ];
     }
@@ -401,7 +309,7 @@ class Transcription
         $rows  = [];
         $db    = App::db();
         $stmt  = $db->prepare(
-            'SELECT t.transcriptID, t.recordingID, t.provider, t.status, t.durationSec, t.costPence, '
+            'SELECT t.transcriptID, t.recordingID, t.provider, t.status, t.durationSec, t.costCurrency, t.costMillionths, '
             . '       t.generatedAt, t.startedAt, t.errorMsg, r.title '
             . 'FROM tblTranscript t INNER JOIN tblRecording r ON r.recordingID = t.recordingID '
             . 'WHERE r.siteID = ? ORDER BY t.queuedAt DESC, t.transcriptID DESC LIMIT ?'
@@ -618,12 +526,6 @@ class Transcription
         $settings        = App::settings()['transcription'] ?? [];
         $defaultProvider = (string) ($settings['provider'] ?? 'openai');
 
-        // 💳 What this organisation may spend this month. The installation's
-        //    own layer is read ON ITS OWN, because for a limit the
-        //    installation's value caps the organisation's and the merged array
-        //    cannot tell the two apart (#668).
-        $capPence = self::capFrom(App::settings(), InstallationSettings::layer());
-
         $jobs = [];
         $stmt = $db->prepare(
             'SELECT t.transcriptID, t.recordingID, t.provider, r.filePath, r.mimeType, r.siteID '
@@ -644,6 +546,7 @@ class Transcription
         $failed       = 0;
         $skipped      = 0;
         $stoppedByCap = false;
+        $stoppedWhy   = '';
 
         foreach ($jobs as $job) {
             $tid         = (int) $job['transcriptID'];
@@ -653,8 +556,15 @@ class Transcription
             //    finished job adds its cost, so a long batch has to be able to
             //    stop part-way. The remaining rows stay queued and are picked
             //    up next month, or sooner if the cap is raised.
-            if (self::monthSpendPence($siteId) >= $capPence) {
+            //    `ProviderSpend::whyRefused()` weighs the installation's figure
+            //    in its currency and an organisation's own in its own (#668,
+            //    D-194), and refuses where a rate is missing (D-192). It is asked
+            //    with THIS job's provider, because the currency is the provider's.
+            $jobProvider = (string) ($job['provider'] ?? $defaultProvider);
+            $whyMoney    = ProviderSpend::whyRefusedFor($db, $siteId, 'transcription', $jobProvider);
+            if ($whyMoney !== '') {
                 $stoppedByCap = true;
+                $stoppedWhy   = $whyMoney;
                 break;
             }
 
@@ -722,7 +632,7 @@ class Transcription
                 }
 
                 $provider = (string) ($job['provider'] ?? $defaultProvider);
-                $result   = self::providerTranscribe($provider, $settings, $path, (string) ($job['mimeType'] ?? 'audio/mpeg'));
+                $result   = static::providerTranscribe($provider, $settings, $path, (string) ($job['mimeType'] ?? 'audio/mpeg'));
                 if ($result['ok'] !== true) {
                     self::markFailed($tid, $result['error'] ?? 'provider-error');
                     $failed++;
@@ -733,7 +643,14 @@ class Transcription
                 $segments = $result['segments'] !== null ? json_encode($result['segments']) : null;
                 $language = (string) ($result['language'] ?? ((string) ($settings['language'] ?? 'en')));
                 $duration = (int) ($result['duration'] ?? 0);
-                $cost     = (int) ($result['costPence'] ?? 0);
+                // 💷 Priced in the company's own currency from what it reported
+                //    (the seconds of audio), and RECORDED AT ONCE — before the
+                //    row is written — because the company has already been paid
+                //    and a failure in the UPDATE below must not lose the charge.
+                $cost = ProviderSpend::cost('transcription', $provider, null, ['seconds' => $duration]);
+                ProviderSpend::record($db, $siteId, 'transcription', $cost);
+                $costCurrency   = $cost === null ? null : (string) $cost['currency'];
+                $costMillionths = $cost === null ? null : (int) $cost['millionths'];
 
                 // 🧨 `fullText` IS BACKQUOTED BECAUSE IT HAS TO BE. `FULLTEXT` is a
                 //    reserved word in MySQL, and keywords are matched without
@@ -752,15 +669,16 @@ class Transcription
                 //    does not.
                 $u = $db->prepare(
                     'UPDATE tblTranscript SET status = \'completed\', `fullText` = ?, jsonSegments = ?, '
-                    . 'language = ?, durationSec = ?, costPence = ?, generatedAt = NOW(), errorMsg = NULL '
+                    . 'language = ?, durationSec = ?, costCurrency = ?, costMillionths = ?, generatedAt = NOW(), errorMsg = NULL '
                     . 'WHERE transcriptID = ?'
                 );
                 if ($u !== false) {
-                    // 'sssiii': the last three are whole numbers. This said
-                    // 'ssssii', which bound the duration as a string — harmless,
-                    // because MySQL converts it, but the types should say what the
-                    // values are.
-                    $u->bind_param('sssiii', $text, $segments, $language, $duration, $cost, $tid);
+                    // 'sssisii': text, segments and language, then the duration as a
+                    // whole number, the currency as text, the cost and the row as
+                    // whole numbers. (An old version bound the duration as a
+                    // string — harmless, but the types should say what the
+                    // values are.)
+                    $u->bind_param('sssisii', $text, $segments, $language, $duration, $costCurrency, $costMillionths, $tid);
                     $u->execute();
                     $u->close();
                 }
@@ -786,7 +704,7 @@ class Transcription
             }
         }
 
-        return ['done' => $done, 'failed' => $failed, 'skipped' => $skipped, 'stoppedByCap' => $stoppedByCap];
+        return ['done' => $done, 'failed' => $failed, 'skipped' => $skipped, 'stoppedByCap' => $stoppedByCap, 'stoppedWhy' => $stoppedWhy];
     }
 
     /**
@@ -820,58 +738,17 @@ class Transcription
         return $rows;
     }
 
-    /**
-     * 💳 What ONE organisation has spent on transcription this calendar month,
-     * in pence.
-     *
-     * SCOPED, where it used to be installation-wide. `tblTranscript` has no
-     * organisation of its own, so this joins through the recording to find it.
-     * Before this, an organisation's administrator read a figure that included
-     * every other organisation's spending on the same installation — and the
-     * cap is checked against this number, so one busy organisation would have
-     * stopped all the others from transcribing anything.
-     *
-     * The month boundary is the server's own calendar month, matching
-     * `generatedAt`'s clock. `Sms::monthSpendPence()` and
-     * `AiAssistant::monthSpendPence()` are the same shape.
-     *
-     * Only `completed` rows count. A failed job is not charged for, and a job
-     * still running has no cost recorded yet — which means a very large batch
-     * can carry the month a little past its cap before the next check sees it.
-     * That is said plainly rather than fixed by guessing at a price before the
-     * provider has quoted one.
-     */
-    public static function monthSpendPence(int $siteId): int
-    {
-        $db = App::db();
-        $stmt = $db->prepare(
-            'SELECT COALESCE(SUM(t.costPence), 0) FROM tblTranscript t '
-            . 'INNER JOIN tblRecording r ON r.recordingID = t.recordingID '
-            . 'WHERE r.siteID = ? AND t.status = \'completed\' '
-            . '  AND t.generatedAt >= DATE_FORMAT(NOW(), \'%Y-%m-01\')'
-        );
-        if ($stmt === false) {
-            return 0;
-        }
-        $stmt->bind_param('i', $siteId);
-        $stmt->execute();
-        $stmt->bind_result($spend);
-        $stmt->fetch();
-        $stmt->close();
-
-        return (int) $spend;
-    }
-
     // -------------------------------------------------------------------------
     // Providers
     // -------------------------------------------------------------------------
 
     /**
      * Returns ['ok'=>bool, 'text'=>string, 'segments'=>?array,
-     *          'language'=>?string, 'duration'=>?int, 'costPence'=>?int,
-     *          'error'=>?string].
+     *          'language'=>?string, 'duration'=>?int, 'error'=>?string].
+     * The cost is NOT here: `processQueue()` prices the seconds of audio the
+     * company reports, in one place (`ProviderSpend::cost()`).
      */
-    private static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
+    protected static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
     {
         switch ($provider) {
             case 'openai':
@@ -928,8 +805,6 @@ class Transcription
         }
         $text     = (string) ($body['text'] ?? '');
         $duration = (int) round((float) ($body['duration'] ?? 0));
-        // whisper-1 list price ~$0.006/min → ~0.5p/min at current rates.
-        $costPence = (int) ceil(($duration / 60.0) * 0.5);
         $segments = null;
         if (isset($body['segments']) === true && is_array($body['segments']) === true) {
             $segments = array_map(static fn (array $s): array => [
@@ -944,7 +819,6 @@ class Transcription
             'segments' => $segments,
             'language' => (string) ($body['language'] ?? ''),
             'duration' => $duration,
-            'costPence' => $costPence,
         ];
     }
 
@@ -1018,8 +892,6 @@ class Transcription
             if ($st === 'completed') {
                 $text     = (string) ($status['text'] ?? '');
                 $duration = (int) round((float) ($status['audio_duration'] ?? 0));
-                // AssemblyAI Core ~$0.37/hr → ~0.5p/min at current rates.
-                $costPence = (int) ceil(($duration / 60.0) * 0.5);
                 $segments = null;
                 if (isset($status['words']) === true && is_array($status['words']) === true) {
                     $segments = array_map(static fn (array $w): array => [
@@ -1034,7 +906,6 @@ class Transcription
                     'segments' => $segments,
                     'language' => (string) ($status['language_code'] ?? ''),
                     'duration' => $duration,
-                    'costPence' => $costPence,
                 ];
             }
             if ($st === 'error') {
@@ -1075,7 +946,6 @@ class Transcription
             'segments' => null,
             'language' => (string) ($settings['language'] ?? 'en'),
             'duration' => 0,
-            'costPence' => 0,
         ];
     }
 

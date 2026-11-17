@@ -5202,13 +5202,19 @@ function brs_proof29(): void
 }
 
 /**
- * PROOF 30 (#801). `tblTranslationUsage` counts, per organisation per month,
- * the translation requests made and their reported cost, and both monthly
- * limits read it (#762). A restore used to put it back to the snapshot's
+ * PROOF 30 (#801, extended by #993). `tblTranslationUsage` counts, per
+ * organisation per month, the translation requests made, and since #993 the
+ * month's MONEY for every outside company (AI, translation, transcription,
+ * texts) is `tblProviderSpend`, per organisation, service and currency; both
+ * monthly limits read them. A restore used to put them back to the snapshot's
  * figures, so a backup from earlier in the month gave an organisation its
  * limit again. Now the CURRENT month's rows keep the larger figure per
- * organisation and per counter; earlier months come back as the snapshot has
- * them.
+ * organisation and per counter, per service and currency for the money;
+ * earlier months come back as the snapshot has them. The proof's own
+ * "pence" are US dollars' hundredths written as millionths in
+ * `tblProviderSpend` (service translation), so every section below really
+ * exercises the money record; section G adds the other services and a
+ * second currency.
  *
  * Every figure is read back from the database over this test's own
  * connection. The made-up organisations need no `tblSites` row: the table has
@@ -5231,28 +5237,57 @@ function brs_proof30(): void
         $month . ' against ' . \Portal\Core\Translation::usageMonth()
     );
 
-    /** site => [calls, costPence] for one month, read back from the database. */
+    /**
+     * site => [calls, money] for one month, read back from the database. The money
+     * is the translation service's US-dollar total in HUNDREDTHS of a dollar (the
+     * table holds millionths; each figure here is written as hundredths x 10,000).
+     */
     $figures = static function (string $which): array {
         $out  = [];
-        $stmt = Brs::$writer->prepare('SELECT siteID, calls, costPence FROM tblTranslationUsage WHERE monthStartUtc = ? AND siteID BETWEEN 970301 AND 970309 ORDER BY siteID');
+        $stmt = Brs::$writer->prepare('SELECT siteID, calls FROM tblTranslationUsage WHERE monthStartUtc = ? AND siteID BETWEEN 970301 AND 970309 ORDER BY siteID');
         $stmt->bind_param('s', $which);
         $stmt->execute();
         $result = $stmt->get_result();
         while (($row = $result->fetch_assoc()) !== null) {
-            $out[(int) $row['siteID']] = [(int) $row['calls'], (int) $row['costPence']];
+            $out[(int) $row['siteID']] = [(int) $row['calls'], 0];
         }
         $stmt->close();
+        $stmt = Brs::$writer->prepare(
+            "SELECT siteID, costMillionths FROM tblProviderSpend WHERE monthStartUtc = ? AND service = 'translation' AND costCurrency = 'USD' AND siteID BETWEEN 970301 AND 970309 ORDER BY siteID"
+        );
+        $stmt->bind_param('s', $which);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while (($row = $result->fetch_assoc()) !== null) {
+            $site = (int) $row['siteID'];
+            $out[$site] = [($out[$site][0] ?? 0), intdiv((int) $row['costMillionths'], 10000)];
+        }
+        $stmt->close();
+        ksort($out);
 
         return $out;
     };
     $set = static function (string $which, int $site, int $calls, int $pence): void {
         $stmt = Brs::$writer->prepare(
-            'INSERT INTO tblTranslationUsage (siteID, monthStartUtc, calls, costPence) VALUES (?, ?, ?, ?) '
-            . 'ON DUPLICATE KEY UPDATE calls = ?, costPence = ?'
+            'INSERT INTO tblTranslationUsage (siteID, monthStartUtc, calls) VALUES (?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE calls = ?'
         );
-        $stmt->bind_param('isiiii', $site, $which, $calls, $pence, $calls, $pence);
+        $stmt->bind_param('isii', $site, $which, $calls, $calls);
         $stmt->execute();
         $stmt->close();
+        $stmt = Brs::$writer->prepare("DELETE FROM tblProviderSpend WHERE siteID = ? AND monthStartUtc = ? AND service = 'translation' AND costCurrency = 'USD'");
+        $stmt->bind_param('is', $site, $which);
+        $stmt->execute();
+        $stmt->close();
+        if ($pence > 0) {
+            $millionths = $pence * 10000;
+            $stmt = Brs::$writer->prepare(
+                "INSERT INTO tblProviderSpend (siteID, monthStartUtc, service, costCurrency, costMillionths) VALUES (?, ?, 'translation', 'USD', ?)"
+            );
+            $stmt->bind_param('isi', $site, $which, $millionths);
+            $stmt->execute();
+            $stmt->close();
+        }
     };
 
     // ---------------------------------------------------------------------
@@ -5330,6 +5365,7 @@ function brs_proof30(): void
     //    snapshot's come back and nothing is said about translation.
     // ---------------------------------------------------------------------
     Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
+    Brs::$writer->query('DELETE FROM tblProviderSpend WHERE siteID BETWEEN 970301 AND 970309');
     $again = $backup->restoreAll($dir);
     brs_check(
         ($again['success'] ?? false) === true && $figures($month) === [970301 => [5, 100], 970302 => [2, 900]],
@@ -5337,8 +5373,8 @@ function brs_proof30(): void
         brs_say([$again['error'] ?? '', $figures($month)])
     );
     brs_check(
-        str_contains(implode(' ', $again['warnings'] ?? []), 'translation figures') === false,
-        'and nothing is said about translation figures, because nothing was kept',
+        str_contains(implode(' ', $again['warnings'] ?? []), 'figures for outside companies') === false,
+        'and nothing is said about the figures for outside companies, because nothing was kept',
         brs_say($again['warnings'] ?? [])
     );
 
@@ -5366,7 +5402,7 @@ function brs_proof30(): void
     //    database error number (BrsUsageFault). 970301 is at 20/400 now and
     //    the snapshot holds 5/100, so a working carry would keep 20/400.
     // ---------------------------------------------------------------------
-    $failSentence = 'be sure of keeping this month\'s translation figures';
+    $failSentence = 'be sure of keeping this month\'s figures for outside companies';
     foreach ([['read', 1146], ['write', 1644]] as [$where, $code]) {
         BrsUsageFault::$where = $where;
         BrsUsageFault::$code  = $code;
@@ -5402,7 +5438,82 @@ function brs_proof30(): void
         );
     }
 
+    // ---------------------------------------------------------------------
+    // G. The month's MONEY for every service and currency (#993). Written
+    //    directly, because section A-F use one service and one currency. The
+    //    snapshot holds AI at $1.00 and texts at EUR 0.40 for 970304; since
+    //    then AI went UP to $5.00 and a THIRD figure (AI in euros) appeared;
+    //    for 970305 the live figure is LOWER than the snapshot's.
+    // ---------------------------------------------------------------------
     Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
+    Brs::$writer->query('DELETE FROM tblProviderSpend WHERE siteID BETWEEN 970301 AND 970309');
+    $money = static function (string $which): array {
+        $out  = [];
+        $stmt = Brs::$writer->prepare('SELECT siteID, service, costCurrency, costMillionths FROM tblProviderSpend WHERE monthStartUtc = ? AND siteID BETWEEN 970301 AND 970309 ORDER BY siteID, service, costCurrency');
+        $stmt->bind_param('s', $which);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while (($row = $result->fetch_assoc()) !== null) {
+            $out[] = (int) $row['siteID'] . ':' . $row['service'] . ':' . $row['costCurrency'] . '=' . (int) $row['costMillionths'];
+        }
+        $stmt->close();
+
+        return $out;
+    };
+    $put = static function (string $which, int $site, string $service, string $code, int $millionths): void {
+        $stmt = Brs::$writer->prepare(
+            'INSERT INTO tblProviderSpend (siteID, monthStartUtc, service, costCurrency, costMillionths) VALUES (?, ?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE costMillionths = ?'
+        );
+        $stmt->bind_param('isssii', $site, $which, $service, $code, $millionths, $millionths);
+        $stmt->execute();
+        $stmt->close();
+    };
+    $put($month, 970304, 'ai', 'USD', 1000000);
+    $put($month, 970304, 'sms', 'EUR', 400000);
+    $put($month, 970305, 'transcription', 'USD', 900000);
+    $put($last, 970304, 'ai', 'USD', 7000000);
+    $takenG = $backup->snapshot('proof 30 G, earlier this month');
+    if (brs_check($takenG['success'] === true, 'a snapshot is taken with this month\'s money for several services and currencies', brs_say($takenG)) === false) {
+        return;
+    }
+    $dirG = (string) $takenG['directory'];
+    $put($month, 970304, 'ai', 'USD', 5000000);        // went UP: must be kept
+    $put($month, 970304, 'ai', 'EUR', 250000);         // a new currency the snapshot never had: kept
+    $put($month, 970305, 'transcription', 'USD', 100000);   // went DOWN (hand edit): the snapshot's larger figure wins
+    $put($last, 970304, 'ai', 'USD', 9999999);         // last month: the snapshot's figure comes back
+    $restoredG = $backup->restoreAll($dirG);
+    brs_check(
+        ($restoredG['success'] ?? false) === true && $money($month) === [
+            '970304:ai:EUR=250000', '970304:ai:USD=5000000', '970304:sms:EUR=400000', '970305:transcription:USD=900000',
+        ],
+        'the money is carried per organisation, SERVICE and CURRENCY, taking the larger figure each time: AI in dollars keeps the live $5.00, AI in euros (a currency the snapshot never had) is kept, texts in euros come back from the snapshot, and a LOWER live figure is replaced by the snapshot\'s larger one',
+        brs_say([$restoredG['error'] ?? '', $money($month)])
+    );
+    brs_check(
+        $money($last) === ['970304:ai:USD=7000000'],
+        'last month\'s money comes back exactly as the snapshot has it, not the later 9,999,999',
+        brs_say($money($last))
+    );
+    brs_check(
+        str_contains(implode(' ', $restoredG['warnings'] ?? []), 'figures for outside companies') === true,
+        'and the restore says the month\'s figures for outside companies were kept (for 970304 and 970305: two organisations)',
+        brs_say($restoredG['warnings'] ?? [])
+    );
+    // An ERASURE (not a restore) must not lower the month either: the record names nobody.
+    $beforeErase = $money($month);
+    Brs::$writer->query('DELETE FROM tblAiUsage WHERE siteID = 970304');
+    Brs::$writer->query('DELETE FROM tblSmsMessage WHERE siteID = 970304');
+    brs_check($money($month) === $beforeErase, 'deleting an organisation\'s AI and text rows, as an erasure does, leaves the month\'s money exactly as it was');
+    $oneT = $backup->restoreTable($dirG, 'tblProviderSpend');
+    brs_check(
+        ($oneT['success'] ?? false) === true && $money($month) === $beforeErase,
+        'a one-table restore of the money record keeps the larger figures too',
+        brs_say([$oneT, $money($month)])
+    );
+
+    Brs::$writer->query('DELETE FROM tblTranslationUsage WHERE siteID BETWEEN 970301 AND 970309');
+    Brs::$writer->query('DELETE FROM tblProviderSpend WHERE siteID BETWEEN 970301 AND 970309');
     brs_checkSame($before, 'the whole database is back to how this proof found it');
 }
 
@@ -5446,7 +5557,7 @@ final class BrsUsageFault extends mysqli
 
     public function prepare(string $query): mysqli_stmt|false
     {
-        $isRead  = str_starts_with($query, 'SELECT `siteID`, `calls`, `costPence` FROM `tblTranslationUsage`');
+        $isRead  = str_starts_with($query, 'SELECT `siteID`, `calls` FROM `tblTranslationUsage`');
         $isWrite = str_starts_with($query, 'INSERT INTO `tblTranslationUsage`') && str_contains($query, 'GREATEST');
         if ((self::$where === 'read' && $isRead === true) || (self::$where === 'write' && $isWrite === true)) {
             throw new mysqli_sql_exception('planted by proof 30', self::$code);

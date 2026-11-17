@@ -28,13 +28,18 @@
  * TWO monthly limits, per organisation, stop new provider calls once either
  * is reached; cached lookups still serve (#762, D-059):
  *
- *   translation.monthCapPence  money, as each provider REPORTS it;
+ *   translation.monthCapPence  money, worked out by `ProviderSpend` from the
+ *                              provider's own usage figures, in the
+ *                              provider's own currency, and compared with
+ *                              the limit in the currency of the level that
+ *                              set it (#993, D-173, D-194);
  *   translation.monthCallCap   the NUMBER of requests sent to the provider,
  *                              which works whatever a provider reports.
  *
- * Both are counted in `tblTranslationUsage`, one row per organisation per
- * calendar month in UTC, written at the moment a provider call is made — not
- * read back out of the cache (see `monthUsage()` for why).
+ * The number of requests is counted in `tblTranslationUsage`, one row per
+ * organisation per calendar month in UTC, written at the moment a provider
+ * call is made; the money is recorded in `tblProviderSpend`. Neither is read
+ * back out of the cache (see `monthUsage()` for why).
  *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/278
@@ -60,15 +65,18 @@ namespace Portal\Core;
 class Translation
 {
     /**
-     * 💸 The monthly spend cap's built-in default and hard maximum, in pence.
+     * 💸 The monthly spend cap's built-in default and hard maximum, in
+     *    HUNDREDTHS of the currency of the level that stores the figure (the
+     *    constants keep their old `PENCE` names; renaming is its own issue).
      *
-     * The default matches what `full_schema.sql` seeds (`5000`, i.e. £50) and
-     * is here as well because a reader must have an answer on an installation
-     * whose row is missing — which is the state between files reaching a
-     * server and somebody pressing "Run migrations".
+     * The default matches what `full_schema.sql` seeds (`5000`, i.e. 50.00)
+     * and is here as well because a reader must have an answer on an
+     * installation whose row is missing — which is the state between files
+     * reaching a server and somebody pressing "Run migrations".
      *
-     * The hard maximum is £1,000 a month. Nothing may ever resolve above it,
-     * whichever level asked.
+     * The hard maximum is 1,000.00 a month. Nothing may ever resolve above it,
+     * whichever level asked. `ProviderSpend::DEFAULT_CAPS` and `HARD_MAX_CAPS`
+     * read these two, so the limit check and this class cannot disagree.
      */
     public const DEFAULT_CAP_PENCE = 5000;
     public const MAX_CAP_PENCE     = 100000;
@@ -140,6 +148,10 @@ class Translation
      *   'not-set-up' the provider is unknown or has no key, so nothing could
      *                be sent and nothing was counted
      *   'money'      the month's money limit is reached
+     *   'no-rate'    a limit has to be checked and there is no usable exchange
+     *                rate for the company's currency, so nothing was sent (D-192)
+     *   'no-currency' a limit has to be checked and no currency has been
+     *                chosen for the level that set it, so nothing was sent
      *   'calls'      the month's limit on the number of requests is reached
      *   'unreadable' this month's use could not be read or recorded, so
      *                nothing was sent: on a money path, "we could not tell"
@@ -214,10 +226,13 @@ class Translation
         //    backup, or stored before any refusal existed is still obeyed
         //    unless the SPENDER caps as well.
         //
-        //    `capPence()` is what holds the organisation to what the
-        //    installation allows (D-013): the two administrators may be
-        //    different parties, so an organisation may hold itself to less and
-        //    may never allow itself more.
+        //    `ProviderSpend::whyRefused()` is what holds the organisation to
+        //    what the installation allows (D-013, D-194): the installation's
+        //    figure is compared in the installation's currency and the
+        //    organisation's own figure in its own currency, and the stricter
+        //    wins, so an organisation may hold itself to less and may never
+        //    allow itself more. A limit that has to be compared and has no
+        //    exchange rate refuses (D-192); no limit at either level, no rate.
         //
         //    🔢 AND THE COUNT (#762, D-059), asked SECOND and by a different
         //    mechanism, for two reasons that are both load-bearing:
@@ -236,7 +251,7 @@ class Translation
         //    CALLS, and the difference is real today and grew when #799 made
         //    an edited announcement translate afresh into the SAME row.
         //
-        //    ⛔ AND "COULD NOT READ" REFUSES. `monthSpendPence()` used to answer
+        //    ⛔ AND "COULD NOT READ" REFUSES. The old spend reader answered
         //    0 when its statement could not be prepared — on a money path that
         //    is "we could not tell" becoming "nothing spent, go ahead". Under
         //    this portal's strict mysqli reporting the branch was unreachable
@@ -264,8 +279,14 @@ class Translation
             self::$lastRefusal = 'unreadable';
             return false;
         }
-        if (self::moneyReached($usage['pence']) === true) {
-            self::$lastRefusal = 'money';
+        $whyMoney = ProviderSpend::whyRefused(App::db(), $siteId, 'translation', ProviderSpend::currencyOf('translation', $provider));
+        if ($whyMoney !== '') {
+            self::$lastRefusal = match ($whyMoney) {
+                'installation-limit', 'organisation-limit' => 'money',
+                'no-rate'                                  => 'no-rate',
+                'no-currency'                              => 'no-currency',
+                default                                    => 'unreadable',
+            };
             return false;
         }
         $reserved = self::reserveCall($siteId, $month, self::callCap());
@@ -313,7 +334,7 @@ class Translation
      * back THROUGH this method, so the translation path cannot skip it, and
      * the self-test drives this method directly with a cost above 0.
      *
-     * @param array{text:string, costPence:int} $result      What the provider answered.
+     * @param array{text:string, cost:array{currency:string, millionths:int}|null} $result What the provider answered.
      * @param string                             $fingerprint `sourceFingerprint()` of the words that were
      *                                                        sent, stored so the cache knows them (#799).
      */
@@ -321,8 +342,8 @@ class Translation
                                    string $sourceField, string $sourceLang, string $targetLang, string $provider,
                                    string $fingerprint): string
     {
-        self::recordSpend($siteId, $month, (int) $result['costPence']);
-        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, (string) $result['text'], $provider, (int) $result['costPence'], $fingerprint);
+        ProviderSpend::record(App::db(), $siteId, 'translation', $result['cost'], $month);
+        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, (string) $result['text'], $provider, $result['cost'], $fingerprint);
         return (string) $result['text'];
     }
 
@@ -353,18 +374,6 @@ class Translation
             default:
                 return false;
         }
-    }
-
-    /**
-     * 💰 Is this month's MONEY limit reached, for the organisation being
-     *    served? The ONE comparison, asked by `translate()` and by the admin
-     *    page, so the page cannot say "reached" while a press still sends.
-     *    `>=`, because a limit of £50 is reached AT £50.
-     */
-    public static function moneyReached(int $pence): bool
-    {
-        $cap = self::capPence();
-        return $cap > 0 && $pence >= $cap;
     }
 
     /**
@@ -438,52 +447,15 @@ class Translation
     }
 
     /**
-     * 💰 The most that may be spent on translation in a month, in pence — the
-     *    ONE answer to that question.
-     *
-     * The LIMIT can differ by organisation, because `SettingLimit` lets an
-     * organisation tighten the installation's figure, and the SPEND it is
-     * compared against is per organisation too: #765 made it so, and since
-     * #762 it is read from `tblTranslationUsage` by `monthUsage()`. (This
-     * docblock said, until #762, that the spend was summed across the whole
-     * installation — true when it was written, untrue after #765, and left
-     * standing in the one place a reader of the limit would look.)
-     *
-     * THREE TIERS, each able to tighten the one above it and none to loosen it
-     * (D-013): the hard maximum below, then the installation, then the
-     * organisation. `SettingLimit` does the arithmetic in one place; do not do
-     * it here and do not compare the two layers by hand.
-     *
-     * **ZERO MEANS "NO LIMIT", SO ZERO IS THE LARGEST VALUE AND NOT THE
-     * SMALLEST.** That is #668's trap, and getting it wrong is costly in both
-     * directions: read as the smallest, an installation that chose "no limit"
-     * would refuse every organisation including a tighter one; read as a plain
-     * number, an organisation could store 0 under an installation's £50 and
-     * spend without end. `$zeroIsLargest` is how it is expressed rather than
-     * converted by hand, because the rule — *"no limit is allowed only when the
-     * installation itself allows no limit"* — cannot be written as arithmetic.
-     *
-     * `MAX_CAP_PENCE` is the hard maximum. It is not a judgement about what a
-     * customer should spend; it is there so that a mistyped figure cannot
-     * become a bill, and so that "no limit" is a decision somebody takes
-     * rather than a number they typed badly.
-     *
-     * @return int Pence per calendar month, or 0 for no limit.
-     */
-    public static function capPence(): int
-    {
-        return SettingLimit::effective('translation.monthCapPence', self::DEFAULT_CAP_PENCE, self::MAX_CAP_PENCE, true);
-    }
-
-    /**
      * 🔢 The most provider requests allowed in a month — the ONE answer to that
-     *    question (#762, D-059). The twin of `capPence()`, built the same way.
+     *    question (#762, D-059). (Its money twin is `ProviderSpend::whyRefused()`,
+     *    #993.)
      *
      * Three tiers through `SettingLimit`, never compared by hand: the hard
      * maximum, then the installation, then the organisation, each able to
      * tighten the one above and none to loosen it (D-013). Zero means no
-     * limit, so it is the LARGEST value (`$zeroIsLargest`), for exactly the
-     * reasons written on `capPence()`.
+     * limit, so it is the LARGEST value (`$zeroIsLargest`), because 0 as a
+     * plain number would pass every limit (#668's zero trap).
      *
      * @return int Requests per calendar month (UTC), or 0 for no limit.
      */
@@ -521,8 +493,8 @@ class Translation
     }
 
     /**
-     * 🧾 This organisation's use this month — requests made and pence reported
-     *    — or NULL when it cannot be read.
+     * 🧾 This organisation's use this month — requests made — or NULL when it
+     *    cannot be read. (The money is `ProviderSpend::monthTotals()`, #993.)
      *
      * WHY A RECORD OF ITS OWN, AND NOT THE CACHE (measured, #762). The money
      * figure used to be `SUM(costPence)` over `tblContentTranslation`, the cache.
@@ -545,19 +517,19 @@ class Translation
      *     predicted that the fix would make a count of cache rows fall behind
      *     the bill, and it does.
      *
-     * So both limits are counted here, at the moment a call is made, one row
-     * per organisation per month, and the cache is only a cache.
+     * So the requests are counted here, and the money in `tblProviderSpend`,
+     * both at the moment a call is made, and the cache is only a cache.
      *
      * @param int    $siteId The organisation being served.
      * @param string $month  `usageMonth()`.
      *
-     * @return array{calls:int, pence:int}|null
+     * @return array{calls:int}|null
      */
     public static function monthUsage(int $siteId, string $month): ?array
     {
         try {
             $stmt = App::db()->prepare(
-                'SELECT `calls`, `costPence` FROM `tblTranslationUsage` '
+                'SELECT `calls` FROM `tblTranslationUsage` '
                 . 'WHERE `siteID` = ? AND `monthStartUtc` = ? LIMIT 1'
             );
             if ($stmt === false) {
@@ -565,7 +537,7 @@ class Translation
             }
             $stmt->bind_param('is', $siteId, $month);
             $stmt->execute();
-            $stmt->bind_result($calls, $pence);
+            $stmt->bind_result($calls);
             $hit = $stmt->fetch() === true;
             $stmt->close();
         } catch (\Throwable $e) {
@@ -576,9 +548,9 @@ class Translation
             return null;
         }
         if ($hit === false) {
-            return ['calls' => 0, 'pence' => 0];
+            return ['calls' => 0];
         }
-        return ['calls' => (int) $calls, 'pence' => (int) $pence];
+        return ['calls' => (int) $calls];
     }
 
     /**
@@ -601,8 +573,8 @@ class Translation
         try {
             $db = App::db();
             $make = $db->prepare(
-                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) '
-                . 'VALUES (?, ?, 0, 0) ON DUPLICATE KEY UPDATE `calls` = `calls`'
+                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`) '
+                . 'VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE `calls` = `calls`'
             );
             if ($make === false) {
                 return 'unreadable';
@@ -631,50 +603,9 @@ class Translation
         return $taken === 1 ? 'reserved' : 'full';
     }
 
-    /**
-     * 💷 Add what a call that SUCCEEDED was reported to cost.
-     *
-     * Its slot was taken before the call, so only the money is added here. If
-     * this write fails the translation is still returned — the provider has
-     * already been paid and refusing the words would waste that — and the
-     * failure is written to PHP's error log in fixed words, so an under-count
-     * is at least visible to whoever reads that log. Never the fault's own
-     * words: they can quote the statement and its values.
-     */
-    private static function recordSpend(int $siteId, string $month, int $costPence): void
-    {
-        if ($costPence <= 0) {
-            return;
-        }
-        try {
-            $stmt = App::db()->prepare(
-                'UPDATE `tblTranslationUsage` SET `costPence` = `costPence` + ? '
-                . 'WHERE `siteID` = ? AND `monthStartUtc` = ?'
-            );
-            if ($stmt === false) {
-                \error_log('Translation: the cost of a translation could not be recorded; this month\'s spend is under-counted.');
-                return;
-            }
-            $stmt->bind_param('iis', $costPence, $siteId, $month);
-            $stmt->execute();
-            $matched = $stmt->affected_rows;
-            $stmt->close();
-            // ⚠️ NO ROW MATCHED (#762 round 2). The reservation made this
-            //    month's row moments ago, so this means it vanished in between
-            //    — a restore in that window, say — and the spend was lost
-            //    without any error. Logged in fixed words naming only the
-            //    organisation, never the figure's context.
-            if ($matched !== 1) {
-                \error_log('Translation: the cost of a translation for organisation ' . $siteId
-                    . ' could not be recorded because this month\'s usage row was not there; this month\'s spend is under-counted.');
-            }
-        } catch (\Throwable $e) {
-            \error_log('Translation: the cost of a translation could not be recorded; this month\'s spend is under-counted.');
-        }
-    }
-
     // -------------------------------------------------------------------------
-    // Providers — each returns ['text'=>string, 'costPence'=>int] or null.
+    // Providers — each returns ['text'=>string, 'cost'=>?array] or null, where
+    // the cost is `ProviderSpend::cost()`'s answer (null: the company reports none).
     // -------------------------------------------------------------------------
 
     private static function providerTranslate(string $provider, array $settings, string $text, string $from, string $to): ?array
@@ -742,9 +673,10 @@ class Translation
         $out = \trim((string) $body['content'][0]['text']);
         $inTok  = (int) ($body['usage']['input_tokens']  ?? 0);
         $outTok = (int) ($body['usage']['output_tokens'] ?? 0);
-        // Haiku 4.5 list price ~$0.80 / $4 per MTok → tiny per call.
-        $costPence = (int) \ceil((($inTok * 0.00008) + ($outTok * 0.0004)) * 100);
-        return ['text' => $out, 'costPence' => \max(0, $costPence)];
+        // The price is worked out by ProviderSpend, in whole millionths of a
+        // dollar from the model that answered. (The old float formula here was
+        // 100 times too high; see ProviderSpend's header.)
+        return ['text' => $out, 'cost' => ProviderSpend::cost('translation', 'anthropic', $model, ['in' => $inTok, 'out' => $outTok])];
     }
 
     /**
@@ -788,8 +720,7 @@ class Translation
         }
         $inTok  = (int) ($body['usage']['prompt_tokens']     ?? 0);
         $outTok = (int) ($body['usage']['completion_tokens'] ?? 0);
-        $costPence = (int) \ceil((($inTok * 0.00015) + ($outTok * 0.0006)) * 100);
-        return ['text' => $out, 'costPence' => \max(0, $costPence)];
+        return ['text' => $out, 'cost' => ProviderSpend::cost('translation', 'openai', $model, ['in' => $inTok, 'out' => $outTok])];
     }
 
     /**
@@ -824,9 +755,8 @@ class Translation
         if ($out === '') {
             return null;
         }
-        // Google charges per source char; ~$20/M → ~1.5p / 10k chars.
-        $cost = (int) \ceil((\mb_strlen($text) / 10000) * 1.5);
-        return ['text' => $out, 'costPence' => $cost];
+        // Google charges per source character.
+        return ['text' => $out, 'cost' => ProviderSpend::cost('translation', 'google', null, ['chars' => \mb_strlen($text)])];
     }
 
     /**
@@ -862,8 +792,7 @@ class Translation
         if ($out === '') {
             return null;
         }
-        $cost = (int) \ceil((\mb_strlen($text) / 10000) * 1.5);
-        return ['text' => $out, 'costPence' => $cost];
+        return ['text' => $out, 'cost' => ProviderSpend::cost('translation', 'deepl', null, ['chars' => \mb_strlen($text)])];
     }
 
     /**
@@ -895,7 +824,7 @@ class Translation
         if ($out === '') {
             return null;
         }
-        return ['text' => $out, 'costPence' => 0];
+        return ['text' => $out, 'cost' => null];
     }
 
     // -------------------------------------------------------------------------
@@ -953,7 +882,7 @@ class Translation
     }
 
     private static function persist(string $table, int $id, string $field, string $source, string $target, string $content,
-                                    string $provider, int $cost, string $fingerprint): void
+                                    string $provider, ?array $cost, string $fingerprint): void
     {
         $db = App::db();
         // 🏢 THE ORGANISATION IS RECORDED, so its spending can be told apart
@@ -968,9 +897,10 @@ class Translation
         //    🧾 SINCE #762 NEITHER LIMIT READS THIS TABLE. The month's spend and
         //    the month's number of requests are counted in `tblTranslationUsage`
         //    at the moment a call is made (see `monthUsage()` for why the cache
-        //    cannot count calls). `costPence` and `siteID` are still written
-        //    here as a record of what each cached piece cost and whose it was;
-        //    nothing sums them any more, and nothing should start to.
+        //    cannot count calls). `costCurrency`, `costMillionths` and `siteID`
+        //    are still written here as a record of what each cached piece cost
+        //    and whose it was; nothing sums them (the month's money is
+        //    `tblProviderSpend`, #993), and nothing should start to.
         //
         //    🔏 THE FINGERPRINT IS WRITTEN ON A DUPLICATE TOO (#799), and that
         //    is the half that is easy to forget. A re-translation of an edited
@@ -984,24 +914,29 @@ class Translation
         $siteId = Site::id();
         $stmt = $db->prepare(
             'INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, '
-            . '`sourceLanguage`, `targetLanguage`, `translatedContent`, `sourceHash`, `provider`, `costPence`, '
-            . '`siteID`) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            . '`sourceLanguage`, `targetLanguage`, `translatedContent`, `sourceHash`, `provider`, `costCurrency`, '
+            . '`costMillionths`, `siteID`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
             . 'ON DUPLICATE KEY UPDATE `translatedContent` = VALUES(`translatedContent`), '
             . '    `sourceHash` = VALUES(`sourceHash`), `sourceLanguage` = VALUES(`sourceLanguage`), '
-            . '    `provider` = VALUES(`provider`), `costPence` = VALUES(`costPence`), '
+            . '    `provider` = VALUES(`provider`), `costCurrency` = VALUES(`costCurrency`), '
+            . '    `costMillionths` = VALUES(`costMillionths`), '
             . '    `siteID` = VALUES(`siteID`), `translatedAt` = NOW()'
         );
         if ($stmt === false) {
             return;
         }
-        // 🔤 TEN VALUES, TEN TYPES, IN ORDER: two `i` at the END (cost, then
-        //    organisation) and none before them but the row number. Until #799
+        // 🔤 ELEVEN VALUES, ELEVEN TYPES, IN ORDER: the row number, then
+        //    seven strings (table, field, languages, words, fingerprint,
+        //    provider, currency), then the cost and the organisation as
+        //    numbers. Until #799
         //    this read `'sissssisi'`, which bound the PROVIDER as a number, so
         //    every cached row since the table was built (`8625b9e`) recorded
         //    its provider as `0` — measured on MySQL 8.0.36 on 7 November 2026.
         //    Nothing reads the column, so nothing showed it.
-        $stmt->bind_param('sissssssii', $table, $id, $field, $source, $target, $content, $fingerprint, $provider, $cost, $siteId);
+        $costCurrency   = $cost === null ? null : (string) $cost['currency'];
+        $costMillionths = $cost === null ? null : (int) $cost['millionths'];
+        $stmt->bind_param('sisssssssii', $table, $id, $field, $source, $target, $content, $fingerprint, $provider, $costCurrency, $costMillionths, $siteId);
         $stmt->execute();
         $stmt->close();
     }

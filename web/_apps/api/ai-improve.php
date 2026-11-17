@@ -16,7 +16,6 @@
 declare(strict_types=1);
 
 use Portal\Core\AiAssistant;
-use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
 
@@ -57,17 +56,19 @@ $out = AiAssistant::improve($siteId, $userId, $kind, $text);
 
 if ($out === null) {
     // Helper returns null for: disabled / cap exceeded / rate limited / provider failure.
-    // Distinguish to give the caller something actionable.
-    $settings = App::settings()['ai_assist'] ?? [];
-    if ((string) ($settings['enabled'] ?? '0') !== '1') {
-        $msg = 'AI Assist is disabled.';
-    } elseif (AiAssistant::monthSpendPence($siteId) >= (int) ($settings['monthCapPence'] ?? 5000)) {
-        $msg = 'Monthly AI budget reached — try again next month.';
-    } elseif (AiAssistant::userDailyCount($siteId, $userId) >= (int) ($settings['userDailyCap'] ?? 20)) {
-        $msg = 'Daily AI limit reached — try again tomorrow.';
-    } else {
-        $msg = 'AI provider unavailable — please try again.';
-    }
+    // It SAYS which (#993, the rule #762 set for translation): re-deriving the
+    // reason here from a fresh read could not tell "the provider failed on the
+    // call that used the last of the month" from "the month was already used".
+    $msg = match (AiAssistant::lastRefusal()) {
+        'off'        => 'AI Assist is disabled.',
+        'money'      => 'Monthly AI budget reached — try again next month.',
+        'no-budget'  => 'AI Assist cannot be used: its monthly budget is set to nothing. An administrator sets the budget under Admin, AI Assist.',
+        'no-rate'    => 'AI Assist cannot be used right now: there is no exchange rate to check this month\'s spending limit. An administrator can add one under Admin, Exchange rates.',
+        'no-currency' => 'AI Assist cannot be used right now: no currency has been chosen to check this month\'s spending limit in. An administrator can choose one under Admin, Settings, Organisation.',
+        'unreadable' => 'AI Assist is not available just now, because the portal could not check this month\'s spending. Nothing was sent.',
+        'daily'      => 'Daily AI limit reached — try again tomorrow.',
+        default      => 'AI provider unavailable — please try again.',
+    };
     http_response_code(503);
     echo json_encode(['error' => 'unavailable', 'message' => $msg, 'csrfToken' => $freshCsrf]);
     exit();

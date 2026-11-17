@@ -129,7 +129,8 @@ $upsert($db, 'transcription.batchSize',  (string) max(1, min(50, (int) ($_POST['
 //    pays for every organisation, so this is the installation's limit on what
 //    any organisation may spend, not one organisation's own budget. An
 //    organisation may hold itself to LESS (its own row, read only through
-//    `Transcription::capFrom()`); it can never raise its own above this (#668).
+//    `ProviderSpend::whyRefused()`, in its own currency); it can never raise its
+//    own above this (#668, #993).
 //
 //    Clamped to the hard maximum in code, so three tiers each hold the one
 //    below: code, then the installation, then the organisation. A missing or

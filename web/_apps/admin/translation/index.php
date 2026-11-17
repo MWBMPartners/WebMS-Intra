@@ -70,18 +70,25 @@ $hasLib  = ((string) ($settings['libre']['apiKey']     ?? '')) !== '';
 //    and translation is then REFUSED rather than allowed (#762). The page says
 //    so rather than showing £0.00, which would read as "nothing spent".
 $usage       = Translation::monthUsage(Site::id(), Translation::usageMonth());
-$capInForce  = Translation::capPence();
 $callsInForce = Translation::callCap();
-// The ONE comparison each, shared with `Translation::translate()`, so this
-// page cannot say "reached" while a press still sends (or the reverse).
-$moneyReached = $usage !== null && Translation::moneyReached($usage['pence']);
-$callsReached = $usage !== null && Translation::callsReached($usage['calls']);
 // The provider IN FORCE — the merged value `translate()` reads — for the two
 // notes about it below. The form's own `$provider` stays the installation's
 // (#674); the two differ only where an organisation holds a row of its own.
 $translationInForce = App::settings()['translation'] ?? [];
 $providerInForce    = (string) ($translationInForce['provider'] ?? 'anthropic');
 $providerIsReady    = Translation::providerReady($providerInForce, $translationInForce);
+// 💷 THE MONEY SIDE comes from ProviderSpend, in each currency's own terms
+//    (#993, D-173, D-194). The ONE comparison, shared with
+//    `Translation::translate()` (which asks `whyRefused()` with the same
+//    provider's currency), so this page cannot say "reached" while a press
+//    still sends (or the reverse).
+$moneySummary = \Portal\Core\ProviderSpend::monthSummary(App::db(), Site::id(), 'translation', $providerInForce);
+$moneyWhy     = \Portal\Core\ProviderSpend::whyRefusedFor(App::db(), Site::id(), 'translation', $providerInForce);
+$moneyLines   = \Portal\Core\ProviderSpend::pageLines($moneySummary);
+$moneyReached = $usage !== null && ($moneyWhy === 'installation-limit' || $moneyWhy === 'organisation-limit');
+$rateMissing  = $moneyWhy === 'no-rate' || $moneyWhy === 'no-currency';
+$rateFixIsHere = $moneyWhy === 'no-rate';
+$callsReached = $usage !== null && Translation::callsReached($usage['calls']);
 
 // 🗂️ THIS ORGANISATION'S CACHED TRANSLATIONS (#762's check, #800 item 2).
 //    Two faults in the old version, both on the card an administrator reads:
@@ -187,6 +194,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         updated and the database upgrade has not been run yet &mdash; ask a global
         administrator to open Admin &rarr; Upgrade. Pieces already translated keep working.
     </div>
+<?php elseif ($moneyWhy === 'unreadable'): ?>
+    <div class="alert alert-danger" role="alert" data-limit-reached="unreadable-money">
+        <strong>This month&rsquo;s spending could not be read, so no new translations are being
+        sent.</strong> The usual cause is that the database upgrade has not been run yet &mdash; ask a
+        global administrator to open Admin &rarr; Upgrade.
+    </div>
+<?php elseif ($rateMissing === true): ?>
+    <div class="alert alert-warning" role="alert" data-limit-reached="<?php echo $moneyWhy === 'no-rate' ? 'no-rate' : 'no-currency'; ?>">
+        <strong>New translations are stopped because the money limit cannot be checked.</strong>
+        <?php echo htmlspecialchars(\Portal\Core\ProviderSpend::refusalWords($moneyWhy), ENT_QUOTES, 'UTF-8'); ?>
+        <?php if ($rateFixIsHere === true): ?>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a>
+        <?php endif; ?>
+    </div>
 <?php elseif ($moneyReached === true && $callsReached === true): ?>
     <div class="alert alert-warning" role="alert" data-limit-reached="both">
         <strong>Both monthly limits are reached</strong> &mdash; the money limit and the limit
@@ -215,8 +236,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">Money spent this month</div>
-        <div class="display-6"><?php echo $usage === null ? '&mdash;' : htmlspecialchars(\Portal\Core\Currency::format((int) $usage['pence'], \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'); ?></div>
-        <div class="small text-muted"><?php echo $capInForce > 0 ? 'of ' . htmlspecialchars(\Portal\Core\Currency::format((int) $capInForce, \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8') . ' limit' : 'no money limit'; ?></div>
+        <div class="h4"><?php echo htmlspecialchars($moneyLines['spent'], ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php foreach ($moneyLines['limits'] as $limitLine): ?>
+            <div class="small text-muted"><?php echo htmlspecialchars($limitLine, ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php endforeach; ?>
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">Translations sent this month</div>

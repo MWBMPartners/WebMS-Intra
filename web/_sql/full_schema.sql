@@ -5019,7 +5019,8 @@ CREATE TABLE IF NOT EXISTS `tblSmsMessage` (
     `status`           ENUM('queued','sent','delivered','failed') NOT NULL DEFAULT 'queued',
     `provider`         VARCHAR(30)  NOT NULL DEFAULT 'twilio',
     `providerRef`      VARCHAR(100) DEFAULT NULL,
-    `costPence`        INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `errorMsg`         VARCHAR(255) DEFAULT NULL,
     `sentAt`           DATETIME     DEFAULT NULL,
     `createdAt`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5261,7 +5262,8 @@ CREATE TABLE IF NOT EXISTS `tblTranscript` (
     `fullText`     MEDIUMTEXT   DEFAULT NULL,
     `jsonSegments` MEDIUMTEXT   DEFAULT NULL,
     `durationSec`  INT          DEFAULT NULL,
-    `costPence`    INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `errorMsg`     VARCHAR(255) DEFAULT NULL,
     `queuedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     -- ⏱️ When this recording was handed to the transcription company, on
@@ -5317,8 +5319,10 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     -- 💳 A LIMIT, so the installation's value CAPS an organisation's and is
     --    never simply overridden by it (#668, owner 29 October 2026). ONE
     --    API key below pays for every organisation on the installation, so
-    --    the two administrators may be different people. Worked out only by
-    --    Transcription::capFrom(). Migration 229.
+    --    the two administrators may be different people. Read only through
+    --    ProviderSpend::whyRefused() since #993 (it replaced the old
+    --    Transcription::capFrom()), in hundredths of the currency of the level
+    --    that stores it. Migration 229.
     (NULL, 'transcription.monthCapPence',   '5000', '5000', 0),
     -- 🎙️ How long a transcript is kept, in days (#714). A transcript is the
     --    VERBATIM words of a recording, and nothing removed one before: the
@@ -5350,7 +5354,8 @@ CREATE TABLE IF NOT EXISTS `tblContentTranslation` (
                         COMMENT 'SHA-256 of the exact original words this translation was made from (#799, migration 256). A cached row is served only while this matches the words in the source row now, so an edited original is translated afresh. NULL means the words are unknown (a row cached before migration 256), and such a row is never served.',
     `provider`          VARCHAR(30)  NOT NULL DEFAULT 'anthropic',
     `qualityScore`      TINYINT      DEFAULT NULL,
-    `costPence`         INT          DEFAULT NULL,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `siteID`            INT          DEFAULT NULL
                         COMMENT 'The organisation whose content this was, so a monthly budget can be told apart from another organisation''s (#765, migration 250). NULL means the source row has gone and it cannot be attributed without guessing, which would move money between two parties'' budgets. No foreign key on purpose: a cascade would delete the spending record when an organisation is removed, and what an installation was charged should outlive the organisation that caused it.',
     `translatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -5426,10 +5431,69 @@ CREATE TABLE IF NOT EXISTS `tblTranslationUsage` (
     `siteID`        INT  NOT NULL COMMENT 'The organisation whose members asked for these translations. Never empty: a key with an empty part does not hold (#487), and a row nobody owns would count against nobody',
     `monthStartUtc` DATE NOT NULL COMMENT 'The first day of the calendar month, IN UTC, that these requests were made in',
     `calls`         INT  NOT NULL DEFAULT 0 COMMENT 'How many requests were sent to the translation company this month, counted just BEFORE each is sent, whether or not an answer then came back (#762). A request never sent, because no key is set or the provider is unknown, is not counted',
-    `costPence`     INT  NOT NULL DEFAULT 0 COMMENT 'What the translation company reported those requests cost, in pence. LibreTranslate reports nothing, so on that route this stays 0 and only `calls` can limit use',
     PRIMARY KEY (`siteID`, `monthStartUtc`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-COMMENT='Translation requests and reported spend, per organisation per month (#762). Read and written only by Portal\\Core\\Translation.';
+COMMENT='Translation requests per organisation per month (#762). The money side moved to tblProviderSpend (#993, migration 302). Read and written only by Portal\\Core\\Translation.';
+
+-- ── Spending with outside companies, in each company's own currency (#993, D-173; migration 302) ──
+CREATE TABLE IF NOT EXISTS `tblProviderSpend` (
+    `siteID`         INT         NOT NULL COMMENT 'The organisation whose members caused the charge. No foreign key on purpose: what an installation was charged outlives the organisation that caused it (as tblTranslationUsage)',
+    `monthStartUtc`  DATE        NOT NULL COMMENT 'The first day of the calendar month, IN UTC, the charge falls in: a calendar date, not a moment',
+    `service`        VARCHAR(20) NOT NULL COMMENT 'Which kind of outside company: ai, translation, transcription or sms',
+    `costCurrency`   CHAR(3)     NOT NULL COMMENT 'The currency the outside company charges in, as three capital letters, for example USD. Never the organisation''s own currency: two currencies are never added together (D-173)',
+    `costMillionths` BIGINT      NOT NULL DEFAULT 0 COMMENT 'What was charged this month, in millionths of one unit of costCurrency (1,000,000 = one whole dollar, pound or euro). Whole numbers only, never a floating-point number',
+    PRIMARY KEY (`siteID`, `monthStartUtc`, `service`, `costCurrency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Spending with outside companies, per organisation, month, service and currency (#993, D-173). Holds no personal data and is not emptied by an erasure. Read and written only by Portal\\Core\\ProviderSpend.';
+
+-- ── Exchange rates (#993, D-173, D-192; migration 301) ──────────────────────
+-- Three tables, read and written only by Portal\\Core\\ExchangeRates. None
+-- holds anything about a person: who typed a rate goes to the activity log, not
+-- here. No column is called exactly `currency`, on purpose: tools/currency-
+-- selftest.php (B4) treats every table with that column as an organisation's
+-- money and relabels its old rows with the organisation's currency.
+CREATE TABLE IF NOT EXISTS `tblExchangeRate` (
+    `rateCurrency` CHAR(3)        NOT NULL COMMENT 'The currency, as its three capital letters, for example USD',
+    `perEuro`      DECIMAL(20,10) NOT NULL COMMENT 'How much of this currency one euro buys, exactly as the European Central Bank wrote it (kept as text on the way in, never as a floating-point number)',
+    `rateDate`     DATE           NOT NULL COMMENT 'The day the European Central Bank published this rate: a calendar date, not a moment',
+    `fetchedAtUtc` DATETIME       NOT NULL COMMENT 'The moment the portal stored it, in UTC (UTC_TIMESTAMP())',
+    PRIMARY KEY (`rateCurrency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The latest daily exchange rates from the European Central Bank, one row per currency (#993, D-192). Written only by Portal\\Core\\ExchangeRates.';
+
+CREATE TABLE IF NOT EXISTS `tblExchangeRateFetch` (
+    `fetchID`        TINYINT     NOT NULL COMMENT 'Always 1: there is one row, holding the state of the daily fetch',
+    `lastAttemptUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last tried to fetch the rates, in UTC, whether or not it worked',
+    `lastSuccessUtc` DATETIME             DEFAULT NULL COMMENT 'The moment the portal last fetched the rates successfully, in UTC',
+    `lastProblem`    VARCHAR(40) NOT NULL DEFAULT '' COMMENT 'One fixed word saying why the last attempt failed (http, capped, unreadable, no-xml, refused, unreachable, future-date, not-saved, test-blocked; each is explained by ExchangeRates::problemWords()), or empty when it worked. Never the reply itself',
+    PRIMARY KEY (`fetchID`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The state of the daily exchange-rate fetch: one row (#993).';
+INSERT INTO `tblExchangeRateFetch` (`fetchID`, `lastAttemptUtc`, `lastSuccessUtc`, `lastProblem`) VALUES (1, NULL, NULL, '')
+ON DUPLICATE KEY UPDATE `fetchID` = `fetchID`;
+
+CREATE TABLE IF NOT EXISTS `tblExchangeRateEntered` (
+    `enteredID`    INT            NOT NULL AUTO_INCREMENT,
+    `siteID`       INT                     DEFAULT NULL COMMENT 'The organisation that typed this rate, or empty for the installation. No foreign key on purpose: a removed organisation\'s rows are cleared by nothing today, which is harmless',
+    `siteScope`    INT AS (COALESCE(`siteID`, -1)) VIRTUAL COMMENT 'Worked out by the database: the organisation number, or -1 for the installation, so the unique key below binds installation rows too (#487). VIRTUAL, not STORED, as tblSettings.siteScope',
+    `fromCurrency` CHAR(3)        NOT NULL COMMENT 'The currency being converted from',
+    `toCurrency`   CHAR(3)        NOT NULL COMMENT 'The currency being converted to: 1 of the from-currency is this many of the to-currency',
+    `rate`         DECIMAL(20,10) NOT NULL COMMENT 'The rate an administrator typed, as exact digits',
+    `asOf`         DATE           NOT NULL COMMENT 'The day the administrator says the rate is from: a calendar date',
+    `enteredAtUtc` DATETIME       NOT NULL COMMENT 'The moment it was saved, in UTC',
+    PRIMARY KEY (`enteredID`),
+    UNIQUE KEY `uq_er_pair` (`siteScope`, `fromCurrency`, `toCurrency`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Exchange rates typed by an administrator, used when the fetched ones are missing or stale (#993, D-192). Holds no personal data: who typed one is in the activity log.';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'exchangeRates.fetch', '1', '1', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/exchange-rates',      'admin/exchange-rates/index.php', 1),
+    ('admin/exchange-rates/save', 'admin/exchange-rates/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/translation',      'admin/translation/index.php',  1),
@@ -5482,7 +5546,8 @@ CREATE TABLE IF NOT EXISTS `tblAiUsage` (
     `provider`     VARCHAR(30)  NOT NULL,
     `inputTokens`  INT          NOT NULL DEFAULT 0,
     `outputTokens` INT          NOT NULL DEFAULT 0,
-    `costPence`    INT          NOT NULL DEFAULT 0,
+    `costCurrency`   CHAR(3)      DEFAULT NULL COMMENT 'The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded',
+    `costMillionths` BIGINT       DEFAULT NULL COMMENT 'What the outside company charged, in millionths of one unit of the currency in costCurrency (1,000,000 = one whole dollar, pound or euro), worked out by Portal\\Core\\ProviderSpend and never a floating-point number. Empty means no cost was recorded (a free local route, or a row from before migration 302)',
     `inputSample`  MEDIUMTEXT   DEFAULT NULL,
     `outputSample` MEDIUMTEXT   DEFAULT NULL,
     `occurredAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -12011,6 +12076,16 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('298_member_limits.sql')
 -- in the table itself. A fresh install holds no suggestions for the migration
 -- to mark. This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('300_suggestion_cancelled_or_postponed_while_waiting.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 301_exchange_rates.sql (#993; D-173, D-192) ────────────────────────
+-- The three tables, the `exchangeRates.fetch` setting and the two addresses are
+-- written above, beside the translation tables; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('301_exchange_rates.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 302_provider_spend_in_its_own_currency.sql (#993; D-173, D-192, D-194) ──
+INSERT INTO `tblMigrations` (`filename`) VALUES ('302_provider_spend_in_its_own_currency.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 303_event_place_not_a_home.sql (#1088; D-120, D-128, D-183) ────────

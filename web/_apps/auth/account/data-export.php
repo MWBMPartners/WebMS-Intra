@@ -87,7 +87,7 @@
  *                          Never who opened it, its number, the visiting
  *                          worker or the visit notes — #1015, D-184)
  *   #1063 — every other kind of record the erasure deletes with you:
- *   tblAiUsage            (what you asked the AI assistant, its answer, the cost)
+ *   tblAiUsage            (what you asked the AI assistant, its answer, the cost and the currency it was charged in)
  *   tblAssetOwners        (equipment you own or look after, without the notes)
  *   tblEventCoordinators  (events you coordinate, without who made you one)
  *   tblEventCrewMembers, tblEventJobAssignments, tblEventPeople (event crews,
@@ -794,7 +794,7 @@ $payload = [
         // 🤖 What you asked the AI assistant and what it answered (both cut
         //    to the first 1,000 characters when stored), and what it cost.
         'aiAssistantUse' => $fetchUserRows(
-            'SELECT `siteID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costPence`, `inputSample`, `outputSample`, `occurredAt` '
+            'SELECT `siteID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costCurrency`, `costMillionths`, `inputSample`, `outputSample`, `occurredAt` '
             . 'FROM `tblAiUsage` WHERE `userID` = ? ORDER BY `occurredAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
         ),
         // 🧰 Equipment you are named as an owner, custodian or stakeholder of.

@@ -187,8 +187,10 @@ if (is_string($capPence) === true) {
 //    makes a deliberate `0` the only way to reach it, and the comparison here
 //    is only against the hard maximum, which zero can never exceed. The
 //    three-tier arithmetic that reads zero as the largest value lives in
-//    `Portal\Core\SettingLimit`, which `Translation::capPence()` asks with
-//    `$zeroIsLargest` set.
+//    `Portal\Core\SettingLimit`, which `ProviderSpend::whyRefused()` asks with
+//    zero meaning "no limit" for translation (#993). The figure is in hundredths
+//    of the INSTALLATION's currency; an organisation's own figure, where it has
+//    one, is in its own.
 if ($capPence > Translation::MAX_CAP_PENCE) {
     Logger::activity(
         'TranslationCapRefused',

@@ -233,9 +233,11 @@ must-know shortcuts.</p>
             fine: the accounts and the record of their merges go back together.</li>
         <?php // 🌐 #801: the monthly translation limits count what was really spent, so a
               //    restore must not give an organisation its month's allowance back. ?>
-        <li><strong>This month&rsquo;s translation figures are not wound back</strong> &mdash; the
+        <li><strong>This month&rsquo;s figures for outside companies are not wound back</strong> &mdash; the
             portal counts how many translation requests each organisation has made this month, and
-            what they cost, because the monthly limits read those figures. Putting a backup back keeps
+            what the outside companies charged for AI drafting, translation, transcription and text
+            messages (each in the currency that company charges in), because the monthly limits read
+            those figures. Putting a backup back keeps
             the <strong>higher</strong> of this month&rsquo;s figures and the backup&rsquo;s, for each
             organisation, so an organisation cannot spend its monthly limit a second time; the result
             says when it did. Earlier months come back exactly as the backup has them.</li>

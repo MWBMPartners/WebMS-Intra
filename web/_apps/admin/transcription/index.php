@@ -133,46 +133,15 @@ foreach ($flatten($merged) as $name => $value) {
     }
 }
 
-// 💳 The budget. `capFrom()` is the ONE place the two layers are weighed
-//    against each other: the installation's value CAPS this organisation's and
-//    is never simply overridden by it (#668, owner 29 October 2026). The
-//    installation's own figure is shown beside it so the number on screen is
-//    attributed honestly — somebody who set 20,000 for their organisation and
-//    sees 5,000 in force needs to know WHY, or they will set it again.
-$capPence     = Transcription::capFrom(App::settings(), InstallationSettings::layer());
-$installCap   = Transcription::installationAllowsPence(InstallationSettings::layer());
-
-// 🏷️ WHETHER THIS ORGANISATION ASKED FOR MORE THAN IT MAY HAVE.
-//
-//    This compared the effective cap with the MERGED setting, which is a
-//    different question and could say something untrue. When an installation's
-//    own stored figure is above the hard maximum in code and the organisation
-//    has chosen nothing, the merged value IS the installation's larger figure,
-//    so the comparison came out true and the page told a global administrator
-//    "your organisation asked for more" about a number the organisation never
-//    touched — it was the installation's own figure that code cut back.
-//
-//    Found by the independent check, and the self-test had been CREATING that
-//    exact state (J06 stores 999999999 installation-wide) while checking only
-//    the figure and never the sentence beside it.
-//
-//    The sentence is about the ORGANISATION'S OWN row, so that is what is read.
-//    There is no site-only settings layer to ask, so it is read directly; no
-//    row means the organisation asked for nothing.
-$orgOwnCap = null;
-$orgCapRow = $db->prepare('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = ? LIMIT 1');
-if ($orgCapRow !== false) {
-    $capKey = Transcription::CAP_KEY;
-    $orgCapRow->bind_param('si', $capKey, $siteId);
-    $orgCapRow->execute();
-    $foundCap = $orgCapRow->get_result()->fetch_assoc();
-    $orgCapRow->close();
-    if ($foundCap !== null && preg_match('/^\d+$/', trim((string) $foundCap['settingValue'])) === 1) {
-        $orgOwnCap = (int) trim((string) $foundCap['settingValue']);
-    }
-}
-$cappedAbove = $orgOwnCap !== null && $orgOwnCap > $capPence;
-$monthSpend   = Transcription::monthSpendPence($siteId);
+// 💳 The budget. `ProviderSpend::whyRefused()` is the ONE place the two levels
+//    are weighed against each other (#993): the installation's figure in the
+//    installation's currency and an organisation's own figure in ITS currency,
+//    the stricter winning (#668, D-194, owner 29 October 2026). The
+//    installation's own figure is the form box's value (#674); the card below
+//    says what each level allows and what this month's spending counts as
+//    against it, so a number on screen is always attributed to a level.
+$installCap  = \Portal\Core\ProviderSpend::installationFigure($db, 'transcription');
+$spendLines  = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'transcription', (string) ((App::settings()['transcription'] ?? [])['provider'] ?? 'openai')));
 $queueStats   = Transcription::queueStatsFor($siteId);
 $recent       = Transcription::recentFor($siteId, 30);
 
@@ -256,14 +225,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">This month</div>
-        <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($monthSpend / 100, 2); ?></div>
-        <div class="small text-muted">
-            of <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capPence / 100, 2); ?>
-            <?php if ($cappedAbove === true): ?>
-                <br><span class="text-warning-emphasis">Your organisation asked for more; the installation allows
-                <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($installCap / 100, 2); ?>.</span>
-            <?php endif; ?>
-        </div>
+        <div class="h4"><?php echo htmlspecialchars($spendLines['spent'], ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php foreach ($spendLines['limits'] as $limitLine): ?>
+            <div class="small text-muted"><?php echo htmlspecialchars($limitLine, ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php endforeach; ?>
+        <?php if ($spendLines['refusal'] !== ''): ?>
+            <div class="small text-danger mt-1" data-spend-refusal><?php echo htmlspecialchars($spendLines['refusal'], ENT_QUOTES, 'UTF-8'); ?></div>
+        <?php endif; ?>
     </div></div></div>
 </div>
 
@@ -327,7 +295,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Account key</div><div class="col-md-8"><?php echo $ready === true ? 'Set' : 'Not set'; ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Language</div><div class="col-md-8"><?php echo htmlspecialchars($language, ENT_QUOTES, 'UTF-8'); ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Recordings per run</div><div class="col-md-8"><?php echo (int) $batchInRun; ?></div></div>
-                <div class="row py-1"><div class="col-md-4 text-muted">Monthly budget</div><div class="col-md-8"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capPence / 100, 2); ?></div></div>
+                <div class="row py-1"><div class="col-md-4 text-muted">Monthly budget</div><div class="col-md-8"><?php echo htmlspecialchars(\Portal\Core\Currency::format($installCap, \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'); ?> (the installation's limit; an organisation may hold itself to less)</div></div>
             </div>
         <?php else: ?>
             <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/transcription/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
@@ -457,7 +425,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-<?php echo htmlspecialchars($cls, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(Transcription::statusWords((string) $t['status']), ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $t['provider'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo $t['durationSec'] !== null ? htmlspecialchars((string) round(((int) $t['durationSec']) / 60, 1), ENT_QUOTES, 'UTF-8') . ' min' : '&mdash;'; ?></div>
-                        <div class="col-md-2 text-end text-muted"><?php echo $t['costPence'] !== null ? htmlspecialchars(\Portal\Core\Currency::format((int) $t['costPence'], \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8') : '&mdash;'; ?></div>
+                        <div class="col-md-2 text-end text-muted"><?php echo htmlspecialchars(\Portal\Core\ProviderSpend::spendWords($t['costCurrency'] === null ? null : (string) $t['costCurrency'], $t['costMillionths'] === null ? null : (int) $t['costMillionths']), ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                 <?php endforeach; ?>
             </div>

@@ -54,8 +54,10 @@
  * ---------------------------------------------------------------------------
  *   • **It cannot prove the money limit is obeyed by a PAID provider.** The
  *     stub is reached through the `libre` route, and `libreTranslate()`
- *     reports `costPence` 0 by design. So spending is made to happen by
- *     writing the month's usage record directly, and section F proves the
+ *     reports NO cost by design. So spending is made to happen by writing
+ *     the month's record directly (in pounds, the installation's currency set
+ *     for this run; since #993 the money lives in `tblProviderSpend`, in the
+ *     company's own currency), and section F proves the
  *     LIMIT is obeyed, not that any provider's own figure is right. That a
  *     reported cost is ADDED to the record is proved by F3-04, which drives
  *     the real `Translation::settle()` through a probe page in the scratch
@@ -339,8 +341,16 @@ function cleanup(): void
         if (is_array($state['usageRows']) === true) {
             q('DELETE FROM `tblTranslationUsage`');
             foreach ($state['usageRows'] as $row) {
-                q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?)',
-                    'isii', [(int) $row['siteID'], (string) $row['monthStartUtc'], (int) $row['calls'], (int) $row['costPence']]);
+                q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`) VALUES (?, ?, ?)',
+                    'isi', [(int) $row['siteID'], (string) $row['monthStartUtc'], (int) $row['calls']]);
+            }
+        }
+        // 💱 #993: the money is in its own table; the whole of it is put back too.
+        if (is_array($state['spendRows'] ?? null) === true) {
+            q('DELETE FROM `tblProviderSpend`');
+            foreach ($state['spendRows'] as $row) {
+                q('INSERT INTO `tblProviderSpend` (`siteID`, `monthStartUtc`, `service`, `costCurrency`, `costMillionths`) VALUES (?, ?, ?, ?, ?)',
+                    'isssi', [(int) $row['siteID'], (string) $row['monthStartUtc'], (string) $row['service'], (string) $row['costCurrency'], (int) $row['costMillionths']]);
             }
         }
         if ((int) $state['orgSwitchSite'] > 0) {
@@ -549,7 +559,8 @@ if ($siteA <= 0) {
 $siteB = CT_LOW + 11;
 // 🧾 The usage record, written down before anything presses Translate, so
 //    the clean-up can put it back exactly (#762).
-$state['usageRows'] = q('SELECT `siteID`, `monthStartUtc`, `calls`, `costPence` FROM `tblTranslationUsage`');
+$state['usageRows'] = q('SELECT `siteID`, `monthStartUtc`, `calls` FROM `tblTranslationUsage`');
+$state['spendRows'] = q('SELECT `siteID`, `monthStartUtc`, `service`, `costCurrency`, `costMillionths` FROM `tblProviderSpend`');
 // ⚠️ THE COLUMN IS `siteKey`, NOT `siteSlug`. A first draft guessed
 //    `siteSlug` and the run died on its first line with "Unknown column" —
 //    CLAUDE.md's "name things by the right identifier" trap, which says to
@@ -740,7 +751,7 @@ file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key'
 // 🔬 A PROBE PAGE, in the SCRATCH COPY only and answering only this run's
 //    token, so section F3 can drive `Translation::settle()` with a cost above
 //    0 (#762, independent check). The one route a test can reach, `libre`,
-//    reports 0 pence, so without this nothing proved a REPORTED cost ever
+//    reports no cost, so without this nothing proved a REPORTED cost ever
 //    reaches the month's record — deleting that write left every check green
 //    while the money limit stopped moving on every paid provider. It boots the
 //    real portal and calls the real private method; it holds no copy of the
@@ -760,7 +771,7 @@ if (($_SERVER['HTTP_X_CT_PROBE'] ?? '') !== '__TOKEN__') {
 }
 $settle = new ReflectionMethod(\Portal\Core\Translation::class, 'settle');
 $words  = $settle->invoke(null, (int) $_GET['site'], (string) $_GET['month'],
-    ['text' => 'probe words', 'costPence' => (int) $_GET['cost']],
+    ['text' => 'probe words', 'cost' => ['currency' => 'GBP', 'millionths' => (int) $_GET['cost'] * 10000]],
     'tblAnnouncements', (int) $_GET['source'], 'body', 'en', 'fr', 'probe', hash('sha256', 'probe source words'));
 echo json_encode(['words' => $words]);
 PROBE;
@@ -820,6 +831,9 @@ setSetting('translation.libre.apiKey', '');
 setSetting('translation.monthCapPence', '5000');
 setSetting('translation.monthCallCap', '1000');
 setSetting('api.translation.content.enabled', 'true');
+// 💱 #993: a money limit is compared in the installation's currency, and with none
+//    chosen a limit in force refuses (D-192). Pounds for this run; put back by cleanup().
+setSetting('org.currency', 'GBP');
 
 // ── the portal's own server ──────────────────────────────────────────────────
 $router = <<<'ROUTER'
@@ -1080,7 +1094,7 @@ head('D. Another organisation\'s words, and rows nobody may see');
 //    never served, and D02 would then be testing the fingerprint rather than the
 //    organisation test it exists for.
 q('INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, `sourceLanguage`, '
-  . '`targetLanguage`, `translatedContent`, `sourceHash`, `provider`, `costPence`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+  . '`targetLanguage`, `translatedContent`, `sourceHash`, `provider`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     'sissssss', ['tblAnnouncements', $annB, 'body', 'en', 'cy', '[[CY]] ' . $bodyB, hash('sha256', $bodyB), 'libre']);
 $cachedB = one('SELECT `translatedContent` AS t FROM `tblContentTranslation` WHERE `sourceID` = ? LIMIT 1', 'i', [$annB]);
 ok('D01 organisation B\'s translated words really are in the cache, which is what makes D02 decisive',
@@ -1511,17 +1525,30 @@ head('F. The monthly limit is obeyed where the money is spent');
  */
 function setUsage(int $site, int $calls, int $pence): void
 {
-    q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?) '
-      . 'ON DUPLICATE KEY UPDATE `calls` = VALUES(`calls`), `costPence` = VALUES(`costPence`)',
-        'isii', [$site, gmdate('Y-m-01'), $calls, $pence]);
+    q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`) VALUES (?, ?, ?) '
+      . 'ON DUPLICATE KEY UPDATE `calls` = VALUES(`calls`)',
+        'isi', [$site, gmdate('Y-m-01'), $calls]);
+    // The money, as the pounds the old figure stood for: `$pence` hundredths of a
+    // pound is `$pence` x 10,000 millionths (D-173; written to `tblProviderSpend`).
+    q('DELETE FROM `tblProviderSpend` WHERE `siteID` = ? AND `monthStartUtc` = ? AND `service` = ?', 'iss', [$site, gmdate('Y-m-01'), 'translation']);
+    if ($pence > 0) {
+        q('INSERT INTO `tblProviderSpend` (`siteID`, `monthStartUtc`, `service`, `costCurrency`, `costMillionths`) VALUES (?, ?, ?, ?, ?)',
+            'isssi', [$site, gmdate('Y-m-01'), 'translation', 'GBP', $pence * 10000]);
+    }
 }
 
 /** @return array{calls:int, pence:int}|null One organisation's usage this month, or null when it has no row. */
 function usageOf(int $site): ?array
 {
-    $row = one('SELECT `calls`, `costPence` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?',
+    $row = one('SELECT `calls` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?',
         'is', [$site, gmdate('Y-m-01')]);
-    return $row === null ? null : ['calls' => (int) $row['calls'], 'pence' => (int) $row['costPence']];
+    if ($row === null) {
+        return null;
+    }
+    // The money in pounds, as hundredths (the unit this test has always used for it).
+    $money = one('SELECT COALESCE(SUM(`costMillionths`), 0) AS m FROM `tblProviderSpend` WHERE `siteID` = ? AND `monthStartUtc` = ? AND `service` = ? AND `costCurrency` = ?',
+        'isss', [$site, gmdate('Y-m-01'), 'translation', 'GBP']);
+    return ['calls' => (int) $row['calls'], 'pence' => intdiv((int) ($money['m'] ?? 0), 10000)];
 }
 
 // Spending is made to happen by writing the month's usage record, because the
@@ -1582,6 +1609,32 @@ $answer = press($jarA, 'tblProjectUpdate', $updA, 'fr', freshToken($jarA));
 ok('F01e spend EXACTLY equal to the money limit is refused, and nothing is sent',
     $answer['status'] === 503 && count(stubCalls()) === $before,
     'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+
+// 💱 #993 (D-192): a limit in force and NO currency to compare it in is REFUSED, with
+//    words that name the way out, and nothing is sent. Then a limit of 0 (= no limit
+//    for translation) needs no currency and translates.
+setUsage($siteA, $usageBeforeF['calls'], 0);
+setSetting('translation.monthCapPence', '5000');
+setSetting('org.currency', '');
+$before = count(stubCalls());
+$answer = press($jarA, 'tblProjectUpdate', $updA, 'fr', freshToken($jarA));
+ok('F01f with no currency chosen and a limit in force, a piece never translated before is refused with 503 and nothing is sent',
+    $answer['status'] === 503 && count(stubCalls()) === $before,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+ok('F01g ...and the member is told no currency has been chosen and an administrator can choose one (NOT "add an exchange rate", which would fix nothing, and not "the limit is reached")',
+    str_contains((string) ($answer['json']['message'] ?? ''), 'no currency has been chosen') === true
+    && str_contains((string) ($answer['json']['message'] ?? ''), 'Admin, Settings, Organisation') === true
+    && str_contains((string) ($answer['json']['message'] ?? ''), 'Exchange rates') === false,
+    'said: ' . (string) ($answer['json']['message'] ?? '(nothing)'));
+setSetting('translation.monthCapPence', '0');
+$before = count(stubCalls());
+$answer = press($jarA, 'tblProjectUpdate', $updA, 'fr', freshToken($jarA));
+ok('F01h a money limit of 0 means NO limit for translation: with no currency chosen the same piece IS translated',
+    $answer['status'] === 200 && count(stubCalls()) === $before + 1,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+// The piece is now cached; take its row away so later sections find it as they did.
+q('DELETE FROM `tblContentTranslation` WHERE `sourceTable` = ? AND `sourceID` = ? AND `targetLanguage` = ?', 'sis', ['tblProjectUpdate', $updA, 'fr']);
+setSetting('org.currency', 'GBP');
 
 // Put the money back so the page sections are not refused.
 setUsage($siteA, $usageBeforeF['calls'], 0);
@@ -1948,7 +2001,7 @@ ok('F3-07 `providerReady()` answers every case in its table, both ways (' . coun
 //    on every installation, and it counted the whole installation. One row of
 //    organisation B is put in the cache so a whole-installation count differs.
 q('INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, `sourceLanguage`, `targetLanguage`, '
-  . '`translatedContent`, `provider`, `costPence`, `siteID`) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
+  . '`translatedContent`, `provider`, `siteID`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     'sisssssi', ['tblAnnouncements', CT_LOW + 91, 'body', 'en', 'fr', 'B words', 'libre', $siteB]);
 $ownCount = (int) (one('SELECT COUNT(*) AS n FROM `tblContentTranslation` WHERE `siteID` = ?', 'i', [$siteA])['n'] ?? -1);
 $allCount = (int) (one('SELECT COUNT(*) AS n FROM `tblContentTranslation`')['n'] ?? -1);

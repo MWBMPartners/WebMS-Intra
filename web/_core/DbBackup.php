@@ -181,6 +181,22 @@ class DbBackup
      */
     private const REMOVED_COLUMNS = [
         'tblEvents' => ['eventTimezone'],
+        // #993, migration 302. `costPence` is gone from the five tables that
+        // held an outside company's charge. The figure was in no named currency
+        // and the formulas that filled it were 100 to 1,000 times too large
+        // (Anthropic 100x, OpenAI 1,000x), so converting it would have kept a
+        // wrong number under a right-looking label. The saved values are
+        // therefore NOT written back; the replacement is `costCurrency` and
+        // `costMillionths` (and the month's `tblProviderSpend`), which an older
+        // snapshot does not have. No customer installation exists yet (the
+        // owner, 2 November 2026), so nothing real is lost. WITHOUT these five
+        // entries every snapshot taken before migration 302 would be refused:
+        // the unknown column reaches the INSERT and the restore stops.
+        'tblAiUsage'            => ['costPence'],
+        'tblSmsMessage'         => ['costPence'],
+        'tblTranscript'         => ['costPence'],
+        'tblContentTranslation' => ['costPence'],
+        'tblTranslationUsage'   => ['costPence'],
         // #708, migration 235. Two free-text note columns that arrived with
         // the stocktake tables (4764c06) and that no version of the portal has
         // ever written to - established by TWO commands, both quoted in that
@@ -5491,7 +5507,7 @@ class DbBackup
         // The fault's own words are not repeated: they can quote values. Its
         // NUMBER is, so an administrator can tell a deadlock from anything else.
         throw new RuntimeException(
-            'The database stopped while this month\'s translation figures were being kept (error number '
+            'The database stopped while this month\'s figures for outside companies were being kept (error number '
             . (int) $e->getCode() . '), and after that kind of failure the database may already have undone '
             . 'part of the work, so the whole restore is being undone rather than carried on.'
         );
@@ -5508,19 +5524,61 @@ class DbBackup
      *
      * @param list<string> $replacing The tables this restore is going to empty.
      *
-     * @return array{rows: list<array{siteID: int, calls: int, costPence: int}>, month: string, couldNotRead: bool}
+     * Since #993 this carries TWO monthly records, both of which a restore would
+     * otherwise put back to the snapshot's figures and so give an organisation
+     * its month to spend again: the number of translation requests
+     * (`tblTranslationUsage`) and the month's money for every outside company,
+     * per organisation, service and currency (`tblProviderSpend`).
+     *
+     * @return array{rows: list<array{siteID: int, calls: int}>, spend: list<array{siteID: int, service: string, costCurrency: string, costMillionths: int}>, month: string, couldNotRead: bool}
      */
     private function readThisMonthsTranslationUse(array $replacing): array
     {
         $month   = \gmdate('Y-m-01');
-        $nothing = ['rows' => [], 'month' => $month, 'couldNotRead' => false];
+        $nothing = ['rows' => [], 'spend' => [], 'month' => $month, 'couldNotRead' => false];
         // `namedIn()`, never `in_array()`: on a server with
         // lower_case_table_names = 1 the restore's list of tables holds the
         // name in lower case (#697).
-        if (self::namedIn('tblTranslationUsage', $replacing) === false) {
+        $callsToo = self::namedIn('tblTranslationUsage', $replacing);
+        $moneyToo = self::namedIn('tblProviderSpend', $replacing);
+        if ($callsToo === false && $moneyToo === false) {
             return $nothing;
         }
         try {
+            $spend = [];
+            if ($moneyToo === true) {
+                $spendExists = $this->db->query(
+                    "SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` "
+                    . "WHERE `TABLE_SCHEMA` = DATABASE() AND LOWER(`TABLE_NAME`) = 'tblproviderspend'"
+                );
+                if ($spendExists === false) {
+                    return ['rows' => [], 'spend' => [], 'month' => $month, 'couldNotRead' => true];
+                }
+                $spendThere = (int) ($spendExists->fetch_assoc()['n'] ?? 0) > 0;
+                $spendExists->free();
+                if ($spendThere === true) {
+                    $sp = $this->db->prepare(
+                        'SELECT `siteID`, `service`, `costCurrency`, `costMillionths` FROM `tblProviderSpend` '
+                        . 'WHERE `monthStartUtc` = ? ORDER BY `siteID`, `service`, `costCurrency`'
+                    );
+                    if ($sp === false) {
+                        return ['rows' => [], 'spend' => [], 'month' => $month, 'couldNotRead' => true];
+                    }
+                    $sp->bind_param('s', $month);
+                    $sp->execute();
+                    $spResult = $sp->get_result();
+                    while ($spResult instanceof \mysqli_result && ($spRow = $spResult->fetch_assoc()) !== null) {
+                        $spend[] = [
+                            'siteID' => (int) $spRow['siteID'], 'service' => (string) $spRow['service'],
+                            'costCurrency' => (string) $spRow['costCurrency'], 'costMillionths' => (int) $spRow['costMillionths'],
+                        ];
+                    }
+                    $sp->close();
+                }
+            }
+            if ($callsToo === false) {
+                return ['rows' => [], 'spend' => $spend, 'month' => $month, 'couldNotRead' => false];
+            }
             // Not there before migration 254 has run. Asked of the database by
             // name, ignoring capitals, never by catching an error.
             $exists = $this->db->query(
@@ -5528,25 +5586,25 @@ class DbBackup
                 . "WHERE `TABLE_SCHEMA` = DATABASE() AND LOWER(`TABLE_NAME`) = 'tbltranslationusage'"
             );
             if ($exists === false) {
-                return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+                return ['rows' => [], 'spend' => $spend, 'month' => $month, 'couldNotRead' => true];
             }
             $there = (int) ($exists->fetch_assoc()['n'] ?? 0) > 0;
             $exists->free();
             if ($there === false) {
-                return $nothing;
+                return ['rows' => [], 'spend' => $spend, 'month' => $month, 'couldNotRead' => false];
             }
             $stmt = $this->db->prepare(
-                'SELECT `siteID`, `calls`, `costPence` FROM `tblTranslationUsage` WHERE `monthStartUtc` = ? ORDER BY `siteID`'
+                'SELECT `siteID`, `calls` FROM `tblTranslationUsage` WHERE `monthStartUtc` = ? ORDER BY `siteID`'
             );
             if ($stmt === false) {
-                return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+                return ['rows' => [], 'spend' => $spend, 'month' => $month, 'couldNotRead' => true];
             }
             $stmt->bind_param('s', $month);
             $stmt->execute();
             $result = $stmt->get_result();
             $rows   = [];
             while ($result instanceof \mysqli_result && ($row = $result->fetch_assoc()) !== null) {
-                $rows[] = ['siteID' => (int) $row['siteID'], 'calls' => (int) $row['calls'], 'costPence' => (int) $row['costPence']];
+                $rows[] = ['siteID' => (int) $row['siteID'], 'calls' => (int) $row['calls']];
             }
             $stmt->close();
         } catch (\Throwable $e) {
@@ -5554,10 +5612,10 @@ class DbBackup
             // ends it (a deadlock), so the same rule as the write applies.
             self::stopUnlessStatementOnly($e);
             // Said out loud by the caller, never read as "nothing was used".
-            return ['rows' => [], 'month' => $month, 'couldNotRead' => true];
+            return ['rows' => [], 'spend' => [], 'month' => $month, 'couldNotRead' => true];
         }
 
-        return ['rows' => $rows, 'month' => $month, 'couldNotRead' => false];
+        return ['rows' => $rows, 'spend' => $spend, 'month' => $month, 'couldNotRead' => false];
     }
 
     /**
@@ -5566,7 +5624,7 @@ class DbBackup
      * the restore's transaction, so a rolled-back restore or a rehearsal takes
      * this with it.
      *
-     * @param array{rows: list<array{siteID: int, calls: int, costPence: int}>, month: string, couldNotRead: bool} $read
+     * @param array{rows: list<array{siteID: int, calls: int}>, spend: list<array{siteID: int, service: string, costCurrency: string, costMillionths: int}>, month: string, couldNotRead: bool} $read
      *        What `readThisMonthsTranslationUse()` found.
      * @param bool $dryRun A rehearsal: the words say "would".
      *
@@ -5577,38 +5635,47 @@ class DbBackup
     private function keepThisMonthsTranslationUse(array $read, bool $dryRun): string
     {
         $failed = ($dryRun === true ? 'This rehearsal could not' : 'This restore could not')
-                . ' be sure of keeping this month\'s translation figures (how many translation requests each organisation '
-                . 'has made, and what they cost), so some or all of them may be as this snapshot recorded them. If the snapshot is from earlier this month, an organisation may be '
-                . 'able to spend up to its monthly translation limit again. Everything else '
+                . ' be sure of keeping this month\'s figures for outside companies (how many translation requests each organisation '
+                . 'has made, and what the outside companies charged), so some or all of them may be as this snapshot recorded them. If the snapshot is from earlier this month, an organisation may be '
+                . 'able to spend up to its monthly limits again. Everything else '
                 . ($dryRun === true ? 'would be' : 'was') . ' put back as normal.';
         if ($read['couldNotRead'] === true) {
             return $failed;
         }
-        if ($read['rows'] === []) {
+        if ($read['rows'] === [] && $read['spend'] === []) {
             return '';
         }
-        $raised = 0;
-        $look   = null;
-        $write  = null;
+        $raisedSites = [];
+        $look        = null;
+        $write       = null;
+        $lookSpend   = null;
+        $writeSpend  = null;
         try {
             $look = $this->db->prepare(
-                'SELECT `calls`, `costPence` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?'
+                'SELECT `calls` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?'
             );
             // GREATEST on each counter on its own: the larger number of
-            // requests and the larger amount of money, which need not come
-            // from the same copy.
+            // requests and, below, the larger amount of money for each
+            // service and currency, which need not come from the same copy.
             $write = $this->db->prepare(
-                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?) '
-                . 'ON DUPLICATE KEY UPDATE `calls` = GREATEST(`calls`, ?), `costPence` = GREATEST(`costPence`, ?)'
+                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`) VALUES (?, ?, ?) '
+                . 'ON DUPLICATE KEY UPDATE `calls` = GREATEST(`calls`, ?)'
             );
-            if ($look === false || $write === false) {
+            $lookSpend = $this->db->prepare(
+                'SELECT `costMillionths` FROM `tblProviderSpend` '
+                . 'WHERE `siteID` = ? AND `monthStartUtc` = ? AND `service` = ? AND `costCurrency` = ?'
+            );
+            $writeSpend = $this->db->prepare(
+                'INSERT INTO `tblProviderSpend` (`siteID`, `monthStartUtc`, `service`, `costCurrency`, `costMillionths`) '
+                . 'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE `costMillionths` = GREATEST(`costMillionths`, ?)'
+            );
+            if ($look === false || $write === false || $lookSpend === false || $writeSpend === false) {
                 return $failed;
             }
             $month = $read['month'];
             foreach ($read['rows'] as $row) {
                 $siteId = $row['siteID'];
                 $calls  = $row['calls'];
-                $pence  = $row['costPence'];
                 $look->bind_param('is', $siteId, $month);
                 $look->execute();
                 $found = $look->get_result();
@@ -5616,12 +5683,31 @@ class DbBackup
                 if ($found instanceof \mysqli_result) {
                     $found->free();
                 }
-                if (is_array($now) === true && (int) $now['calls'] >= $calls && (int) $now['costPence'] >= $pence) {
-                    continue; // the snapshot's figures are already at least as large
+                if (is_array($now) === true && (int) $now['calls'] >= $calls) {
+                    continue; // the snapshot's figure is already at least as large
                 }
-                $write->bind_param('isiiii', $siteId, $month, $calls, $pence, $calls, $pence);
+                $write->bind_param('isii', $siteId, $month, $calls, $calls);
                 $write->execute();
-                $raised++;
+                $raisedSites[$siteId] = true;
+            }
+            foreach ($read['spend'] as $row) {
+                $siteId   = $row['siteID'];
+                $service  = $row['service'];
+                $currency = $row['costCurrency'];
+                $amount   = $row['costMillionths'];
+                $lookSpend->bind_param('isss', $siteId, $month, $service, $currency);
+                $lookSpend->execute();
+                $found = $lookSpend->get_result();
+                $now   = $found instanceof \mysqli_result ? $found->fetch_assoc() : null;
+                if ($found instanceof \mysqli_result) {
+                    $found->free();
+                }
+                if (is_array($now) === true && (int) $now['costMillionths'] >= $amount) {
+                    continue; // the snapshot's figure is already at least as large
+                }
+                $writeSpend->bind_param('isssii', $siteId, $month, $service, $currency, $amount, $amount);
+                $writeSpend->execute();
+                $raisedSites[$siteId] = true;
             }
         } catch (\Throwable $e) {
             // Only an error known to undo just its own statement lets the
@@ -5631,12 +5717,13 @@ class DbBackup
             self::stopUnlessStatementOnly($e);
             return $failed;
         } finally {
-            foreach ([$look, $write] as $stmt) {
+            foreach ([$look, $write, $lookSpend, $writeSpend] as $stmt) {
                 if ($stmt instanceof \mysqli_stmt) {
                     $stmt->close();
                 }
             }
         }
+        $raised = \count($raisedSites);
         if ($raised === 0) {
             return '';
         }
@@ -5645,12 +5732,13 @@ class DbBackup
         //    restore": the two counters are judged separately, so an
         //    organisation can end with the snapshot's request count and the
         //    live figure for money (the independent check's mixed case).
-        return 'This month\'s translation figures (how many translation requests were made, and what they cost) '
+        return 'This month\'s figures for outside companies (how many translation requests were made, and what the '
+             . 'outside companies charged for AI, translation, transcription and text messages) '
              . ($dryRun === true ? 'would be' : 'were') . ' higher before this restore than in the snapshot for '
              . $raised . ' organisation(s). For each of those, the higher of the two figures '
-             . ($dryRun === true ? 'would be' : 'was') . ' kept, for the number of requests and for the money '
-             . 'separately, because requests already made and paid for this month still count against the monthly '
-             . 'limits. Earlier months\' figures ' . ($dryRun === true ? 'would be' : 'were') . ' put back as the snapshot has them.';
+             . ($dryRun === true ? 'would be' : 'was') . ' kept, for the number of requests and for the money of each '
+             . 'service and currency separately, because requests already made and paid for this month still count '
+             . 'against the monthly limits. Earlier months\' figures ' . ($dryRun === true ? 'would be' : 'were') . ' put back as the snapshot has them.';
     }
 
     /**

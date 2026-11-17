@@ -69,7 +69,11 @@
  * own numbers, each under a name that begins "texts":
  *   "textsRan":…, "textsSent":…, "textsFailed":…, "textsNotSent":…,
  *   "textsLeft":…, "textsNotReady":…, "textsError":…
- * (what each means is at Sms::sendHeld(), without the "texts").
+ * (what each means is at Sms::sendHeld(), without the "texts"). A THIRD step
+ * (#993) fetches the day's exchange rates, and adds its own four numbers the
+ * same way: "ratesRan", "ratesStored", "ratesError", "ratesSkipped" (what each
+ * means is at ExchangeRates::refreshIfDue(), without the "rates"). It runs
+ * whatever the mail step did and cannot change its status word.
  * TWO THINGS WERE TRIED FIRST AND REJECTED. A second line of JSON for the
  * texts step: a scheduler, a monitor and the self-tests all read the answer
  * as ONE JSON document, and a second line breaks that. And one "texts"
@@ -107,6 +111,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\ExchangeRates;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\MailRoutes;
@@ -222,12 +227,46 @@ try {
     error_log('Mail queue job: the held texts step stopped: ' . get_class($problem));
 }
 
+// 💱 THE EXCHANGE-RATES STEP (#993; D-192). A third step, here for the same
+//    reason the texts step is: an installation that already runs this job for
+//    its mail gets the day's rates with it, and no customer has to add a
+//    scheduler line. ExchangeRates::refreshIfDue() fetches only when the last
+//    success is over 20 hours old (after a failure, over an hour since the
+//    attempt), only while the installation's switch is on, and catches its own
+//    faults; the try here is for what it cannot (its class file missing from
+//    a half-finished upload). It runs whatever the mail step did and can never
+//    change the mail step's answer, the status word or the finish recorded
+//    below. Until it has answered, the numbers say "stopped by a fault".
+$rates = ['ran' => 0, 'stored' => 0, 'error' => 1, 'skipped' => 0];
+try {
+    $rates = ExchangeRates::refreshIfDue(App::db());
+    // 📝 A line only when a fetch really ran. Numbers only: the bank's reply
+    //    is never written down.
+    if ($rates['ran'] > 0) {
+        Logger::activity(
+            'ExchangeRatesFetched',
+            $rates['error'] === 0
+                ? 'Exchange rates fetched: ' . $rates['stored'] . ' currencies held'
+                : 'Exchange rates: the daily fetch did not succeed'
+        );
+    }
+} catch (\Throwable $problem) {
+    error_log('Mail queue job: the exchange-rates step stopped: ' . get_class($problem));
+}
+
 // 🔢 The texts step's numbers, each under its own name ("sent" becomes
 //    "textsSent"), so that they sit beside the mail step's numbers without
 //    being taken for them: see WHAT IT PRINTS in the file header.
 $textNumbers = [];
 foreach ($texts as $what => $howMany) {
     $textNumbers['texts' . ucfirst((string) $what)] = (int) $howMany;
+}
+// 💱 And the rates step's, each beginning "rates": ratesRan, ratesStored,
+//    ratesError, ratesSkipped. Folded into the same map, so every answer that
+//    carries the texts' numbers carries these too, and the answer stays ONE
+//    JSON document of plain numbers.
+foreach ($rates as $what => $howMany) {
+    $textNumbers['rates' . ucfirst((string) $what)] = (int) $howMany;
 }
 
 if ($mailStopped === true) {

@@ -856,6 +856,10 @@ ROUTER;
         // D10. Option mistakes throw rather than fall back to a default.
         foreach ([
             ['maxbytes' => 10], ['maxBytes' => 0], ['accept' => "text/calendar\r\nX-Evil: 1"], ['maxRedirects' => 11], ['deadline' => 'soon'],
+            // The purpose goes into the User-Agent header, so a line break in it
+            // is a header-injection door: a TRAILING one (which `$` in a pattern
+            // lets through, `\z` does not) and one in the MIDDLE (#993).
+            ['purpose' => "exchange rates\n"], ['purpose' => "exchange\nrates"], ['purpose' => "exchange rates\r\nX-Evil: 1"],
         ] as $bad) {
             $threw = false;
             try {

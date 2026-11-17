@@ -3239,9 +3239,47 @@ return [
         'decision' => 'not-personal',
         // #762, migration 254. Written down rather than left out: an absence
         // looks exactly like the #706 fault, where tables had no decision.
-        'reason'   => 'How many translations one organisation asked for in one month, and what the '
-                    . 'translation company reported they cost: an organisation number, a month and two '
-                    . 'counts. It says nothing about which member pressed the button or what was translated',
+        'reason'   => 'How many translations one organisation asked for in one month: an organisation '
+                    . 'number, a month and a count. It says nothing about which member pressed the button '
+                    . 'or what was translated. (The money moved to tblProviderSpend in #993.)',
+        'columns'  => [],
+    ],
+    'tblProviderSpend' => [
+        'decision' => 'not-personal',
+        // #993, migration 302. Written down rather than left out (#706).
+        // DELIBERATELY NOT EMPTIED BY AN ERASURE, and that is the point: AI
+        // and text-message spend used to be a SUM over the rows an erasure
+        // deletes (tblAiUsage, tblSmsMessage), so erasing somebody LOWERED the
+        // month's spend and gave the organisation money to spend again. This
+        // table holds no row about anybody, so it survives.
+        'reason'   => 'What one organisation was charged by outside companies in one month, per kind of '
+                    . 'service and currency: an organisation number, a month, a service name, a currency '
+                    . 'and a whole number. It names nobody and says nothing about what was sent, so an '
+                    . 'erasure leaves it alone on purpose; otherwise erasing a member would lower the '
+                    . 'month\'s spend and let the organisation spend it again',
+        'columns'  => [],
+    ],
+    'tblExchangeRate' => [
+        'decision' => 'not-personal',
+        // #993, migration 301. Written down rather than left out (#706).
+        'reason'   => 'The European Central Bank\'s published exchange rates: a currency, a rate, the '
+                    . 'bank\'s date and the moment the portal stored it. Nothing about any person',
+        'columns'  => [],
+    ],
+    'tblExchangeRateFetch' => [
+        'decision' => 'not-personal',
+        // #993, migration 301.
+        'reason'   => 'One row: when the daily fetch of exchange rates last ran and one fixed word for why it '
+                    . 'failed. Nothing about any person, and never the reply itself',
+        'columns'  => [],
+    ],
+    'tblExchangeRateEntered' => [
+        'decision' => 'not-personal',
+        // #993, migration 301. Deliberately no column for who typed a rate: that goes to the
+        // activity log, which an erasure reaches through its own userID column.
+        'reason'   => 'Exchange rates an administrator typed: an organisation number (or none for the '
+                    . 'installation), two currencies, a rate and two dates. It has no column for who typed '
+                    . 'one, so it holds no personal data',
         'columns'  => [],
     ],
     'tblScheduledJobRun' => [

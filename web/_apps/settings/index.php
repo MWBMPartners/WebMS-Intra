@@ -242,6 +242,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: ' . Site::url('settings'));
             exit();
         }
+        // 💱 The exchange-rate switch (#993): deleting it here would leave the
+        //    fetch with no row, which reads as off. Changed only at Admin,
+        //    Exchange rates.
+        if ($lockedKey !== null && \Portal\Core\ExchangeRates::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is an exchange-rate setting and can only be changed at Admin, Exchange rates',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\ExchangeRates::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
         // 🌍 The country (#967): deleting the installation's row here would leave
         //    every organisation following it with no country, and an
         //    organisation's own with no check at all. Changed only at Admin,
@@ -881,6 +895,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     $currencyLocked   = \Portal\Core\Currency::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 And the country (#967), changed on the same page as the currency.
                                     $countryLocked    = \Portal\Core\Countries::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And the exchange-rate switch (#993), changed on its own page.
+                                    $exchangeRatesLocked = \Portal\Core\ExchangeRates::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 #845: ONE answer each to "is Edit offered" and "is Delete
                                     //    offered", built from the methods' answers above and nothing
                                     //    else. They used to be two separate chains — the Edit chain
@@ -913,7 +929,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         || $outsideLocked === true || $registrationsLocked === true || $activityLogLocked === true
                                         || $geocodeCacheLocked === true || $memberLimitsLocked === true
                                         || $copiedRuleLocked === true || $foyerLocked === true || $webhookPortsLocked === true
-                                        || $transcriptLocked === true || $currencyLocked === true || $countryLocked === true || $rowRefusal !== null;
+                                        || $transcriptLocked === true || $currencyLocked === true || $countryLocked === true || $exchangeRatesLocked === true || $rowRefusal !== null;
                                     $deleteLocked = $editLocked === true || $isGivingRule === true;
                                     ?>
                                     <?php if ($editLocked === true): ?>
@@ -981,6 +997,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                                  administrator. Its own branch, one per family, so section D of
                                                  tools/settings-locks-selftest.php can take it out on its own. */ ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Settings, Organisation</a>
+                                    <?php elseif ($exchangeRatesLocked === true): ?>
+                                        <?php /* #993: the switch is the installation's, a global administrator's, set on the rates page. */ ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Exchange rates</a>
                                     <?php elseif ($rowRefusal !== null): ?>
                                         <?php /* #1021: no link — there is no page where this person could change it either. */ ?>
                                         <span class="small text-secondary" data-row-refusal="<?php echo htmlspecialchars($rowRefusal, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(SettingsRowRule::noteWords($rowRefusal), ENT_QUOTES, 'UTF-8'); ?></span>
