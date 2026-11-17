@@ -193,11 +193,7 @@ class ApiResponse
      */
     public static function requireApiKey(array $requiredScopes = []): array
     {
-        $auth = (string) (
-            $_SERVER['HTTP_AUTHORIZATION']
-            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-            ?? ''
-        );
+        $auth = ApiAuth::authorizationHeader();
         if (str_starts_with($auth, 'Bearer ') === false) {
             self::error('Bearer token required in Authorization header', 401);
         }

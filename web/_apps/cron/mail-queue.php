@@ -110,6 +110,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ApiAuth;
 use Portal\Core\App;
 use Portal\Core\ExchangeRates;
 use Portal\Core\Logger;
@@ -133,7 +134,7 @@ ini_set('display_errors', '0');
 // expected ("?token[]=x"); turning that into text raises a PHP warning, which
 // the portal records with the request's address.
 $given  = '';
-$header = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+$header = ApiAuth::authorizationHeader();
 if (is_string($header) === true && preg_match('/\ABearer\s+(\S+)\z/i', trim($header), $found) === 1) {
     $given = $found[1];
 } elseif (is_string($_GET['token'] ?? null) === true) {

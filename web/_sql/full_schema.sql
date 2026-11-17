@@ -6011,7 +6011,7 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     -- 122_event_reminders.sql (#329)
     (NULL, 'reminders.enabled',                          '1',  '1',  0),
-    (NULL, 'reminders.cron_token',                       '',   '',   0),
+    (NULL, 'reminders.cron_token',                       '',   '',   1),
     -- 123_event_public_landing.sql (#346)
     (NULL, 'public_landing.show_qr',                     '1',  '1',  0),
     (NULL, 'public_landing.show_countdown',              '1',  '1',  0),
@@ -6019,7 +6019,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'safeguarding.dbs_required_for_coordinators', '0',  '0',  0),
     (NULL, 'safeguarding.dbs_renewal_warning_days',      '90', '90', 0),
     -- 129_external_calendar_feeds.sql (#327)
-    (NULL, 'feeds.cron_token',                           '',   '',   0)
+    (NULL, 'feeds.cron_token',                           '',   '',   1)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
@@ -12099,6 +12099,11 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('303_event_place_not_a_home.sql
 -- tblUserSites.leftAtUtc is written above, in the table itself. This is the
 -- record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('305_membership_leaving_date.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 306_two_job_tokens_secret.sql (#1154) ──────────────────────────────
+-- The two seed rows above now carry the secret mark. This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('306_two_job_tokens_secret.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
