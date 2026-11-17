@@ -25262,3 +25262,11 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - Known, from the independent check: kiosk sessions need a token in the restored `tblKioskTokens`, so another installation's kiosk
   browser cannot act; a kiosk member number could point at a reused account number for up to its 90-second idle window after
   restoring an older snapshot of the same installation; the ended-session lines are written against the session's account number.
+
+### The noticeboard's host keeps the form token current (#1141)
+
+- The bundle calls `host.save()` and swallows rejections (`Promise.resolve(h.save(posters)).catch(() => {})`), so the host's
+  `save()` never rejects and reports through a DOM notice (`#noticeboard-save-failed`, `role=alert`, `textContent` only). A host that
+  captures `window.NoticeboardHost.csrf` once is the #768 fault again: copy the nearest pattern (`Portal.csrf` +
+  `Portal.rememberCsrf`). The real-browser test is `tools/noticeboard-babel-browser-selftest.mjs` (sections C and D) and the HTTP
+  test `tools/noticeboard-save-selftest.php`.

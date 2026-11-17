@@ -81,6 +81,18 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### The noticeboard stores every change in a visit (#1141)
+
+- The noticeboard's second and later saves in one visit were silently lost: the page read the form token once at load, the server
+  replaces it on every accepted post, so the second add, edit or delete was refused while still showing on screen. The
+  page's host now reads the live token when it posts (`Portal.csrf()`), hands every answer to `Portal.rememberCsrf()`, sends
+  one save at a time, and shows a visible notice above the board when a save fails (the generated bundle ignores the result, so
+  the host is the only place that can say so). Upload uses the same helper. The generated bundle is untouched. Measured by the
+  independent check with the board's own buttons in a real browser: two adds, an edit and a remove, and an image upload followed
+  by saves, all stored. Open: a request that never gets an answer holds later saves with no notice (no time limit), nothing
+  tests the token hand-back after an upload, the notice can be partly hidden behind the edit panel or off-screen after a scroll,
+  and its wording says "reload" when the next change alone recovers. Codex has not reviewed this.
+
 ### A whole-database restore ends every sign-in (#1137)
 
 - A whole-database restore now ends every session, the restorer's included. At the end of the restore, inside its transaction,
