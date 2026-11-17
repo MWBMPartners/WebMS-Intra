@@ -42,7 +42,7 @@ $db = App::db();
 $rows = [];
 $listSql = 'SELECT o.offboardingID, o.userID, o.effectiveDate, o.reason, o.dataDisposition, '
     . '       o.offboardedAt, o.rehiredAt, '
-    . '       u.fullName, u.emailAddress, '
+    . '       u.fullName, u.emailAddress, u.isActive AS accountIsActive, '
     // #982 round 12: whether the account has since been ERASED on request.
     //    An erasure can be carried out inside the undo window, and rehire.php
     //    then refuses (AccountGuard row 3a), so the list must not offer a
@@ -126,7 +126,10 @@ $csrf = Auth::csrfToken();
             <div class="portal-data-list">
                 <?php foreach ($rows as $r):
                     $isErased = (int) ($r['isErased'] ?? 0) === 1;
-                    $canUndo = $r['rehiredAt'] === null && $isErased === false &&
+                    // #1152: an account that is switched ON again is back, whatever this row says
+                    // (an older return by the Active tick left the row unmarked); no Rehire for it.
+                    $isBack  = (int) ($r['accountIsActive'] ?? 0) === 1;
+                    $canUndo = $r['rehiredAt'] === null && $isErased === false && $isBack === false &&
                         strtotime((string) $r['offboardedAt']) > (time() - $undoWindowDays * 86400);
                 ?>
                     <div class="row py-2 border-bottom align-items-center">
@@ -143,6 +146,8 @@ $csrf = Auth::csrfToken();
                         <div class="col-md-2 text-end">
                             <?php if ($r['rehiredAt'] !== null): ?>
                                 <span class="badge bg-success">Rehired</span>
+                            <?php elseif ($isBack === true && $isErased === false): ?>
+                                <span class="badge bg-success">Back</span>
                             <?php elseif ($isErased === true): ?>
                                 <span class="small text-muted">Erased on request, so it cannot be rehired</span>
                             <?php elseif ($canUndo === true): ?>

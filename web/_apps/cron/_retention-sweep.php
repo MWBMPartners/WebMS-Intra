@@ -1323,9 +1323,11 @@ function run_offboarding_erasure_sweep(): array
          . '     WHERE o2.userID = r.userID '
          . '     ORDER BY o2.offboardedAt DESC, o2.offboardingID DESC LIMIT 1'
          . ') '
+         . 'INNER JOIN tblUsers ru ON ru.userID = r.userID '
          . "WHERE r.status IN ('pending_review', 'processing') "
          . "  AND o.dataDisposition IN ('erase', 'anonymise', 'delete') "
          . '  AND o.rehiredAt IS NULL '
+         . '  AND ru.isActive = 0 '
          . '  AND o.offboardedAt <= DATE_SUB(NOW(), INTERVAL ? DAY) '
          . 'ORDER BY r.requestID';
 
@@ -1367,9 +1369,21 @@ function run_offboarding_erasure_sweep(): array
         //    counted as waiting and left completely alone.
         $claimed = false;
         try {
+            // 🔙 #1152: THE ACCOUNT MUST STILL BE SWITCHED OFF, ASKED IN THE CLAIM ITSELF.
+            //    Selection above read it some time ago, and the Active tick on Admin,
+            //    Users can commit between that read and this statement. Joined here,
+            //    the claim reads the account row as it is NOW (and waits on the row
+            //    lock that save holds while it brings somebody back), so a person who
+            //    has returned is never claimed, whatever state their request is in.
+            //    The newest offboarding row must also still be unmarked, for the same
+            //    reason as in the selection. A refused claim is counted as waiting.
             $lock = $db->prepare(
-                'UPDATE tblErasureRequest SET status = "processing", claimedAt = UTC_TIMESTAMP() '
-                . 'WHERE requestID = ? AND status = "pending_review"'
+                'UPDATE `tblErasureRequest` `r` '
+                . 'INNER JOIN `tblUsers` `u` ON `u`.`userID` = `r`.`userID` '
+                . 'SET `r`.`status` = "processing", `r`.`claimedAt` = UTC_TIMESTAMP() '
+                . 'WHERE `r`.`requestID` = ? AND `r`.`status` = "pending_review" AND `u`.`isActive` = 0 '
+                . 'AND (SELECT `o3`.`rehiredAt` FROM `tblOffboarding` `o3` WHERE `o3`.`userID` = `r`.`userID` '
+                . '     ORDER BY `o3`.`offboardedAt` DESC, `o3`.`offboardingID` DESC LIMIT 1) IS NULL'
             );
             if ($lock !== false) {
                 $lock->bind_param('i', $one['requestID']);

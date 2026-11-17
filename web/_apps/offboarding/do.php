@@ -167,6 +167,31 @@ try {
         [$userId], 'i'
     );
 
+    // 1a. END EVERY EXISTING SESSION OF THE PERSON (#1155). Step 1 switches the
+    //     account off, and a session is ended on its next request when the
+    //     account is off - but if the person is brought back (Rehire, or the
+    //     Active tick on Admin, Users) before that request, the account is on
+    //     again and the old session carried on, signed in with no password
+    //     (reproduced on the second local rehearsal). `Auth::endOtherSessionsOf()`
+    //     is the ONE mechanism for ending a person's sessions (it raises the
+    //     account's `signInVersion`, which every session is compared with); this
+    //     reuses it. Inside the transaction, so a rolled-back offboarding ends
+    //     nothing. It does not touch THIS browser's session: the administrator
+    //     cannot offboard their own account (refused above). A database not yet
+    //     upgraded to migration 270 answers false and the step is logged as
+    //     failed, as every other step is, and the offboarding carries on.
+    try {
+        $sessionsEnded = Auth::endOtherSessionsOf($db, $userId);
+        $stepsLog[]    = $sessionsEnded === true
+            ? ['step' => 'end_sessions', 'ok' => true]
+            : ['step' => 'end_sessions', 'ok' => false, 'error' => 'the sign-in version could not be recorded'];
+    } catch (\Throwable $e) {
+        if ($e instanceof \mysqli_sql_exception && in_array($e->getCode(), [1213, 1205], true) === true) {
+            throw $e;
+        }
+        $stepsLog[] = ['step' => 'end_sessions', 'ok' => false, 'error' => $e->getMessage()];
+    }
+
     // 2. Delete passkeys / WebAuthn credentials.
     $run('delete_webauthn',
         'DELETE FROM tblWebAuthnCredentials WHERE userID = ?',

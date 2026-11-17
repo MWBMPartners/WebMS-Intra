@@ -805,6 +805,18 @@ if ($action === 'update') {
             $back->close();
         }
 
+        // 🔙 #1152: switching the account back on is also a RETURN from any offboarding it
+        //    had, and has to be treated exactly as Rehire treats one: the offboarding row is
+        //    marked rehired (so the offboarding list stops offering Rehire) and an erasure
+        //    request still waiting is cancelled (so nobody can erase a returned member, by
+        //    hand or by the nightly sweep). Portal\Core\ReturnedMember is the ONE place
+        //    both routes do it. It does nothing for an account that was never offboarded.
+        //    This is NOT limited to a one-organisation portal, unlike the membership step
+        //    above: whether the person has come back does not depend on that.
+        if ($isActive === 1 && $storedIsActive === 0) {
+            \Portal\Core\ReturnedMember::record($mysqli, (int) $userID, (int) ($_SESSION['user_id'] ?? 0));
+        }
+
         // 🔑 #586: the password is stored whichever of the two cases step
         //    10b found. There is no third case and no silent one: a
         //    password that cannot be stored never reaches here, because

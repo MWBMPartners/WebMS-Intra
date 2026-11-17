@@ -25,6 +25,7 @@ use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Memberships;
+use Portal\Core\ReturnedMember;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -176,49 +177,17 @@ try {
             $stmt->close();
         }
     }
-    $stmt = $db->prepare(
-        'UPDATE tblOffboarding SET rehiredAt = NOW(), rehiredByID = ? WHERE offboardingID = ?'
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('ii', $adminId, $id);
-        $stmt->execute();
-        $stmt->close();
-    }
-    // 🛑 Cancel any erasure request this offboarding filed (#569).
-    //
-    //    Since #569, offboarding with "erase" files a real erasure request.
-    //    Undoing the offboarding has to call that off, and an independent
-    //    check found that it did not: the request simply stayed at
-    //    'pending_review'. In the DEFAULT mode ('on_request') nothing
-    //    automatic ever looks at it again, so it sat on Admin → Erasure
-    //    requests with nothing marking it as undone, waiting for the next
-    //    administrator working that queue to erase a person who is now a
-    //    current, active member.
-    //
-    //    Only a request that is still WAITING is cancelled, in one statement
-    //    (`status = 'pending_review'`). A request already at 'processing' is
-    //    being carried out right now and must not be touched: taking it back
-    //    at that point would leave a half-erased account with its request
-    //    marked cancelled, which is worse than either outcome. A request the
-    //    PERSON filed themselves is also at 'pending_review' and is cancelled
-    //    too — that is deliberate: bringing somebody back is a decision that
-    //    their data stays, and an administrator who wants it gone can file
-    //    again. The alternative, erasing a reinstated member because of a
-    //    request from before they returned, is plainly worse.
-    //
-    //    It is inside the same transaction as the rest of the undo, so a
-    //    rehire that fails leaves the request exactly as it was.
-    $cancelledRequests = 0;
-    $stmt = $db->prepare(
-        "UPDATE tblErasureRequest SET status = 'cancelled' "
-        . "WHERE userID = ? AND status = 'pending_review'"
-    );
-    if ($stmt !== false) {
-        $stmt->bind_param('i', $userId);
-        $stmt->execute();
-        $cancelledRequests = (int) $stmt->affected_rows;
-        $stmt->close();
-    }
+    // 🛑 Mark the offboarding undone AND cancel the erasure request it filed
+    //    (#569), through Portal\Core\ReturnedMember, the ONE place that does
+    //    both (#1152: the Active tick on Admin, Users calls the same, so the
+    //    two routes back cannot disagree). The reasoning that used to sit here
+    //    - only a WAITING request is cancelled, a `processing` one is left
+    //    alone, a request the person filed themselves is cancelled too because
+    //    bringing somebody back is a decision that their data stays - now
+    //    lives in that class. It is inside the same transaction as the rest of
+    //    the undo, so a rehire that fails leaves the request exactly as it was.
+    $returned          = ReturnedMember::record($db, $userId, $adminId, $id);
+    $cancelledRequests = $returned['cancelled'];
 
     $db->commit();
     // 🔑 WHAT THE ACCOUNT HAS NOW, as FACTS that promise nothing (#982
