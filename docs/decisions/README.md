@@ -265,7 +265,9 @@ appended with its real date and a note that it was added later.
 | [D-207](207-the-pilot-runs-with-the-five-paid-outside-services-switched-off.md) | 2026-11-17 | D-207 · The pilot runs with the paid outside services (AI, translation, transcription, text messages, online payments) switched off | in force |
 | [D-208](208-linking-a-sign-in-account-never-creates-an-account.md) | 2026-11-17 | D-208 · Linking a Microsoft or Google account never creates an account | in force |
 | [D-209](209-an-erasure-removes-remembered-map-positions-that-match-the-persons-own-address.md) | 2026-11-17 | D-209 · An erasure removes remembered map positions that match the person's own address | in force |
+| [D-210](210-a-visitors-cookie-record-is-replaced-when-its-cookie-runs-out.md) | 2026-11-17 | D-210 · A visitor's cookie-choice record counts as replaced when its cookie runs out | in force |
+| [D-211](211-a-membership-records-when-it-was-switched-off.md) | 2026-11-17 | D-211 · A membership records when it was switched off, so consent records can be cleared after a member leaves | in force |
 
-*209 decisions. This index is checked against the folder by
+*211 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
