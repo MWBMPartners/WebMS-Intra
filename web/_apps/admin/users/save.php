@@ -813,8 +813,11 @@ if ($action === 'update') {
         //    both routes do it. It does nothing for an account that was never offboarded.
         //    This is NOT limited to a one-organisation portal, unlike the membership step
         //    above: whether the person has come back does not depend on that.
+        //    It THROWS when an erasure run is already under way for the person (#1152
+        //    round 1), so this whole save is rolled back and nothing is switched on.
+        $erasureCancelled = 0;
         if ($isActive === 1 && $storedIsActive === 0) {
-            \Portal\Core\ReturnedMember::record($mysqli, (int) $userID, (int) ($_SESSION['user_id'] ?? 0));
+            $erasureCancelled = \Portal\Core\ReturnedMember::record($mysqli, (int) $userID, (int) ($_SESSION['user_id'] ?? 0))['cancelled'];
         }
 
         // 🔑 #586: the password is stored whichever of the two cases step
@@ -932,7 +935,14 @@ if ($action === 'update') {
     //    assembled from pieces, because a piece written for one case read
     //    untrue in the other.
     $recordNote = '';
+    // #1152: bringing an offboarded person back called off a waiting erasure request; say so, as Rehire does.
+    if ($erasureCancelled > 0) {
+        $recordNote .= ' (a waiting request to erase their personal details was cancelled because they were brought back)';
+    }
     $flashNote  = '';
+    if ($erasureCancelled > 0) {
+        $flashNote .= ' A waiting request to erase their personal details has been cancelled.';
+    }
     if ($setOwn === true) {
         if ($signInWasCreated === true) {
             $recordNote .= ' (a password sign-in was created for the administrator\'s own account)';

@@ -8,7 +8,8 @@
  * WHAT IT PROVES (real MySQL, real HTTP, one worker)
  *   A. Offboard with erasure, then tick Active on Admin, Users: the waiting
  *      erasure request is cancelled, the offboarding row is marked rehired by
- *      that administrator, and the offboarding list no longer offers Rehire.
+ *      that administrator, the offboarding list no longer offers Rehire, and the
+ *      success message and the activity line say a waiting request was cancelled.
  *      Rehire still does the same (same code, ReturnedMember).
  *   B. A suspended (never offboarded) member who filed their own erasure
  *      request keeps it when switched back on: the tick is not a decision to
@@ -18,8 +19,12 @@
  *      offboarded person who is still gone, and NEVER one whose account is
  *      switched on, even when the request still says `pending_review` and the
  *      offboarding row is unmarked (the state the tick left before #1152). The
- *      claim itself refuses an active account (checked with a trigger that
- *      switches the account on between selection and claim).
+ *      claim itself refuses an account switched on AFTER the selection: two
+ *      people are due in one run and a database trigger switches the second on
+ *      while the first is being erased (section X4).
+ *   C2. The Active tick landing while the sweep has already claimed the request
+ *      (`processing`, held open by a trigger, with the tick sent to a SECOND
+ *      server) is REFUSED and the account stays off (section X2).
  *   D. A browser signed in BEFORE offboarding is refused after the person is
  *      brought back by the Active tick and by Rehire, before it ever made
  *      another request in between. The browser is NOT signed in afterwards.
@@ -144,7 +149,6 @@ const BBB = 918422; // offboarded with erasure, brought back by Rehire
 const CCC = 918423; // suspended, never offboarded, has a request of their own
 const DDD = 918424; // offboarded with erasure, still gone: the sweep's control
 const EEE = 918425; // sweep: account switched on, request left waiting (the pre-fix state)
-const FFF = 918426; // sweep: account switched on between selection and claim (trigger)
 const JOB_TOKEN = 'selftest-return-cron-token';
 
 function addr(string $key): string
@@ -322,7 +326,7 @@ if (function_exists('pcntl_async_signals') === true) {
 }
 removeWorld();
 
-$people = [ADM => 'Ada Admin', AAA => 'Aaron Aaa', BBB => 'Bella Bbb', CCC => 'Cleo Ccc', DDD => 'Dan Ddd', EEE => 'Eve Eee', FFF => 'Finn Fff'];
+$people = [ADM => 'Ada Admin', AAA => 'Aaron Aaa', BBB => 'Bella Bbb', CCC => 'Cleo Ccc', DDD => 'Dan Ddd', EEE => 'Eve Eee'];
 foreach ($people as $id => $name) {
     q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, $name, 'u' . $id . '.return918@selftest.invalid']);
     q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, ?, 0)', 'iii', [$id, ORG_A, $id === ADM ? 1 : 0]);
@@ -593,7 +597,7 @@ $probeTick = static function () use ($newMember, $offboard, $tick, $requestOf, $
     return ($requestOf($id)['status'] ?? '') === 'cancelled' && ($offRow($id)['rehiredAt'] ?? null) !== null;
 };
 ok('E0 the tick probe passes unplanted', $probeTick() === true);
-$plant('E1 the Active tick no longer calls ReturnedMember', '_apps/admin/users/save.php', "\\Portal\\Core\\ReturnedMember::record(\$mysqli, (int) \$userID, (int) (\$_SESSION['user_id'] ?? 0));", '$userID = $userID;', $probeTick);
+$plant('E1 the Active tick no longer calls ReturnedMember', '_apps/admin/users/save.php', "\\Portal\\Core\\ReturnedMember::record(\$mysqli, (int) \$userID, (int) (\$_SESSION['user_id'] ?? 0))['cancelled'];", '0;', $probeTick);
 
 // Probe 2: sign a spare in, offboard, bring back by the tick; passes when the old browser stays refused.
 $probeSession = static function () use ($newMember, $offboard, $tick, $isSignedIn): bool {
@@ -651,6 +655,120 @@ $probeList = static function () use ($newMember, $offboard, &$jar, $offRow): boo
 };
 ok('E10 the list probe passes unplanted', $probeList() === true);
 $plant('E11 the list does not notice the account is on', '_apps/offboarding/index.php', "(int) (\$r['accountIsActive'] ?? 0) === 1;", "(int) (\$r['accountIsActive'] ?? 0) === 2;", $probeList);
+
+// =============================================================================
+head('F3. The tick says a waiting erasure request was cancelled');
+// =============================================================================
+[$f3] = $newMember(false);
+$offboard($f3);
+$tickF3 = $tick($f3);
+$flashF3 = preg_match('/class="alert alert-(?:success|danger)[^>]*>(.*?)<\/div>/s', req($jar['adm'], 'GET', '/admin/users')['body'], $mmF3) === 1 ? text($mmF3[1]) : '';
+ok('F3a the administrator is told the request was cancelled', str_contains($flashF3, 'waiting request to erase their personal details has been cancelled'), $flashF3);
+$lineF3 = (string) (one("SELECT activityDescription AS d FROM tblActivityLogs WHERE activityDescription LIKE ? ORDER BY logID DESC LIMIT 1", 's', ['Updated user #' . $f3 . '%'])['d'] ?? '');
+ok('F3b the activity line says so, and names the account by number only', str_contains($lineF3, 'request to erase their personal details was cancelled') && str_contains($lineF3, 'Spare') === false, $lineF3);
+
+// =============================================================================
+head('X4. An account switched on between selection and claim (two people due in one run)');
+// =============================================================================
+$probeX4 = static function () use ($newMember, $offboard, $age, $requestOf, $sweep, $db): bool {
+    [$p1] = $newMember(false);
+    [$p2] = $newMember(false);
+    $offboard($p1);
+    $offboard($p2);
+    $age($p1);
+    $age($p2);
+    $r1 = (int) $requestOf($p1)['requestID'];
+    $r2 = (int) $requestOf($p2)['requestID'];
+    if ($r1 >= $r2) {
+        return false; // the premise: p1 is claimed first
+    }
+    // Erasing p1 writes audit lines; the first one switches p2's account on, after the run has already SELECTED p2.
+    $db->query('DROP TRIGGER IF EXISTS `selftest_return_flip`');
+    $db->query('CREATE TRIGGER `selftest_return_flip` BEFORE INSERT ON `tblErasureAudit` FOR EACH ROW BEGIN '
+        . 'IF NEW.requestID = ' . $r1 . ' THEN UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ' . $p2 . '; END IF; END');
+    try {
+        $sweep();
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `selftest_return_flip`');
+    }
+    $first  = (string) (one('SELECT status AS s FROM tblErasureRequest WHERE requestID = ?', 'i', [$r1])['s'] ?? '');
+    $second = (string) (one('SELECT status AS s FROM tblErasureRequest WHERE requestID = ?', 'i', [$r2])['s'] ?? '');
+    $name   = (string) (one('SELECT fullName AS n FROM tblUsers WHERE userID = ?', 'i', [$p2])['n'] ?? '');
+
+    return $first === 'completed' && $second === 'pending_review' && str_contains($name, 'Spare');
+};
+ok('X4 the claim refuses the second person, whose account was switched on after the selection, while the first is erased', $probeX4() === true);
+$plant('X4p the claim stops asking whether the account is on (the selection alone cannot see the change)', '_apps/cron/_retention-sweep.php', "AND `u`.`isActive` = 0 '", "AND 1 = 1 '", $probeX4);
+
+// =============================================================================
+head('X2. The tick lands while the sweep has already claimed the request (the race)');
+// =============================================================================
+// A trigger holds the sweep open (6 s) the first time it writes an audit line for the request, so the request
+// stays `processing` while a SECOND server (same scratch copy, same sessions, port + 1) takes the tick.
+$probeRace = static function () use ($newMember, $offboard, $age, $requestOf, $db, &$jar, &$port, $child, $sep, $env, $adminToken): bool {
+    $port2 = $port + 1;
+    $proc2 = proc_open(
+        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors2.log', '-d', 'log_errors=1',
+            '-d', 'display_errors=0', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+            '-S', '127.0.0.1:' . $port2, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server2.log', 'a'], 2 => ['file', $child . $sep . 'server2.log', 'a']],
+        $pipes2,
+        $child,
+        $env
+    );
+    $until = microtime(true) + 10;
+    while (portAnswers($port2) === false && microtime(true) < $until) {
+        usleep(100000);
+    }
+    [$id] = $newMember(false);
+    $offboard($id);
+    $age($id);
+    $rid = (int) ($requestOf($id)['requestID'] ?? 0);
+    $db->query('CREATE TABLE IF NOT EXISTS `selftest_return_flag` (`n` INT)');
+    $db->query('DELETE FROM `selftest_return_flag`');
+    $db->query('DROP TRIGGER IF EXISTS `selftest_return_slow`');
+    $db->query('CREATE TRIGGER `selftest_return_slow` BEFORE INSERT ON `tblErasureAudit` FOR EACH ROW BEGIN '
+        . 'IF NEW.requestID = ' . $rid . ' AND (SELECT COUNT(*) FROM `selftest_return_flag`) = 0 THEN '
+        . 'INSERT INTO `selftest_return_flag` VALUES (1); DO SLEEP(6); END IF; END');
+    $mh = curl_multi_init();
+    $h1 = curl_init('http://127.0.0.1:' . $port . '/cron/retention-sweep?token=' . JOB_TOKEN);
+    curl_setopt_array($h1, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 300, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+    curl_multi_add_handle($mh, $h1);
+    $t0 = microtime(true);
+    do {
+        curl_multi_exec($mh, $running);
+        usleep(50000);
+    } while (microtime(true) - $t0 < 2.0);
+    $mid = (string) (one('SELECT status AS s FROM tblErasureRequest WHERE requestID = ?', 'i', [$rid])['s'] ?? '');
+    $row = one('SELECT fullName, emailAddress FROM tblUsers WHERE userID = ?', 'i', [$id]);
+    $saved = $port;
+    $port  = $port2;
+    $tok   = token(req($jar['adm'], 'GET', '/admin/users')['body']);
+    req($jar['adm'], 'POST', '/admin/users/save', ['csrf_token' => $tok, 'action' => 'update', 'userID' => (string) $id,
+        'fullName' => (string) $row['fullName'], 'emailAddress' => (string) $row['emailAddress'], 'phoneNumber' => '', 'isActive' => '1']);
+    $port = $saved;
+    $offAfterTick = (int) one('SELECT isActive AS a FROM tblUsers WHERE userID = ?', 'i', [$id])['a'];
+    do {
+        curl_multi_exec($mh, $running);
+        usleep(100000);
+    } while ($running > 0);
+    curl_multi_remove_handle($mh, $h1);
+    curl_multi_close($mh);
+    $db->query('DROP TRIGGER IF EXISTS `selftest_return_slow`');
+    $db->query('DROP TABLE IF EXISTS `selftest_return_flag`');
+    if (is_resource($proc2) === true) {
+        proc_terminate($proc2);
+        usleep(300000);
+        proc_close($proc2);
+    }
+    // Premise: the request really was `processing` when the tick came. Verdict: the tick was refused, so the
+    // account stayed off at that moment (it is erased by the run that was already going, as before the tick).
+    echo '        race: request ' . $mid . ' when the tick came; account on after the tick: ' . $offAfterTick . "\n";
+
+    return $mid === 'processing' && $offAfterTick === 0;
+};
+ok('X2 the tick is REFUSED while the sweep has the request in hand, and the account stays off', $probeRace() === true);
+$plant('X2p ReturnedMember stops refusing while a run is under way', '_core/ReturnedMember.php', 'if ($running !== null) {', 'if (false) {', $probeRace);
 
 // =============================================================================
 echo "\n" . ($fail === 0 ? 'ALL PASSED' : 'FAILED') . " — {$pass} passed, {$fail} failed\n";

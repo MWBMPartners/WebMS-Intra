@@ -66,6 +66,24 @@ final class ReturnedMember
         if ($userId <= 0) {
             return ['marked' => 0, 'cancelled' => 0];
         }
+
+        // 🔒 REFUSE WHILE AN ERASURE RUN IS UNDER WAY (#1152, check round 1). The nightly sweep
+        //    claims a request by setting it to `processing` and then erases the account; a
+        //    return that landed after the claim used to succeed (nothing here touches a
+        //    `processing` request, on purpose: cancelling it would leave a half-erased account
+        //    marked cancelled) and the run then erased a member who had just been brought back.
+        //    Read with FOR UPDATE inside the caller's transaction, and THROW, so the caller
+        //    rolls back: the account stays off and the administrator is told it could not be
+        //    saved. A claim made after this transaction began waits for its lock on the account.
+        $busy = $db->prepare("SELECT `requestID` FROM `tblErasureRequest` WHERE `userID` = ? AND `status` = 'processing' FOR UPDATE");
+        $busy->bind_param('i', $userId);
+        $busy->execute();
+        $running = $busy->get_result()->fetch_row();
+        $busy->close();
+        if ($running !== null) {
+            throw new \RuntimeException('an erasure run is already under way for this account');
+        }
+
         $marked = 0;
         if ($offboardingId !== null) {
             $stmt = $db->prepare(
