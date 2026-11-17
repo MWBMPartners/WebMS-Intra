@@ -152,7 +152,10 @@ if (preg_match('/^[0-9a-fA-F]{6}$/', $hex) === 1) {
 header_remove('X-Powered-By');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');
-header('Referrer-Policy: strict-origin-when-cross-origin');
+// (#1095) No Referrer-Policy is sent here. `bootstrap.php` already sends one
+// from the `portal.headers.referrer_policy` setting, and a second header() call
+// of the same name REPLACES the first, so a fixed value written here made that
+// setting do nothing on every page drawn through this template.
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 header('Strict-Transport-Security: max-age=63072000; includeSubDomains; preload');
 // 🔐 Content Security Policy (#144 — nonce-based tightening).

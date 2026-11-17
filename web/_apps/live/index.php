@@ -30,6 +30,15 @@ $displayName = (string) (App::settings()['livestream']['displayName'] ?? 'Livest
 $pageTitle   = $displayName;
 $pageSection = 'livestream';
 $breadcrumbs = ['Dashboard' => Site::url(''), $displayName => ''];
+// 🎬 (#1092) Let the page rule admit the player's own host, or the browser
+// refuses the frame. Set BEFORE header.php, which reads it. The `custom`
+// platform (administrator-written HTML) is NOT covered: its hosts are unknown.
+$cspFrameExtra = '';
+if ($live !== null && (string) $live['platform'] !== 'custom') {
+    $cspFrameExtra = Livestream::frameOriginFor(
+        Livestream::embedUrl((string) $live['platform'], (string) ($live['channelOrVideoId'] ?? ''))
+    );
+}
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 

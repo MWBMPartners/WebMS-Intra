@@ -161,4 +161,21 @@ class Livestream
             default          => null,
         };
     }
+
+    /**
+     * (#1092) The `scheme://host` of a player address `embedUrl()` built, for the
+     * page rule's `frame-src`. Taken FROM the built address so no player host is
+     * written a second time anywhere. https only; anything else answers ''.
+     */
+    public static function frameOriginFor(?string $embedUrl): string
+    {
+        if ($embedUrl === null) {
+            return '';
+        }
+        $parts = parse_url($embedUrl);
+        if (is_array($parts) === false || ($parts['scheme'] ?? '') !== 'https' || ($parts['host'] ?? '') === '') {
+            return '';
+        }
+        return 'https://' . $parts['host'];
+    }
 }
