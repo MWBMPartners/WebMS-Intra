@@ -260,7 +260,10 @@ appended with its real date and a note that it was added later.
 | [D-202](202-plan-with-opus-build-with-haiku-or-sonnet-on-every-llm-system.md) | 2026-11-16 | D-202 · Plan with the strongest tier, build with a cheaper tier, check with the strongest tier — on every LLM system | in force |
 | [D-203](203-correction-a-check-is-never-weaker-than-the-build.md) | 2026-11-16 | D-203 · Correction to the wording of D-202: a check is never run on a weaker tier than the build | in force |
 | [D-204](204-until-the-first-install-three-check-rounds-and-only-real-harm-blocks.md) | 2026-11-17 | D-204 · Until the first install: three check rounds per package, and only real harm blocks | in force |
+| [D-205](205-the-first-install-is-a-pilot-for-the-owners-own-organisation.md) | 2026-11-17 | D-205 · The first install is a pilot for the owner's own organisation; the full backlog still applies before any release | in force |
+| [D-206](206-no-codex-review-before-the-pilot-install.md) | 2026-11-17 | D-206 · No Codex review before the pilot install; Claude (Opus) checks carry it | in force |
+| [D-207](207-the-pilot-runs-with-the-five-paid-outside-services-switched-off.md) | 2026-11-17 | D-207 · The pilot runs with the paid outside services (AI, translation, transcription, text messages, online payments) switched off | in force |
 
-*204 decisions. This index is checked against the folder by
+*207 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
