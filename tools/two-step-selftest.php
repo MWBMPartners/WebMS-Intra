@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 204; // eleven by #1073 (N00-N10); five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13); sixteen by #1042 round 4 (M14-M29)
+const EXPECTED_CHECKS = 205; // twelve by #1073 (N00-N10 and N04b); five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13); sixteen by #1042 round 4 (M14-M29)
 
 function refuse(string $why): never
 {
@@ -2142,19 +2142,19 @@ ok('K10 /login/ms365 is NOT refused for a browser somebody is signed in on (the 
     $k10Start['status'] === 302 && str_starts_with($k10Start['location'], 'https://login.microsoftonline.com/') === true
     && $k4['sso']['start']['status'] === 302 && str_starts_with($k4['sso']['start']['location'], 'https://login.microsoftonline.com/') === true && $k4['sso']['state'] !== '',
     describe($k10Start) . '; ' . describe($k4['sso']['start']));
-ok('K11 the Microsoft callback signs B in, and sends B to the front page rather than to the page A was waiting to come back to',
+ok('K11 the Microsoft callback signs B in, and sends B to the front page rather than to the page C was waiting to come back to',
     $k4['sso']['back']['status'] === 302 && $k4['sso']['back']['location'] === '/' && (int) ($k4['now']['user_id'] ?? 0) === PEOPLE['tia'],
     describe($k4['sso']['back']));
-ok('K12 ...none of A\'s entries reach B (message, typing, come-back address, A\'s saved language), the browser\'s language is kept, and the proof is B\'s, by Microsoft',
+ok('K12 ...none of C\'s entries reach B (message, typing, come-back address, C\'s saved language), the browser\'s language is kept, and the proof is B\'s, by Microsoft',
     stillThere($k4['now'], $k4['waiting']) === [] && ($k4['now']['portal_locale'] ?? null) === 'cy' && proofIn($k4['now']) === PEOPLE['tia'] . ':Microsoft',
     'still there: ' . implode(', ', stillThere($k4['now'], $k4['waiting'])) . '; proof: ' . proofIn($k4['now']));
 $k4Page = req($k4['jar'], 'GET', '/account/add-password', null, ip(105));
-ok('K13 ...and B\'s own page does not show A\'s waiting message — the fault as #900 found it',
+ok('K13 ...and B\'s own page does not show C\'s waiting message — the fault as #900 found it',
     $k4Page['status'] === 200 && str_contains($k4Page['body'], (string) $k4['waiting']['flash_msg']) === false, describe($k4Page));
 
 // --- K5. The same with Google.
 $k5 = $k4Journey('google', 'tia', ip(106), '/p900-sams-page');
-ok('K14 the Google callback likewise signs B in with none of A\'s entries, and records B\'s proof by Google',
+ok('K14 the Google callback likewise signs B in with none of C\'s entries, and records B\'s proof by Google',
     $k5['sso']['back']['status'] === 302 && $k5['sso']['back']['location'] === '/' && (int) ($k5['now']['user_id'] ?? 0) === PEOPLE['tia']
         && stillThere($k5['now'], $k5['waiting']) === [] && proofIn($k5['now']) === PEOPLE['tia'] . ':Google',
     describe($k5['sso']['back']) . '; still there: ' . implode(', ', stillThere($k5['now'], $k5['waiting'])) . '; proof: ' . proofIn($k5['now']));
@@ -2256,7 +2256,7 @@ ok('K23 PLANT, a session waiting for a code counted as nobody\'s: C loses her ow
 $plantAuth(["on purpose (#731).\n        self::beginSessionFor(\$userId);" => "on purpose (#731).\n        session_regenerate_id(true);"]);
 $p5 = $k4Journey('ms365', 'tia', ip(117), '/p900-sams-page');
 $unplant();
-ok('K24 PLANT, the Microsoft callback put back as it was before #900 (a bare session_regenerate_id): A\'s message reaches B, so K12 and K13 can fail',
+ok('K24 PLANT, the Microsoft callback put back as it was before #900 (a bare session_regenerate_id): C\'s message reaches B, so K12 and K13 can fail',
     in_array('flash_msg', stillThere($p5['now'], $p5['waiting']), true) === true && (int) ($p5['now']['user_id'] ?? 0) === PEOPLE['tia'],
     'still there under the plant: ' . implode(', ', stillThere($p5['now'], $p5['waiting'])));
 
@@ -3664,7 +3664,7 @@ ok('M28 somebody NOT signed in whose sign-in names a switched-off account is sen
     $m28Fine, implode('; ', $m28Why));
 
 // =============================================================================
-// N00-N10 (#1073, D-208): LINKING NEVER CREATES AN ACCOUNT OR SWITCHES ONE.
+// N00-N10 and N04b (#1073, D-208): LINKING NEVER CREATES AN ACCOUNT OR SWITCHES ONE.
 // =============================================================================
 // A member who is already signed in and sends Microsoft or Google through the
 // callback (the Account page's link buttons, "Add a password") is LINKING.
@@ -3734,6 +3734,18 @@ ok('N04 an identity already linked to a DIFFERENT member is refused with its own
     && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true && $madeForXena() === [],
     $n04Why . '; his account changed in: ' . implode(',', $n04['zedChanged']));
 q("DELETE FROM tblLinkedAccounts WHERE providerSub = 'p1073-ms-linked-to-zed'");
+
+// N04b: the same through GOOGLE, whose callback has its own copy of the check.
+// Nothing else drove it: with its condition switched off every other check stayed green.
+q("INSERT INTO tblLinkedAccounts (userID, provider, providerSub, providerEmail) VALUES (?, 'google', 'p1073-g-linked-to-zed', ?)", 'is', [PEOPLE['zed'], emailOf('zed')]);
+$n04b = $linkTry(253, 'google', ['sub' => 'p1073-g-linked-to-zed', 'email' => P1042_NEW_EMAIL, 'name' => 'p1073 renamed by provider']);
+[$n04bOk, $n04bWhy] = $judgeIn($n04b, 'linked_elsewhere', 'Google', 253);
+$n04bZed = one('SELECT fullName FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zed']]);
+ok('N04b the same through GOOGLE: an identity already linked to a DIFFERENT member is refused with its own words, she stays herself, and neither account changed',
+    $n04bOk === true && $n04b['zedChanged'] === [] && ($n04bZed['fullName'] ?? '') !== 'p1073 renamed by provider' && $n04b['refusals'] === 1
+    && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true && $madeForXena() === [],
+    $n04bWhy . '; his account changed in: ' . implode(',', $n04b['zedChanged']));
+q("DELETE FROM tblLinkedAccounts WHERE providerSub = 'p1073-g-linked-to-zed'");
 
 // N05: an identity carrying ANOTHER member's e-mail address, linked to nobody.
 // Both callbacks. The old code updated his row (name, avatar, switched ON) and linked it.
