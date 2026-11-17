@@ -111,7 +111,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      families (hand-maintained CSS, not part of the generated bundle). Must
      load BEFORE noticeboard.css so the faces exist before anything renders
      text with them; supersedes the generated CSS's CSP-blocked Google Fonts
-     @import (see fonts-selfhost.css header + DEV_NOTES.md). -->
+     @import (see the fonts-selfhost.css header). -->
 <link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">
 <link rel="stylesheet" href="/assets/noticeboard/noticeboard.css">
 <!-- 🔒 #575: the bundle below can fetch Babel (a compiler) from a public server

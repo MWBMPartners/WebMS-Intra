@@ -56,12 +56,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-shield-halved me-2"></i>Privacy &amp; Data Protection</h1>
 
-<?php if ($controllerName === '' && $contactEmail === ''): ?>
+<?php // #1138 item 10: this notice is for the people who can fix it. A visitor or member cannot, and read it as a fault in the portal. ?>
+<?php if ($controllerName === '' && $contactEmail === '' && App::isAdmin() === true): ?>
     <div class="alert alert-warning small">
         <i class="fa-solid fa-triangle-exclamation me-1"></i>
-        <strong>Admin notice:</strong> the data controller name and contact email are not yet
-        configured. Set <code>privacy.controllerName</code> and <code>privacy.contactEmail</code>
-        in Site Settings.
+        <strong>Admin notice:</strong> only administrators see this. The Privacy page cannot name
+        your organisation as the data controller until <code>privacy.controllerName</code> and
+        <code>privacy.contactEmail</code> are set in Admin, Settings.
     </div>
 <?php endif; ?>
 
@@ -73,7 +74,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h2 class="h4 mt-4">Data controller</h2>
 <p>
     The data controller is
-    <strong><?php echo $controllerName !== '' ? htmlspecialchars($controllerName, ENT_QUOTES, 'UTF-8') : '<em>not configured</em>'; ?></strong>.
+    <strong><?php echo $controllerName !== '' ? htmlspecialchars($controllerName, ENT_QUOTES, 'UTF-8') : 'the organisation that runs this portal'; ?></strong>.
     <?php if ($contactEmail !== ''): ?>
         Privacy enquiries:
         <a href="mailto:<?php echo htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8'); ?>">

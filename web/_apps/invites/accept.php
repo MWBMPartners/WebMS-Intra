@@ -273,6 +273,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // is the same site-context initializer the password/SSO/
                 // WebAuthn login paths all call.
                 $_SESSION['user_id'] = $newUserId;
+                // #1138 item 8: every other sign-in sets the name and address the
+                //    top bar shows; this one set neither, so a new member read
+                //    "User" until they signed in again. They are the values
+                //    just stored for the new account ($name was inserted as the
+                //    full name and the invitation's address as the e-mail),
+                //    never read from the request a second time.
+                $_SESSION['user_name']  = $name;
+                $_SESSION['user_email'] = (string) $invite['email'];
                 Auth::initSessionSite($newUserId, $db);
 
                 header('Location: ' . Site::url(''));
@@ -286,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    record why, and say what is true: the account is
                     //    there, sign in with what you just chose. Not the form
                     //    again — it would be refused as "already accepted".
-                    unset($_SESSION['user_id']);
+                    unset($_SESSION['user_id'], $_SESSION['user_name'], $_SESSION['user_email']);
                     Logger::errorPlatform('Invites', 'Error', 'INVITE_SIGNIN_FAIL', $e->getMessage(), '');
                     echo '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Invitation</title></head>'
                        . '<body style="font-family:system-ui;text-align:center;padding:4rem 1rem;">'

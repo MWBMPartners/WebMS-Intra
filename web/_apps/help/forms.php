@@ -179,7 +179,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         address, kept for abuse-tracing purposes — so it cannot be matched to a specific person for
         erasure-by-request the way an internal response can; an admin can still delete any individual
         response by hand from the Responses page. Public responses are otherwise kept indefinitely in
-        this version — see DEV_NOTES for a note on an optional future auto-purge.
+        this version.
     </p>
 </section>
 

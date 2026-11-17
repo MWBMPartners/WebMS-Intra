@@ -1247,6 +1247,51 @@ ROUTER;
     }
 
     // =========================================================================
+    // R6. A failed name look-up must not reach the error handler (#1138 item 12)
+    // =========================================================================
+    // PHP 8 hands a warning to an installed handler whatever "@" says, and the
+    // portal's handler writes every one to the error log, so a failed look-up
+    // ("A temporary server error occurred.") was logged on every failed
+    // exchange-rate fetch. resolve() now swallows the warning of its own two
+    // look-ups. The recorder below is a handler that, like the portal's, does
+    // NOT honour "@".
+    echo "\n=== R6. A failed look-up is silent for the error handler ===\n";
+    $r6Seen = [];
+    $r6Recorder = static function (int $no, string $str) use (&$r6Seen): bool {
+        $r6Seen[] = $str;
+        return true;
+    };
+    $r6Name = 'does-not-exist.invalid';
+
+    // Premise: a bare "@" look-up DOES reach such a handler on this machine. A
+    // name that does not exist usually gives an empty answer and NO warning
+    // (the warning is for a server fault), so on many machines the premise
+    // cannot be shown, and then this part says so instead of passing.
+    $r6Previous = set_error_handler($r6Recorder);
+    @dns_get_record($r6Name, DNS_A);
+    restore_error_handler();
+    $r6PremiseHolds = $r6Seen !== [];
+    $r6Seen = [];
+
+    set_error_handler($r6Recorder);
+    $r6Ips = st_private('resolve', [$r6Name]);
+    restore_error_handler();
+    st_check('R6: resolve() of a name that does not exist answers the empty list', $r6Ips === [], st_show($r6Ips));
+    if ($r6PremiseHolds === true) {
+        st_check('R6: and the error handler saw NO warning from it', $r6Seen === [], st_show($r6Seen));
+    } else {
+        st_skip('R6: the error handler saw no warning', 'a bare "@dns_get_record" raises no warning for this name on this machine, so the fix cannot be proved here');
+    }
+    // Always provable: the temporary handler is taken out again, so the
+    // handler that was installed before is the one installed after.
+    set_error_handler($r6Recorder);
+    st_private('resolve', [$r6Name]);
+    $r6Top = set_error_handler(static fn (): bool => false);
+    restore_error_handler();
+    restore_error_handler();
+    st_check('R6: resolve() leaves the caller\'s error handler in place', $r6Top === $r6Recorder, st_show($r6Top));
+
+    // =========================================================================
     // Summary
     // =========================================================================
     echo "\n";

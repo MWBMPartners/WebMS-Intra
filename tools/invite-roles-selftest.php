@@ -543,6 +543,22 @@ $inOther = one($db, 'SELECT COUNT(*) FROM `tblUserRoles` WHERE `userID` = ? AND 
 $inThis  = one($db, 'SELECT COUNT(*) FROM `tblUserRoles` WHERE `userID` = ? AND `siteID` = ?', 'ii', [$got['uid'], $site]);
 check('A5 an invitation to ANOTHER organisation gives the role there and nothing in this one', $got['uid'] > 0 && $inOther === 1 && $inThis === 0);
 
+// A6. #1138 item 8. The new member is signed in by the acceptance; the very next page's top
+//     bar must show THEIR name (it used to read "User" until they signed in again).
+//     The jar still holds the session the acceptance made.
+$nameShown = static function () use ($seedInvite, $accept, $http): array {
+    [$tokenN, $emailN] = $seedInvite('user', IR_ORG);
+    $got  = $accept($tokenN, $emailN);
+    $page = $http('GET', '/dashboard');
+
+    return ['uid' => $got['uid'], 'status' => $page['status'], 'body' => $page['body']];
+};
+$n = $nameShown();
+$inTopBar = static fn (string $html): bool => preg_match('/portal-navbar-user">\s*Selftest invited\s*</', $html) === 1;
+check("A6 the new member's name ('Selftest invited') is in the TOP BAR of the next page, not \"User\"",
+    $n['uid'] > 0 && $n['status'] === 200 && $inTopBar($n['body']) === true,
+    'HTTP ' . $n['status']);
+
 // =============================================================================
 // B. A role deleted between sending and accepting refuses the whole acceptance
 // =============================================================================
@@ -804,6 +820,13 @@ $plant('reading an absent marker as "unticked" turns E6 red', '_core/GivingReten
         run($db, "DELETE FROM `tblSettings` WHERE `settingKey` = 'giving.retention.taxReceipts' AND `siteID` = ?", 'i', [$site]);
 
         return $kept;
+    });
+$plant('not setting the new member\'s name in the session turns A6 red', '_apps/invites/accept.php',
+    '$_SESSION[\'user_name\']  = $name;', '',
+    static function () use ($nameShown, $inTopBar): bool {
+        $n = $nameShown();
+
+        return $n['uid'] > 0 && $inTopBar($n['body']) === true;
     });
 $plant('removing the Upgrade tile\'s gate turns F2 red', '_apps/admin/index.php',
     "['show' => \$isUmbrella === true, 'colour' => 'secondary', 'icon' => 'fa-arrow-up-from-bracket'", "['show' => true, 'colour' => 'secondary', 'icon' => 'fa-arrow-up-from-bracket'",
