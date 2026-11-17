@@ -541,9 +541,12 @@ $conInstNever = $conInstDays === ConsentRetention::NEVER;
 $conExplained = 'The portal keeps a record of each choice made about the privacy notice and about cookies. A record that a '
     . 'newer choice by the same person has replaced is deleted by the nightly clear-out once the newer one is older than the '
     . 'figure below, if that scheduled job has been set up. A choice made without signing in counts as replaced when its cookie '
-    . 'runs out, ' . ConsentRetention::COOKIE_DAYS . ' days after it was made. A signed-in person&rsquo;s latest choice is never '
-    . 'deleted by this, and an erasure deletes all of a person&rsquo;s records at once. <strong>A member who has left but whose '
-    . 'account has not been erased is not yet cleared by a leaving date</strong>; that follows in a later release. '
+    . 'runs out, ' . ConsentRetention::COOKIE_DAYS . ' days after it was made. A signed-in person&rsquo;s latest choice is kept '
+    . 'while they belong to the organisation, and an erasure deletes all of a person&rsquo;s records at once. '
+    . '<strong>When a membership is ended through Offboarding, every record of that person here, the latest included, is '
+    . 'deleted once the figure below has passed since it ended.</strong> Switching an account off with the Active tick does not '
+    . 'end a membership, and removing a person from an organisation under Admin, Organisations, Users keeps no leaving date, so '
+    . 'neither starts that clock. A merged account&rsquo;s records follow the account the person now has. '
     . '&ldquo;Keep for ever&rdquo; keeps the records, where this installation allows it.';
 // What the network-address period does, in words true of both forms (D-178).
 // The places are NetworkAddressRetention::PLACES; the privacy pages list them.

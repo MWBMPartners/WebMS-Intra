@@ -478,8 +478,10 @@ return [
                 . 'choice was made from, and is deleted whole, address included, not just emptied of it. A record that a newer '
                 . 'choice of yours has replaced is deleted by a nightly clear-out once the newer one is older than the privacy '
                 . 'data-retention period set for the organisation (shown on this page), and a choice made without signing in counts '
-                . 'as replaced when its cookie runs out, a year after it was made. Your latest choice while signed in is kept '
-                . 'until your account is erased, which deletes it at once.',
+                . 'as replaced when its cookie runs out, a year after it was made. If your membership of the organisation is '
+                . 'ended through Offboarding, every record of yours there, the latest included, is deleted once that period has '
+                . 'passed since it ended. Otherwise your latest choice while signed in is kept until your account is erased, '
+                . 'which deletes it at once.',
         ],
     ],
     'tblCountEnvelopes' => [

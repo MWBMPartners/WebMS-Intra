@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 287; // #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 291; // #934 package 2h added M13s-M13v: 287 + 4. #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -4208,6 +4208,118 @@ ok('M13h rehiring (as a global administrator) an account with NO password row, n
     && str_contains($ollyRehire, 'You can give it') === false && str_contains($ollyRehire, 'cannot be given') === false
     && str_contains($ollyRehire, 'Forgot your password') === false,
     'rehire said: ' . $ollyRehire);
+// =============================================================================
+// M13s - M13w (#934, package 2h, D-211): a membership records WHEN it was
+// switched off, and a rehire empties the date. Driven over HTTP through the
+// real /offboarding/do and /offboarding/rehire pages.
+//
+// Two people, each in four organisations: A and B on, X off with an OLD date
+// (left before this offboarding), Y off with NO date (switched off before the
+// column existed). X and Y are made here and removed at the end.
+// =============================================================================
+const M2H_ORG_X  = 917004; // an organisation the person left long ago (old date)
+const M2H_ORG_Y  = 917005; // an organisation the person was switched out of with no date recorded
+const M2H_GLOBAL = 917300; // rehired by a global administrator
+const M2H_ONE    = 917301; // rehired by the administrator of ONE organisation (A)
+const M2H_OLD    = '2026-01-01 00:00:00';
+q("INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `isActive`) VALUES (?, 'selftest-2h-x', 'Selftest 2h X', 1), (?, 'selftest-2h-y', 'Selftest 2h Y', 1)", 'ii', [M2H_ORG_X, M2H_ORG_Y]);
+foreach ([M2H_GLOBAL => 'Greta Global', M2H_ONE => 'Owen One'] as $m2hId => $m2hName) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$m2hId, $m2hName, 'u' . $m2hId . '.erasure@selftest.invalid']);
+    $m2hMemberships = $m2hId === M2H_GLOBAL
+        ? [[ORG_A, 1, null], [ORG_B, 1, null], [M2H_ORG_X, 0, M2H_OLD], [M2H_ORG_Y, 0, null]]
+        : [[ORG_A, 1, null]];
+    foreach ($m2hMemberships as [$m2hSite, $m2hOn, $m2hDate]) {
+        q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `leftAtUtc`) VALUES (?, ?, ?, ?)', 'iiis', [$m2hId, $m2hSite, $m2hOn, $m2hDate]);
+    }
+}
+/** @return array<int, array{on: int, date: ?string, secs: ?int}> site => the membership, with its date and how many seconds ago (UTC) it was. */
+$m2hRows = static function (int $uid): array {
+    $out = [];
+    foreach (q('SELECT `siteID`, `isActive`, `leftAtUtc`, TIMESTAMPDIFF(SECOND, `leftAtUtc`, UTC_TIMESTAMP()) AS `secs` FROM `tblUserSites` WHERE `userID` = ? ORDER BY `siteID`', 'i', [$uid]) as $r) {
+        $out[(int) $r['siteID']] = ['on' => (int) $r['isActive'], 'date' => $r['leftAtUtc'] === null ? null : (string) $r['leftAtUtc'], 'secs' => $r['secs'] === null ? null : (int) $r['secs']];
+    }
+
+    return $out;
+};
+/** The date of one membership: null when empty, '(no row)' when there is no such membership (so an absent row never reads as an empty date). */
+$m2hDate = static fn (array $rows, int $site): ?string => array_key_exists($site, $rows) === true ? $rows[$site]['date'] : '(no row)';
+$m2hJustNow = static fn (?array $row): bool => $row !== null && $row['on'] === 0 && $row['secs'] !== null && $row['secs'] >= 0 && $row['secs'] <= 120;
+
+[, $m2hSaid1] = $offboardM(M2H_GLOBAL, 'Selftest #934 2h');
+$m2hAfterOff = $m2hRows(M2H_GLOBAL);
+ok('M13s offboarding switches off every switched-on membership AND records the moment, in UTC, within two minutes of now; a membership that had already left keeps its own old date, and one switched off with no date stays empty - nothing is guessed (#934, D-211)',
+    str_contains($m2hSaid1, 'Offboarded.') === true
+    && $m2hJustNow($m2hAfterOff[ORG_A] ?? null) === true && $m2hJustNow($m2hAfterOff[ORG_B] ?? null) === true
+    && ($m2hAfterOff[M2H_ORG_X]['on'] ?? 1) === 0 && $m2hDate($m2hAfterOff, M2H_ORG_X) === M2H_OLD
+    && ($m2hAfterOff[M2H_ORG_Y]['on'] ?? 1) === 0 && $m2hDate($m2hAfterOff, M2H_ORG_Y) === null,
+    json_encode($m2hAfterOff) . ' | said: ' . $m2hSaid1);
+
+$m2hRehire1 = $rehireM(M2H_GLOBAL);
+$m2hAfterRe = $m2hRows(M2H_GLOBAL);
+$m2hAllOnEmpty = true;
+foreach ($m2hAfterRe as $m2hRow) {
+    if ($m2hRow['on'] !== 1 || $m2hRow['date'] !== null) {
+        $m2hAllOnEmpty = false;
+    }
+}
+ok('M13t a rehire by a global administrator switches EVERY membership back on and empties every date (a date left behind would start a deletion clock on somebody who has returned)',
+    str_contains($m2hRehire1, 'User rehired') === true && count($m2hAfterRe) === 4 && $m2hAllOnEmpty === true,
+    json_encode($m2hAfterRe) . ' | said: ' . $m2hRehire1);
+
+[, $m2hSaid2] = $offboardM(M2H_ONE, 'Selftest #934 2h one');
+$m2hOffOne = $m2hRows(M2H_ONE);
+$m2hRehire2 = $rehireM(M2H_ONE, 'adm');
+$m2hAfterOne = $m2hRows(M2H_ONE);
+$m2hOffJustNow = $m2hJustNow($m2hOffOne[ORG_A] ?? null);
+$m2hOneOffRows = $m2hAfterOne;
+ok('M13u a rehire by the administrator of ONE organisation (who can only rehire somebody whose every membership is in that organisation) switches that membership back on and empties its date',
+    str_contains($m2hSaid2, 'Offboarded.') === true && str_contains($m2hRehire2, 'User rehired') === true
+    && $m2hOffJustNow === true && count($m2hOneOffRows) === 1 && ($m2hAfterOne[ORG_A]['on'] ?? 0) === 1 && $m2hDate($m2hAfterOne, ORG_A) === null,
+    json_encode($m2hAfterOne) . ' | offboard said: ' . $m2hSaid2 . ' | rehire said: ' . $m2hRehire2);
+
+// M13v: the plants. Each is applied to the copy the server runs from, one press is made, and the
+// check above that depends on it must go red; the file is then put back exactly.
+$m2hMemPath = $child . $sep . 'web' . $sep . '_core' . $sep . 'Memberships.php';
+$m2hMemOrig = (string) file_get_contents($m2hMemPath);
+$m2hPlant = static function (string $from, string $to, string $who, int $uid) use ($m2hMemPath, $m2hMemOrig, $offboardM, $rehireM, $m2hRows): array {
+    $applied = substr_count($m2hMemOrig, $from) === 1;
+    $rows = [];
+    if ($applied === true) {
+        file_put_contents($m2hMemPath, str_replace($from, $to, $m2hMemOrig));
+        try {
+            q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [$uid]);
+            q('UPDATE `tblUserSites` SET `isActive` = 1, `leftAtUtc` = NULL WHERE `userID` = ? AND `siteID` IN (?, ?)', 'iii', [$uid, ORG_A, ORG_B]);
+            q('UPDATE `tblUserSites` SET `leftAtUtc` = ? WHERE `userID` = ? AND `siteID` = ?', 'sii', [M2H_OLD, $uid, M2H_ORG_X]);
+            $offboardM($uid, 'Selftest #934 2h plant');
+            $rows['off'] = $m2hRows($uid);
+            $rehireM($uid, $who);
+            $rows['re'] = $m2hRows($uid);
+        } finally {
+            file_put_contents($m2hMemPath, $m2hMemOrig);
+        }
+    }
+
+    return [$applied, $rows];
+};
+// (1) offboarding's old statement (no date): the date check goes red.
+[$p1, $r1] = $m2hPlant('`leftAtUtc` = UTC_TIMESTAMP(), `isActive` = 0', '`isActive` = 0', 'root', M2H_GLOBAL);
+$p1Red = $p1 === true && $m2hDate($r1['off'], ORG_A) === null;
+// (2) rehire that does not empty the date: the all-empty check goes red.
+[$p2, $r2] = $m2hPlant('SET `isActive` = 1, `leftAtUtc` = NULL WHERE `userID` = ?\'', 'SET `isActive` = 1 WHERE `userID` = ?\'', 'root', M2H_GLOBAL);
+$p2Red = $p2 === true && $m2hDate($r2['re'], ORG_A) !== null && $m2hDate($r2['re'], ORG_A) !== '(no row)';
+// (3) switch-off without AND isActive = 1: the membership that left long ago is re-dated to now.
+[$p3, $r3] = $m2hPlant(' AND `isActive` = 1\'', '\'', 'root', M2H_GLOBAL);
+$p3Red = $p3 === true && $m2hDate($r3['off'], M2H_ORG_X) !== M2H_OLD && $m2hDate($r3['off'], M2H_ORG_X) !== '(no row)';
+ok('M13v each plant is applied to the running copy and goes red: offboarding without the date (A stays empty), a rehire that leaves the date (A keeps one), a switch-off without "AND isActive = 1" (the old date of X is overwritten); and the file is restored exactly',
+    $p1Red === true && $p2Red === true && $p3Red === true && (string) file_get_contents($m2hMemPath) === $m2hMemOrig,
+    json_encode([$p1, $p2, $p3, $r1, $r2, $r3]));
+
+// Put the world back: the two extra organisations, the two people and their records.
+q('DELETE FROM `tblUserSites` WHERE `userID` IN (?, ?)', 'ii', [M2H_GLOBAL, M2H_ONE]);
+q('DELETE FROM `tblOffboarding` WHERE `userID` IN (?, ?)', 'ii', [M2H_GLOBAL, M2H_ONE]);
+q('DELETE FROM `tblUsers` WHERE `userID` IN (?, ?)', 'ii', [M2H_GLOBAL, M2H_ONE]);
+q('DELETE FROM `tblSites` WHERE `siteID` IN (?, ?)', 'ii', [M2H_ORG_X, M2H_ORG_Y]);
+
 // M13i: Google sign-in set up for the organisation, limited to a hosted domain.
 siteSetting(ORG_A, 'auth.google.clientID', 'selftest-982-google-client');
 siteSetting(ORG_A, 'auth.google.hostedDomain', 'selftest-982.example');

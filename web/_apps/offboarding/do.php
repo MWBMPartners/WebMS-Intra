@@ -33,6 +33,7 @@ use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GdprEraser;
+use Portal\Core\Memberships;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -183,9 +184,13 @@ try {
         [$userId], 'i'
     );
 
-    // 4. End site memberships.
+    // 4. End site memberships, and record WHEN (#934, D-211). The statement
+    //    lives in Memberships, the one place a membership is switched off: it
+    //    stamps the UTC moment only on a membership that is on, so one that
+    //    left an organisation earlier keeps its true date. Its 'affected' now
+    //    counts the memberships switched off by THIS offboarding.
     $run('end_site_memberships',
-        'UPDATE tblUserSites SET isActive = 0 WHERE userID = ?',
+        Memberships::SWITCH_OFF_ALL_SQL,
         [$userId], 'i'
     );
 

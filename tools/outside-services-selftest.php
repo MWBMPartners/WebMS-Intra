@@ -990,9 +990,9 @@ check('E07b ...and their translation choice, text-message settings, newsletter c
 // Until then the copy named `tblUserSites` only inside another entry's
 // sub-select, so no membership was handed over.
 $memberships = (array) ($data['organisationMemberships'] ?? []);
-check('E07c ...and the organisations they belong to, each with whether they are an administrator there, whether active, and when they joined (#813)',
+check('E07c ...and the organisations they belong to, each with whether they are an administrator there, whether active, when they joined, and when it ended (UTC; empty unless Offboarding recorded it) (#813, #934)',
     array_map('intval', array_column($memberships, 'siteID')) === [ORG_A, ORG_B]
-    && array_keys((array) ($memberships[0] ?? [])) === ['siteID', 'siteName', 'isSiteAdmin', 'isSiteRootAdmin', 'isActive', 'joinedAt'],
+    && array_keys((array) ($memberships[0] ?? [])) === ['siteID', 'siteName', 'isSiteAdmin', 'isSiteRootAdmin', 'isActive', 'joinedAt', 'leftAtUtc'],
     json_encode($memberships));
 foreach (['tblUserTranslationPref', 'tblUserSmsPreference', 'tblNewsletterSubscription', 'tblZoomAccount', 'tblAssetKioskPins'] as $own813) {
     q('DELETE FROM `' . $own813 . '` WHERE `userID` = ?', 'i', [M]);

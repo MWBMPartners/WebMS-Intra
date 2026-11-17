@@ -63,8 +63,8 @@
  *                          of it — #592)
  *   tblUserOutsideServicePref (your own choices about outside services — #778)
  *   tblUserSites          (the organisations you belong to, with your
- *                          administrator flags, whether active, and when you
- *                          joined — #813)
+ *                          administrator flags, whether active, when you
+ *                          joined, and when it ended (UTC) — #813, #934)
  *   tblUserTranslationPref (your choice to have content translated — #813)
  *   tblUserSmsPreference  (your text-message settings, without the one-time
  *                          verification code — #813)
@@ -326,7 +326,7 @@ $payload = [
         //    those are counted, not listed. The coordinator's ruling, #1018
         //    check round 3.)
         'organisationMemberships' => $fetchUserRows(
-            'SELECT us.`siteID`, s.`siteName`, us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt` '
+            'SELECT us.`siteID`, s.`siteName`, us.`isSiteAdmin`, us.`isSiteRootAdmin`, us.`isActive`, us.`joinedAt`, us.`leftAtUtc` '
             . 'FROM `tblUserSites` us LEFT JOIN `tblSites` s ON s.`siteID` = us.`siteID` WHERE us.`userID` = ? ORDER BY us.`siteID`'
         ),
         // 🌐 #813 — your own choice to have the organisation's words

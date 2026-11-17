@@ -24,6 +24,7 @@ declare(strict_types=1);
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Memberships;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -160,7 +161,7 @@ try {
     //    a membership in an organisation this administrator has never
     //    been given any say over.
     if (AccountGuard::actorIsGlobal() === true) {
-        $stmt = $db->prepare('UPDATE tblUserSites SET isActive = 1 WHERE userID = ?');
+        $stmt = $db->prepare(Memberships::SWITCH_ON_ALL_SQL);
         if ($stmt !== false) {
             $stmt->bind_param('i', $userId);
             $stmt->execute();
@@ -168,7 +169,7 @@ try {
         }
     } else {
         $openSiteId = Site::id();
-        $stmt = $db->prepare('UPDATE tblUserSites SET isActive = 1 WHERE userID = ? AND siteID = ?');
+        $stmt = $db->prepare(Memberships::SWITCH_ON_ONE_SQL);
         if ($stmt !== false) {
             $stmt->bind_param('ii', $userId, $openSiteId);
             $stmt->execute();

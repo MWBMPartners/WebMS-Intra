@@ -98,7 +98,7 @@ $csrf = Auth::csrfToken();
         <li>Switch the account off, so they can no longer sign in</li>
         <li>Delete every passkey</li>
         <li>Remove their password</li>
-        <li>End their membership of every organisation</li>
+        <li>End their membership of every organisation, and record when it ended</li>
         <li>End their leadership roles</li>
         <li>End their small-group memberships and join requests, in every organisation</li>
         <li>Take their home off every small group that meets there, in every organisation, deleting its address from the group at once (a map position the portal looked up for it may be remembered until its keeping period ends); the leaders of each group are e-mailed to choose a new place</li>
@@ -108,6 +108,7 @@ $csrf = Auth::csrfToken();
         <li>Stop notifications to their devices</li>
         <li>Record what each step did, and file an erasure request if you choose to erase their details</li>
     </ul>
+    <p class="small mb-0">Their records of agreeing to the privacy notice and of their cookie choices in an organisation are deleted once that organisation&rsquo;s privacy keeping period has passed after this. Switching an account off with the Active tick on Admin, Users does not end a membership; use Offboarding to record that somebody has left.</p>
     <p class="mt-2 mb-0">Within the configured undo window, an admin can rehire the user from <a href="<?php echo htmlspecialchars(Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">/offboarding</a>, unless the account has been erased by then. A rehire switches the account back on, restores its organisation memberships (every organisation for a global administrator, only this one for anybody else) and cancels any erasure request for them still waiting for review, even one they made themselves; NOTHING ELSE is put back: the password, passkeys, Microsoft or Google links, roles, user groups, departments, leadership roles, small-group memberships, trusted devices and notification subscriptions stay removed, and a small-group home address that was deleted is gone for good. The page shown after a rehire says what the account still has.</p>
 </div>
 

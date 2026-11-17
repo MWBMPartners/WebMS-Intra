@@ -928,6 +928,23 @@ check('G1 two processes completing at once: exactly one merges, the other is tol
 check('G2 ...and the duplicate\'s rows moved once', n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$gk}") === 1
     && n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$gd}") === 0);
 
+// 🚪 #934 (D-211): a membership's leaving date moves with the person. The duplicate
+//    has left organisation B (switched off, dated by Offboarding) and is still in A;
+//    the kept account is in A only. Nothing clashes, so B's membership moves to the
+//    kept account and brings its date with it (a merge never rewrites history).
+$lk = $user('LeftKept'); $member($lk, $siteA);
+$ld = $user('LeftDup');  $member($ld, $siteA); $member($ld, $siteB, 0);
+$db->query("UPDATE `tblUserSites` SET `leftAtUtc` = '2026-02-03 04:05:06' WHERE `userID` = {$ld} AND `siteID` = {$siteB}");
+$lAdmin = $user('LeftAdmin', ['isRootAdmin' => 1]); $member($lAdmin, $siteA, 1, 1); $member($lAdmin, $siteB, 1, 1); $grantDc($lAdmin, $siteA); $grantDc($lAdmin, $siteB);
+$lstart = M::start($db, $lAdmin, true, false, $siteA, false, $lk, $ld);
+$lreq   = am_open($db, $lstart['requestId']);
+$ltoken = M::agree($db, $lreq, $ld, true, '', 0, false)['token'];
+$lout   = M::agree($db, $lreq, $lk, true, $ltoken, $ld, false)['outcome'];
+check('G3 a duplicate\'s switched-off membership arrives on the kept account with the SAME leaving date, still switched off (#934)',
+    $lout === 'completed'
+    && n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$lk} AND `siteID` = {$siteB} AND `isActive` = 0 AND `leftAtUtc` = '2026-02-03 04:05:06'") === 1
+    && n($db, "SELECT COUNT(*) AS n FROM `tblUserSites` WHERE `userID` = {$ld}") === 0, $lout . json_encode($lstart));
+
 // =============================================================================
 echo "H. An erasure request filed for the duplicate WHILE the merge runs (finding 3)\n";
 // =============================================================================

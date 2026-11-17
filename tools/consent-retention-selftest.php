@@ -46,7 +46,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const CR_EXPECTED_CHECKS = 22;
+const CR_EXPECTED_CHECKS = 37;
 
 $crDbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($crDbName, 'selftest_') === false) {
@@ -63,7 +63,7 @@ $crEnv = [
 
 /** The classes the sweep file loads, in the copy a plant is made from. */
 const CR_CLASSES = ['InstallationSettings', 'App', 'SettingLimit', 'RetentionPeriod', 'ActivityLogRetention',
-    'NetworkAddressRetention', 'ConsentRetention', 'GeocodeCacheRetention'];
+    'NetworkAddressRetention', 'ConsentRetention', 'GeocodeCacheRetention', 'Memberships', 'AccountMerge'];
 
 // =============================================================================
 // 🧒 THE CHILD: run ONE scenario against the files under `$argv[3]`.
@@ -80,6 +80,11 @@ if (($argv[1] ?? '') === '--scenario') {
     $db = new mysqli($crEnv['SELFTEST_DB_HOST'], $crEnv['SELFTEST_DB_USER'], $crEnv['SELFTEST_DB_PASS'],
         $crEnv['SELFTEST_DB_NAME'], (int) $crEnv['SELFTEST_DB_PORT']);
     $db->set_charset('utf8mb4');
+    // 🕙 The database session's zone is TEN HOURS from UTC for every scenario, set here rather
+    //    than by a server flag so any database the test is pointed at behaves the same. `NOW()` and
+    //    a `DEFAULT CURRENT_TIMESTAMP` follow the session zone while `UTC_TIMESTAMP()` does not;
+    //    that gap is what lets a clear-out that mixed the two clocks FAIL (#934, D-211, plant P19).
+    $db->query("SET time_zone = '+10:00'");
     \Portal\Core\App::init($db, []);
 
     try {
@@ -135,6 +140,11 @@ function cr_world(mysqli $db): array
     cr_set($db, null, '100');
     cr_set($db, 1, '30');
     cr_set($db, 2, null);
+    // 🚪 Package 2h's worlds put people and memberships in; start every world without them.
+    foreach (['tblUserSites', 'tblAccountMergeSide', 'tblAccountMergeRequest'] as $gone) {
+        $db->query('DELETE FROM `' . $gone . '`');
+    }
+    $db->query('DELETE FROM `tblUsers` WHERE `userID` >= 20');
 
     $specs = [
         // Organisation 1 (30 days): a signed-in person's chain of three. Two are replaced, one by a record 100 days old (past the period), one by 5 (not).
@@ -209,6 +219,153 @@ function cr_deletes(mysqli $db): int
     $res = $db->query("SHOW SESSION STATUS LIKE 'Com\\_delete'");
 
     return (int) $res->fetch_row()[1];
+}
+
+/** Set or remove the portal-wide organisation-mode setting (a stored text, exactly as the installer writes it). */
+function cr_mode(mysqli $db, ?string $value): void
+{
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'multisite.enabled' AND `siteID` IS NULL");
+    if ($value !== null) {
+        $ins = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'multisite.enabled', ?, '', 0)");
+        $ins->bind_param('s', $value);
+        $ins->execute();
+        $ins->close();
+    }
+}
+
+/**
+ * 🚪 Package 2h (#934, D-211): the member-has-left rule, driven through the REAL step.
+ *    Every fixture is a state production can reach: offboarding leaves a membership
+ *    off with a UTC moment, rehire empties it, a merge closes the duplicate's
+ *    account under a made-up address. Dates are set by UPDATE as those would.
+ *    Organisation 1 keeps records 30 days, organisation 2 follows 100.
+ *
+ * @return array{ok: bool, detail: string}
+ */
+function cr_left_scenario(mysqli $db, string $name): array
+{
+    cr_world($db);
+    $db->query('DELETE FROM `tblConsentLog`');
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    cr_mode($db, $name === 'left-single' ? 'false' : ($name === 'left-single-upper' ? 'TRUE' : 'true'));
+    if ($name === 'left-never') {
+        cr_set($db, null, '0');
+        cr_set($db, 1, '0');
+        cr_set($db, 2, '0');
+    }
+
+    // [userID, account on, global administrator, email or null for an ordinary one]
+    $people = [];
+    // [userID, siteID, membership on, hours since it was switched off (null = no date)]
+    $member = [];
+    // [label, siteID, userID, kind, age in days, expected]
+    $recs = [];
+    $merges = [];
+    if ($name === 'left-single' || $name === 'left-single-upper') {
+        $people = [[51, 1, 0, null], [52, 0, 0, null]];
+        $member = [[51, 1, 0, 24 * 60], [52, 1, 0, 24 * 60]];
+        // L07: one organisation, membership off with an old date, account ON: kept. L08: account OFF too: deleted.
+        $recs = [['L07-on-kept', 1, 51, 'cookies', 200, 'keep'], ['L08-off-gone', 1, 52, 'cookies', 200, 'del']];
+        if ($name === 'left-single-upper') {
+            // L09: the stored text TRUE is read as ONE organisation by PHP, so the account being on keeps the records.
+            $recs = [['L09-upper-on-kept', 1, 51, 'cookies', 200, 'keep'], ['L09b-upper-off-gone', 1, 52, 'cookies', 200, 'del']];
+        }
+    } elseif ($name === 'left-never') {
+        $people = [[21, 1, 0, null]];
+        $member = [[21, 1, 0, 24 * 60]];
+        $recs   = [['L13-never-kept', 1, 21, 'cookies', 200, 'keep']];
+    } else {
+        $people = [[21, 1, 0, null], [22, 1, 0, null], [23, 1, 0, null], [24, 1, 0, null], [25, 1, 1, null], [26, 1, 0, null],
+            [27, 1, 0, null], [28, 0, 0, 'merged-28@merged.invalid'], [29, 1, 0, null], [30, 0, 0, 'merged-30@merged.invalid'],
+            [31, 1, 0, null], [32, 1, 0, null], [40, 1, 0, null]];
+        // 32 was merged into 31 and then REOPENED by hand (on, an ordinary address): no longer as the merge closed it.
+        $merges = [[1, 27, 28], [2, 29, 30], [3, 31, 32]];
+        $member = [
+            [21, 1, 0, 31 * 24], [21, 2, 1, null],            // left organisation 1 31 days ago, still in 2
+            [22, 1, 0, 29 * 24],                               // left 29 days ago
+            [23, 1, 0, null],                                  // off with NO date
+            [24, 1, 1, 90 * 24],                               // ON with a stray old date
+            [25, 1, 0, 90 * 24],                               // a global administrator
+            [26, 1, 0, 30 * 24 - 5],                           // left 5 hours short of the period, by UTC
+            [27, 1, 0, 31 * 24], [29, 1, 1, null], [31, 1, 0, 31 * 24],
+            [40, 1, 0, 31 * 24],
+        ];
+        $recs = [
+            ['L01-old-gone', 1, 21, 'cookies', 200, 'del'], ['L03-recent-kept', 1, 21, 'analytics', 2, 'keep'],
+            ['L01-T-kept', 2, 21, 'cookies', 200, 'keep'],
+            ['L02-kept', 1, 22, 'cookies', 200, 'keep'], ['L04-nodate-kept', 1, 23, 'cookies', 200, 'keep'],
+            ['L05-on-kept', 1, 24, 'cookies', 200, 'keep'], ['L06-global-kept', 1, 25, 'cookies', 200, 'keep'],
+            ['L16-utc-kept', 1, 26, 'cookies', 200, 'keep'],
+            ['L10-K-gone', 1, 27, 'cookies', 200, 'del'], ['L10-D-gone', 1, 28, 'cookies', 200, 'del'],
+            ['L11-D2-kept', 1, 30, 'cookies', 200, 'keep'], ['L12-D3-kept', 1, 32, 'cookies', 200, 'keep'],
+            // L14: both rules want these (the older is replaced by the newer, which is past the period; the person has left)
+            ['L14-a-gone', 1, 40, 'cookies', 300, 'del'], ['L14-b-gone', 1, 40, 'cookies', 100, 'del'],
+        ];
+    }
+    foreach ($people as [$id, $on, $root, $email]) {
+        $address = $email ?? ('person-' . $id . '@example.invalid');
+        $ins = $db->prepare('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isRootAdmin`) VALUES (?, ?, ?, ?, ?)');
+        $nm = 'Person ' . $id;
+        $ins->bind_param('issii', $id, $nm, $address, $on, $root);
+        $ins->execute();
+        $ins->close();
+    }
+    foreach ($merges as [$req, $kept, $dup]) {
+        $db->query('INSERT INTO `tblAccountMergeRequest` (`requestID`, `siteID`, `requestedAtUtc`, `expiresAtUtc`, `notBeforeUtc`, `status`) '
+            . "VALUES ($req, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP(), 'completed')");
+        $db->query("INSERT INTO `tblAccountMergeSide` (`requestID`, `userID`, `side`) VALUES ($req, $kept, 'kept'), ($req, $dup, 'duplicate')");
+    }
+    foreach ($member as [$user, $site, $on, $hours]) {
+        $ins = $db->prepare('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `leftAtUtc`) '
+            . 'VALUES (?, ?, ?, ' . ($hours === null ? 'NULL' : 'DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . (int) $hours . ' HOUR)') . ')');
+        $ins->bind_param('iii', $user, $site, $on);
+        $ins->execute();
+        $ins->close();
+    }
+    usort($recs, static fn (array $a, array $b): int => $b[4] <=> $a[4]);
+    $out = [];
+    $ins = $db->prepare('INSERT INTO `tblConsentLog` (`siteID`, `userID`, `sessionID`, `consentType`, `decision`, `policyHash`, `createdAt`) '
+        . 'VALUES (?, ?, ?, ?, \'accept\', ?, DATE_SUB(NOW(), INTERVAL ? DAY))');
+    foreach ($recs as [$label, $site, $user, $kind, $age, $expect]) {
+        $sess = 's-' . $label;
+        $hash = hash('sha256', $label);
+        $ins->bind_param('iisssi', $site, $user, $sess, $kind, $hash, $age);
+        $ins->execute();
+        $out[$label] = ['id' => (int) $db->insert_id, 'expect' => $expect];
+    }
+    $ins->close();
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+
+    $before  = cr_fingerprint($db);
+    $should  = count(array_filter($out, static fn (array $r): bool => $r['expect'] === 'del'));
+    $counted = consent_sweep(false);
+    $countChangedNothing = cr_fingerprint($db) === $before;
+    $deleted = consent_sweep(true);
+    $after   = cr_fingerprint($db);
+    $wronglyKept = [];
+    $wronglyGone = [];
+    foreach ($out as $label => $row) {
+        $present = array_key_exists($row['id'], $after);
+        if ($row['expect'] === 'del' && $present === true) {
+            $wronglyKept[] = $label;
+        }
+        if ($row['expect'] === 'keep' && $present === false) {
+            $wronglyGone[] = $label;
+        }
+    }
+    $same = true;
+    foreach ($after as $id => $json) {
+        if ($before[$id] !== $json) {
+            $same = false;
+        }
+    }
+    $second = consent_sweep(true);
+    $ok = $wronglyKept === [] && $wronglyGone === [] && $counted === $should && $deleted === $should
+        && $countChangedNothing === true && $same === true && $second === 0;
+
+    return ['ok' => $ok, 'detail' => 'counted ' . $counted . ', deleted ' . $deleted . ', expected ' . $should
+        . '; wrongly kept: ' . implode(',', $wronglyKept) . '; wrongly gone: ' . implode(',', $wronglyGone)
+        . '; survivors unchanged: ' . var_export($same, true) . '; second run deleted ' . $second];
 }
 
 function cr_scenario(mysqli $db, string $name): array
@@ -328,6 +485,16 @@ function cr_scenario(mysqli $db, string $name): array
             $ok = $n === $total && $left === 4 && $statements >= (int) ceil($total / $CR::BATCH);
             return ['ok' => $ok, 'detail' => 'deleted ' . $n . ' of ' . $total . ', left ' . $left . ', DELETE statements ' . $statements];
 
+        case 'premise':
+            $diff = (int) $db->query('SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW())')->fetch_row()[0];
+            return ['ok' => $diff === 10, 'detail' => 'NOW() is ' . $diff . ' hours ahead of UTC_TIMESTAMP()'];
+
+        case 'left-multi':
+        case 'left-never':
+        case 'left-single':
+        case 'left-single-upper':
+            return cr_left_scenario($db, $name);
+
         case 'own-key-only':
             $db->query("DELETE FROM `tblSettings` WHERE `siteID` = 1 AND `settingKey` IN ('audit.retentionDays', 'privacy.dataRetentionDays', 'privacy.networkAddressDays')");
             cr_set($db, null, '730');
@@ -377,6 +544,11 @@ $crScenarios = [
     'own-above-installation' => 'C an organisation\'s own figure above the installation\'s (SQL or a restore) is held to the installation\'s',
     'caps-refused'           => 'D a figure above the installation\'s, "keep for ever" under a number of days, a non-administrator, and an installation figure below an organisation\'s own are all refused; a figure within the cap is stored',
     'batches'                => 'E a backlog of two batches and a part is deleted in at least that many bounded statements and another organisation\'s young records stay',
+    'premise'                => 'L15 premise: this database\'s NOW() is ten hours ahead of UTC_TIMESTAMP() (without that the clock plant below could not fail)',
+    'left-multi'             => 'L01-L06, L10-L12, L14, L16 several organisations: a member who left an organisation more than its period ago has every old record there deleted (merged accounts followed only while still closed); still-a-member, left too recently (by the UTC clock), no leaving date, switched on, a global administrator, a record made recently and another organisation\'s records all stay; the preview equals the deletion',
+    'left-never'             => 'L13 an organisation that keeps records for ever deletes nothing for a member who left',
+    'left-single'            => 'L07-L08 ONE organisation: a left membership with the account still on keeps the records, with the account off deletes them',
+    'left-single-upper'      => 'L09 the one-organisation setting stored as TRUE is read as one organisation (as PHP reads it)',
     'own-key-only'           => 'F saving the figure writes its own setting and never the activity log\'s or the network-address one',
 ];
 foreach ($crScenarios as $scenario => $label) {
@@ -391,8 +563,9 @@ $crCheck('G consent.php sets its cookie for exactly COOKIE_DAYS days', preg_matc
     'cookie lifetime and ConsentRetention::COOKIE_DAYS disagree');
 // 🚫 No unbounded delete of the log anywhere in the sweep file.
 $crSweepSrc = (string) file_get_contents($crWeb . '/_apps/cron/_retention-sweep.php');
-$crCheck('H the sweep deletes from tblConsentLog only by number and organisation, in bounded batches', substr_count($crSweepSrc, 'DELETE FROM `tblConsentLog`') === 1
-    && str_contains($crSweepSrc, "`siteID` = ? AND `consentID` IN (") === true && str_contains($crSweepSrc, 'LIMIT \' . (int) ConsentRetention::BATCH') === true);
+$crCheck('H the sweep deletes from tblConsentLog only by number and organisation, in bounded batches', substr_count($crSweepSrc, 'DELETE FROM `tblConsentLog`') === 2
+    && str_contains($crSweepSrc, "`siteID` = ? AND `consentID` IN (") === true
+    && str_contains($crSweepSrc, "DELETE FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` = ? ") === true && str_contains($crSweepSrc, 'LIMIT \' . (int) ConsentRetention::BATCH') === true);
 
 echo "P. Each guard planted out of a copy: its scenario must go red\n";
 /** Copy the files a scenario loads, apply ONE edit, run, and answer whether the edit applied and the scenario still passed. */
@@ -453,6 +626,26 @@ $crPlants = [
         "        if (\$days === ConsentRetention::NEVER) {\n            continue; // ♾️ This organisation keeps these records", "        if (false) {\n            continue; // ♾️ This organisation keeps these records", 'own-never-under-never'],
     ['P9 the delete unbounded (no LIMIT on the selection)', '_apps/cron/_retention-sweep.php',
         " . ' ORDER BY `t`.`consentID` LIMIT ' . (int) ConsentRetention::BATCH);", " . ' ORDER BY `t`.`consentID`');", 'batches'],
+    ['P12 the switched-on rule dropped (a switched-on row with a stray old date counts as left)', '_core/Memberships.php',
+        "'(' . \$us . '.`isActive` = 0 AND '", "'(1 = 1 AND '", 'left-multi'],
+    ['P13 the global-administrator rule dropped', '_core/Memberships.php',
+        "' AND ' . \$p . '.`isRootAdmin` = 0'", "' AND 1 = 1'", 'left-multi'],
+    ['P14 the one-organisation term dropped (an account still switched on no longer protects the records)', '_core/Memberships.php',
+        "' AND (' . \$p . '.`isActive` = 0 OR EXISTS (", "' AND (1 = 1 OR EXISTS (", 'left-single'],
+    ['P15 the exact-text reading of the setting dropped (TRUE read as several organisations)', '_core/Memberships.php',
+        "CAST(`msx`.`settingValue` AS BINARY) = CAST(\\'true\\' AS BINARY)", "`msx`.`settingValue` = \\'true\\'", 'left-single-upper'],
+    ['P16 merge following skipped', '_apps/cron/_retention-sweep.php',
+        '$kept = AccountMerge::survivorOf($db, $u);', '$kept = null;', 'left-multi'],
+    ['P17 the still-closed test skipped', '_apps/cron/_retention-sweep.php',
+        "if (\$stillClosed === false) {\n                continue;", "if (false) {\n                continue;", 'left-multi'],
+    ['P18 the record\'s own date test dropped from the delete', '_apps/cron/_retention-sweep.php',
+        "AND `createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY) '\n                        . 'AND EXISTS", "AND ? > 0 '\n                        . 'AND EXISTS", 'left-multi'],
+    ['P19 the UTC clock swapped for the database session clock', '_core/Memberships.php',
+        "DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)'", "DATE_SUB(NOW(), INTERVAL ? DAY)'", 'left-multi'],
+    ['P20 the organisation ignored in the left rule\'s delete', '_apps/cron/_retention-sweep.php',
+        "'DELETE FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` = ? '", "'DELETE FROM `tblConsentLog` WHERE ? > 0 AND `userID` = ? '", 'left-multi'],
+    ['P21 the preview counts a row due under both rules twice', '_apps/cron/_retention-sweep.php',
+        '$leftIds = ($reallyDelete === false) ? array_keys($left) : [];', '$leftIds = [];', 'left-multi'],
     ['P10 the reader\'s cap taken out (an organisation\'s own figure obeyed above the installation\'s)', '_core/RetentionPeriod.php',
         "        return SettingLimit::cappedForSite((int) \$text, static::KEY, static::DEFAULT_DAYS, self::HARD_MAX_DAYS, true);",
         "        return (int) \$text;", 'own-above-installation'],
