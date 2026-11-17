@@ -2668,7 +2668,7 @@ $wantSaid = [
     'what3words'      => 'For a home, the three words name the home itself.',
     'robotCheck'      => 'sends the company the check\'s answer and your internet address',
     'errorMonitoring' => 'Never your internet address.',
-    'errorMonitoring#address' => 'The whole address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name or an e-mail address;',
+    'errorMonitoring#address' => 'The address of the page, including anything after a question mark, which can include what somebody typed into a search box, such as a name (an e-mail address typed there is taken out first);',
     // ✋ Round 9: each changed sentence pinned WHOLE.
     'errorMonitoring#field' => 'Three kinds of report also carry, in a field of its own, the portal\'s own account number for a person (a number, never a name): a refused attempt to change an account, and a refused attempt to give an account an e-mail address another account already has (the number of whoever tried); and a daily e-mail about imported events that could not be sent (the number of the administrator it was for).',
     'pushNotifications#contact' => 'Each one the server sends also carries, in a signed header, the contact address this installation gave for its notifications (an e-mail or web address), as the notification standard asks, so the company can tell which portal is sending to your device.',
