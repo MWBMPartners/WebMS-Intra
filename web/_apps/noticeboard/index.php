@@ -114,6 +114,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      @import (see fonts-selfhost.css header + DEV_NOTES.md). -->
 <link rel="stylesheet" href="/assets/noticeboard/fonts-selfhost.css">
 <link rel="stylesheet" href="/assets/noticeboard/noticeboard.css">
+<!-- 🔒 #575: the bundle below can fetch Babel (a compiler) from a public server
+     (unpkg.com) with NO fingerprint, but only when window.Babel is missing and a
+     template uses an <x-import> of a .jsx or .tsx file. Nothing in the portal
+     does, and this page's script rule would refuse the fetch anyway; this stub
+     makes it impossible whatever that rule says now or later: with window.Babel
+     already defined the bundle never creates the outside script tag.
+     COST, said plainly: an <x-import> of .jsx now fails with the message below
+     instead of failing silently in the browser (it could not run before either).
+     The bundle is GENERATED outside this repository and must not be hand-edited;
+     the lasting fix is a BABEL_SRI fingerprint in its source (see
+     tools/audit-checks/check_cdn_sri.py, which checks this stub is still here).
+     It is inline, carries the nonce, and sits BEFORE the deferred tags so it runs
+     first. -->
+<script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>">
+  window.Babel = {
+    transform: function () {
+      throw new Error('Templates that need compiling in the browser are not supported on this portal.');
+    }
+  };
+</script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-18.3.1.production.min.js" defer></script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/vendor/react/react-dom-18.3.1.production.min.js" defer></script>
 <script nonce="<?php echo htmlspecialchars($nonce, ENT_QUOTES, 'UTF-8'); ?>" src="/assets/noticeboard/noticeboard.noeval.js" defer></script>
