@@ -24974,3 +24974,10 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   organisation's list; the list relies on a merge switching the duplicate off rather than excluding merged-away
   accounts itself; the 20,000-option draw would want a search box on a very large organisation; choosing "none" with an
   empty name box still saves a case about nobody (as before).
+
+### A second header() of the same name replaces the first (#1095)
+
+- `header.php` sent a fixed `Referrer-Policy` after start-up had sent the setting's value, so the setting did nothing
+  on most pages. The same fault exists for HSTS (it adds `preload`, which start-up's comment says is not sent) and
+  Permissions-Policy; `api-docs/index.php` also sends its own fixed referrer header. Narrow: a comma-separated
+  fallback list in the setting now gets the default, not its stricter last value.

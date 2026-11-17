@@ -4,6 +4,19 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The referrer setting works, and the /live player is no longer refused (#1095, #1092 part)
+
+- The referrer setting (`portal.headers.referrer_policy`) now reaches pages drawn through `header.php`; `header.php`
+  no longer sends a second, fixed `Referrer-Policy` that replaced it. `bootstrap.php` accepts only the eight standard
+  values (capitals and spaces ignored); anything else gets `strict-origin-when-cross-origin`; empty still means send
+  none. An installation that sets `no-referrer` will now see the empty-chat case `LiveChat.php` describes on old
+  browsers or over plain http.
+- `/live` names the player's own host in its frame rule, taken from the address `Livestream::embedUrl()` built
+  (`Livestream::frameOriginFor()`); a real browser loads YouTube, Vimeo, Twitch and Facebook frames and still refuses
+  an unlisted one. The `custom` platform is not covered. Open: the robot check on four forms (#1092 part 2),
+  `header.php` also overrides the HSTS and Permissions-Policy settings, `api-docs` still overrides the referrer
+  setting. Codex has not reviewed this.
+
 ### A care case records which member it is about (#1066)
 
 - Care register: "Open new case" now makes the worker choose which member of the organisation the case is about, or
