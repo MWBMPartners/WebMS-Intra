@@ -26,6 +26,19 @@
  * its look-up allowance. The explanation is here and not beside the two
  * lines because a comment inside the script would be sent to every browser.
  *
+ * THE FORM TOKEN (#1134). Both calls (`geo/lookup`, `geo/w3w-suggest`) SPEND the
+ * page's one form token (Auth::verifyCsrf() replaces it on every acceptance,
+ * #768) and hand the replacement back as a top-level `csrfToken`. The script
+ * therefore (1) reads the token at the moment of posting through
+ * Portal.csrf(), which reads every carrier (portal.js loads AFTER this script,
+ * so window.Portal is looked at when a button is pressed, never at load);
+ * (2) gives EVERY answer, refusals included, to Portal.rememberCsrf(), the one
+ * place that writes the meta tag, every csrf_token field and every [data-csrf]
+ * element, so the page's Save is not left holding a spent token; and (3) sends
+ * ONE request at a time across both calls (`inFlight`), because two requests
+ * holding the same token can never both succeed. The explanation is here and
+ * not in the script because a comment inside the script goes to every browser.
+ *
  * @package   Portal\Core\Partials
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -56,8 +69,34 @@ if (function_exists('portal_location_map_assets') === false) {
     'use strict';
 
     function csrfToken() {
+        if (window.Portal && typeof window.Portal.csrf === 'function') {
+            var live = window.Portal.csrf();
+            if (live) { return live; }
+        }
         var meta = document.querySelector('meta[name="csrf-token"]');
         return meta ? meta.getAttribute('content') : '';
+    }
+
+    // One request at a time across the look-up and the suggestions. The body is
+    // built INSIDE the queued step so the token is read when it is posted.
+    var inFlight = Promise.resolve();
+    function post(address, buildBody) {
+        var run = inFlight.then(function () {
+            var body = buildBody();
+            body.set('csrf_token', csrfToken());
+            return fetch(address, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+                body: body.toString()
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                    window.Portal.rememberCsrf(data);
+                }
+                return data;
+            });
+        });
+        inFlight = run.catch(function () { /* keep the queue moving */ });
+        return run;
     }
 
     // 🗺️ Interactive maps — one per .portal-location-map[data-lat] element.
@@ -115,8 +154,6 @@ if (function_exists('portal_location_map_assets') === false) {
                     var input = form.querySelector('[name="' + fieldName + '"]');
                     return input ? input.value : '';
                 };
-                var body = new URLSearchParams();
-                body.set('csrf_token', csrfToken());
                 var w3wVal = get('w3wField');
                 var addressVal;
                 if (btn.dataset.addressFreetext) {
@@ -125,7 +162,6 @@ if (function_exists('portal_location_map_assets') === false) {
                     addressVal = [get('addressLine1'), get('addressLine2'), get('addressCity'), get('addressRegion'), get('addressPostcode')]
                         .filter(function (v) { return v !== ''; }).join(', ');
                 }
-                if (w3wVal) { body.set('w3w', w3wVal); }
                 // 🏠 D-183: a home or a public place, as the form says. A named
                 //    checkbox ticked ("not anybody's home") makes it public.
                 var kind = btn.dataset.addressKind === 'public' ? 'public' : 'home';
@@ -136,19 +172,19 @@ if (function_exists('portal_location_map_assets') === false) {
                     var mark = form.querySelector('[name="' + btn.dataset.addressKindPublicField + '"]:checked');
                     if (mark && (mark.value === '1' || mark.value === 'public')) { kind = 'public'; }
                 }
-                body.set('addressKind', kind);
-                if (addressVal) { body.set('address', addressVal); }
                 var countryVal = get('addressCountry');
-                if (countryVal) { body.set('countryCode', countryVal); }
 
                 btn.disabled = true;
                 if (statusEl) { statusEl.textContent = '…'; }
 
-                fetch('<?php echo Router::urlForScript('geo/lookup'); ?>', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: body.toString()
-                }).then(function (r) { return r.json(); }).then(function (data) {
+                post('<?php echo Router::urlForScript('geo/lookup'); ?>', function () {
+                    var body = new URLSearchParams();
+                    if (w3wVal) { body.set('w3w', w3wVal); }
+                    body.set('addressKind', kind);
+                    if (addressVal) { body.set('address', addressVal); }
+                    if (countryVal) { body.set('countryCode', countryVal); }
+                    return body;
+                }).then(function (data) {
                     btn.disabled = false;
                     if (data && data.ok === true) {
                         var latInput = form.querySelector('[name="' + btn.dataset.latTarget + '"]');
@@ -181,14 +217,11 @@ if (function_exists('portal_location_map_assets') === false) {
                 var q = input.value;
                 if (q.length < 3) { return; }
                 timer = setTimeout(function () {
-                    var body = new URLSearchParams();
-                    body.set('csrf_token', csrfToken());
-                    body.set('q', q);
-                    fetch('<?php echo Router::urlForScript('geo/w3w-suggest'); ?>', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-                        body: body.toString()
-                    }).then(function (r) { return r.json(); }).then(function (data) {
+                    post('<?php echo Router::urlForScript('geo/w3w-suggest'); ?>', function () {
+                        var body = new URLSearchParams();
+                        body.set('q', q);
+                        return body;
+                    }).then(function (data) {
                         var list = input.getAttribute('list');
                         var datalist = list ? document.getElementById(list) : null;
                         if (!datalist || !data || data.ok !== true) { return; }

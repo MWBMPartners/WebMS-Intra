@@ -42,14 +42,28 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit;
 }
 
+// 🔑 THE TOKEN WAS JUST SPENT (#1134). Auth::verifyCsrf() replaces the session's
+//    one form token every time it accepts one (#768), and the page this answer
+//    goes to goes on to post an ordinary form (Save). Every answer from here
+//    on therefore carries the replacement as a top-level `csrfToken`, which the
+//    page script hands to Portal.rememberCsrf() so every carrier on the page
+//    is written. ONE closure makes every answer, so an exit added later cannot
+//    forget it. The two answers ABOVE (wrong method, refused token) are given
+//    before anything was spent, so they stay as they were. This endpoint stays
+//    outside `api/*`, so it does not use ApiResponse's `meta.csrfToken`.
+$answer = static function (array $body): never {
+    $body['csrfToken'] = Auth::csrfToken();
+    echo json_encode($body);
+    exit;
+};
+
 $w3wRaw = trim((string) ($_POST['w3w'] ?? ''));
 $w3w = $w3wRaw !== '' ? GeoLocation::validateW3W($w3wRaw) : null;
 
 if ($w3w !== null && What3Words::isConfigured() === true) {
     $coords = What3Words::convertToCoordinates($w3w);
     if ($coords !== null) {
-        echo json_encode(['ok' => true, 'lat' => $coords['lat'], 'lng' => $coords['lng'], 'source' => 'w3w', 'formatted' => null]);
-        exit;
+        $answer(['ok' => true, 'lat' => $coords['lat'], 'lng' => $coords['lng'], 'source' => 'w3w', 'formatted' => null]);
     }
 }
 
@@ -70,8 +84,7 @@ if ($address === '') {
 $address = mb_substr($address, 0, 500);
 
 if ($address === '') {
-    echo json_encode(['ok' => false, 'reason' => 'not_found']);
-    exit;
+    $answer(['ok' => false, 'reason' => 'not_found']);
 }
 
 $countryCode = isset($_POST['countryCode']) ? trim((string) $_POST['countryCode']) : null;
@@ -83,11 +96,10 @@ $addressKind = ($_POST['addressKind'] ?? null) === Geocoder::KIND_PUBLIC ? Geoco
 $result = Geocoder::forward($address, $countryCode !== '' ? $countryCode : null, $addressKind);
 
 if ($result === null) {
-    echo json_encode(['ok' => false, 'reason' => 'not_found']);
-    exit;
+    $answer(['ok' => false, 'reason' => 'not_found']);
 }
 
-echo json_encode([
+$answer([
     'ok'        => true,
     'lat'       => $result['lat'],
     'lng'       => $result['lng'],

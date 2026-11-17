@@ -8,6 +8,16 @@
  * Records the user's decision in tblConsentLog and sets a long-lived cookie
  * so we don't show the banner again on this device.
  *
+ * EVERY ANSWER GIVEN AFTER THE TOKEN WAS ACCEPTED CARRIES THE REPLACEMENT as a
+ * top-level `csrfToken` (#1134). verifyCsrf() replaces the session's one form
+ * token each time it accepts one (#768), and the banner is shown to every NEW
+ * visitor on whatever page they land on, the sign-in page included. Without
+ * the replacement the banner spent the token its page's form was holding and
+ * the visitor's next post (the sign-in itself) was refused. The banner script
+ * (footer.php) already hands the answer to Portal.rememberCsrf(). A visitor
+ * with no account gets the session's token: a page on another site cannot read
+ * this reply (no CORS), so returning it gives an attacker nothing.
+ *
  * Request body (form-encoded):
  *   csrf_token   — required
  *   type         — 'cookies' | 'privacy_policy' | 'marketing' | 'analytics'
@@ -44,6 +54,15 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit();
 }
 
+// 🔑 One closure makes every answer from here on, so an exit added later cannot
+//    forget the token. The two answers above were given before anything was spent.
+$answer = static function (int $status, array $body): never {
+    $body['csrfToken'] = Auth::csrfToken();
+    http_response_code($status);
+    echo json_encode($body);
+    exit();
+};
+
 $type     = (string) ($_POST['type']     ?? '');
 $decision = (string) ($_POST['decision'] ?? '');
 
@@ -53,9 +72,7 @@ $validDecisions = ['accept', 'reject', 'withdraw'];
 if (in_array($type, $validTypes, true) === false
     || in_array($decision, $validDecisions, true) === false
 ) {
-    http_response_code(400);
-    echo json_encode(['status' => 'bad_request']);
-    exit();
+    $answer(400, ['status' => 'bad_request']);
 }
 
 $siteId    = Site::id();
@@ -95,9 +112,7 @@ $stmt = $mysqli->prepare(
     . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt === false) {
-    http_response_code(500);
-    echo json_encode(['status' => 'db_error']);
-    exit();
+    $answer(500, ['status' => 'db_error']);
 }
 $stmt->bind_param('iissssss', $siteId, $userId, $sessionId, $type, $decision, $policyHash, $ip, $ua);
 $stmt->execute();
@@ -113,4 +128,4 @@ setcookie('portal_consent_' . $type, $decision, [
     'samesite' => 'Lax',
 ]);
 
-echo json_encode(['status' => 'ok', 'type' => $type, 'decision' => $decision]);
+$answer(200, ['status' => 'ok', 'type' => $type, 'decision' => $decision]);

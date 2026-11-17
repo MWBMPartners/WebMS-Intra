@@ -388,27 +388,60 @@ if ($isNew !== true && $canWrite === true && count($items) > 1) {
     if (!list) return;
     const planID = list.dataset.planId;
     const csrf   = <?php echo json_encode($csrf); ?>;
+    // The token the page was drawn with is only the fallback: every accepted
+    // post spends it and the answer carries the replacement (#1134), which
+    // Portal.rememberCsrf() writes into every carrier. Read at posting time.
+    const liveToken = () => ((window.Portal && typeof window.Portal.csrf === 'function' && window.Portal.csrf()) || csrf);
+    // One drag in flight at a time: two requests holding one token cannot both succeed.
+    let saving = false;
+    let again  = false;
+    // A small message where a refused save is shown: nothing else on the page says so.
+    const note = document.createElement('div');
+    note.className = 'alert alert-warning small d-none';
+    note.setAttribute('role', 'alert');
+    note.textContent = <?php echo json_encode('The new order was not saved. Reload the page and try again.'); ?>;
+    list.parentNode.insertBefore(note, list);
+
+    async function save(rows) {
+        const body = new URLSearchParams();
+        body.append('csrf_token', liveToken());
+        body.append('planID', planID);
+        rows.forEach(r => body.append('items[]', r.dataset.itemId));
+        let saved = false;
+        try {
+            const res = await fetch('<?php echo Router::urlForScript('worship/plan/reorder'); ?>', { method: 'POST', body: body });
+            const j = await res.json();
+            if (j && window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                window.Portal.rememberCsrf(j);
+            }
+            saved = !!(j && j.ok === true);
+        } catch (e) { console.error('Reorder error:', e); }
+        return saved;
+    }
 
     Sortable.create(list, {
         animation: 150,
         ghostClass: 'bg-light',
         handle: '.portal-data-row-main',
         onEnd: async function () {
-            const rows = list.querySelectorAll('.portal-data-row[data-item-id]');
-            const body = new URLSearchParams();
-            body.append('csrf_token', csrf);
-            body.append('planID', planID);
-            rows.forEach(r => body.append('items[]', r.dataset.itemId));
-            try {
-                const res = await fetch('<?php echo Router::urlForScript('worship/plan/reorder'); ?>', { method: 'POST', body: body });
-                const j = await res.json();
-                if (!j || !j.ok) console.warn('Reorder rejected:', j);
-                // Update visible sort numbers without a full reload.
-                rows.forEach((r, idx) => {
-                    const badge = r.querySelector('.badge.bg-secondary');
-                    if (badge) badge.textContent = String(idx + 1);
-                });
-            } catch (e) { console.error('Reorder error:', e); }
+            // A drag finished while a save is running: save once more afterwards, with the final order.
+            if (saving) { again = true; return; }
+            saving = true;
+            let saved = true;
+            do {
+                again = false;
+                const rows = list.querySelectorAll('.portal-data-row[data-item-id]');
+                saved = await save(rows);
+                // Renumber the visible sort numbers ONLY when the server kept the order.
+                if (saved) {
+                    rows.forEach((r, idx) => {
+                        const badge = r.querySelector('.badge.bg-secondary');
+                        if (badge) badge.textContent = String(idx + 1);
+                    });
+                }
+            } while (again);
+            saving = false;
+            note.classList.toggle('d-none', saved);
         }
     });
 })();

@@ -42,24 +42,36 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit;
 }
 
-if (What3Words::isConfigured() === false) {
-    echo json_encode(['ok' => false, 'reason' => 'disabled']);
+// 🔑 THE TOKEN WAS JUST SPENT (#1134). Auth::verifyCsrf() replaces the session's
+//    one form token every time it accepts one (#768), and the page this answer
+//    goes to goes on to post an ordinary form (Save). Every answer from here
+//    on therefore carries the replacement as a top-level `csrfToken`, which the
+//    page script hands to Portal.rememberCsrf() so every carrier on the page
+//    is written. ONE closure makes every answer, so an exit added later cannot
+//    forget it. The two answers ABOVE (wrong method, refused token) are given
+//    before anything was spent, so they stay as they were. This endpoint stays
+//    outside `api/*`, so it does not use ApiResponse's `meta.csrfToken`.
+$answer = static function (array $body): never {
+    $body['csrfToken'] = Auth::csrfToken();
+    echo json_encode($body);
     exit;
+};
+
+if (What3Words::isConfigured() === false) {
+    $answer(['ok' => false, 'reason' => 'disabled']);
 }
 
 // 🚦 Soft per-session rate limit — >=400ms between calls.
 $now = microtime(true);
 $last = (float) ($_SESSION['w3w_suggest_last'] ?? 0);
 if (($now - $last) < 0.4) {
-    echo json_encode(['ok' => false, 'reason' => 'throttled']);
-    exit;
+    $answer(['ok' => false, 'reason' => 'throttled']);
 }
 $_SESSION['w3w_suggest_last'] = $now;
 
 $q = trim((string) ($_POST['q'] ?? ''));
 if ($q === '') {
-    echo json_encode(['ok' => true, 'suggestions' => []]);
-    exit;
+    $answer(['ok' => true, 'suggestions' => []]);
 }
 
 $focus = null;
@@ -74,4 +86,4 @@ if ($focusLat !== null && $focusLng !== null) {
 
 $suggestions = What3Words::autosuggest($q, $focus);
 
-echo json_encode(['ok' => true, 'suggestions' => $suggestions]);
+$answer(['ok' => true, 'suggestions' => $suggestions]);
