@@ -99,6 +99,7 @@ ALLOWED: dict[str, str] = {
     "_core/GdprEraser.php": "erasure list entries (table names in an array), not queries",
     "_core/AccountMerge.php": "the account merge (#1064): its column list names membership tables, and it reads and moves a person's memberships in EVERY organisation on purpose (tblUserSites to find which organisations to ask the permission in, and every membership row when the person completes a merge), because a merge reaches all of them",
     "_core/personal-data-catalogue.php": "erasure list entries (table names as array keys), not queries",
+    "_core/DataKinds.php": "plain words for each kind of record a member is shown (#1135): table names as array keys, not queries",
 }
 
 

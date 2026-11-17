@@ -2043,6 +2043,20 @@ $copy = json_decode($http('GET', '/account/data-export')['body'], true);
 $dupSide = array_filter((array) ($copy['data']['accountMerges'] ?? []), static fn ($r): bool => is_array($r) && (int) ($r['userID'] ?? 0) === $eDup && ($r['side'] ?? '') === 'duplicate');
 check('E25b the kept account\'s data copy includes records under the DUPLICATE\'s number (D-199)', $dupSide !== [],
     is_array($copy) ? 'accountMerges: ' . json_encode($copy['data']['accountMerges'] ?? null) : 'not JSON');
+// 🎁 #1135 (D-199): the kinds the data copy hands over about a person's records of money, attendance and
+//    the like follow a merge too - the copy's blocks run for every number that is the same person - and
+//    so does the copy's "what we hold about you" list, which is GdprEraser::inventory() (it adds a merged-in
+//    account's rows to the kept one's). A payment made under the DUPLICATE's number, after the merge, shows
+//    under the kept account as one row of its own, and the list counts it.
+$db->query("INSERT INTO `tblPayment` (`siteID`, `userID`, `provider`, `providerRef`, `amountPence`, `currency`, `status`, `purpose`) "
+    . "VALUES ({$siteOne}, {$eDup}, 'stripe', 'P1135-{$tag}', 4321, 'GBP', 'succeeded', 'giving')");
+$copy1135 = json_decode($http('GET', '/account/data-export')['body'], true);
+$db->query("DELETE FROM `tblPayment` WHERE `providerRef` = 'P1135-{$tag}'");
+$pay1135  = array_values(array_filter((array) ($copy1135['data']['payments'] ?? []), static fn ($r): bool => is_array($r) && (int) ($r['amountPence'] ?? 0) === 4321));
+$held1135 = array_values(array_filter((array) ($copy1135['data']['whatWeHoldAboutYou'] ?? []), static fn ($r): bool => is_array($r) && ($r['kind'] ?? '') === 'Payments you made'));
+check('E25c the kept account\'s data copy hands over a payment made under the DUPLICATE\'s number as a row of its own, and its "what we hold" list counts it (#1135, D-199)',
+    count($pay1135) === 1 && count($held1135) === 1 && (int) ($held1135[0]['count'] ?? 0) === 1 && str_contains((string) json_encode($copy1135['data']['payments'] ?? null), 'P1135-') === false,
+    is_array($copy1135) ? json_encode([$copy1135['data']['payments'] ?? null, $held1135]) : 'not JSON');
 // ⚠️ Checked in the database, NOT by trying to sign in: a failed sign-in counts
 //    towards the five-per-15-minutes limit on this address, so the fifth run of
 //    this test on one machine locked every later sign-in and turned unrelated

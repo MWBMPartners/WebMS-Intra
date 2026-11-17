@@ -112,6 +112,30 @@
  *   tblCareAccessLog      (when you opened a pastoral care file, nothing else)
  *   tblVisitor            (your visitor record from before you had an account,
  *                          without the follow-up notes)
+ *   #1135 — every kind of record ABOUT you that the erasure KEEPS (which #1063
+ *   did not cover, since it looked only at what is deleted):
+ *   tblGivingEntry        (gifts recorded for you, without the treasurer's notes
+ *                          and who typed them in)
+ *   tblCountEnvelopes     (offering envelopes named for you)
+ *   tblGivingStatementLog (giving statements made for you, without the file path)
+ *   tblGivingKeptDonors   (the name and address kept with your gift records, if
+ *                          you were erased and still asked)
+ *   tblPayment            (payments you made, without the payment company's
+ *                          references)
+ *   tblEventAttendance    (your attendance, without who marked it or their note)
+ *   tblResourceBooking    (room bookings you made, without the approver's words)
+ *   tblAssetLoans         (equipment lent to or borrowed by you, without the
+ *                          staff notes)
+ *   tblAssetLicenseAssignments (software seats, without who linked them)
+ *   tblErrors             (errors while you were signed in: when, how serious and
+ *                          the page, without any message text)
+ *   tblAuditTrail         (changes you made: which record and what kind of
+ *                          change, never the values)
+ *   tblExpenseClaimApprovals (decisions you made on expense claims, without your
+ *                          comment)
+ *   `whatWeHoldAboutYou`  (EVERY other kind My data lists, as a count in plain
+ *                          words with what an erasure would do - the seventy-one
+ *                          kinds of record you made as a worker; no contents)
  *   Left out on purpose, each with its reason in the written list
  *   (personal-data-catalogue.php, `notInDataCopy`): tblTotpBackupCodes and
  *   tblRestoreHeldRows.
@@ -946,6 +970,129 @@ $payload = [
             'SELECT `siteID`, `fullName`, `email`, `phone`, `firstVisitedAt`, `source`, `status`, `createdAt`, `updatedAt` '
             . 'FROM `tblVisitor` WHERE `convertedUserID` = ?'
         ),
+        // 🎁 #1135 — THE RECORDS ABOUT YOU THAT THE ERASURE KEEPS. The rule of
+        //    #1063 (every record the erasure DELETES is handed over or named as
+        //    left out) never looked at a kept record, so a member's copy left out
+        //    their gifts, envelopes, statements, payments, attendance, bookings,
+        //    loans and the rest of the twelve below, although "My data" counted
+        //    every one of them. Each block matches on the column that says the
+        //    record is ABOUT the person (a member's number in `GdprEraser::
+        //    LINK_COLUMNS`, never an actor column), and applies this file's rule:
+        //    what is yours is handed over; another person's account number, the
+        //    words a worker wrote, and a payment company's or server's own
+        //    reference are left out. Section 27 of tools/gdpr-coverage-selftest.php
+        //    now fails on ANY such record in neither place.
+        //
+        // 💷 Gifts recorded for you. LEFT OUT: `notes` (the treasurer's own words,
+        //    which can name others) and `recordedByID` (whoever typed it in).
+        'gifts' => $fetchUserRows(
+            'SELECT `entryID`, `siteID`, `categoryID`, `donorName`, `amountPence`, `currency`, `donatedAt`, `method`, `reference`, '
+            . '`campaignID`, `pledgeID`, `createdAt` FROM `tblGivingEntry` WHERE `donorID` = ? ORDER BY `donatedAt` DESC, `entryID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // ✉️ Offering envelopes named for you. `amount` is a decimal in the
+        //    currency named in `currency` (this table's own habit).
+        'offeringEnvelopes' => $fetchUserRows(
+            'SELECT `envelopeID`, `countSessionID`, `giverName`, `amount`, `currency`, `method`, `createdAt` '
+            . 'FROM `tblCountEnvelopes` WHERE `giverID` = ? ORDER BY `envelopeID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🧾 Giving statements made for you: the period, the totals and when and
+        //    where one was e-mailed. LEFT OUT: `pdfPath` (a path on the server),
+        //    `errorMsg` (the portal's own error text) and `createdByID`.
+        'givingStatements' => $fetchUserRows(
+            'SELECT `siteID`, `periodKey`, `fromDate`, `toDate`, `totalPence`, `giftAidPence`, `currency`, `queuedAt`, `emailedAt`, `emailedTo` '
+            . 'FROM `tblGivingStatementLog` WHERE `donorID` = ? ORDER BY `toDate` DESC'
+        ),
+        // 🔖 The kept copy of your name and home address beside your gift records,
+        //    which exists only AFTER an erasure (the account is then emptied, so a
+        //    member able to ask for a copy normally has none). Every column is
+        //    handed over, so no exclusion is needed.
+        'keptGivingIdentity' => $fetchUserRows(
+            'SELECT `keptDonorID`, `siteID`, `donorID`, `erasureRequestID`, `fullName`, `address`, `postcode`, `scope`, '
+            . '`lastGiftDate`, `keptGiftCount`, `createdAt`, `clearedAt` FROM `tblGivingKeptDonors` WHERE `donorID` = ?'
+        ),
+        // 💳 Payments you made, in whatever currency each was taken. LEFT OUT: the
+        //    payment company's own reference for it, the key the portal made to
+        //    avoid taking it twice (both can be used to look the payment up at the
+        //    company) and the error text.
+        'payments' => $fetchUserRows(
+            'SELECT `paymentID`, `siteID`, `provider`, `amountPence`, `feePence`, `currency`, `status`, `purpose`, `isRecurring`, `occurredAt`, `createdAt` '
+            . 'FROM `tblPayment` WHERE `userID` = ? ORDER BY `createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // ✋ Your attendance at events. LEFT OUT: who marked it, the coordinator's
+        //    note, and the walk-in name (a different way of being listed).
+        'eventAttendance' => $fetchUserRows(
+            'SELECT `a`.`attendanceID`, `a`.`eventID`, `e`.`eventName`, `a`.`dayDate`, `a`.`markedAt` '
+            . 'FROM `tblEventAttendance` AS `a` INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `a`.`eventID` '
+            . 'WHERE `a`.`userID` = ? ORDER BY `a`.`dayDate` DESC, `a`.`attendanceID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 🚪 Room and resource bookings you made, including `purpose` and `notes`,
+        //    which are YOUR words (#723). LEFT OUT: who approved it and the
+        //    approver's reason for declining (their words, not yours).
+        'resourceBookings' => $fetchUserRows(
+            'SELECT `bookingID`, `resourceID`, `startAt`, `endAt`, `purpose`, `notes`, `status`, `approvedAt`, `createdAt` '
+            . 'FROM `tblResourceBooking` WHERE `bookedByID` = ? ORDER BY `startAt` DESC'
+        ),
+        // 📦 Equipment lent to you or borrowed from you. `counterpartyName` and
+        //    `counterpartyContact` stay: on a loan matched to YOUR account they are
+        //    the details typed about you, and the erasure empties exactly them.
+        //    LEFT OUT: the three notes (staff's own words) and who approved or asked
+        //    for the loan.
+        'equipmentLoans' => $fetchUserRows(
+            'SELECT `loanID`, `siteID`, `assetID`, `direction`, `status`, `counterpartyName`, `counterpartyContact`, `conditionOut`, `conditionIn`, '
+            . '`dateOut`, `dueDate`, `dateIn` FROM `tblAssetLoans` WHERE `counterpartyUserID` = ? ORDER BY `loanID` DESC'
+        ),
+        // 💿 Software seats assigned to you. LEFT OUT: who linked or released it,
+        //    the notes and the device's name (typed by an administrator).
+        'softwareSeats' => $fetchUserRows(
+            'SELECT `assignmentID`, `siteID`, `licenseAssetID`, `seatLabel`, `status`, `linkedAt`, `releasedAt` '
+            . 'FROM `tblAssetLicenseAssignments` WHERE `userID` = ?'
+        ),
+        // ⚠️ Errors recorded while you were signed in: when, how serious, and the
+        //    page that was asked for WITHOUT anything after a question mark (an
+        //    address can carry a one-time key or somebody else's details there;
+        //    CHAR(63) is that mark, written so this file's count of bound values
+        //    stays right). LEFT OUT: the message and its detail (they can quote
+        //    another person's data), the browser's headers and who resolved it.
+        'errorsWhileSignedIn' => $fetchUserRows(
+            'SELECT `errorID`, `siteID`, `errorSeverity`, `errorPlatform`, `errorCode`, SUBSTRING_INDEX(`requestURL`, CHAR(63), 1) AS `addressRequested`, '
+            . '`visitorIP`, `isResolved`, `createdAt` FROM `tblErrors` WHERE `userID` = ? ORDER BY `createdAt` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // 📜 The history of changes YOU made to records: which kind of record, its
+        //    number, what kind of change, the field and when. LEFT OUT: the old and
+        //    new values and the change set (another person's record, #707).
+        'changesYouMade' => $fetchUserRows(
+            'SELECT `auditID`, `siteID`, `source`, `tableName`, `recordID`, `action`, `fieldName`, `ipAddress`, `createdAt` '
+            . 'FROM `tblAuditTrail` WHERE `userID` = ? ORDER BY `createdAt` DESC, `auditID` DESC LIMIT ' . (DATA_COPY_ROWS_PER_KIND + 1)
+        ),
+        // ✅ Expense claim decisions YOU made as an approver: which claim, the
+        //    decision, your role and when. LEFT OUT: your comment (it is about
+        //    somebody else's claim and can name them).
+        'expenseDecisionsYouMade' => $fetchUserRows(
+            'SELECT `approvalID`, `claimID`, `decision`, `approverRole`, `decidedAt` FROM `tblExpenseClaimApprovals` WHERE `userID` = ? ORDER BY `decidedAt` DESC'
+        ),
+        // 🗂️ #1135 — WHAT ELSE WE HOLD, KIND BY KIND, FROM THE SAME LIST "MY DATA"
+        //    SHOWS. The seventy-one other kinds of record are ones you MADE as a
+        //    worker (announcements you wrote, rota slots you created, stocktakes
+        //    you started, and so on). Almost every one is about somebody else, so
+        //    each kind is COUNTED, with what an erasure would do to it, and nothing
+        //    from inside a record is handed over (the shape D-142 gave the care,
+        //    DBS and check-in records). The rows above are the same kinds again,
+        //    with their contents; this list is the whole of `GdprEraser::
+        //    inventory()`, so "everything My data lists is in this file" holds by
+        //    construction. A kind that could not be read says so and carries no
+        //    number: never "none" (#1012). Merged accounts are added together by
+        //    inventory() itself (#1064).
+        'whatWeHoldAboutYou' => array_map(static function (array $row): array {
+            if (($row['couldNotRead'] ?? false) === true) {
+                return ['kind' => (string) $row['kind'], 'count' => null, 'couldNotRead' => true, 'note' => (string) $row['note']];
+            }
+
+            return [
+                'kind'     => (string) $row['kind'],
+                'count'    => (int) $row['rows'],
+                'ifErased' => GdprEraser::inventoryWords($row, true),
+            ];
+        }, GdprEraser::inventory($userId)),
         // 🙏 Salvation decision cards (tblSalvationCards) are DELIBERATELY
         // NOT exported here: the public decision-card form has no userID
         // FK at all (fullName/email/phone/address are free-text fields
@@ -959,7 +1106,8 @@ $payload = [
 
 // ✂️ #1063: a kind cut to its newest DATA_COPY_ROWS_PER_KIND rows says so,
 //    in words, rather than looking complete.
-foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened', 'activityLogs'] as $kind) {
+foreach (['textMessagesSentToYou', 'aiAssistantUse', 'eventAnswers', 'newslettersSentToYou', 'recordingsPlayed', 'careFilesYouOpened', 'activityLogs',
+    'gifts', 'offeringEnvelopes', 'payments', 'eventAttendance', 'errorsWhileSignedIn', 'changesYouMade'] as $kind) {
     if (count($payload['data'][$kind]) > DATA_COPY_ROWS_PER_KIND) {
         $payload['data'][$kind]   = array_slice($payload['data'][$kind], 0, DATA_COPY_ROWS_PER_KIND);
         $payload['shortened'][$kind] = 'Only the newest ' . number_format(DATA_COPY_ROWS_PER_KIND)

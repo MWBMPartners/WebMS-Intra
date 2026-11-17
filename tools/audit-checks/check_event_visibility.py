@@ -195,6 +195,7 @@ FILE_ALLOWLIST: dict[str, str] = {
     "_apps/cron/_retention-sweep.php": "deletes expired REGISTRATIONS by their event's retention window; shows no event detail",
     "_core/GdprEraser.php": "erasure catalogue; removes a person's own data, never reads or shows an event",
     "_core/personal-data-catalogue.php": "documents what GdprEraser erases; no live query reads an event",
+    "_core/DataKinds.php": "a list of plain words for each kind of record a member is shown (#1135); table names are array keys, nothing here queries or shows an event",
     "_apps/auth/account/data-export.php": "exports a member's OWN data; any event named in the export is one they already submitted, RSVPed to or were assigned to — never a viewer-facing listing",
     # 🛡️ Moderation-only: administrators reviewing PUBLIC submissions
     # before they become real events. Nothing here shows an IMPORTED
