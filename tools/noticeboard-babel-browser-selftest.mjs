@@ -23,6 +23,15 @@
  * Section B is the SAME run WITHOUT the stub: it must see the unpkg request. That
  * is what proves section A could have failed.
  *
+ * Sections C and D (#1141) use the same real index.php for the HOST'S OWN save():
+ * the host script is lifted out of the page (PHP echoes replaced by fixed values),
+ * run beside the real portal.js against a stand-in save address that answers
+ * like api/noticeboard/save (it refuses a token it did not hand out and rotates
+ * the token on every accepted post). C does two saves in one visit and asserts
+ * both are accepted, the second carrying the replacement; D makes the server
+ * refuse and asserts the person is told. The stand-in is NOT the real handler
+ * (tools/noticeboard-save-selftest.php drives that).
+ *
  * `unpkg.com` is mapped to a dead local address with `--host-resolver-rules`, so
  * the test never touches the internet whatever happens.
  *
@@ -77,6 +86,33 @@ async function stubFromRealPage() {
     const hit = tags.find((m) => /window\.Babel\s*=/.test(m[1]) === true);
     if (hit === undefined) { return null; }
     return hit[1];
+}
+
+/**
+ * The real host: the inline script in index.php that defines window.NoticeboardHost,
+ * with each PHP echo swapped for a fixed value (the two it holds are the admin flag,
+ * the first token, and the four api addresses).
+ */
+async function hostFromRealPage() {
+    // The nonce's own `?>` would end a tag early, so that attribute goes first.
+    const raw = (await readFile(PAGE_SOURCE, 'utf8')).replace(/ nonce="<\?php[\s\S]*?\?>"/g, '');
+    const tags = [...raw.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
+    const hit = tags.find((m) => /window\.NoticeboardHost\s*=/.test(m[1]) === true);
+    if (hit === undefined) { return null; }
+    return hit[1]
+        .replace(/<\?php echo json_encode\(\$csrf\); \?>/g, '"tok0"')
+        .replace(/<\?php echo \$isAdmin === true \? 'true' : 'false'; \?>/g, 'true')
+        .replace(/<\?php echo Router::urlForScript\('([^']+)'\); \?>/g, '/$1')
+        .replace(/<\?(?:php|=)[\s\S]*?\?>/g, '');
+}
+
+function hostPageHtml(host) {
+    return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="csrf-token" content="tok0"><title>host fixture</title></head><body>
+<div id="noticeboard-root"></div>
+<script>${host}</script>
+<script src="/assets/js/portal.js"></script>
+</body></html>`;
 }
 
 function pageHtml(stub) {
@@ -186,12 +222,44 @@ async function main() {
         process.exit(1);
     }
 
+    const host = await hostFromRealPage();
+    if (host === null) {
+        console.error('REFUSED: web/_apps/noticeboard/index.php has no inline script defining window.NoticeboardHost.');
+        process.exit(1);
+    }
+
     const work = await mkdtemp(path.join(tmpdir(), 'board-babel-'));
     const profile = path.join(work, 'profile');
     await mkdir(profile, { recursive: true });
     const types = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html; charset=utf-8' };
+    // Stand-in for api/noticeboard/save: one live token; an accepted post replaces it.
+    const fake = { token: 'tok0', n: 0, seen: [], inFlight: 0, maxInFlight: 0, failWith: null, delayMs: 120 };
     const server = createServer(async (request, answer) => {
         const pathname = new URL(request.url, 'http://x').pathname;
+        if (pathname === '/host.html') {
+            answer.writeHead(200, { 'Content-Type': types['.html'] });
+            answer.end(hostPageHtml(host)); return;
+        }
+        if (pathname === '/api/noticeboard/save') {
+            fake.inFlight += 1; fake.maxInFlight = Math.max(fake.maxInFlight, fake.inFlight);
+            let body = '';
+            for await (const chunk of request) { body += chunk; }
+            await new Promise((r) => setTimeout(r, fake.delayMs));
+            const sent = request.headers['x-csrf-token'];
+            const titles = (JSON.parse(body).posters ?? []).map((p) => p.title);
+            const reply = (code, payload) => { fake.inFlight -= 1; answer.writeHead(code, { 'Content-Type': 'application/json' }); answer.end(JSON.stringify(payload)); };
+            if (fake.failWith !== null) {
+                fake.seen.push({ sent, titles, accepted: false });
+                reply(500, { status: 'error', message: fake.failWith }); return;
+            }
+            if (sent !== fake.token) {
+                fake.seen.push({ sent, titles, accepted: false });
+                reply(403, { status: 'error', message: 'CSRF check failed' }); return;
+            }
+            fake.n += 1; fake.token = `tok${fake.n}`;
+            fake.seen.push({ sent, titles, accepted: true });
+            reply(200, { status: 'ok', data: { saved: true }, meta: { csrfToken: fake.token } }); return;
+        }
         if (pathname === '/with.html' || pathname === '/without.html') {
             answer.writeHead(200, { 'Content-Type': types['.html'] });
             answer.end(pageHtml(pathname === '/with.html' ? stub : null)); return;
@@ -259,6 +327,38 @@ async function main() {
         check('B2 the forced .jsx x-import really ran (premise)', b.loading, true);
         check('B3 without the stub the bundle DOES try unpkg.com', b.unpkg.length > 0, true);
         check('B4 without the stub a Babel script element is added', b.babelTags > 0, true);
+
+        console.log('C. The real host: two saves in one visit (#1141)');
+        await browser.send('Page.navigate', { url: `${base}/host.html` });
+        await browser.waitFor('return document.readyState === "complete" && typeof window.Portal === "object" '
+            + '&& typeof window.Portal.rememberCsrf === "function";', 'portal.js to load');
+        // Three saves in a row without waiting, as a quick add-add-delete would: the
+        // host must send them one at a time, each with the token the last answer gave.
+        await browser.evaluate(`
+            window.__done = 0;
+            ['one', 'two', 'three'].forEach(function (t) {
+                Promise.resolve(window.NoticeboardHost.save([{ id: 'p' + t, title: t }])).then(function () { window.__done += 1; });
+            });
+            return 1;`);
+        await browser.waitFor('return window.__done === 3;', 'the three saves to finish');
+        check('C1 all three saves reached the server, in order', fake.seen.map((x) => x.titles[0]), ['one', 'two', 'three']);
+        check('C2 every one was ACCEPTED (none refused for a spent token)', fake.seen.map((x) => x.accepted), [true, true, true]);
+        check('C3 each carried the replacement the answer before it handed back', fake.seen.map((x) => x.sent), ['tok0', 'tok1', 'tok2']);
+        check('C4 only one save was ever in flight at a time', fake.maxInFlight, 1);
+        check('C5 the page now holds the latest token (meta tag)', await browser.evaluate('return window.Portal.csrf();'), 'tok3');
+        check('C6 no failure notice is showing', await browser.evaluate('return document.getElementById("noticeboard-save-failed") === null;'), true);
+
+        console.log('D. A refused save is told to the person');
+        fake.failWith = 'Could not save noticeboard';
+        await browser.evaluate('window.__done = 0; Promise.resolve(window.NoticeboardHost.save([{ id: "px", title: "x" }])).then(function () { window.__done = 1; }); return 1;');
+        await browser.waitFor('return window.__done === 1;', 'the refused save to finish');
+        const shown = await browser.evaluate('var n = document.getElementById("noticeboard-save-failed"); return n === null ? null : [n.textContent, n.getAttribute("role")];');
+        check('D1 a notice with role=alert appears', shown === null ? null : shown[1], 'alert');
+        check('D2 it says the change could not be saved and why', shown === null ? '' : shown[0].includes('could not be saved') && shown[0].includes('Could not save noticeboard'), true);
+        fake.failWith = null;
+        await browser.evaluate('window.__done = 0; Promise.resolve(window.NoticeboardHost.save([{ id: "py", title: "y" }])).then(function () { window.__done = 1; }); return 1;');
+        await browser.waitFor('return window.__done === 1;', 'the next save to finish');
+        check('D3 a later successful save clears the notice', await browser.evaluate('return document.getElementById("noticeboard-save-failed") === null;'), true);
     } finally {
         await stop();
     }
