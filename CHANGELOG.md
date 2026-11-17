@@ -81,6 +81,20 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### A member who has come back is never erased; offboarding ends their sessions (#1152, #1155)
+
+- Ticking Active on a person who was offboarded with "erase their details" left their erasure request waiting, and the nightly
+  sweep could then erase a member who had returned. Now one place, `ReturnedMember::record()`, handles a return for both Rehire
+  and the Active tick: it marks the offboarding as undone and cancels a request still waiting (a person's own request, filed
+  while suspended, is kept). The sweep erases only an account still switched off, checked again in the claim itself. A return
+  is refused while an erasure run for that person is under way (measured: otherwise the tick succeeded and the run erased the
+  returned member); an administrator can recover a request stuck for 15 minutes with Put back on Admin, Erasure requests. The
+  tick tells the administrator when it cancelled a request. The Offboarding list no longer offers Rehire to an account that is
+  on. Offboarding now ends the person's existing sessions (`Auth::endOtherSessionsOf()`), so a browser signed in before cannot
+  revive after a return. Opus check rounds 1 and 2: clean. Open: on a portal with several organisations a tick leaves the
+  account on with memberships off; two comments and the refusal messages are worded loosely; the refusal is logged as Fatal.
+  Codex has not reviewed this.
+
 ### The giving statement names the organisation that issued it (#1156)
 
 - The statement PDF and its e-mail were headed with nothing, because they read the request's merged giving settings. They now
