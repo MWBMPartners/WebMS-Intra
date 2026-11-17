@@ -38,6 +38,7 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\GdprEraser;
@@ -356,6 +357,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 </form>
 
+<?php
+// 🚪 #1136: does the Offboarding page open at all? It ships switched off, and the
+//    router refuses a switched-off app's pages, so a button to it would be a dead
+//    end. Asked once, the same way the router asks (AppRegistry::isEnabled()).
+$offboardingOpens = AppRegistry::isEnabled('offboarding');
+?>
 <!-- 📋 User list -->
 <div class="portal-data-list">
     <!-- 🏷️ Header row -->
@@ -457,6 +464,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             data-rootadmin="<?php echo $isRoot ? '1' : '0'; ?>">
                         <i class="fa-solid fa-pen me-1"></i>Edit
                     </button>
+                    <?php // 🚪 #1136: the way to the per-person offboarding page, which nothing linked. Drawn only where that page would open: the Offboarding app is on, and the same verdict the page asks for its button (REACH_ACCOUNT, which is $rowVerdict) allows. An erased or merged account gets the badges below instead, never this link. ?>
+                    <?php if ($offboardingOpens === true): ?>
+                        <a class="btn btn-sm btn-outline-danger ms-1" data-offboard-link
+                           href="<?php echo htmlspecialchars(Site::url('offboarding/user') . '?id=' . $uid, ENT_QUOTES, 'UTF-8'); ?>">
+                            <i class="fa-solid fa-door-open me-1"></i>Offboard
+                        </a>
+                    <?php endif; ?>
                 <?php elseif ($rowVerdict === AccountGuard::GLOBAL_ONLY): ?>
                     <!-- 🛡️ #518: this row is real (it belongs to this organisation, or this
                          is a global administrator's own view), but only a global

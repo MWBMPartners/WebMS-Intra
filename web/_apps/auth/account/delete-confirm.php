@@ -68,6 +68,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\ErasureNotice;
 use Portal\Core\GdprEraser;
 use Portal\Core\Logger;
 use Portal\Core\Router;
@@ -156,6 +157,12 @@ Logger::activity(
     'Erasure request #' . $filed['requestID'] . ' filed from "Delete my account", confirmed by the typed phrase',
     $userId
 );
+
+// 📣 Tell the organisation's administrators the request is waiting (#1136;
+//    the one-month deadline). The "already asked" case returned above, so this
+//    is always a NEW request. It never throws and never changes what the
+//    person sees next.
+ErasureNotice::requestWaiting(App::db(), Site::id(), (int) $filed['requestID']);
 
 // The person stays signed in: their account has not been touched. They land
 // on "My data", which shows the message and lists the request as waiting.

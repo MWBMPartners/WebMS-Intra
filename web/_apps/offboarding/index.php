@@ -104,7 +104,7 @@ $csrf = Auth::csrfToken();
         <h1 class="mb-1"><i class="fa-solid fa-door-open me-2 text-danger"></i>Offboarding</h1>
         <p class="text-secondary mb-0">Revoke access when a volunteer or staff member leaves. <?php echo $undoWindowDays; ?>-day undo window.</p>
     </div>
-    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Pick user → /admin/users</a>
+    <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">Pick a person in Admin, Users</a>
 </div>
 
 <?php if ($flashMsg !== ''): ?>
@@ -115,7 +115,7 @@ $csrf = Auth::csrfToken();
 <?php endif; ?>
 
 <div class="alert alert-info small">
-    To offboard a user, navigate to <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">/admin/users</a> → click the user → "Offboard" action. This page lists what's already been done.
+    To offboard somebody, open <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Users</a> and press Offboard on their line. This page lists what has already been done.
 </div>
 
 <?php if (count($rows) === 0): ?>

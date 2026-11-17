@@ -18,6 +18,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\ErasureNotice;
 use Portal\Core\Router;
 
 $token = (string) ($_GET['token'] ?? '');
@@ -36,13 +37,37 @@ if ($token === '' || preg_match('/^[a-f0-9]{64}$/', $token) !== 1) {
 }
 
 $db = App::db();
-$stmt = $db->prepare('UPDATE tblErasureRequest SET status = "pending_review", confirmedAt = NOW(), confirmToken = NULL WHERE confirmToken = ? AND status = "pending_confirmation" AND requestedAt >= DATE_SUB(NOW(), INTERVAL 1 DAY)');
+// 🔎 Which request the link belongs to, and which organisation's it is. This
+//    page is reached signed out, so Site::id() is the organisation the ADDRESS
+//    names, which need not be the request's: the administrators told below are
+//    the request's own organisation's (#1136).
+$requestId   = 0;
+$requestSite = 0;
+$find = $db->prepare('SELECT requestID, siteID FROM tblErasureRequest WHERE confirmToken = ? AND status = "pending_confirmation" AND requestedAt >= DATE_SUB(NOW(), INTERVAL 1 DAY) LIMIT 1');
+if ($find !== false) {
+    $find->bind_param('s', $token);
+    $find->execute();
+    $found = $find->get_result()->fetch_assoc();
+    $find->close();
+    if ($found !== null) {
+        $requestId   = (int) $found['requestID'];
+        $requestSite = (int) $found['siteID'];
+    }
+}
+$stmt = $db->prepare('UPDATE tblErasureRequest SET status = "pending_review", confirmedAt = NOW(), confirmToken = NULL WHERE confirmToken = ? AND requestID = ? AND status = "pending_confirmation" AND requestedAt >= DATE_SUB(NOW(), INTERVAL 1 DAY)');
 $affected = 0;
 if ($stmt !== false) {
-    $stmt->bind_param('s', $token);
+    $stmt->bind_param('si', $token, $requestId);
     $stmt->execute();
     $affected = $stmt->affected_rows;
     $stmt->close();
+}
+// 📣 Tell the organisation's administrators, once, only when THIS press moved
+//    the request to "waiting" (#1136; the one-month deadline). A second press
+//    of the same link changes nothing and so tells nobody. It never throws and
+//    never changes the page below.
+if ($affected === 1 && $requestId > 0) {
+    ErasureNotice::requestWaiting($db, $requestSite, $requestId);
 }
 ?>
 <!doctype html>
