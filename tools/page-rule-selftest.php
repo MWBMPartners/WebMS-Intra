@@ -514,6 +514,9 @@ foreach ($keyNames as $prov) {
     foreach ($loads[$prov] as $i => $url) {
         $wants[] = [($i === 0 || str_ends_with($url, '.js') === true) ? 'script-src' : 'frame-src', $url];
     }
+    if ($prov === 'recaptcha') {
+        $wants[] = ['connect-src', 'https://www.google.com/recaptcha/api2/clr'];
+    }
     if ($prov === 'hcaptcha') {
         $wants[] = ['style-src', 'https://newassets.hcaptcha.com/x.css'];
         $wants[] = ['connect-src', 'https://hcaptcha.com/checksiteconfig'];
@@ -622,6 +625,20 @@ if ($o === null) {
     $code === 1 ? ok('E-P1', 'P1: the real browser goes red when the header drops the sources') : bad('E-P1', 'P1 not caught by the browser', 'exit ' . $code);
     [$code] = $browserRun('recaptcha');
     $code === 0 ? ok('E-P1b', 'P1 restored: the browser is green again') : bad('E-P1b', 'not restored', 'exit ' . $code);
+}
+// P3: reCAPTCHA loses its connect-src host -> the browser and the header both go red.
+$o = $plant('_core/Captcha.php', "'connect' => ' https://www.google.com',", "'connect' => '',");
+if ($o === null) {
+    bad('E-P3', 'plant P3 did not apply');
+} else {
+    [$code] = $browserRun('recaptcha');
+    [$h] = $collect('/decision-card');
+    $restore('_core/Captcha.php', $o);
+    ($code === 1 && $allows($directive($h, 'connect-src'), 'https://www.google.com/recaptcha/api2/clr') === false)
+        ? ok('E-P3', 'P3: dropping reCAPTCHA\'s connect-src host is caught by the browser and by the header check')
+        : bad('E-P3', 'P3 not caught', 'browser exit ' . $code);
+    [$code] = $browserRun('recaptcha');
+    $code === 0 ? ok('E-P3b', 'P3 restored: green again') : bad('E-P3b', 'not restored', 'exit ' . $code);
 }
 $setProvider(null);
 foreach (['enabled', 'allowAnonymous', 'requireCaptcha'] as $k) {

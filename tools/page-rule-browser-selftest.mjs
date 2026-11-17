@@ -64,6 +64,7 @@ const LOADS = {
         ['script', 'https://www.gstatic.com/recaptcha/releases/x/recaptcha__en.js'],
         ['frame', 'https://www.google.com/recaptcha/api2/anchor'],
         ['frame', 'https://recaptcha.google.com/recaptcha/api2/x'],
+        ['connect', 'https://www.google.com/recaptcha/api2/clr'],
     ],
     hcaptcha: [
         ['script', 'https://js.hcaptcha.com/1/api.js'],

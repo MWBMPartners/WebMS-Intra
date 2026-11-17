@@ -476,7 +476,7 @@ PER_FILE: dict[str, dict[str, int]] = {
     },
     'www.google.com': {
         '_apps/admin/captcha/index.php': 1,
-        '_core/Captcha.php': 4,
+        '_core/Captcha.php': 5,
         '_core/GeoLocation.php': 2,
         '_core/OutsideServices.php': 1,
     },

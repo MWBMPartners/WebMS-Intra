@@ -303,7 +303,9 @@ class Captcha
     //    Source: each provider's own published page-rule guidance --
     //    reCAPTCHA: https://developers.google.com/recaptcha/docs/faq (the
     //    "content security policy" answer: script from www.google.com and
-    //    www.gstatic.com, frames from www.google.com and recaptcha.google.com);
+    //    www.gstatic.com, frames from www.google.com and recaptcha.google.com,
+    //    and background requests (connect-src) to www.google.com, which v3 makes
+    //    to /recaptcha/api2/clr: measured refused without it);
     //    hCaptcha: https://docs.hcaptcha.com/ ("Content Security Policy": its
     //    script, frames, styles and connections all come from hcaptcha.com and
     //    its sub-names). A host is written WITHOUT a path on purpose: a
@@ -312,7 +314,7 @@ class Captcha
         'script'  => ' https://www.google.com https://www.gstatic.com',
         'frame'   => ' https://www.google.com https://recaptcha.google.com',
         'style'   => '',
-        'connect' => '',
+        'connect' => ' https://www.google.com',
     ];
     private const HCAPTCHA_HOSTS = ' https://hcaptcha.com https://*.hcaptcha.com';
     private const HCAPTCHA_PAGE_RULE = [
@@ -449,12 +451,11 @@ class Captcha
                 // with the standard header a script written into the page runs
                 // only with that mark (#144, 3 June 2026). Without it the token
                 // was never fetched, so the form always failed its bot check.
-                // WHAT THE NONCE DOES NOT FIX: the standard header lets script
-                // FILES come from two outside addresses only, and Google's is
-                // not one of them. So on a page with the standard header the
-                // Google script file named by scriptTag() is still refused, and
-                // this script then finds no `grecaptcha` and does nothing. On a
-                // page that sends no rule (sign-in, the public forms) it works.
+                // Google's script files and frames are admitted by the page rule
+                // through `cspSources()` (#1092), which header.php adds on every
+                // page when reCAPTCHA is the provider in use. Before that the
+                // standard header refused them and this script found no
+                // `grecaptcha` and did nothing.
                 return ''
                     . '<input type="hidden" name="' . self::esc(self::RECAPTCHA_POST_FIELD)
                     . '" id="g-recaptcha-response">'
