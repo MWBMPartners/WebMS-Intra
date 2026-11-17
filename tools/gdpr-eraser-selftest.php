@@ -4371,7 +4371,7 @@ ge_ok('THE REPORT says what is kept and until when, in words: 2 gifts, 1 tax dec
     count($lineG1) === 1 && $lineG1[0]['action'] === 'retain'
     && str_contains($textG1, '2 gifts, 1 tax declaration and 1 giving statement keep the donor\'s details on this record until ' . GivingRetention::dateInWords($untilG1))
     && str_contains($textG1, '2 other gifts keep the amount, date and method and no longer name the donor')
-    && str_contains($textG1, 'only on gifts that have a tax declaration, receipt or statement')
+    && str_contains($textG1, 'only on gifts covered by a tax declaration or a giving statement')
     && str_contains($textG1, 'last such gift ' . GivingRetention::dateInWords($ago(100)))
     && str_contains($textG1, 'no financial year end is set, so one year after that was used'), $textG1);
 ge_ok('...and it says the period is NOT YET CONFIRMED and is a cautious placeholder, because the organisation has not said which country it is in; it never says the figure is what the law requires',

@@ -86,7 +86,7 @@ $badgeClass = match ($state) {
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-box-archive me-2"></i>Backup Freshness</h1>
-        <p class="text-secondary mb-0">Current state of the snapshots kept in <code>web/_backups/</code>.</p>
+        <p class="text-secondary mb-0">Current state of the snapshots kept in the private <code>_backups</code> folder, which sits beside the web folder rather than inside it.</p>
     </div>
     <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>

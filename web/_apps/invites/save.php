@@ -27,6 +27,8 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\PortalAddress;
+use Portal\Core\PublicWebsiteSetup;
+use Portal\Core\Roles;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -53,6 +55,40 @@ $role      = (string) ($_POST['role'] ?? 'user');
 //    anything else quietly becomes an ordinary "user" invite instead.
 if (in_array($role, ['user', 'volunteer', 'staff', 'admin'], true) === false) {
     $role = 'user';
+}
+
+// 🎟️ #539: "volunteer" and "staff" now really GRANT that role when the
+//    invitation is accepted (invites/accept.php), so they are only offered
+//    where they can be granted, and are judged by the same rule that governs
+//    giving a role any other way:
+//      1. this organisation must still HAVE a role with that key (a standard
+//         role can be deleted), or the invitation could never be accepted;
+//      2. D-093: if the role opens "Set up the public website", only that
+//         organisation's global administrator may hand it out. The INVITER is
+//         the one handing it out, so the inviter is asked, here and again
+//         under a lock when the invitation is accepted.
+//    Nothing is stored when either refuses, and the refusal is plain.
+if ($role === 'volunteer' || $role === 'staff') {
+    $roleExists = false;
+    foreach (Roles::forSite($db, $siteId) as $roleRow) {
+        if ($roleRow['roleKey'] === $role) {
+            $roleExists = true;
+        }
+    }
+    if ($roleExists === false) {
+        $_SESSION['flash_msg']  = 'This organisation has no "' . $role . '" role at the moment, so nobody can be invited with it. Choose another role, or add the role first. Nothing was sent.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('invites/new'));
+        exit();
+    }
+    $whyNot = PublicWebsiteSetup::whyRoleChangeRefused($db, $userId, $siteId, [$role]);
+    if ($whyNot !== '') {
+        PublicWebsiteSetup::recordHandOutRefused($userId > 0 ? $userId : null, $siteId, 'an invitation');
+        $_SESSION['flash_msg']  = $whyNot . ' Nothing was sent.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('invites/new'));
+        exit();
+    }
 }
 $days      = max(1, min(90, (int) ($_POST['expiryDays'] ?? 7)));
 $message   = trim((string) ($_POST['welcomeMessage'] ?? ''));

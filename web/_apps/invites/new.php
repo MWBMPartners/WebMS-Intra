@@ -12,6 +12,8 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\PortalAddress;
+use Portal\Core\PublicWebsiteSetup;
+use Portal\Core\Roles;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -25,10 +27,32 @@ $settings = App::settings();
 $defaultExpiry = (int) ($settings['invites']['default_expiry_days'] ?? 7);
 $defaultRole   = (string) ($settings['invites']['default_role'] ?? 'user');
 
+// 🎟️ #539: the invitation roles that really grant something here. "volunteer" and
+//    "staff" are offered only if this organisation still has them AND this person
+//    may hand them out under D-093 (an ordinary administrator may not hand out a
+//    role that opens "Set up the public website"). save.php asks both again.
+$grantableRoles = [];
+$dbForRoles     = App::db();
+$inviterNumber  = (int) ($_SESSION['user_id'] ?? 0);
+foreach (Roles::forSite($dbForRoles, Site::id()) as $roleRow) {
+    if (($roleRow['roleKey'] === 'volunteer' || $roleRow['roleKey'] === 'staff')
+        && PublicWebsiteSetup::whyRoleChangeRefused($dbForRoles, $inviterNumber, Site::id(), [$roleRow['roleKey']]) === ''
+    ) {
+        $grantableRoles[] = $roleRow['roleKey'];
+    }
+}
+
 // 🔗 Can an invitation's e-mail carry a working link (#500)? Asked here as
 //    well as in the save handler, which refuses on the same answer, so the
 //    reason is on screen before anybody types a list of addresses.
 $canLink = PortalAddress::absolute('auth/invite') !== '';
+
+// 💬 A refusal from invites/save.php (an organisation without the role, or D-093's
+//    hand-out rule) is carried here in the session; neither invitations page used
+//    to print one, so a refusal would have looked like nothing happening.
+$refusalFlash = (string) ($_SESSION['flash_msg'] ?? '');
+$refusalType  = (string) ($_SESSION['flash_type'] ?? 'info');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
 $pageTitle   = 'New invitation';
 $pageSection = 'invites';
@@ -39,6 +63,12 @@ $csrf = Auth::csrfToken();
 
 <h1 class="mb-3"><i class="fa-solid fa-envelope-open-text me-2"></i>New invitation</h1>
 <p class="text-muted">Generate one or more single-use invite links. Recipients self-register with the assigned role pre-set.</p>
+
+<?php if ($refusalFlash !== ''): ?>
+<div class="alert alert-<?php echo htmlspecialchars($refusalType !== '' ? $refusalType : 'info', ENT_QUOTES, 'UTF-8'); ?>" role="status" data-invite-refusal="1">
+    <?php echo htmlspecialchars($refusalFlash, ENT_QUOTES, 'UTF-8'); ?>
+</div>
+<?php endif; ?>
 
 <?php if ($canLink === false): ?>
 <div class="alert alert-danger" role="alert">
@@ -62,7 +92,13 @@ $csrf = Auth::csrfToken();
                 <div class="col-md-4">
                     <label class="form-label">Role on acceptance</label>
                     <select name="role" class="form-select">
-                        <?php foreach (['user', 'volunteer', 'staff', 'admin'] as $role): ?>
+                        <?php foreach (['user', 'volunteer', 'staff', 'admin'] as $role):
+                // 🎟️ #539: "volunteer" and "staff" grant that role on acceptance now, so
+                //    they are offered only where the organisation still has the role and
+                //    where THIS person may hand it out (D-093; save.php asks again).
+                if (($role === 'volunteer' || $role === 'staff') && in_array($role, $grantableRoles, true) === false) {
+                    continue;
+                } ?>
                             <?php // 🛡️ #518: the label makes clear "admin" only reaches this
                                   // organisation — see invites/accept.php, which now enforces
                                   // that (it used to grant portal-wide rights). The submitted

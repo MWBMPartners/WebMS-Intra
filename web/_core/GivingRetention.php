@@ -100,6 +100,22 @@ class GivingRetention
     public const KEY_HOLD         = 'giving.retention.hold';
 
     /**
+     * 🧾 Whether THIS organisation says it issues tax receipts (#939, D-167).
+     *
+     * Stored as the exact words `true` or `false`, ONLY on the organisation's
+     * own row, and deliberately NOT seeded: a missing row reads as `false`
+     * ("does not issue tax receipts"), the one wording that is true of every
+     * organisation, so no installation needs a row and no migration is needed.
+     * The portal never records a tax receipt itself. The keep rule
+     * (keptWhenSql()) looks only at tax declarations and giving statements, so
+     * this setting changes WORDS and nothing else: it must never be read by
+     * any statement that decides whose name is kept.
+     * It is edited on the giving-records page alone: the general settings
+     * editor already refuses every `giving.retention.` key.
+     */
+    public const KEY_TAX_RECEIPTS = 'giving.retention.taxReceipts';
+
+    /**
      * 🛑 The OPTIONAL ceiling on the number of years (#687, migration 234).
      *
      * A ceiling, not a figure: it says how many years an organisation may
@@ -131,7 +147,9 @@ class GivingRetention
      * @var array<string, string>
      */
     public const SCOPES = [
-        self::SCOPE_RECEIPTED => 'Only gifts with a tax declaration, a tax receipt or a giving statement',
+        // The wording that is true of EVERY organisation (#939). A page that
+        // can ask which organisation it speaks for uses keptGiftWords().
+        self::SCOPE_RECEIPTED => 'Only gifts covered by a tax declaration or a giving statement',
         self::SCOPE_ALL       => 'Every gift',
     ];
 
@@ -166,6 +184,45 @@ class GivingRetention
 
     /** @var array<string, array<string, mixed>> The data file, by path, once read. */
     private static array $dataRead = [];
+
+    // =========================================================================
+    // 🗣️ The words for "which gifts keep the donor's name" (#939, D-167)
+    // =========================================================================
+
+    /**
+     * The ONE place the phrase naming the gifts that keep a donor's name is
+     * written ("gifts covered by ...").
+     *
+     * It used to be typed out in five places, each saying "a tax receipt" for
+     * every organisation, although the portal records no tax receipt and the
+     * keep rule never looks for one. D-167: receipts are described ONLY where
+     * the organisation itself says it issues them. When it does, the giving
+     * statement the portal makes is the receipt, so the words say that and
+     * promise nothing more. A receipt made outside the portal is not seen by it
+     * and is not claimed.
+     *
+     * @param bool $issuesReceipts The organisation's own tick, from ruleForSite().
+     */
+    public static function receiptedGiftWords(bool $issuesReceipts): string
+    {
+        return $issuesReceipts === true
+            ? 'gifts covered by a tax declaration, or by a giving statement (this organisation\'s tax receipt)'
+            : 'gifts covered by a tax declaration or a giving statement';
+    }
+
+    /**
+     * The choice as a label or a short sentence: "every gift" or "only gifts
+     * covered by ...". Capitalise it for a heading with ucfirst().
+     *
+     * @param bool   $issuesReceipts The organisation's own tick.
+     * @param string $scope          SCOPE_RECEIPTED or SCOPE_ALL (anything else counts as the narrower).
+     */
+    public static function keptGiftWords(bool $issuesReceipts, string $scope): string
+    {
+        return $scope === self::SCOPE_ALL
+            ? 'every gift'
+            : 'only ' . self::receiptedGiftWords($issuesReceipts);
+    }
 
     // =========================================================================
     // 📚 The data file
@@ -466,7 +523,7 @@ class GivingRetention
      *
      * @return array{siteId: int, countryCode: string, scope: string, yearsOwn: ?int, years: int,
      *   confirmed: bool, confirmedOn: string, yearEnd: string, hold: bool, holdOwn: bool,
-     *   holdEverybody: bool, timezone: string, suggestion: array<string, mixed>}
+     *   holdEverybody: bool, issuesReceipts: bool, timezone: string, suggestion: array<string, mixed>}
      */
     public static function ruleForSite(int $siteId, ?string $path = null): array
     {
@@ -506,6 +563,8 @@ class GivingRetention
             'hold'        => ($hold !== 'false' && $hold !== '') || ($holdEverybody !== 'false' && $holdEverybody !== ''),
             'holdOwn'       => $hold !== 'false' && $hold !== '',
             'holdEverybody' => $holdEverybody !== 'false' && $holdEverybody !== '',
+            // 🧾 Words only (#939): only the exact word `true` counts; a missing row is "no".
+            'issuesReceipts' => $read(self::KEY_TAX_RECEIPTS) === 'true',
             'timezone'    => self::timezoneOfSite($siteId),
             'suggestion'  => $suggestion,
         ];
@@ -1234,6 +1293,10 @@ class GivingRetention
             }
         }
         $hold       = $text('hold') === '1';
+        // 🧾 #939: ask whether the box's MARKER arrived, never what the tick holds
+        //    (#677). An unticked box sends nothing at all, so the page sends a
+        //    marker beside it; with no marker the saved answer is left alone.
+        $receiptsOwn = ($text('taxReceiptsShown') === '1') ? ($text('taxReceipts') === '1') : null;
         $ticked     = $text('confirmed') === '1';
         $understood = $text('understood') === '1';
 
@@ -1387,6 +1450,9 @@ class GivingRetention
         if ($capOwn !== null) {
             $values[self::KEY_MAX_YEARS] = (string) $capOwn;
         }
+        if ($receiptsOwn !== null) {
+            $values[self::KEY_TAX_RECEIPTS] = $receiptsOwn === true ? 'true' : 'false';
+        }
         $db->begin_transaction();
         try {
             // 🔒 THE CEILING AGAIN, LIVE AND LOCKED, before anything is written.
@@ -1431,6 +1497,9 @@ class GivingRetention
         if ($capOwn !== null) {
             $was['own ceiling'] = $oldOwnCap === self::NO_CAP ? 'none' : (string) $oldOwnCap;
         }
+        if ($receiptsOwn !== null) {
+            $was['issues tax receipts'] = $old['issuesReceipts'] === true ? 'yes' : 'no';
+        }
         $now = [
             'country' => $country, 'which gifts' => $scope,
             'years' => $yearsOwn === null ? 'following the suggestion (' . $years . ')' : (string) $yearsOwn,
@@ -1439,6 +1508,9 @@ class GivingRetention
         ];
         if ($capOwn !== null) {
             $now['own ceiling'] = $capOwn === self::NO_CAP ? 'none' : (string) $capOwn;
+        }
+        if ($receiptsOwn !== null) {
+            $now['issues tax receipts'] = $receiptsOwn === true ? 'yes' : 'no';
         }
         foreach ($now as $label => $value) {
             if ($value !== $was[$label]) {

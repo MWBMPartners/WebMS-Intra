@@ -1949,6 +1949,8 @@ $privacyStates = [
     'privacy retention, not confirmed, every gift'       => ['giving.retention.confirmed' => 'false', 'giving.retention.scope' => 'all'],
     'privacy retention, confirmed, 7 years'              => ['giving.retention.confirmed' => 'true', 'giving.retention.years' => '7'],
     'privacy retention, confirmed, every gift, 1 year'   => ['giving.retention.confirmed' => 'true', 'giving.retention.years' => '1', 'giving.retention.scope' => 'all'],
+    // #939 / D-167: "tax receipt" appears only where the organisation says it issues them.
+    'privacy retention, confirmed, 7 years, issues tax receipts' => ['giving.retention.confirmed' => 'true', 'giving.retention.years' => '7', 'giving.retention.taxReceipts' => 'true'],
 ];
 $privacyWrong = [];
 $privacySeen  = [];
@@ -1975,13 +1977,21 @@ try {
 }
 // The premise, first: four DIFFERENT sections, or the states were not drawn
 // and every pin would be the same text pinned four times.
-if (count(array_unique($privacySeen)) !== 4) {
-    $privacyWrong[] = 'the four giving states drew ' . count(array_unique($privacySeen)) . ' different section(s), not four';
+if (count(array_unique($privacySeen)) !== 5) {
+    $privacyWrong[] = 'the five giving states drew ' . count(array_unique($privacySeen)) . ' different section(s), not five';
+}
+// #939: the word "receipt" is in the section ONLY in the one state that ticked it, and in that state it is
+// the organisation's own giving statement, never a claim about receipts the portal cannot see.
+foreach ($privacySeen as $stateName => $region) {
+    $says = preg_match('/tax receipt/i', $region) === 1;
+    if (($stateName === 'privacy retention, confirmed, 7 years, issues tax receipts') !== $says) {
+        $privacyWrong[] = 'the word "tax receipt" is ' . ($says ? 'present' : 'absent') . ' in the state "' . $stateName . '"';
+    }
 }
 if ($givingRowsNow() !== $givingBefore) {
     $privacyWrong[] = 'the organisation\'s giving settings were not put back as they were';
 }
-ok('the PRIVACY page\'s "Retention policy" section, drawn in all four states of its giving sentence, is each time exactly the pinned markup a member receives, found once, inside exactly the pinned wrappers - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared (#703, D-113)',
+ok('the PRIVACY page\'s "Retention policy" section, drawn in all five states of its giving sentence, is each time exactly the pinned markup a member receives, found once, inside exactly the pinned wrappers - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared (#703, D-113)',
     $privacyWrong === [], implode(' | ', $privacyWrong));
 // 🗣️ The administrators' help: the whole section "What an erasure keeps, and
 //    what it does not reach", rendered, from its heading to the next heading

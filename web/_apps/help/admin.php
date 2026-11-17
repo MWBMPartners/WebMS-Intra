@@ -16,6 +16,7 @@
 declare(strict_types=1);
 
 use Portal\Core\Departments;
+use Portal\Core\GivingRetention;
 use Portal\Core\Roles;
 use Portal\Core\Site;
 
@@ -950,7 +951,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h3 class="h6 mt-3">What you set</h3>
     <ul>
         <li><strong>Your country.</strong> The portal uses it only to suggest a number of years. Until you choose one, it suggests a cautious 10 years.</li>
-        <li><strong>Which gifts keep the donor's name.</strong> Only gifts with a tax declaration, a tax receipt or a giving statement (recommended), or every gift. Every other gift keeps its amount, date and method and loses the name straight away.</li>
+        <li><strong>Which gifts keep the donor's name.</strong> Only <?php echo htmlspecialchars(GivingRetention::receiptedGiftWords(GivingRetention::ruleForSite(Site::id())['issuesReceipts'] === true), ENT_QUOTES, 'UTF-8'); ?> (recommended), or every gift. Every other gift keeps its amount, date and method and loses the name straight away.</li>
         <li><strong>How many years.</strong> Counted from the end of the financial year of the donor's last such gift.</li>
         <li><strong>When your financial year ends.</strong> Until you say, the portal counts from one year after the last gift, which may keep a record up to a year longer than needed.</li>
         <li><strong>Hold.</strong> Switch this on while an audit or tax enquiry is open. Nothing is cleared until you switch it off. A global administrator can also hold the whole installation; the page shows that separately, and it cannot be changed from your organisation's page.</li>

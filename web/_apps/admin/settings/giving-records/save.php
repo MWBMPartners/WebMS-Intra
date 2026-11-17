@@ -77,6 +77,14 @@ foreach (['countryCode', 'scope', 'years', 'confirmed', 'yearEndMonth', 'yearEnd
     $posted[$field] = is_string($_POST[$field] ?? null) === true ? $_POST[$field] : '';
 }
 
+// 🧾 #939: "we issue tax receipts" changes only wording, and only where its
+//    marker ARRIVED (#677): an unticked box sends nothing, so the page sends
+//    `taxReceiptsShown` beside it. No marker, no change.
+if (array_key_exists('taxReceiptsShown', $_POST) === true) {
+    $posted['taxReceiptsShown'] = is_string($_POST['taxReceiptsShown']) === true ? $_POST['taxReceiptsShown'] : '';
+    $posted['taxReceipts']      = is_string($_POST['taxReceipts'] ?? null) === true ? $_POST['taxReceipts'] : '';
+}
+
 // 🛑 THE CEILING ONLY WHERE IT REALLY ARRIVED (#687, and #677's lesson).
 //    The loop above deliberately fills every one of its eight fields with '',
 //    because for a tick box that is what "not ticked" looks like. The ceiling
