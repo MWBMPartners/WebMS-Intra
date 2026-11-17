@@ -119,6 +119,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    personal details, authentication, erasure or retention, backups, or
    anything that writes or deletes stored data is at stake, where rounds
    continue until one is clean (the owner, 5 November 2026 — D-051).**
+   **Until the first install: three check rounds per package, only real harm blocks (the owner, 17 November 2026 — D-204).** Same rule as in `.claude/CLAUDE.md`; change both together.
    **Any check or review carried out by a CLAUDE agent runs on Opus, whatever
    model is otherwise set (the owner, 15 November 2026 — D-186).** Same rule as
    in `.claude/CLAUDE.md`; change both together.

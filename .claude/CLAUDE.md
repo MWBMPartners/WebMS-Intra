@@ -882,6 +882,8 @@ as enforcing it in `~/.claude/settings.json`; on 1 November 2026 that file had n
 `env` block at all, so nothing refuses a seventh agent. Open the file before saying
 otherwise (#678).
 
+**UNTIL THE FIRST INSTALL: THREE CHECK ROUNDS PER PACKAGE, AND ONLY REAL HARM BLOCKS (the owner, 17 November 2026 — D-204).** Later rounds look only at what changed; narrow, unlikely or wording-only findings become issues; realistic data loss, data leak, money misstatement or wrongful access is still fixed first. D-051's longer rule returns after the first install.
+
 **CHECKS AND REVIEWS BY CLAUDE ALWAYS RUN ON OPUS (the owner, 15 November 2026 — D-186), whatever model is
 otherwise set.** Building may use a cheaper tier; an independent check, review, red-team pass or verification by a
 Claude agent never does. The `dev-team:opus-builder` agent type is Opus; name the model if a brief does not.
