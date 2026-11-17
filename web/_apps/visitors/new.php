@@ -11,10 +11,22 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Capabilities;
 use Portal\Core\Site;
 
 Auth::ensureSession();
 Auth::requireLogin();
+
+// 🛡️ Role gate (#1151, D-017). A first-time visitor's name, e-mail address and
+//    telephone number are personal details, so being signed in is not enough:
+//    an administrator, or whoever this organisation has pointed "Follow up
+//    first-time visitors" at. It ships pointing at `visitor_coordinator`, the
+//    role the app already names for this work. Every page and handler here
+//    asks the same question.
+if (App::isAdmin() === false && App::can(Capabilities::VISITORS_FOLLOW_UP) === false) {
+    http_response_code(403);
+    exit('This area is restricted to the visitor follow-up team.');
+}
 
 $db     = App::db();
 $siteId = Site::id();
