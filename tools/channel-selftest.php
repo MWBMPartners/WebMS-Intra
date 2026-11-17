@@ -46,6 +46,10 @@
  *      defaults lean to "live" when the channel has not been decided yet.
  *   P. The pages, on a scratch copy of `web/` behind PHP's built-in server:
  *      A  a folder named `public_html` and nothing else: live, by the folder.
+ *         (The API documentation page and the API description are fetched as the
+ *         Root Admin here, because D-215 (#1131) made them administrator-only on
+ *         every channel; a visitor is sent to sign in at A08, A09 and J17.
+ *         tools/api-description-access-selftest.php owns who is let in.)
  *      B  the file says `beta`: the staff gate. Who passes it and who does
  *         not; who reaches the database upgrade page (a Root Admin only);
  *         scheduled jobs, every `/api/` address and the API documentation
@@ -917,10 +921,13 @@ function warningOnAPage(string $jar = '', string $query = '', array $headers = [
  */
 function routedFromWebFolder(): array
 {
+    // D-215 (#1131): the API description is for signed-in administrators and key holders, so it is fetched with
+    // the Root Admin's cookie; robots.txt and the sitemap stay visitor fetches.
+    global $staff;
     $own = ['/robots.txt' => 'User-agent', '/sitemap.xml' => 'so it has no sitemap', '/openapi.json' => '"openapi"'];
     $got = [];
     foreach ($own as $address => $words) {
-        $answer        = req('', 'GET', $address);
+        $answer        = req($address === '/openapi.json' ? $staff['jar'] : '', 'GET', $address);
         $got[$address] = $answer['status'] . (str_contains($answer['body'], $words) === true ? ' own page' : ' NOT its own page');
     }
 
@@ -1207,13 +1214,19 @@ $dash = req($staff['jar'], 'GET', '/admin');
 ok('A07 the admin dashboard tells an administrator, in amber, that the channel was worked out from the folder\'s name (public_html, so live) and that a .channel file settles it',
     $dash['status'] === 200 && noteIn($dash) === 'folder' && noteIsAmber($dash) === true && str_contains($dash['body'], '<code>public_html</code>') === true && str_contains($dash['body'], '<strong>live</strong>') === true
     && str_contains($dash['body'], '<code>.channel</code>') === true && str_contains($dash['body'], $child) === false, said($dash) . '; the note says: ' . var_export(noteIn($dash), true));
-$docs = docsPage('', '/api-docs/');
-ok('A08 the API documentation page (/api-docs/, which the web server runs by itself) answers: no fatal error, no file path, and a PHP warning raised inside it is not printed',
-    $docs['page'] === true && $docs['leak'] === false && $docs['reported'] === true, $docs['said']);
-$docsFile = docsPage('', '/api-docs/index.php');
-$docsVia  = docsPage('', '/api-docs//');
-ok('A09 the same page by its file name, and when the portal\'s own router includes it (a server that hands every address to index.php): both answer, neither prints anything',
-    $docsFile['page'] === true && $docsFile['leak'] === false && $docsVia['page'] === true && $docsVia['leak'] === false, 'by file name: ' . $docsFile['said'] . ' | through the router: ' . $docsVia['said']);
+// D-215 (#1131): the page is for signed-in administrators, so it is fetched as the Root Admin; a visitor is
+// sent to sign in and sees no Swagger.
+$docs    = docsPage($staff['jar'], '/api-docs/');
+$visitor = req('', 'GET', '/api-docs/');
+ok('A08 the API documentation page (/api-docs/, which the web server runs by itself) answers the Root Admin: no fatal error, no file path, and a PHP warning raised inside it is not printed; a visitor is sent to sign in (D-215)',
+    $docs['page'] === true && $docs['leak'] === false && $docs['reported'] === true && sentToSignIn($visitor) === true && str_contains($visitor['body'], 'swagger-ui') === false, $docs['said'] . ' | visitor: ' . said($visitor));
+$docsFile = docsPage($staff['jar'], '/api-docs/index.php');
+$docsVia  = docsPage($staff['jar'], '/api-docs//');
+$visitorB = req('', 'GET', '/api-docs/index.php');
+$visitorC = req('', 'GET', '/api-docs//');
+ok('A09 the same page by its file name, and when the portal\'s own router includes it (a server that hands every address to index.php): both answer the Root Admin, neither prints anything, and a visitor is sent to sign in on both (D-215)',
+    $docsFile['page'] === true && $docsFile['leak'] === false && $docsVia['page'] === true && $docsVia['leak'] === false && sentToSignIn($visitorB) === true && sentToSignIn($visitorC) === true && str_contains($visitorB['body'] . $visitorC['body'], 'swagger-ui') === false,
+    'by file name: ' . $docsFile['said'] . ' | through the router: ' . $docsVia['said'] . ' | visitors: ' . said($visitorB) . ', ' . said($visitorC));
 
 // =============================================================================
 // B. THE FILE SAYS BETA: THE STAFF GATE
@@ -1451,8 +1464,10 @@ foreach (['the member, /admin' => [$member['jar'], '/admin', 403], 'the member, 
     }
 }
 ok('J16 nobody who is not an administrator is shown the note: not the member (refused the admin dashboard, 403; nothing on their own pages), and not a visitor', $shown === [], implode('; ', $shown));
-$docs = docsPage('', '/api-docs/');
-ok('J17 the API documentation page answers a visitor here as on any live portal, and prints nothing', $docs['page'] === true && $docs['leak'] === false && $docs['reported'] === true, $docs['said']);
+$docs    = docsPage($staff['jar'], '/api-docs/');
+$visitor = req('', 'GET', '/api-docs/');
+ok('J17 the API documentation page answers the Root Admin here as on any live portal, and prints nothing; a visitor is sent to sign in (D-215)',
+    $docs['page'] === true && $docs['leak'] === false && $docs['reported'] === true && sentToSignIn($visitor) === true && str_contains($visitor['body'], 'swagger-ui') === false, $docs['said'] . ' | visitor: ' . said($visitor));
 
 // =============================================================================
 // K. A WEB FOLDER OF ANOTHER NAME, WITH A FILE

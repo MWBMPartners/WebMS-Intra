@@ -5485,7 +5485,8 @@ function pw_run(): void
         pa_heading('W51 — the API sentences: the API description and the API keys page (chunk P8-4; challenge L11)');
         $apiSentence = 'Events copied in from an outside calendar reach an API key exactly when a signed-out visitor could see them, in the same detail, '
             . 'unless the calendar — or a choice or rule covering the event — is set \'Don\'t show via API\'.';
-        $o51 = pw_req($out, 'GET', PW_A . '/openapi.json');
+        // D-215 (#1131): the description is for administrators and key holders, so it is read as the administrator.
+        $o51 = pw_req($sa, 'GET', PW_A . '/openapi.json');
         $j51 = json_decode($o51['body'], true);
         pa_ok(
             'W51 ' . PW_A . '/openapi.json answers 200 with JSON whose description carries the sentence about outside calendars, word for word',

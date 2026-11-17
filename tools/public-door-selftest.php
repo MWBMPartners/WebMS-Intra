@@ -4677,9 +4677,12 @@ check('P36 with a database number added to each event, the schema check over the
 $p = $plant('public_html/error.php', "if (class_exists('Portal\\\\Core\\\\Site', false) === true && \\Portal\\Core\\Site::isDoorRequest() === true) {",
     'if (false) {', static fn (): bool => $signature($http('GET', '/error.php?code=404', ['host' => 'door-a.selftest.test'])) === $ref);
 check('P37 with error.php\'s hand-off taken out, a public address draws something other than the door\'s 404', [$p['applied'], $p['result']], [true, false]);
+// D-215 (#1131): the page is now for signed-in administrators, so with the hand-off taken out a visitor on a
+// public address is sent to sign in (302), not shown the page (200). What is measured is therefore the same
+// as P37's: does it still answer the door's own 404?
 $p = $plant('public_html/api-docs/index.php', 'if (\\Portal\\Core\\Site::isDoorRequest() === true) {', 'if (false) {',
-    static fn (): int => $http('GET', '/api-docs/index.php', ['host' => 'door-a.selftest.test'])['status']);
-check('P38 with the API description\'s hand-off taken out, it answers 200 on a public address', [$p['applied'], $p['result']], [true, 200]);
+    static fn (): bool => $signature($http('GET', '/api-docs/index.php', ['host' => 'door-a.selftest.test'])) === $ref);
+check('P38 with the API description\'s hand-off taken out, it answers something other than the door\'s 404 on a public address', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicDoor.php', "if (\$lifetime > 0 && (\$touched === false || \$touched + \$lifetime < time())) {", 'if (false) {',
     static function () use ($ageOut, $feedA, $cookieOf, $people): int {
         $ageOut(true);
@@ -4867,9 +4870,14 @@ $p = $plantMany([$faultEdit, ['public_html/error.php', "&& \\Portal\\Core\\Site:
         return $sessionFiles() - $before;
     });
 check('P47 with error.php\'s failure-state answer taken out, the same fault leaves a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
+// D-215 (#1131): as P38, the page is no longer drawn for a visitor, so the measure is the same triple P43 uses:
+// with the failure-state answer taken out, the plain "try again" is NOT what comes back.
 $p = $plantMany([$faultEdit, ['public_html/api-docs/index.php', 'if (\\Portal\\Core\\Site::publicAddressUnknown() === true) {', 'if (false) {']],
-    static fn (): int => $http('GET', '/api-docs/index.php', ['host' => 'door-c.selftest.test'])['status']);
-check('P48 with the API description\'s failure-state answer taken out, the same fault draws it (200) on switched-off C\'s address', [$p['applied'], $p['result']], [true, 200]);
+    static function () use ($http): array {
+        $r = $http('GET', '/api-docs/index.php', ['host' => 'door-c.selftest.test']);
+        return [$r['status'], $r['body'], $r['headers']['set-cookie'] ?? ''];
+    });
+check('P48 with the API description\'s failure-state answer taken out, the same fault answers something other than the plain "try again" on switched-off C\'s address', [$p['applied'], $p['result'] !== $tryAgain], [true, true]);
 $p = $plantMany([$faultEdit, ['_core/Site.php', "        if (\$doorLookupFailed === true) {\n            if (\$multi !== null) {", "        if (false) {\n            if (\$multi !== null) {"]],
     static function () use ($http, $sessionFiles): int {
         $before = $sessionFiles();

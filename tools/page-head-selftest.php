@@ -30,6 +30,8 @@
  *      FAIL. A test that cannot see the fault it exists to catch proves
  *      nothing, and this project has shipped three such checks already.
  *   F. The browser-tab icon on a page that draws its own <head> (#680).
+ *   G. (every /api-docs and /openapi.json fetch is made as an administrator
+ *      since D-215, #1131; G00 shows a visitor no longer gets the page)
  *   G. /api-docs, on both ways in, and the kiosk screen — the pages that draw
  *      their own <head> outside web/_apps' ordinary pattern — with a planted
  *      fault on /api-docs. Since #821 also the three other exempt SCREENS
@@ -575,6 +577,66 @@ if ($signIn === '') {
     }
 }
 
+// -----------------------------------------------------------------------------
+// D-215 (#1131): /api-docs and /openapi.json are for signed-in administrators
+// and API key holders, so every fetch of them below is made as an
+// administrator of its own. The old fetches were a visitor's, which now get the
+// sign-in page, so reading them as before would prove nothing about the head.
+// G00 makes that switch visible here too.
+// -----------------------------------------------------------------------------
+$a8         = ['user' => 982301];
+$a8Password = bin2hex(random_bytes(12)) . 'Aa1!';
+$a8User     = 'selftest-pagehead-docs-' . bin2hex(random_bytes(3));
+$a8Jar      = $child . $sep . 'a8-cookies.txt';
+$a8Tidy = static function () use ($db, $a8): void {
+    $links = $db->query(
+        "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+        . "WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers'"
+    );
+    foreach ($links->fetch_all(MYSQLI_ASSOC) as $link) {
+        $db->query('DELETE FROM `' . str_replace('`', '', (string) $link['TABLE_NAME']) . '` WHERE `'
+            . str_replace('`', '', (string) $link['COLUMN_NAME']) . '` = ' . $a8['user']);
+    }
+    $db->query('DELETE FROM tblUsers WHERE userID = ' . $a8['user']);
+};
+$a8Tidy();
+$stmt = $db->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, \'Page-head Docs Administrator\', ?, 1, 1, 0)');
+$a8Email = $a8User . '@selftest.invalid';
+$stmt->bind_param('is', $a8['user'], $a8Email);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 1, 0)');
+$stmt->bind_param('i', $a8['user']);
+$stmt->execute();
+$a8Hash = password_hash($a8Password, PASSWORD_DEFAULT);
+$stmt = $db->prepare('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)');
+$stmt->bind_param('iss', $a8['user'], $a8User, $a8Hash);
+$stmt->execute();
+$stmt->close();
+
+/** Fetch as that administrator (a cookie jar of its own), following redirects like $get. */
+$getAsAdmin = static function (string $path, array $post = []) use ($port, $a8Jar): string {
+    $ch = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_COOKIEJAR      => $a8Jar,
+        CURLOPT_COOKIEFILE     => $a8Jar,
+    ]);
+    if ($post !== []) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $body = curl_exec($ch);
+    return is_string($body) === true ? $body : '';
+};
+preg_match('#name="csrf_token"\s+value="([^"]+)"#', $getAsAdmin('/login'), $a8Csrf);
+$getAsAdmin('/login', ['csrf_token' => $a8Csrf[1] ?? '', 'username' => $a8User, 'password' => $a8Password]);
+if (str_contains($get('/api-docs/index.php'), 'id="swagger-ui"') === false && str_contains($getAsAdmin('/api-docs/index.php'), 'id="swagger-ui"') === true) {
+    ok('G00', 'a visitor no longer gets the API documentation page (D-215), and the administrator used below does');
+} else {
+    bad('G00', 'a visitor still gets the page, or the administrator used for the checks below does not');
+}
+
 echo "\n=== G. /api-docs and the kiosk, which draw their own <head> outside the router's pages (#569) ===\n";
 // -----------------------------------------------------------------------------
 // WHY THIS IS HERE. `/api-docs` is answered by the web server directly and
@@ -641,7 +703,7 @@ $emptyIconOnly = static function (string $html) use ($tag, $liveHead, $iconLinks
     return implode('; ', $miss);
 };
 foreach (['G01' => '/api-docs', 'G02' => '/api-docs/index.php'] as $id => $path) {
-    $html = $get($path);
+    $html = $getAsAdmin($path);
     if ($html === '' || str_contains($html, 'id="swagger-ui"') === false) {
         bad($id, "{$path} did not answer the API documentation page at all", substr($html, 0, 300));
         continue;
@@ -695,7 +757,7 @@ if ($docsAfter === null || $docsAfter === $docsBefore) {
     bad('G03', 'could not plant the fault: no head-meta.php require found in the copied /api-docs page');
 } else {
     file_put_contents($plantDocs, $docsAfter);
-    $html = $get('/api-docs/index.php');
+    $html = $getAsAdmin('/api-docs/index.php');
     if (str_contains($html, 'id="swagger-ui"') === false) {
         bad('G03', 'the planted /api-docs page did not draw at all, so the plant broke more than the tags', substr($html, 0, 300));
     } elseif ($tag($html, 'name', 'description') === null && $iconOn($html) === false) {
@@ -704,7 +766,7 @@ if ($docsAfter === null || $docsAfter === $docsBefore) {
         bad('G03', 'with the require taken out of /api-docs, a description or an icon was STILL found, so G02 proves nothing');
     }
     file_put_contents($plantDocs, $docsBefore);
-    $html = $get('/api-docs/index.php');
+    $html = $getAsAdmin('/api-docs/index.php');
     if ($tag($html, 'name', 'description') !== null && $iconOn($html) === true) {
         ok('G04', 'and /api-docs is whole again once the fault is taken out');
     } else {
@@ -989,7 +1051,7 @@ $plantedPub   = 'Planted Publisher ' . bin2hex(random_bytes(3));
 $setSetting('product.name', $plantedName);
 $setSetting('product.publisher', $plantedPub);
 
-$served = json_decode($get('/openapi.json'), true);
+$served = json_decode($getAsAdmin('/openapi.json'), true);
 $title  = is_array($served) === true ? (string) ($served['info']['title'] ?? '') : '';
 $who    = is_array($served) === true ? (string) ($served['info']['contact']['name'] ?? '') : '';
 if ($title === $plantedName . ' REST API') {
@@ -1010,7 +1072,7 @@ if ($specAfter === null || $specAfter === $specBefore) {
     bad('H04', 'could not plant the fault: no title replacement found in the copied openapi.php');
 } else {
     file_put_contents($plantSpec, $specAfter);
-    $planted = json_decode($get('/openapi.json'), true);
+    $planted = json_decode($getAsAdmin('/openapi.json'), true);
     $pTitle  = is_array($planted) === true ? (string) ($planted['info']['title'] ?? '') : '';
     if ($pTitle !== '' && $pTitle !== $plantedName . ' REST API') {
         ok('H04', 'with the replacement taken out of openapi.php, the served title is "' . $pTitle . '" — H02 can see the fault');
@@ -1018,7 +1080,7 @@ if ($specAfter === null || $specAfter === $specBefore) {
         bad('H04', 'with the replacement taken out, the title was still right (or nothing was served), so H02 proves nothing', 'got "' . $pTitle . '"');
     }
     file_put_contents($plantSpec, $specBefore);
-    $again = json_decode($get('/openapi.json'), true);
+    $again = json_decode($getAsAdmin('/openapi.json'), true);
     if (is_array($again) === true && (string) ($again['info']['title'] ?? '') === $plantedName . ' REST API') {
         ok('H05', 'and /openapi.json is whole again once the fault is taken out');
     } else {
@@ -1037,8 +1099,8 @@ if ($specAfter === null || $specAfter === $specBefore) {
 // -----------------------------------------------------------------------------
 $siteWas     = $readSetting('product.publisherUrl');
 $plantedSite = 'https://publisher-' . bin2hex(random_bytes(3)) . '.example.org/about?who=us';
-$servedUrl   = static function () use ($get): ?string {
-    $doc = json_decode($get('/openapi.json'), true);
+$servedUrl   = static function () use ($getAsAdmin): ?string {
+    $doc = json_decode($getAsAdmin('/openapi.json'), true);
     if (is_array($doc) === false) {
         return '(not served)';
     }
@@ -1345,6 +1407,7 @@ $i8Plant(
     $i8Checks['I03'][0]
 );
 $i8Tidy();
+$a8Tidy();
 
 echo "\n=== Z. Clean-up ===\n";
 $clearSetting('site.url');

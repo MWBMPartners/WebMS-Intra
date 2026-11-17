@@ -18,7 +18,12 @@
  * Routed via tblRoutes:
  *   routeKey   = 'openapi.json'
  *   targetFile = 'openapi.php'
- *   isProtected = 0  (public — API docs viewers need it before login)
+ *   isProtected = 0  ON PURPOSE: the router's sign-in redirect would turn
+ *                    away a program sending an API key. Who may read this is
+ *                    decided by Portal\Core\ApiDescriptionAccess (D-215, #1131):
+ *                    a signed-in administrator or a valid `Bearer wbms_` key;
+ *                    a bad key gets 401, anybody else the 404 page. (On a
+ *                    pre-release copy the staff gate answers first.)
  *
  * The static `openapi.json` file is deliberately deleted so Apache's
  * "skip rewrite if static file exists" check falls through to index.php,
@@ -28,7 +33,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/307
  * -----------------------------------------------------------------------------
  */
@@ -37,7 +42,12 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\PublisherWebsite;
+use Portal\Core\ApiDescriptionAccess;
 use Portal\Core\Site;
+
+// 🔐 D-215 (#1131): administrators and API key holders only. Before anything
+//    else is read or printed.
+ApiDescriptionAccess::enforce(false);
 
 // 🏷️ Resolve the brand-aware fields.
 $productName      = Site::productName();
@@ -53,6 +63,7 @@ if ($raw === false) {
     // Spec missing — emit a minimal valid OpenAPI doc so Swagger UI
     // shows an empty-but-valid page rather than a hard 500.
     http_response_code(503);
+    header('Cache-Control: private, no-store');
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'openapi' => '3.0.3',
@@ -69,6 +80,7 @@ if ($raw === false) {
 $spec = json_decode($raw, true);
 if (is_array($spec) === false) {
     http_response_code(500);
+    header('Cache-Control: private, no-store');
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['error' => 'Spec template is not valid JSON']);
     exit();
@@ -111,5 +123,10 @@ if ($publisherWebsite !== '') {
 
 // 📡 Emit.
 header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: public, max-age=300');
+// 🚫 The answer now depends on WHO asked. `public` would let a shared cache (a
+//    hosting company's proxy, a content delivery service) store an
+//    administrator's copy and hand it to a stranger. This line also REPLACES
+//    the no-cache header the session start sent, which is how the old
+//    `public` line won.
+header('Cache-Control: private, no-store');
 echo json_encode($spec, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
