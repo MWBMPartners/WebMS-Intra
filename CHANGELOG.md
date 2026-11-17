@@ -40,6 +40,18 @@
   other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
   limits not exact under two simultaneous requests). Codex has not reviewed this.
 
+### Consent records now have a clear-out (#934, part; D-166, D-210)
+
+- The nightly retention sweep now deletes records of privacy-notice and cookie choices (`tblConsentLog`): a record replaced
+  by a later record of the same organisation, kind of choice and person (the account, else the browser-session fingerprint)
+  once the LATER record is older than `privacy.dataRetentionDays` (default 730), and a visitor's unreplaced record 365 days
+  (the cookie's life) plus that period after it was made. A signed-in person's latest record is never deleted. 0 keeps for
+  ever; the installation's figure caps an organisation's; set on Admin, Maintenance, Retention; the general settings editor
+  refuses the key. The preview count equals what the job deletes. **Not yet built, and said so on the privacy page and the
+  Retention page: a member who has left but is not erased keeps their latest records until the leaving date of package 2h
+  (D-211).** Open: MariaDB is very slow on a large table (#1125), the activity-log period is not in the policy fingerprint
+  `consent.php` hashes, a member using two devices with a period under 365 days. Codex has not reviewed this.
+
 ### An erasure removes the remembered map positions of the person's own addresses (#1067; D-209)
 
 - An erasure now also deletes the remembered map positions whose address matches an address the portal holds for the

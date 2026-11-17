@@ -25145,3 +25145,18 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   `gdpr-eraser-selftest.php` moved.
 - Known (independent check): a replaced (not missing) installation key leaves old rows unfound with no caveat on the audit line;
   the catalogue reason says "other people's" rows are kept though a shared address's row is deleted.
+
+### The consent-record clear-out (#934)
+
+- `Portal\Core\ConsentRetention` is the ONE place; `consent_sweep()` (in `cron/_retention-sweep.php`) the one step;
+  `ConsentRetention::replacedWhere()` the one definition of "replaced". It deletes whole `tblConsentLog` rows, one
+  organisation at a time, in batches of 500 selected by `LIMIT` then deleted by number AND organisation (MySQL refuses a
+  DELETE with a subquery reading the same table, 1093); a run stops after 2,000 batches per organisation. No migration.
+- Lesson: a "does a later row exist" probe per row on one table is quadratic (a correlated EXISTS ran over 5 minutes on one
+  count); compare each row with a grouped MAX of the rows that qualify instead. Measured 100,000 rows: 1.14 s a count on
+  MySQL 8.0.36, but MariaDB 11.4 cannot index the visitor-session list and took 51.5 s (#1125).
+- `consent.php`'s cookie lifetime (`365 * 86400`) and `ConsentRetention::COOKIE_DAYS` are two copies; test G fails if they
+  differ. The delete's organisation filter cannot go red on its own (the numbers are already chosen per organisation); the
+  count mismatch catches its removal. Removing `t.userID IS NULL` from the visitor-session join is pinned by no test and
+  unreachable today (sign-out destroys the session). On MariaDB the portal omits ONLY_FULL_GROUP_BY, so a column dropped from
+  the GROUP BY would silently merge kinds of choice there.

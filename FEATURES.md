@@ -2399,3 +2399,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Sign-in / linked accounts: linking a Microsoft or Google identity attaches only to the account you are signed in to; it never creates an account or switches the session (#1073, D-208).
 
 - Erasure: remembered map positions of the person's own addresses are deleted (#1067, D-209).
+
+- Privacy: consent records (privacy-notice and cookie choices) are cleared nightly by `Portal\Core\ConsentRetention` per D-166 and D-210; the period is set on Admin, Maintenance, Retention (#934).

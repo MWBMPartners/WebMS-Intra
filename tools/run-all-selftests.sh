@@ -250,6 +250,7 @@ care-case-person|tools/care-case-person-selftest.php|selftest_carecase|SELFTEST_
 page-rule|tools/page-rule-selftest.php|selftest_pagerule|SELFTEST_WEB_PORT=9163
 event-place-map|tools/event-place-map-selftest.php|selftest_eventplace|
 invite-roles|tools/invite-roles-selftest.php|selftest_inviteroles|SELFTEST_WEB_PORT=9164
+consent-retention|tools/consent-retention-selftest.php|selftest_consent|
 site-modes|tools/site-modes-selftest.php|selftest_sitemodes|web:site-modes SELFTEST_WEB_PORT=9461
 channel|tools/channel-selftest.php|selftest_channel|web:channel SELFTEST_WEB_PORT=9590
 portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:portal-address SELFTEST_WEB_PORT=9660
