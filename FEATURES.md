@@ -2388,3 +2388,5 @@ reads as reassurance. Run the loop above — it takes seconds.
   Controller; never falls open, D-191). A merged-away account shows "Merged into another account, cannot be changed".
 
 - Care register, "Open new case": required "Who is this case about?" list (`Site::membersForPicker()`); typed name only for people with no account (#1066).
+
+- Events: the "a public place" mark decides whether the event page shows an OpenStreetMap map (`tblEvents.locationNotAHome`, #1088).

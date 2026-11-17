@@ -4,6 +4,19 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An event at a home no longer asks an outside map company for a map (#1088; D-120, D-128, D-183)
+
+- An event page no longer asks OpenStreetMap for a map unless whoever set the event marked its place as "a public
+  place". The form's "someone's home / a public place" answer is now stored on the event (`tblEvents.locationNotAHome`,
+  migration 303) and starts from the stored value when an event is edited. A home, or an event with no answer
+  stored, gets no map and the page rule names no tile host, for every viewer, signed in or not. A map is drawn for a
+  public place only when the installation, the organisation and (signed in) the viewer's own choice allow it; on the
+  shipped default a marked public place is mapped for visitors and for members who have not chosen. **Every existing
+  event, and every event linked to a venue, loses its map until somebody marks its place as public.** Events made by
+  the events API, a visitor's suggestion, an import or a feed take the default (no map). Open: the events API cannot
+  set the mark or clear it when an address changes, and a home event's position is still in the page's search-engine
+  data and the calendar feeds. Codex has not reviewed this.
+
 ### The referrer setting works, and the /live player is no longer refused (#1095, #1092 part)
 
 - The referrer setting (`portal.headers.referrer_policy`) now reaches pages drawn through `header.php`; `header.php`

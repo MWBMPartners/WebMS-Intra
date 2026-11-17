@@ -24981,3 +24981,15 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   on most pages. The same fault exists for HSTS (it adds `preload`, which start-up's comment says is not sent) and
   Permissions-Policy; `api-docs/index.php` also sends its own fixed referrer header. Narrow: a comma-separated
   fallback list in the setting now gets the default, not its stricter last value.
+
+### An event's map (#1088)
+
+- `OutsideServices::allowsEventPlaceMap(bool $notAHome)` is the ONE decision: false unless marked; then the viewer's
+  `decide(MEMBER_MAP, ...)` through `markedPlaceMapFrom()`. An event names no host, so D-120 means nobody can agree
+  for a home; D-128 lets a marked place be mapped under the tiers. `calendar/event.php` never names the tile host.
+- Setting values: `no` = not allowed, `off` = allowed and each member chooses (the SHIPPED default), `on` is capped to
+  `off` for this service. Refusal is `no`, not `off`; a test that used `on`/`off` as allowed/refused was wrong.
+- An UPDATE writes the column only when `locationAddressKind` was posted (#677). Series copies carry it through
+  `$insertColumns`; `series-repattern.php` reads `SELECT *`, so it is carried with no edit.
+- Guard: `check_outside_services_gated.py` rule 8 checks presence only; an extra, ungated tile-host widening would
+  pass it, and only the self-test's P2 plant catches that (D-065).
