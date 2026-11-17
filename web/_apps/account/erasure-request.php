@@ -128,13 +128,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if (($i['couldNotRead'] ?? false) === true): ?>
                 <?php // 🚧 #1012: a kind of record whose read failed - said, never counted as 0 or left out. ?>
                 <li data-inventory-could-not-read>
-                    <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
+                    <span data-inventory-kind><?php echo htmlspecialchars((string) $i['kind'], ENT_QUOTES, 'UTF-8'); ?></span>
                     — <?php echo htmlspecialchars((string) $i['note'], ENT_QUOTES, 'UTF-8'); ?>
                 </li>
                 <?php continue; ?>
             <?php endif; ?>
             <li>
-                <code><?php echo htmlspecialchars((string) $i['table'], ENT_QUOTES, 'UTF-8'); ?></code>
+                <span data-inventory-kind><?php echo htmlspecialchars((string) $i['kind'], ENT_QUOTES, 'UTF-8'); ?></span>
                 — <strong><?php echo (int) $i['rows']; ?></strong> row(s) will be
                 <strong><?php echo htmlspecialchars(GdprEraser::inventoryWords($i), ENT_QUOTES, 'UTF-8'); ?></strong>.
                 <?php if (($i['reason'] ?? '') !== ''): ?>

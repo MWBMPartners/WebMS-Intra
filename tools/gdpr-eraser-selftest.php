@@ -742,6 +742,8 @@ $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
 require_once $coreDir . 'App.php';
 require_once $coreDir . 'GivingRetention.php';
 require_once $coreDir . 'GdprEraser.php';
+// 🗣️ #1135: GdprEraser::inventory() puts each kind's plain words on its rows through DataKinds; no autoloader here.
+require_once $coreDir . 'DataKinds.php';
 // 🧑‍⚖️ #724: before a run changes anything, the erasure asks whether any line of
 //    free text is still waiting for a person to decide about it. There is no
 //    autoloader here, so without this line every run stops at that question

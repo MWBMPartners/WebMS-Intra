@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 115; // #1067 added one: the remembered map positions' step, pinned for order and keys. 114 before.
+const EXPECTED_CHECKS = 118; // #1135 added three: every record ABOUT a person is in the data copy, the copy holds the whole of My data's list, and every kind has plain words. 115 before. #1067 added one: the remembered map positions' step, pinned for order and keys. 114 before.
     // #1064 round 10 added one: section 10b, the addresses emptied at the close. #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
@@ -3800,13 +3800,39 @@ $readPreparedTables = static function (string $code, string $opener): array {
     return $tables;
 };
 $inCopy     = $handedOver + $readPreparedTables($exportCode, '$mysqli->prepare(');
+// 🎁 #1135: the tables the instruction list matches on a column that says the record is
+//    ABOUT the person - in LINK_COLUMNS and not in ACTOR_COLUMNS - whatever the decision.
+//    Read from GdprEraser::catalogue() itself ($instructions), never a copy. The rule of
+//    #1063 looked only at `erase`, so a kept gift or payment was never asked about.
+$aboutPersonTables = [];
+foreach ($instructions as $instruction) {
+    $aboutColumn = (string) ($instruction['userCol'] ?? '');
+    if ($aboutColumn !== '' && in_array($aboutColumn, $linkColumns, true) === true && in_array($aboutColumn, $actorColumns, true) === false) {
+        $aboutPersonTables[(string) $instruction['table']] = $aboutColumn;
+    }
+}
+// Tables handed over THROUGH a GdprEraser helper the page calls (the three asked of the
+// class are read there: the care and DBS records), as the sentence above section 27 says
+// this reading cannot see by itself. The helper's own SQL is read, outer FROM or JOIN.
+$helperHandedOver = [];
+foreach (['recordsCarryingYourName', 'dbsChecksAboutYou', 'careCasesAboutYou'] as $helperName) {
+    if (str_contains($exportCode, 'GdprEraser::' . $helperName . '(') === true) {
+        gc_findAll('/\b(?:FROM|JOIN)\s+`?(tbl\w+)`?/i', $method($eraserCode, $helperName), $helperTables);
+        foreach ($helperTables[1] as $helperTable) {
+            $helperHandedOver[$helperTable] = true;
+        }
+    }
+}
 $copyGaps   = [];
 $eraseCount = 0;
 foreach ($catalogue as $table => $entry) {
     $decision = (string) ($entry['decision'] ?? '');
     $leftOut  = $entry['notInDataCopy'] ?? null;
-    if ($leftOut !== null && $decision !== 'erase') {
-        $copyGaps[] = $table . ' carries notInDataCopy but its decision is "' . $decision . '", not erase';
+    // #1135: the rule used to be ONLY about what is erased; a kept record ABOUT the person
+    //    (a gift, a payment) must be in the copy too, so the excuse is allowed for one of
+    //    those as well. A table that is neither is still refused an excuse.
+    if ($leftOut !== null && $decision !== 'erase' && isset($aboutPersonTables[$table]) === false) {
+        $copyGaps[] = $table . ' carries notInDataCopy but its decision is "' . $decision . '" and nothing in the written list is about the person on it';
     }
     if ($decision !== 'erase') {
         continue;
@@ -3855,6 +3881,113 @@ check(
     implode('; ', $copyGaps)
 );
 
+// 27b (#1135). EVERY RECORD ABOUT THE PERSON, KEPT OR ERASED, IS IN THEIR COPY OR NAMED.
+//     "My data" counts a record by the instruction's column whatever the decision; the
+//     copy used to be built from the `erase` ones only, so a member's gifts, envelopes,
+//     statements, payments, attendance, bookings and loans were counted there and handed
+//     over nowhere. Same reading of "handed over" as above, plus the care and DBS records
+//     the page asks a GdprEraser helper for.
+$aboutGaps = [];
+foreach ($aboutPersonTables as $table => $aboutColumn) {
+    $leftOutHere = $catalogue[$table]['notInDataCopy'] ?? null;
+    $handedHere  = isset($inCopy[$table]) === true || isset($helperHandedOver[$table]) === true;
+    if ($handedHere === false && $leftOutHere === null) {
+        $aboutGaps[] = $table . ' (matched on ' . $aboutColumn . ') is about the person but is neither handed over by account/data-export nor named with notInDataCopy';
+    }
+    if ($handedHere === true && $leftOutHere !== null) {
+        $aboutGaps[] = $table . ' is handed over, yet notInDataCopy says it is left out (a stale reason)';
+    }
+}
+foreach (['tblGivingEntry', 'tblCountEnvelopes', 'tblGivingStatementLog', 'tblPayment', 'tblEventAttendance', 'tblResourceBooking', 'tblAssetLoans'] as $known) {
+    if (isset($aboutPersonTables[$known]) === false || isset($inCopy[$known]) === false) {
+        $aboutGaps[] = 'premise: ' . $known . ' (one of the records #1135 found missing) is not read as a record about the person that the page hands over';
+    }
+}
+check(
+    'every record the written list matches on a column saying it is ABOUT the person, kept or erased, is handed over by account/data-export or named with its reason (#1135)',
+    $aboutGaps === [],
+    implode('; ', $aboutGaps)
+);
+
+// 27c (#1135). THE COPY HOLDS THE WHOLE OF MY DATA'S LIST. The records a person MADE as a
+//     worker (seventy-one kinds) are about somebody else, so they are COUNTED, from the
+//     very list My data prints, GdprEraser::inventory(). The page must call it IN CODE (a
+//     comment naming it counts for nothing) and must hand its rows over under their plain
+//     `kind`, with the count and what an erasure would do - never turning a kind that
+//     could not be read into zero (#1012).
+$inventoryCalls = substr_count($exportCode, 'GdprEraser::inventory($userId)');
+check(
+    'the data copy asks GdprEraser::inventory() for the whole of My data\'s list, hands over each kind in plain words with its count, and never turns an unread kind into zero (#1135)',
+    $inventoryCalls === 1
+        && str_contains($exportCode, "'whatWeHoldAboutYou' => array_map(") === true
+        && str_contains($exportCode, "'count' => null, 'couldNotRead' => true") === true
+        && str_contains($exportCode, "GdprEraser::inventoryWords(\$row, true)") === true
+        && str_contains($exportCode, "'kind'     => (string) \$row['kind']") === true,
+    'GdprEraser::inventory($userId) is called ' . $inventoryCalls . ' time(s) in the page\'s code; the whatWeHoldAboutYou block must be built from it'
+);
+
+
+// -----------------------------------------------------------------------------
+// 28. EVERY KIND OF RECORD A MEMBER IS SHOWN HAS PLAIN WORDS, AND ONLY THOSE (#1135,
+//     #1138 item 9). My data, the erasure request page and the data copy used to name a
+//     kind of record by its table name. `DataKinds` is the ONE place a table becomes
+//     words. FAILS BOTH WAYS: a table the inventory can count (an account column, or a
+//     parent it is matched through) with no phrase; a phrase for a table nothing can
+//     count (a stale entry that reads like coverage); and a phrase that is not words
+//     (it holds `tbl`, or is under eight characters). `tblErasureRequest` is counted by
+//     hand in GdprEraser::inventory(), so it is expected too; `tblErasureAudit` is not
+//     in the catalogue (#510 rule 7d) and must not be here.
+// -----------------------------------------------------------------------------
+require_once __DIR__ . '/../web/_core/DataKinds.php';
+$countable = ['tblErasureRequest' => true];
+foreach ($instructions as $instruction) {
+    $hasColumn = (string) ($instruction['userCol'] ?? '') !== '';
+    $hasParent = isset($instruction['subjectVia']) === true && is_array($instruction['subjectVia']) === true;
+    if ($hasColumn === true || $hasParent === true) {
+        $countable[(string) $instruction['table']] = true;
+    }
+}
+$wordFaults = [];
+foreach (array_keys($countable) as $table) {
+    if (isset(\Portal\Core\DataKinds::WORDS[$table]) === false) {
+        $wordFaults[] = $table . ' can be counted for a member but has no plain words in DataKinds::WORDS';
+    }
+}
+foreach (\Portal\Core\DataKinds::WORDS as $table => $phrase) {
+    if (isset($countable[$table]) === false) {
+        $wordFaults[] = 'DataKinds::WORDS has an entry for ' . $table . ', which nothing can count for a member';
+    }
+}
+foreach (\Portal\Core\DataKinds::MADE as $table => $phrase) {
+    if (isset(\Portal\Core\DataKinds::WORDS[$table]) === false) {
+        $wordFaults[] = 'DataKinds::MADE has an entry for ' . $table . ', which has no WORDS entry';
+    }
+}
+// Each list on its own: merging them would let a table's MADE phrase hide its WORDS phrase (same key).
+$allPhrases = [];
+foreach ([\Portal\Core\DataKinds::WORDS, \Portal\Core\DataKinds::MADE] as $phraseList) {
+    foreach ($phraseList as $table => $phrase) {
+        if (stripos($phrase, 'tbl') !== false || strlen(trim($phrase)) < 8) {
+            $wordFaults[] = $table . '\'s phrase "' . $phrase . '" is not plain words (it holds "tbl" or is under eight characters)';
+        }
+        // A phrase read back to a table must name exactly one: two entries sharing words would make a
+        // member's page ambiguous and the page tests (which read the words back) wrong.
+        $allPhrases[$phrase][] = $table;
+    }
+}
+foreach ($allPhrases as $phrase => $tables) {
+    if (count($tables) > 1) {
+        $wordFaults[] = '"' . $phrase . '" is the phrase for more than one entry (' . implode(', ', $tables) . ')';
+    }
+}
+if (count($countable) < 100) {
+    $wordFaults[] = 'premise: fewer than 100 countable tables (' . count($countable) . '), so the catalogue is not being read as it should';
+}
+check(
+    'every table the inventory can count for a member has plain words in DataKinds, no phrase exists for one it cannot, and no phrase holds a table name (#1135)',
+    $wordFaults === [],
+    implode('; ', $wordFaults)
+);
 
 // -----------------------------------------------------------------------------
 // 25. THE REMEMBERED MAP POSITIONS ARE DELETED BEFORE THE WALK, THROUGH GEOCODER'S

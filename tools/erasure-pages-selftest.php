@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 292; // #934 package 2h added M13s-M13w: 287 + 5. #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 300; // #1135 added R9-R16: 292 + 8. #934 package 2h added M13s-M13w: 287 + 5. #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -451,6 +451,37 @@ $db->set_charset('utf8mb4');
 
 $pass = 0;
 $fail = 0;
+
+/**
+ * 🗣️ #1135 (#1138 item 9): My data and Request erasure print each kind of record in PLAIN WORDS
+ * (`DataKinds`), no longer by its table name. The checks below used to find a row by the table
+ * name in `<code>`. They read what a member reads now - the element marked `data-inventory-kind`
+ * - and turn the words back into the table through DataKinds' own lists, so a phrase that is
+ * changed or reused for two tables fails here rather than quietly matching nothing. An unknown
+ * phrase answers '' (no row found). The words for the records a person MADE come second: no
+ * phrase is in both lists (section 28 of tools/gdpr-coverage-selftest.php pins every phrase).
+ */
+function inventoryKindTable(?\Dom\Element $element): string
+{
+    return $element === null ? '' : inventoryWordsTable(trim((string) $element->textContent));
+}
+
+/** The same, from the words themselves (a cell's text). */
+function inventoryWordsTable(string $words): string
+{
+    static $loaded = false;
+    if ($loaded === false) {
+        require_once __DIR__ . '/../web/_core/DataKinds.php';
+        $loaded = true;
+    }
+    $found = array_search($words, \Portal\Core\DataKinds::WORDS, true);
+    if ($found === false) {
+        $found = array_search($words, \Portal\Core\DataKinds::MADE, true);
+    }
+
+    return $found === false ? '' : (string) $found;
+}
+
 
 /** ✅ Report one check. `$detail` is shown only on failure. */
 function ok(string $label, bool $passed, string $detail = ''): void
@@ -1410,8 +1441,8 @@ $askText = text($askPage['body']);
 $askClaimRow = renderedRegion($askPage['body'], static function (\Dom\HTMLDocument $doc): array {
     $rows = [];
     foreach ($doc->querySelectorAll('li') as $li) {
-        $code = $li->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+        $code = $li->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === 'tblExpenseClaims') {
             $rows[] = $li;
         }
     }
@@ -1422,8 +1453,8 @@ $calDataHtml  = (string) req($jar['cal'], 'GET', '/account/my-data')['body'];
 $dataClaimRow = renderedRegion($calDataHtml, static function (\Dom\HTMLDocument $doc): array {
     $rows = [];
     foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
-        $code = $row->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+        $code = $row->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === 'tblExpenseClaims') {
             $rows[] = $row;
         }
     }
@@ -1455,8 +1486,8 @@ $melDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
 $askBookingRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
     $rows = [];
     foreach ($doc->querySelectorAll('li') as $li) {
-        $code = $li->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === 'tblResourceBooking') {
+        $code = $li->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === 'tblResourceBooking') {
             $rows[] = $li;
         }
     }
@@ -1489,8 +1520,8 @@ ok('B4b REQUEST ERASURE SHOWS A MEMBER NO DEVELOPER NOTE: Mel\'s room-booking ro
 $askInvitationRow = renderedRegion($melAskHtml, static function (\Dom\HTMLDocument $doc): array {
     $rows = [];
     foreach ($doc->querySelectorAll('li') as $li) {
-        $code = $li->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === 'tblInvitation') {
+        $code = $li->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === 'tblInvitation') {
             $rows[] = $li;
         }
     }
@@ -1531,9 +1562,9 @@ $calCases   = is_array($calCopy) === true ? ($calCopy['data']['careCasesAboutYou
 $careCounts = ['tblCareCase' => 0, 'tblCareVisit' => 0];
 $calDataDoc = \Dom\HTMLDocument::createFromString($calDataHtml, LIBXML_NOERROR);
 foreach ($calDataDoc->querySelectorAll('.portal-data-list > .row') as $row) {
-    $code  = $row->querySelector('code');
+    $code  = $row->querySelector('[data-inventory-kind]');
     $count = $row->querySelector('.col-md-1 strong');
-    $name  = $code === null ? '' : trim((string) $code->textContent);
+    $name  = $code === null ? '' : inventoryKindTable($code);
     if (isset($careCounts[$name]) === true && $count !== null) {
         $careCounts[$name] += (int) trim((string) $count->textContent);
     }
@@ -1595,8 +1626,8 @@ $claimColumn = static fn (): ?array => one(
 $claimLabel = static function () use (&$jar): string {
     $doc = \Dom\HTMLDocument::createFromString((string) req($jar['cal'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
     foreach ($doc->querySelectorAll('li') as $li) {
-        $code = $li->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+        $code = $li->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === 'tblExpenseClaims') {
             return trim((string) $li->querySelectorAll('strong')->item(1)?->textContent);
         }
     }
@@ -1619,7 +1650,7 @@ ok('THE CLAIM\'S LABEL FOLLOWS THE DATABASE, NOT A LIST OF TABLES: with its acco
     && $labelWhenBack === 'kept, with some details about you removed but still carrying your account number',
     json_encode(['column before' => $claimWas, 'column after' => $claimColumn(), 'emptiable' => $labelWhenNullable, 'put back' => $labelWhenBack]));
 ok('the page says in words what happens to each kind of record: "kept" for a Gift Aid declaration, and never "retaind"',
-    $askPage['status'] === 200 && preg_match('/tblGiftAidDeclaration — 1 row\(s\) will be kept\s*\./', $askText) === 1
+    $askPage['status'] === 200 && preg_match('/Your Gift Aid \(tax relief\) declarations — 1 row\(s\) will be kept\s*\./', $askText) === 1
     && str_contains($askText, 'retaind') === false, mb_substr($askText, 0, 700));
 $landings['"Request data erasure", a good press'] = req($jar['cal'], 'POST', '/account/erasure-request', ['csrf_token' => token($askPage['body'])])['location'];
 $askTold  = message(req($jar['cal'], 'GET', '/account/my-data')['body']);
@@ -1782,13 +1813,13 @@ ok('the DBS page records who recorded a check by NAME as well as number, read fr
 //    #703 round 6: pinned AS RENDERED, each row whole. Round 5 searched the
 //    page's text for phrases, so a sentence the page appended to a row (M5), or
 //    a row hidden by an attribute, left it green. The row is the element My data
-//    draws for one kind of record (`.row` holding the table's name in <code>).
+//    draws for one kind of record (`.row` holding the kind's plain words in `data-inventory-kind`, #1135).
 $myDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
 $myDataRow  = static fn (string $table): string => renderedRegion($myDataHtml, static function (\Dom\HTMLDocument $doc) use ($table): array {
     $rows = [];
     foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
-        $code = $row->querySelector('code');
-        if ($code !== null && trim((string) $code->textContent) === $table) {
+        $code = $row->querySelector('[data-inventory-kind]');
+        if ($code !== null && inventoryKindTable($code) === $table) {
             $rows[] = $row;
         }
     }
@@ -3036,6 +3067,8 @@ $givingShown = static function (string $html): array {
         // #927 check round 1: the badge is framed as what WOULD happen
         // ("would be ... if you ask to be erased"). The frame is required here,
         // so a bare badge is left as printed and fails the checks below.
+        // 🗣️ #1135: the first cell is the kind in PLAIN WORDS now; read it back to the table.
+        $cells[0] = inventoryWordsTable($cells[0] ?? '') !== '' ? inventoryWordsTable($cells[0]) : ($cells[0] ?? '');
         $inside   = preg_match('/^would be (.+?),? if you ask to be erased$/', $cells[2] ?? '', $framed) === 1 ? $framed[1] : ($cells[2] ?? '');
         $cells[2] = $asWord[$inside] ?? ($cells[2] ?? '');
         if (isset($shown[$cells[0] ?? '']) === true && $cells[0] !== 'reasons') {
@@ -3085,10 +3118,10 @@ $boAsks  = (string) req($jar['bo'], 'GET', '/account/erasure-request')['body'];
 $asksDoc = \Dom\HTMLDocument::createFromString($boAsks, LIBXML_NOERROR);
 $asked   = [];
 foreach ($asksDoc->querySelectorAll('li') as $li) {
-    $code = $li->querySelector('code');
-    if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblCountEnvelopes'], true) === true) {
+    $code = $li->querySelector('[data-inventory-kind]');
+    if ($code !== null && in_array(inventoryKindTable($code), ['tblGivingEntry', 'tblCountEnvelopes'], true) === true) {
         $strong  = $li->querySelectorAll('strong');
-        $asked[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+        $asked[] = inventoryKindTable($code) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
     }
 }
 ok('K3 REQUEST ERASURE says the same to Bo: one gift and one envelope "kept", one of each "kept, with some details about you removed" (#703 round 8)',
@@ -3141,10 +3174,10 @@ ok('K6 THE WORDS FOLLOW THE STATE: with the years not confirmed, Dora is told th
 $patAsks = \Dom\HTMLDocument::createFromString((string) req($jar['pat'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
 $patSaid = [];
 foreach ($patAsks->querySelectorAll('li') as $li) {
-    $code = $li->querySelector('code');
-    if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
+    $code = $li->querySelector('[data-inventory-kind]');
+    if ($code !== null && in_array(inventoryKindTable($code), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
         $strong    = $li->querySelectorAll('strong');
-        $patSaid[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+        $patSaid[] = inventoryKindTable($code) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
     }
 }
 // 🔁 CHANGED BY #927: the declaration's label used to be "kept, with some
@@ -3168,10 +3201,10 @@ $patLines = static function () use (&$jar): array {
     $doc  = \Dom\HTMLDocument::createFromString((string) req($jar['pat'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
     $said = [];
     foreach ($doc->querySelectorAll('li') as $li) {
-        $code = $li->querySelector('code');
-        if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
+        $code = $li->querySelector('[data-inventory-kind]');
+        if ($code !== null && in_array(inventoryKindTable($code), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
             $strong = $li->querySelectorAll('strong');
-            $said[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+            $said[] = inventoryKindTable($code) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
         }
     }
 
@@ -3296,8 +3329,8 @@ ok('K11 A GIVER IN TWO ORGANISATIONS: Quin\'s kept gifts are worded organisation
     json_encode($fromA) . ' | B: ' . json_encode($fromB));
 
 /**
- * Whether the INVENTORY parts of a page (those holding a <code> cell with the
- * table's name - never the menu, whose organisation switcher lists B's name
+ * Whether the INVENTORY parts of a page (those holding a `data-inventory-kind` cell with the
+ * kind's plain words - never the menu, whose organisation switcher lists B's name
  * too, which is how round 11's check passed with the reason escaped twice)
  * hold any <b> element, whether their TEXT holds the odd name exactly, and
  * whether their markup shows it escaped TWICE (`&amp;lt;`, `&amp;amp;`).
@@ -3308,7 +3341,7 @@ $asTextOnly = static function (string $html, string $selector) use ($oddName): a
     $text    = false;
     $twice   = false;
     foreach ($doc->querySelectorAll($selector) as $part) {
-        if ($part->querySelector('code') === null) {
+        if ($part->querySelector('[data-inventory-kind]') === null) {
             continue;
         }
         $markup += count($part->querySelectorAll('b'));
@@ -6495,7 +6528,7 @@ $p1012Counted = static function (array $got): array {
         foreach ($row->children as $cell) {
             $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
         }
-        if (($cells[0] ?? '') === 'tblDbsChecks') {
+        if (inventoryWordsTable($cells[0] ?? '') === 'tblDbsChecks') {
             $fromPage[] = [(int) ($cells[1] ?? -1), mb_substr((string) ($cells[3] ?? ''), 0, 24)];
         }
     }
@@ -6581,8 +6614,8 @@ $p1012Observe = static function () use ($p1012Fetch, $p1012Counted, $p1012Expect
     $unreadWords = 'These records could not be read just now, so whether we hold any, and how many, is not known. Please try again later.';
     if ($broken['page']['status'] !== 200 || $asking['status'] !== 200
         || $unreadJson !== [['unread', null, $unreadWords], ['read', 1, 'DBS checks you recorded ']]
-        || $unreadPage !== [['tblDbsChecks', '?', 'could not be read just now', $unreadWords]]
-        || $unreadAsk !== ['tblDbsChecks — ' . $unreadWords]) {
+        || $unreadPage !== [['Safeguarding (DBS) checks recorded for you', '?', 'could not be read just now', $unreadWords]]
+        || $unreadAsk !== ['Safeguarding (DBS) checks recorded for you — ' . $unreadWords]) {
         $wrong[] = 'inventory hid failure';
     }
 
@@ -7000,6 +7033,181 @@ foreach ($r1063Plants as $label => [$rel, $swaps, $expect]) {
 }
 $r1063Clean = $r1063Observe();
 ok('R5 with every #1063 plant taken out again, the same copy is right (#1063)', $r1063Clean === [], implode('; ', $r1063Clean));
+// -----------------------------------------------------------------------------
+// R9-R16 (#1135): THE RECORDS ABOUT A MEMBER THAT AN ERASURE KEEPS ARE IN THEIR COPY, IN
+// PLAIN WORDS. "My data" counted a member's gifts, envelopes, statements, payments,
+// attendance, bookings, loans, software seats, errors, change history and claim decisions,
+// and the copy handed over none of them. Fay (A) and Dan (A) each get one row in all
+// eleven; Fay's copy must hold hers with the amounts and currencies, nothing that is
+// Dan's, and none of the words or references left out on purpose (the treasurer's note,
+// a payment company's reference, a file path, a page's query string). The copy's
+// "what we hold about you" list must hold the gifts under their plain name and a record
+// Fay only MADE as a worker (a decision card given to her) - and a kind whose read fails
+// must say so, never turn into none. The plants prove each guard goes red.
+// -----------------------------------------------------------------------------
+const R1135_EVENT = 917950;
+$r1135Tables = ['tblGivingEntry' => 'donorID', 'tblCountEnvelopes' => 'giverID', 'tblGivingStatementLog' => 'donorID',
+    'tblPayment' => 'userID', 'tblEventAttendance' => 'userID', 'tblResourceBooking' => 'bookedByID',
+    'tblAssetLoans' => 'counterpartyUserID', 'tblAssetLicenseAssignments' => 'userID', 'tblErrors' => 'userID',
+    'tblAuditTrail' => 'userID', 'tblExpenseClaimApprovals' => 'userID', 'tblSalvationCards' => 'assignedToID'];
+$r1135Clear = static function () use ($db, $r1135Tables): void {
+    foreach ($r1135Tables as $table => $col) {
+        q('DELETE FROM `' . $table . '` WHERE `' . $col . '` IN (?, ?)', 'ii', [FAY, DAN]);
+    }
+    q('DELETE FROM `tblEvents` WHERE `eventID` = ?', 'i', [R1135_EVENT]);
+};
+$r1135Rows = static function (int $who, string $tag, int $other, string $amount) use ($db): void {
+    $db->query('SET SESSION foreign_key_checks = 0');
+    q("INSERT INTO `tblEvents` (`eventID`, `siteID`, `eventName`, `eventSlug`, `startDateTime`, `endDateTime`, `timezone`, `status`) "
+        . "VALUES (?, ?, 'R1135 event', 'r1135-event', '2031-07-01 10:00:00', '2031-07-01 11:00:00', 'Europe/London', 'draft') ON DUPLICATE KEY UPDATE `eventID` = `eventID`",
+        'ii', [R1135_EVENT, ORG_A]);
+    q('INSERT INTO `tblGivingEntry` (`siteID`, `donorID`, `donorName`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`, `reference`, `notes`, `recordedByID`) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)',
+        'iisisssssi', [ORG_A, $who, 'R1135 donor ' . $tag, (int) $amount, 'EUR', '2026-03-04', 'cash', 'R1135 ref ' . $tag, 'R1135-LEFTOUT note ' . $tag, $other]);
+    q('INSERT INTO `tblCountEnvelopes` (`countSessionID`, `giverID`, `giverName`, `amount`, `currency`, `method`) VALUES (917951, ?, ?, ?, ?, ?)',
+        'issss', [$who, 'R1135 giver ' . $tag, $amount . '.50', 'USD', 'cash']);
+    q('INSERT INTO `tblGivingStatementLog` (`siteID`, `donorID`, `periodKey`, `fromDate`, `toDate`, `totalPence`, `giftAidPence`, `currency`, `pdfPath`, `emailedTo`, `errorMsg`, `createdByID`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'iisssiissssi', [ORG_A, $who, 'R1135-' . $tag, '2026-01-01', '2026-12-31', (int) $amount * 2, (int) $amount, 'GBP', 'R1135-LEFTOUT/path-' . $tag . '.pdf', 'r1135-' . strtolower($tag) . '@example.invalid', 'R1135-LEFTOUT err', $other]);
+    q('INSERT INTO `tblPayment` (`siteID`, `userID`, `provider`, `providerRef`, `idempotencyKey`, `amountPence`, `currency`, `status`, `purpose`, `errorMsg`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'iisssissss', [ORG_A, $who, 'stripe', 'R1135-LEFTOUT-ref-' . $tag, 'R1135-LEFTOUT-key-' . $tag, (int) $amount + 7, 'GBP', 'succeeded', 'giving', 'R1135-LEFTOUT err']);
+    q('INSERT INTO `tblEventAttendance` (`eventID`, `userID`, `dayDate`, `markedByID`, `notes`) VALUES (?, ?, ?, ?, ?)',
+        'iisis', [R1135_EVENT, $who, '2026-07-01', $other, 'R1135-LEFTOUT note ' . $tag]);
+    q('INSERT INTO `tblResourceBooking` (`resourceID`, `bookedByID`, `startAt`, `endAt`, `purpose`, `notes`, `status`, `approvedByID`, `declineReason`) VALUES (917952, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'isssssis', [$who, '2026-08-01 10:00:00', '2026-08-01 11:00:00', 'R1135 purpose ' . $tag, 'R1135 own words ' . $tag, 'declined', $other, 'R1135-LEFTOUT decline']);
+    q('INSERT INTO `tblAssetLoans` (`siteID`, `assetID`, `direction`, `counterpartyType`, `counterpartyUserID`, `status`, `notes`, `conditionOutNotes`, `approvedByID`, `requestedByID`) VALUES (?, 917953, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'ississsii', [ORG_A, 'out', 'user', $who, 'active', 'R1135-LEFTOUT note', 'R1135-LEFTOUT cond', $other, $other]);
+    q('INSERT INTO `tblAssetLicenseAssignments` (`siteID`, `licenseAssetID`, `userID`, `seatLabel`, `deviceName`, `notes`, `linkedByID`) VALUES (?, 917954, ?, ?, ?, ?, ?)',
+        'iisssi', [ORG_A, $who, 'R1135 seat ' . $tag, 'R1135-LEFTOUT device', 'R1135-LEFTOUT note', $other]);
+    q('INSERT INTO `tblErrors` (`siteID`, `errorSeverity`, `errorTitle`, `errorDetail`, `userID`, `requestURL`) VALUES (?, ?, ?, ?, ?, ?)',
+        'isssis', [ORG_A, 'Warning', 'R1135-LEFTOUT title', 'R1135-LEFTOUT detail', $who, '/r1135/page-' . $tag . '?key=R1135-LEFTOUT-query']);
+    q('INSERT INTO `tblAuditTrail` (`siteID`, `userID`, `tableName`, `recordID`, `action`, `oldValue`, `newValue`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'iisisss', [ORG_A, $who, 'tblR1135' . $tag, 4242, 'update', 'R1135-LEFTOUT old', 'R1135-LEFTOUT new']);
+    q('INSERT INTO `tblExpenseClaimApprovals` (`claimID`, `userID`, `decision`, `comments`) VALUES (917955, ?, ?, ?)',
+        'iss', [$who, 'Approved', 'R1135-LEFTOUT comment']);
+    $db->query('SET SESSION foreign_key_checks = 1');
+};
+$r1135Clear();
+$r1135Rows(FAY, 'FAY', DAN, '12345');
+$r1135Rows(DAN, 'DAN', FAY, '777');
+q('INSERT INTO `tblSalvationCards` (`siteID`, `fullName`, `assignedToID`) VALUES (?, ?, ?)', 'isi', [ORG_A, 'R1135 card', FAY]);
+$r1135Observe = static function () use (&$jar): array {
+    $wrong  = [];
+    $export = req($jar['fay'], 'GET', '/account/data-export');
+    $copy   = json_decode($export['body'], true);
+    if ($export['status'] !== 200 || is_array($copy['data'] ?? null) === false) {
+        return ['the data copy did not come back as JSON (HTTP ' . $export['status'] . ')'];
+    }
+    $data  = $copy['data'];
+    $first = static fn (string $key): array => (array) ($data[$key][0] ?? []);
+    $wantRow = [
+        'gifts'                    => ['amountPence' => 12345, 'currency' => 'EUR', 'donorName' => 'R1135 donor FAY', 'reference' => 'R1135 ref FAY'],
+        'offeringEnvelopes'        => ['giverName' => 'R1135 giver FAY', 'currency' => 'USD'],
+        'givingStatements'         => ['totalPence' => 24690, 'currency' => 'GBP', 'emailedTo' => 'r1135-fay@example.invalid'],
+        'payments'                 => ['amountPence' => 12352, 'currency' => 'GBP', 'status' => 'succeeded'],
+        'eventAttendance'          => ['eventName' => 'R1135 event', 'dayDate' => '2026-07-01'],
+        'resourceBookings'         => ['purpose' => 'R1135 purpose FAY', 'notes' => 'R1135 own words FAY', 'status' => 'declined'],
+        'equipmentLoans'           => ['direction' => 'out', 'status' => 'active'],
+        'softwareSeats'            => ['seatLabel' => 'R1135 seat FAY'],
+        'errorsWhileSignedIn'      => ['errorSeverity' => 'Warning', 'addressRequested' => '/r1135/page-FAY'],
+        'changesYouMade'           => ['tableName' => 'tblR1135FAY', 'action' => 'update'],
+        'expenseDecisionsYouMade'  => ['decision' => 'Approved'],
+    ];
+    foreach ($wantRow as $key => $facts) {
+        if (count((array) ($data[$key] ?? [])) !== 1) {
+            $wrong[] = 'Fay\'s copy holds ' . count((array) ($data[$key] ?? [])) . ' row(s) under ' . $key . ', not her one';
+            continue;
+        }
+        foreach ($facts as $field => $value) {
+            if (($first($key)[$field] ?? null) != $value) {
+                $wrong[] = $key . '.' . $field . ' is ' . json_encode($first($key)[$field] ?? null, JSON_UNESCAPED_SLASHES) . ', not ' . json_encode($value, JSON_UNESCAPED_SLASHES);
+            }
+        }
+    }
+    $whole = (string) json_encode($data);
+    if (str_contains($whole, 'DAN') === true && preg_match('/R1135[^"]*DAN|"amountPence":777|r1135-dan/', $whole) === 1) {
+        $wrong[] = 'Fay\'s copy holds one of Dan\'s records';
+    }
+    if (str_contains($whole, 'R1135-LEFTOUT') === true) {
+        $wrong[] = 'Fay\'s copy hands over words, a reference or a path left out on purpose (R1135-LEFTOUT)';
+    }
+    // What we hold, kind by kind: plain words, counts, and a record she only MADE as a worker.
+    $held = [];
+    foreach ((array) ($data['whatWeHoldAboutYou'] ?? []) as $row) {
+        $held[(string) ($row['kind'] ?? '')] = ($held[(string) ($row['kind'] ?? '')] ?? 0) + (int) ($row['count'] ?? 0);
+        if (stripos((string) ($row['kind'] ?? ''), 'tbl') !== false || (string) ($row['kind'] ?? '') === '') {
+            $wrong[] = 'a "what we hold" row has no plain words: ' . json_encode($row);
+        }
+    }
+    foreach (['Gifts recorded for you' => 1, 'Offering envelopes named for you' => 1, 'Payments you made' => 1,
+        'Your attendance at events' => 1, 'Decision cards given to you to follow up' => 1] as $kind => $count) {
+        if (($held[$kind] ?? null) !== $count) {
+            $wrong[] = 'the "what we hold" list says ' . json_encode($held[$kind] ?? null) . ' for "' . $kind . '", not ' . $count;
+        }
+    }
+
+    return $wrong;
+};
+$r1135First = $r1135Observe();
+ok('R9 Fay\'s full data copy holds her gift, envelope, statement, payment, attendance, booking, loan, software seat, error, change and claim decision - each with its own amounts, currencies and dates in plain rows - and none of Dan\'s, none of the treasurer\'s notes, references, paths or query strings left out on purpose, and lists every kind My data lists by its plain name (#1135)',
+    $r1135First === [], implode('; ', $r1135First));
+$r1135Plants = [
+    'R10 the gifts block taken out of the copy' => [
+        '_apps/auth/account/data-export.php', ['FROM `tblGivingEntry` WHERE `donorID` = ?' => 'FROM `tblGivingEntry` WHERE `donorID` = -1 AND `donorID` = ?'],
+        'Fay\'s copy holds 0 row(s) under gifts, not her one'],
+    'R11 the treasurer\'s note handed over with the gift' => [
+        '_apps/auth/account/data-export.php', ["'SELECT `entryID`, `siteID`, `categoryID`, `donorName`," => "'SELECT `entryID`, `notes`, `siteID`, `categoryID`, `donorName`,"],
+        'Fay\'s copy hands over words, a reference or a path left out on purpose (R1135-LEFTOUT)'],
+    'R12 the payment company\'s reference handed over with the payment' => [
+        '_apps/auth/account/data-export.php', ["'SELECT `paymentID`, `siteID`, `provider`," => "'SELECT `paymentID`, `providerRef`, `siteID`, `provider`,"],
+        'Fay\'s copy hands over words, a reference or a path left out on purpose (R1135-LEFTOUT)'],
+    'R13 the page asked for handed over with its query string' => [
+        '_apps/auth/account/data-export.php', ['SUBSTRING_INDEX(`requestURL`, CHAR(63), 1) AS `addressRequested`' => '`requestURL` AS `addressRequested`'],
+        'errorsWhileSignedIn.addressRequested is "/r1135/page-FAY?key=R1135-LEFTOUT-query", not "/r1135/page-FAY"'],
+    'R14 the "what we hold" list taken out of the copy' => [
+        '_apps/auth/account/data-export.php', ["}, GdprEraser::inventory(\$userId))," => "}, []),"],
+        'the "what we hold" list says null for "Gifts recorded for you", not 1'],
+    'R15 the gifts block matching every member rather than the one asking' => [
+        '_apps/auth/account/data-export.php', ['FROM `tblGivingEntry` WHERE `donorID` = ? ORDER BY `donatedAt`' => 'FROM `tblGivingEntry` WHERE `donorID` = ? OR 1 = 1 ORDER BY `donatedAt`'],
+        'Fay\'s copy holds one of Dan\'s records'],
+];
+foreach ($r1135Plants as $label => [$rel, $swaps, $expect]) {
+    $path     = $plantFile($rel);
+    $original = (string) file_get_contents($path);
+    $applied  = true;
+    foreach (array_keys($swaps) as $from) {
+        $applied = $applied && substr_count($original, (string) $from) === 1;
+    }
+    $wrong = ['(not run)'];
+    if ($applied === true) {
+        file_put_contents($path, strtr($original, $swaps));
+        try {
+            $wrong = $r1135Observe();
+        } finally {
+            file_put_contents($path, $original);
+        }
+    }
+    ok($label . ' - planted, the check goes red, and the file is put back (#1135)',
+        $applied === true && in_array($expect, $wrong, true) === true && (string) file_get_contents($path) === $original,
+        ($applied === true ? 'applied' : 'NOT APPLIED: the text to change was not found exactly once') . ' | observed: ' . implode('; ', $wrong));
+}
+// R16: a kind whose read FAILS is said, never turned into none. The decision cards are counted from
+// the column Fay was given them by, which the copy's own blocks never read, so renaming it breaks
+// only the list's read of that kind: the copy still comes back, and the list must say "could not be
+// read" with no number. The column is put back whatever happens.
+$db->query('ALTER TABLE `tblSalvationCards` RENAME COLUMN `assignedToID` TO `assignedToIDP1135`');
+try {
+    $brokenCopy = json_decode(req($jar['fay'], 'GET', '/account/data-export')['body'], true);
+} finally {
+    $db->query('ALTER TABLE `tblSalvationCards` RENAME COLUMN `assignedToIDP1135` TO `assignedToID`');
+}
+$brokenRows = array_values(array_filter((array) ($brokenCopy['data']['whatWeHoldAboutYou'] ?? []),
+    static fn (array $row): bool => ($row['kind'] ?? '') === 'Decision cards given to you to follow up'));
+ok('R16 when a kind cannot be read, the copy\'s list says so - "could not be read", no count - and never shows it as none or leaves it out (#1135, #1012)',
+    count($brokenRows) === 1 && ($brokenRows[0]['couldNotRead'] ?? false) === true && array_key_exists('count', $brokenRows[0]) === true && $brokenRows[0]['count'] === null
+    && str_contains((string) ($brokenRows[0]['note'] ?? ''), 'could not be read just now') === true
+    && count((array) ($brokenCopy['data']['gifts'] ?? [])) === 1,
+    json_encode($brokenRows));
+$r1135Clear();
+
 // A HEAVY member: 5,001 recordings played, one more than a kind is cut to.
 // The copy hands over the newest 5,000, says in words that it was cut, and
 // still comes back promptly (measured, and printed).

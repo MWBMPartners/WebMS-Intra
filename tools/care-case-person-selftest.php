@@ -483,9 +483,10 @@ $myData = (string) req($jar['mem'], 'GET', '/account/my-data')['body'];
 $count  = 0;
 $mdoc   = \Dom\HTMLDocument::createFromString($myData, LIBXML_NOERROR);
 foreach ($mdoc->querySelectorAll('.portal-data-list > .row') as $r) {
-    $code = $r->querySelector('code');
+    // #1135: My data names a kind of record in plain words now, not by its table name.
+    $code = $r->querySelector('[data-inventory-kind]');
     $n    = $r->querySelector('.col-md-1 strong');
-    if ($code !== null && trim((string) $code->textContent) === 'tblCareCase' && $n !== null) {
+    if ($code !== null && trim((string) $code->textContent) === 'Pastoral care cases about you' && $n !== null) {
         $count += (int) trim((string) $n->textContent);
     }
 }

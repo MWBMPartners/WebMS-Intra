@@ -4743,7 +4743,7 @@ class GdprEraser
      * is true and `note` says in words that the records could not be read.
      * Both pages that print this list show that row as such.
      *
-     * @return array<int, array{table: string, rows: int|null, action: string, reason: string, keepsNumber: bool, couldNotRead?: true, note?: string}>
+     * @return array<int, array{table: string, kind: string, rows: int|null, action: string, reason: string, keepsNumber: bool, couldNotRead?: true, note?: string}>
      */
     public static function inventory(int $userId): array
     {
@@ -4875,6 +4875,10 @@ class GdprEraser
                     $action = (string) $entry['action'];
                     $out[] = [
                         'table'       => $table,
+                        // 🗣️ #1138 item 9: the kind of record in words a member can read
+                        //    (DataKinds is the ONE place a table becomes words). `table`
+                        //    stays beside it for the machine-readable download.
+                        'kind'        => DataKinds::words($table, $col),
                         'rows'        => (int) $count,
                         'action'      => $action,
                         'reason'      => (string) ($entry['reason'] ?? ''),
@@ -4920,6 +4924,7 @@ class GdprEraser
             if ($total > 0) {
                 $out[] = [
                     'table'       => 'tblErasureRequest',
+                    'kind'        => DataKinds::words('tblErasureRequest'),
                     'rows'        => $total,
                     'action'      => 'anonymise',
                     'reason'      => 'Your request to be erased (' . implode(', ', $states) . '). The record that it was asked '
@@ -4972,6 +4977,7 @@ class GdprEraser
 
         return [
             'table'        => (string) $entry['table'],
+            'kind'         => DataKinds::words((string) $entry['table'], (string) ($entry['userCol'] ?? '')),
             'rows'         => null,
             'action'       => $action,
             'reason'       => (string) ($entry['reason'] ?? ''),
@@ -7249,7 +7255,7 @@ class GdprEraser
      * @param array{keep: int, loseRule: int, loseDue: int, kept: list<array<string, mixed>>, dueAt: list<string>, ruleAt: list<string>} $outlook
      * @param int $otherKeep How many of the OTHER kind will keep the name (gifts and envelopes speak for each other:
      *                       an envelope that will keep the name becomes a gift that does).
-     * @return list<array{table: string, rows: int, action: string, reason: string, keepsNumber: bool}>
+     * @return list<array{table: string, kind: string, rows: int, action: string, reason: string, keepsNumber: bool}>
      */
     private static function givingRows(string $table, array $outlook, int $otherKeep = 0): array
     {
@@ -7306,6 +7312,7 @@ class GdprEraser
             }
             $rows[] = [
                 'table'       => $table,
+                'kind'        => DataKinds::words($table),
                 'rows'        => $outlook['keep'],
                 'action'      => 'retain',
                 'keepsNumber' => true,
@@ -7336,6 +7343,7 @@ class GdprEraser
             }
             $rows[] = [
                 'table'       => $table,
+                'kind'        => DataKinds::words($table),
                 'rows'        => $lost,
                 'action'      => 'anonymise',
                 // #927: a gift or envelope that loses the name loses the

@@ -42,6 +42,10 @@ if (isset($_GET['download']) === true) {
     echo json_encode([
         'generatedAt' => date('c'),
         'userID'      => $userId,
+        // 🤖 The machine-readable file keeps `table` beside the plain `kind` on every
+        //    row: a person moving their data to another system, or a developer reading
+        //    it, can match a row to its table; the PAGE below shows only the words
+        //    (DataKinds, #1138 item 9).
         'inventory'   => $inventory,
         'recordsCarryingYourName' => $asWorker,
     ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -80,7 +84,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                               //    No count and no "would be" words: neither is known. The sentence is
                               //    GdprEraser::INVENTORY_COULD_NOT_READ, also in the JSON download's `note`. ?>
                         <div class="row py-2 border-bottom small" data-inventory-could-not-read>
-                            <div class="col-md-4"><code><?php echo htmlspecialchars((string) $row['table'], ENT_QUOTES, 'UTF-8'); ?></code></div>
+                            <div class="col-md-4" data-inventory-kind><?php echo htmlspecialchars((string) $row['kind'], ENT_QUOTES, 'UTF-8'); ?></div>
                             <div class="col-md-1 text-end"><strong>?</strong></div>
                             <div class="col-md-2"><span class="badge text-wrap text-start bg-warning text-dark">could not be read just now</span></div>
                             <div class="col-md-5 text-muted"><?php echo htmlspecialchars((string) $row['note'], ENT_QUOTES, 'UTF-8'); ?></div>
@@ -88,7 +92,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php continue; ?>
                     <?php endif; ?>
                     <div class="row py-2 border-bottom small">
-                        <div class="col-md-4"><code><?php echo htmlspecialchars((string) $row['table'], ENT_QUOTES, 'UTF-8'); ?></code></div>
+                        <div class="col-md-4" data-inventory-kind><?php echo htmlspecialchars((string) $row['kind'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-1 text-end"><strong><?php echo (int) $row['rows']; ?></strong></div>
                         <?php // 🗣️ #927: this badge printed the instruction's own word ("anonymise"), which beside an
                               //    expense claim read as "made anonymous" while the claim keeps the
@@ -112,8 +116,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    made none of these records sees nothing new. Every value printed is one
 //    of GdprEraser's own fixed words, a stored date, or an organisation's
 //    name - nothing about the other person can reach this card, because the
-//    method never reads it. No <code> table names here: the rows above are
-//    found by theirs, and a second row naming a table would muddle that.
+//    method never reads it. No table names here either: the rows above say each
+//    kind in plain words (DataKinds, #1135).
 if ($asWorker['records'] !== [] || $asWorker['notListed'] > 0 || $asWorker['couldNotRead'] !== []):
 ?>
 <div class="card mb-3" data-records-carrying-your-name>

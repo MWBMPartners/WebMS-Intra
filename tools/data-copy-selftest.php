@@ -93,6 +93,13 @@ const PAGE  = __DIR__ . '/../web/_apps/auth/account/data-export.php';
 const OTHER_WORDS = [
     'tblAssetOwners.notes', 'tblLeadershipAssignments.notes', 'tblPathwayProgress.notes', 'tblVisitor.notes',
     'tblOffboarding.reason', 'tblOffboarding.stepsLog', 'tblVenueBookings.notes', 'tblSmsMessage.body',
+    // #1135: the kept records ABOUT a person. Each is words a worker or approver wrote on a
+    // record that is about this person (or about somebody else on it), so the copy leaves it out.
+    'tblGivingEntry.notes', 'tblEventAttendance.notes', 'tblResourceBooking.declineReason', 'tblAssetLoans.notes',
+    'tblAssetLoans.conditionOutNotes', 'tblAssetLoans.conditionInNotes', 'tblAssetLoans.declineReason',
+    'tblAssetLicenseAssignments.notes', 'tblAssetLicenseAssignments.deviceName', 'tblExpenseClaimApprovals.comments',
+    'tblErrors.errorTitle', 'tblErrors.errorDetail', 'tblErrors.requestHeaders', 'tblAuditTrail.oldValue', 'tblAuditTrail.newValue',
+    'tblPayment.errorMsg', 'tblGivingStatementLog.errorMsg',
 ];
 // Secrets that work without signing in, or a sign-in secret even scrambled.
 const SECRETS = [
@@ -100,6 +107,9 @@ const SECRETS = [
     'tblPushSubscriptions.authKey', 'tblInvitation.tokenHash', 'tblNewsletterRecipient.unsubToken', 'tblNewsletterSubscription.unsubToken',
     'tblUserSmsPreference.verificationCode', 'tblLocalAccounts.passwordHash', 'tblUsers.totpSecret', 'tblPasswordResets.tokenHash',
     'tblSmsMessage.providerRef', 'tblAssetKioskPins.pinHash', 'tblZoomAccount.accessToken', 'tblZoomAccount.refreshToken',
+    // #1135: the payment company's own references for a payment (they can be used to look it up there)
+    // and the server's path to a giving statement's file.
+    'tblPayment.providerRef', 'tblPayment.idempotencyKey', 'tblGivingStatementLog.pdfPath',
 ];
 // A value fixed for one column, where the block's own rule depends on it: a
 // prayer-chain text's words are another member's request (D-016), so the
@@ -179,7 +189,7 @@ foreach ($starts[1] as $i => [$key]) {
     $strips[$key] = $second === '' ? [] : (array) eval('return ' . $second . ';');
 }
 dc_check('premise: the page\'s blocks are found and read (more than 40, and the ones #1063 added among them)',
-    count($blocks) > 40 && isset($blocks['eventsYouCoordinate'], $blocks['textMessagesSentToYou'], $blocks['yourVisitorRecord'],
+    count($blocks) > 40 && isset($blocks['eventsYouCoordinate'], $blocks['textMessagesSentToYou'], $blocks['yourVisitorRecord'], $blocks['gifts'], $blocks['payments'], $blocks['changesYouMade'],
         $blocks['demoDataRegister'], $blocks['importedEventNotices']) && ($strips['user'] ?? null) === ['totpSecret'],
     count($blocks) . ' found');
 
