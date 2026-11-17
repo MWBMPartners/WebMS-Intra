@@ -3,7 +3,7 @@
 **Date:** 2026-11-17  
 **Status:** in force
 
-**Question (#1067):** the portal remembers the answer of an address look-up so it does not ask twice (D-183). A request to erase a person could not remove a remembered position even when it was their own home address. What should an erasure do?
+**Question:** (#1067) the portal remembers the answer of an address look-up so it does not ask twice (D-183). A request to erase a person could not remove a remembered position even when it was their own home address. What should an erasure do?
 
 **Answer:** the owner chose: when erasing a person, also delete any remembered map position whose address matches an address held for that person.
 

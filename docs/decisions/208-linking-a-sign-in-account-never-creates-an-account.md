@@ -3,7 +3,7 @@
 **Date:** 2026-11-17  
 **Status:** in force
 
-**Question (#1073):** a signed-in member linking a Microsoft or Google identity that matches nobody got a brand-new account and was silently switched into it. What should linking do?
+**Question:** (#1073) a signed-in member linking a Microsoft or Google identity that matches nobody got a brand-new account and was silently switched into it. What should linking do?
 
 **Answer:** the owner chose: linking never creates an account. It attaches to the account the person is signed in to, or to an existing account; if the identity matches nobody the portal says so and nothing changes.
 
