@@ -81,6 +81,18 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### Install guide corrected after the local rehearsal (#1133, #1139)
+
+- `docs/INSTALL.md`: package size (about 14 MB, about 1,800 files); stop if the installer reports a beta or alpha copy
+  (a test copy lets only administrators in); step 9 adds the publisher's website and currency; scheduled jobs now say to
+  make up and keep one token per job, with the scheduler line, the token in the address (the `Authorization` header is
+  not passed on under Apache with PHP as a module: measured) and no symbols in a token; a new step names the data
+  controller (`privacy.controllerName`, `privacy.contactEmail`); which pages are reached from Admin cards; Offboarding
+  ships switched off; Remove is hidden on a one-organisation portal (D-223); the upgrade section names the dashboard's
+  button and explains that a pilot zip with a database change carries a higher last version number (D-218).
+  `tools/package/README.md` gains a bullet on D-218 and D-222. Opus check, round 1: clean, claims verified against the code
+  and a real Apache run. Codex has not reviewed this.
+
 ### The noticeboard stores every change in a visit (#1141)
 
 - The noticeboard's second and later saves in one visit were silently lost: the page read the form token once at load, the server

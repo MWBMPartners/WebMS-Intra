@@ -342,7 +342,8 @@ or by typing its address.
    period, the daily backup. Hosting panels call the page for this "Cron jobs" or "Scheduled tasks".
 
    First give each job its token, a password that only the scheduler knows. Make up a long random value: at least
-   32 letters and digits, for example from a password manager's generator. In Admin, Settings, find the setting
+   32 letters and digits only, for example from a password manager's generator with symbols switched OFF (a symbol such
+   as `%`, `&`, `#` or `+` breaks the scheduler line or the address, and the job is then refused). In Admin, Settings, find the setting
    named in the table below (for most jobs `maintenance.cronToken`), press the pencil button on its line, paste the
    value and press "Save Changes". **Keep a copy somewhere safe and private: the page never shows a saved token
    again.** A job whose token is empty refuses every call.
@@ -400,7 +401,8 @@ or by typing its address.
 7. **Name your organisation as the data controller.** The Privacy page tells members and visitors who is
    responsible for their personal details and how to reach them. In Admin, Settings, set `privacy.controllerName`
    (your organisation's legal name) and `privacy.contactEmail` (where people write about their data). Until both
-   are set, the Privacy page cannot name them, and shows administrators a notice saying so.
+   are set, the Privacy page cannot fully name them, and shows administrators a notice saying so (the notice goes away as
+   soon as either one is filled in, so set both).
 8. **Add the people** who will use the portal: Admin, then User Management. When somebody leaves, press
    **Offboard** on their line there. That button appears only once the Offboarding app is switched on (Admin, then
    Apps; it ships switched off). On a portal with one organisation, "Remove" on an organisation's user list is not
@@ -444,7 +446,7 @@ which copy this is (`.channel`) stay as they are: no package holds any of them.
 
 A package that brings a database upgrade always carries a higher version number than the one you run, and that
 is how the portal knows to close itself. If step 10 below shows the same version as before while database
-upgrades are listed as waiting, run them before anybody uses the portal: open Admin, then Upgrade, and press the
+upgrades are listed as waiting, run them before anybody uses the portal: open Admin, then the "Open the Upgrade page" card, and press the
 "Run … Pending Migration" button. The portal takes a safety copy of the database first.
 
 The notes do not always say which it will be, so plan for the first: choose a quiet time, and do the steps from
