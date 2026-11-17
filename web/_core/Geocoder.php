@@ -563,7 +563,8 @@ class Geocoder
     }
 
     /* ====================================================================== */
-    /* Cache (tblGeocodeCache — read/write ONLY here)                         */
+    /* Cache (tblGeocodeCache — read/written here; also cleared by the        */
+    /* retention sweep, GeocodeCacheRetention, and by forgetRemembered())     */
     /* ====================================================================== */
 
     private static function cacheKey(string $direction, string $queryText): string
@@ -606,16 +607,38 @@ class Geocoder
      * `["gb","1 high street"]`, or `["","1 high street"]` when it was not
      * limited to any country.
      *
-     * Nothing is tidied here. `cacheKey()` lower-cases the whole text, so
-     * `GB` and `gb` already share one row (Nominatim reads its `countrycodes`
-     * the same whatever the case). `JSON_UNESCAPED_UNICODE` keeps `É` as a
-     * letter rather than an escape, so that lower-casing folds it to `é` as it
-     * always did. A version that ALSO trimmed and lower-cased the country here
-     * was written first and taken out: planted back to the untidied form, the
-     * self-test stayed green, because `/geo/lookup` trims what it is sent and
-     * `cacheKey()` does the rest — a step nothing can tell from its absence.
-     * The country is not otherwise judged: the look-up is sent exactly as
-     * before, and what was asked is what the row is filed under.
+     * The COUNTRY half is left exactly as given. `cacheKey()` lower-cases the
+     * whole text, so `GB` and `gb` already share one row (Nominatim reads its
+     * `countrycodes` the same whatever the case). `JSON_UNESCAPED_UNICODE`
+     * keeps `É` as a letter rather than an escape, so that lower-casing folds
+     * it to `é` as it always did. A version that ALSO trimmed and lower-cased
+     * the country here was written first and taken out: planted back to the
+     * untidied form, the self-test stayed green, because `/geo/lookup` trims
+     * what it is sent and `cacheKey()` does the rest — a step nothing can tell
+     * from its absence. The country is not otherwise judged: the look-up is
+     * sent exactly as before, and what was asked is what the row is filed
+     * under.
+     *
+     * THE ADDRESS HALF IS FOLDED FOR SPACING ONLY (#1067, D-209): every run of
+     * white space (a line break of either kind, a tab, doubled spaces) becomes
+     * one space, a comma is written as `, ` whatever surrounded it, and a
+     * leading or trailing space or comma goes. Capitals are not touched here
+     * (the key's own lower-casing does that). WHY: an erasure has to find the
+     * remembered answer for an address the portal holds, by rebuilding the
+     * text the look-up was made from, and the SAME address reaches this method
+     * spelt differently. The directory's address box is a textarea: the
+     * browser's script sends its line breaks as LF, while the stored copy (a
+     * posted form turns each LF into CR LF) has CR LF, so for every address on
+     * more than one line the two never matched and an erasure would have found
+     * nothing. The small group "Look up" button joins its boxes with ", "
+     * without trimming them, so `12 Oak Road , Cambridge` is possible too.
+     * This changes ONLY the key. What is sent to the map service is the
+     * address exactly as it was typed.
+     *
+     * Where the folding cannot be applied (text that is not valid UTF-8 makes
+     * the pattern functions answer null) the text is used as it is; the
+     * eraser then simply cannot rebuild that one spelling, which is the stated
+     * limit for an address held in a form nobody can type.
      *
      * WHY A JSON LIST AND NOT `country|address`. With a plain separator a
      * country of `x|y` and an address `a` would give the same text as a
@@ -634,7 +657,9 @@ class Geocoder
      * nightly clear-out removes them as unused (#1037, D-182,
      * `GeocodeCacheRetention`). Migration 290 removed the reverse rows. No
      * installation existed when this changed (D-135), so in practice there
-     * were no such rows.
+     * were no such rows. The same is true of the spacing fold above (#1067):
+     * a row filed under an unfolded spelling is simply not found again, and
+     * the period removes it.
      *
      * The column comment on `tblGeocodeCache.queryHash` says how a key is made
      * for a public place and for a home, where "query text" is this text
@@ -643,6 +668,11 @@ class Geocoder
     private static function forwardKeyText(string $address, ?string $countryCode): string
     {
         $country = $countryCode ?? '';
+        $folded  = preg_replace('/\s+/u', ' ', $address);
+        if (is_string($folded) === true) {
+            $folded = preg_replace('/\s*,[\s,]*/u', ', ', $folded);
+        }
+        $address = is_string($folded) === true ? trim($folded, ' ,') : $address;
         $text = json_encode(
             [$country, $address],
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
@@ -651,6 +681,85 @@ class Geocoder
         // json_encode() answers false only for text it cannot encode, which the
         // SUBSTITUTE flag rules out; this keeps the key well defined if not.
         return $text !== false ? $text : '["' . bin2hex($country) . '","' . bin2hex($address) . '"]';
+    }
+
+    /**
+     * 🗑️ EVERY key an answer for this address may be remembered under (#1067,
+     * D-209): the address looked up limited to each country the portal knows
+     * (`Countries::choices()`) and to none, as a public place and as a home.
+     * This is the ONE place an erasure's keys are made — they are built by the
+     * same private methods a look-up uses, never by a copy in the eraser or a
+     * test (#647).
+     *
+     * Nothing says whose home a row is, so the only way to find the rows for
+     * an address is to rebuild every key it could have been filed under.
+     * Reads no database. A home's key is not made when the installation's
+     * secret key cannot be read (homeCacheKey() answers null): then no home
+     * row could have been written under it either, and `homeKeysMade` says so
+     * for the caller to put in its audit line.
+     *
+     * The country box on the location forms accepts any two letters, so a
+     * look-up limited to a code that is not in the portal's list is not
+     * reached. That is the one stated limit; the keeping period removes such a
+     * row.
+     *
+     * @return array{keys: list<string>, homeKeysMade: bool}
+     */
+    public static function rememberedKeysFor(string $address): array
+    {
+        $address      = trim($address);
+        $homeKeysMade = AddressFingerprint::hasInstallationKey();
+        if ($address === '') {
+            return ['keys' => [], 'homeKeysMade' => $homeKeysMade];
+        }
+
+        $keys = [];
+        foreach (array_merge([''], array_map('strval', array_keys(Countries::choices()))) as $country) {
+            $text = self::forwardKeyText($address, $country === '' ? null : $country);
+            $keys[self::cacheKey('forward', $text)] = true;
+            $home = self::homeCacheKey($text);
+            if ($home !== null) {
+                $keys[$home] = true;
+            }
+        }
+
+        return ['keys' => array_map('strval', array_keys($keys)), 'homeKeysMade' => $homeKeysMade];
+    }
+
+    /**
+     * 🗑️ Delete the forward answers remembered under any of these keys, and
+     * answer how many rows went (#1067, D-209). The only writer here that
+     * deletes for a person.
+     *
+     * UNLIKE cachePut(), THIS THROWS. A look-up that cannot be remembered
+     * costs one more request; an erasure that believes a delete which did not
+     * happen reports a remembered home as gone. It uses the connection it is
+     * given, so the eraser's own step transaction can undo it. Its
+     * messages carry no key (a home's key is a fingerprint of the home).
+     *
+     * @param list<string> $keys
+     */
+    public static function forgetRemembered(\mysqli $db, array $keys): int
+    {
+        $gone = 0;
+        foreach (array_chunk(array_values(array_unique($keys)), 500) as $chunk) {
+            $stmt = $db->prepare(
+                "DELETE FROM `tblGeocodeCache` WHERE `direction` = 'forward' AND `queryHash` IN ("
+                . implode(', ', array_fill(0, count($chunk), '?')) . ')'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException('the remembered answers could not be deleted');
+            }
+            $stmt->bind_param(str_repeat('s', count($chunk)), ...$chunk);
+            if ($stmt->execute() === false) {
+                $stmt->close();
+                throw new \RuntimeException('the remembered answers could not be deleted');
+            }
+            $gone += (int) $stmt->affected_rows;
+            $stmt->close();
+        }
+
+        return $gone;
     }
 
     /**

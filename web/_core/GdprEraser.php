@@ -2428,6 +2428,35 @@ class GdprEraser
             if ($reopenedIn !== []) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::refuseReopenedMerge($db, $requestId, $reopenedIn));
             }
+            // 🗺️ #1067 (D-209) — the remembered map positions of the addresses
+            //    held for this person. BEFORE the walk AND BEFORE
+            //    the merged-in accounts' details are emptied, and that is
+            //    load-bearing (#709's ordering trap): the walk empties
+            //    `displayAddress`, the hosts' meeting-place addresses and their
+            //    link to the host, and `eraseMergeRecords()` empties a merged-in
+            //    account's own address, which are the only way to find these
+            //    rows — nothing on a remembered position says whose it is. Run
+            //    after either it would find nothing and write "none".
+            //
+            //    IT THROWS ON A FAILURE, where every other step above and below
+            //    answers STEP_FAILED. A failed step lets the walk carry on and
+            //    empty the addresses, so the next run would find nothing and
+            //    the request would close as "completed" with the positions
+            //    still there: the silent-success shape. Thrown, the outer catch
+            //    stops the run, puts the request back and nothing after this
+            //    point has run. A SECOND run that finds nothing is therefore
+            //    correct: the first run's step committed, with its audit line,
+            //    before any later step could fail.
+            //
+            //    It is NOT in DEDICATED_STEP_TABLES, on purpose (the #707
+            //    precedent, eraseAuditTrailAboutPerson()): that list means "the
+            //    whole table is erased by a step and handed over in the data
+            //    copy", and here only the matching rows go while every other
+            //    row is kept for the D-182 period.
+            $outcomes[] = self::asOneStep(
+                $db,
+                static fn (): string => self::eraseRememberedMapPositions($db, $requestId, array_merge([$userId], array_keys($mergedIn)))
+            );
             if ($mergedIn !== []) {
                 $outcomes[] = self::asOneStep($db, static fn (): string => self::eraseMergeRecords($requestId, array_keys($mergedIn)));
             }
@@ -9602,6 +9631,159 @@ class GdprEraser
 
             return $emptied;
         }
+    }
+
+    /**
+     * 🗺️ Delete the remembered map positions whose address matches an address
+     * held for this person (#1067, D-209) — their directory address, a Gift
+     * Aid declaration's address, and the address of any small group meeting
+     * place they are the named host of — for this account and for every
+     * account merged into it (D-199).
+     *
+     * Nothing on a remembered position says whose it is, so the rows are found
+     * by rebuilding every key the held addresses could have been filed under
+     * (`Geocoder::rememberedKeysFor()`, the ONE place keys are made) and
+     * deleting those (`Geocoder::forgetRemembered()`).
+     *
+     * A SHARED ADDRESS (a household, a church hall) IS DELETED TOO, home and
+     * public kind alike. A remembered position is a memo the whole
+     * installation shares and nobody owns: the other person's own address and
+     * their own stored map position are not touched, and the next look-up of
+     * that address asks the map service again. D-209 says "any remembered
+     * position whose address matches"; do not "fix" this into a sharing check.
+     *
+     * DELIBERATELY NOT SOURCES: `tblGivingKeptDonors` (a copy made by this
+     * same erasure from the declaration or the account, so its text is already
+     * a candidate); `tblSalvationCards.address` and
+     * `tblEvents.locationAddress` (nothing records whose address it is);
+     * venues, the organisation's address, resources and asset locations
+     * (places, not people); a small group place the person only ENTERED
+     * (`placeEnteredByID` is the named host's home, not theirs); an address
+     * the person held before and changed, or typed and looked up without
+     * saving (nothing records it — the keeping period removes it). A look-up
+     * limited to a country code the portal does not list is not reached
+     * either (see Geocoder::rememberedKeysFor()).
+     *
+     * ⚠️ IT THROWS, with fixed words, when a read or the delete fails — see
+     * the comment at its call in execute() for why. Never the database's own
+     * words: a key is a fingerprint of a home. The audit line names no address
+     * and no key (`tblErasureAudit` is sealed and never erased, #510 rule 7d).
+     *
+     * @param list<int> $userIds This account and every account merged into it.
+     *
+     * @return string STEP_CHANGED or STEP_UNCHANGED.
+     */
+    private static function eraseRememberedMapPositions(\mysqli $db, int $requestId, array $userIds): string
+    {
+        try {
+            // The portal's own loader finds these classes; two self-tests load
+            // the eraser by hand without it (the house pattern, see
+            // `ActivityLogRetention::needSettingLimit()`), so each is asked for
+            // first and read from this folder only when it is not there.
+            foreach (['AddressFingerprint', 'SecretSettings', 'Countries', 'GeoLocation', 'Geocoder'] as $needed) {
+                if (class_exists(__NAMESPACE__ . '\\' . $needed) === false) {
+                    require_once __DIR__ . DIRECTORY_SEPARATOR . $needed . '.php';
+                }
+            }
+            $keys         = [];
+            $homeKeysMade = AddressFingerprint::hasInstallationKey();
+            foreach (self::rememberedMapAddressesOf($db, $userIds) as $address) {
+                $made = Geocoder::rememberedKeysFor($address);
+                foreach ($made['keys'] as $key) {
+                    $keys[$key] = true;
+                }
+                $homeKeysMade = $made['homeKeysMade'];
+            }
+            $gone = Geocoder::forgetRemembered($db, array_map('strval', array_keys($keys)));
+        } catch (\Throwable $e) {
+            throw new \RuntimeException('the remembered map positions held for this person could not be deleted');
+        }
+
+        $words = 'Remembered map positions whose address matches an address held for this person (their directory '
+            . 'address, a Gift Aid declaration, a small group meeting place they are the named host of): '
+            . ($gone > 0 ? $gone . ' deleted' : 'none found');
+        if ($homeKeysMade === false) {
+            $words .= '. Positions remembered for a home could not be looked for, because the installation\'s secret '
+                . 'key could not be read; any such position is removed when unused for the keeping period';
+        }
+        self::logAudit($db, $requestId, $gone > 0 ? 'delete' : 'none', 'tblGeocodeCache', $gone > 0 ? $gone . ' rows' : null, $words);
+
+        return $gone > 0 ? self::STEP_CHANGED : self::STEP_UNCHANGED;
+    }
+
+    /**
+     * 📍 The address texts held for these accounts that an address look-up may
+     * have been made from, in every form the look-up pages build them (#1067).
+     * Reads only; THROWS on a failed read.
+     *
+     * - `tblUsers.displayAddress`: the directory's "Look up coordinates"
+     *   button sends the box's text with LF line breaks, trimmed and cut at
+     *   500 characters; the stored copy has CR LF. Both the stored text and
+     *   the browser's form (CR LF folded, trimmed, cut) are returned, because
+     *   the cut falls in a different place on the two. (Geocoder folds the
+     *   spacing in the key, so the line breaks themselves no longer matter.)
+     * - `tblSmallGroups` and `tblSmallGroupPlaces` where the person is the
+     *   named HOST: the parts joined the way `GeoLocation::formatAddress()`
+     *   does, which both the save page and the "Look up" button use.
+     * - `tblGiftAidDeclaration` where the person is the donor: the address
+     *   with its postcode, and the address alone.
+     *
+     * @param list<int> $userIds
+     * @return list<string> Each text once, never empty.
+     */
+    private static function rememberedMapAddressesOf(\mysqli $db, array $userIds): array
+    {
+        $userIds = array_values(array_unique(array_map('intval', $userIds)));
+        if ($userIds === []) {
+            return [];
+        }
+        $marks = implode(', ', array_fill(0, count($userIds), '?'));
+        $types = str_repeat('i', count($userIds));
+        $read  = static function (string $sql) use ($db, $marks, $types, $userIds): array {
+            $stmt = $db->prepare(str_replace('{IDS}', $marks, $sql));
+            if ($stmt === false) {
+                throw new \RuntimeException('the held addresses could not be read');
+            }
+            $stmt->bind_param($types, ...$userIds);
+            $stmt->execute();
+            $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+
+            return $rows;
+        };
+
+        $found = [];
+        $add   = static function (?string $text) use (&$found): void {
+            $text = trim((string) $text);
+            if ($text !== '') {
+                $found[$text] = true;
+            }
+        };
+
+        foreach ($read('SELECT `displayAddress` AS `a` FROM `tblUsers` WHERE `userID` IN ({IDS})') as $row) {
+            $stored = trim((string) $row['a']);
+            $add($stored);
+            $add(mb_substr(trim(str_replace("\r\n", "\n", $stored)), 0, 500));
+        }
+        foreach (['tblSmallGroups', 'tblSmallGroupPlaces'] as $table) {
+            foreach ($read(
+                'SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode` FROM `' . $table . '` WHERE `hostUserID` IN ({IDS})'
+            ) as $row) {
+                $add(GeoLocation::formatAddress([
+                    'line1'    => trim((string) $row['addressLine1']),
+                    'line2'    => trim((string) $row['addressLine2']),
+                    'city'     => trim((string) $row['city']),
+                    'region'   => trim((string) $row['region']),
+                    'postcode' => trim((string) $row['postcode']),
+                ]));
+            }
+        }
+        foreach ($read('SELECT `address`, `postcode` FROM `tblGiftAidDeclaration` WHERE `donorID` IN ({IDS})') as $row) {
+            $add((string) $row['address']);
+            $add(GeoLocation::formatAddress(['line1' => trim((string) $row['address']), 'postcode' => trim((string) $row['postcode'])]));
+        }
+
+        return array_map('strval', array_keys($found));
     }
 
     /** The audit line and step answer for eraseAuditTrailAboutPerson(). */

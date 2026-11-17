@@ -190,8 +190,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             address setting above lets them see addresses. A planned meeting takes no roll and is not counted in
             attendance figures.</li>
         <li><strong>When a host's account is erased,</strong> the address of every place they are named as host of
-            is emptied, together with their agreement to a map. An address with no host named is not reached by
-            anybody's erasure, because nothing records whose home it is.</li>
+            is emptied, together with their agreement to a map, and any map position the portal remembered for that
+            address is deleted too. An address with no host named is not reached by anybody's erasure, because
+            nothing records whose home it is.</li>
     </ul>
 </section>
 

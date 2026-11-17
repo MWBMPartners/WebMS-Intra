@@ -258,8 +258,10 @@ final class GeocodeCacheRetention
      * 📄 The privacy notice's sentence about remembered map positions of homes
      *    (D-183), as plain text; the page escapes it. One place, so the notice
      *    and the "what we store" list cannot say different things. Nothing on a
-     *    row says whose home it is, so an erasure request cannot single one
-     *    out — said, because a member deciding what to ask for needs it.
+     *    row says whose home it is, so an erasure finds a person's rows by the
+     *    ADDRESSES held for them (#1067, D-209) and says which; a position for
+     *    any other address is left to the time limit — said, because a member
+     *    deciding what to ask for needs it.
      */
     public static function privacyWords(\mysqli $db): string
     {
@@ -294,8 +296,12 @@ final class GeocodeCacheRetention
 
         return 'When an address marked as somebody\'s home (for example a small group\'s host, or your own address '
             . 'in the directory) is looked up on a map, ' . $remembers . $period . ', if the nightly clear-out has '
-            . 'been set up. Nothing on it says whose home it is, so an erasure request cannot pick it out; the time '
-            . 'limit is what removes it. Positions of public places, such as venues, are treated as not about anybody.';
+            . 'been set up. Nothing on it says whose home it is. If you ask for your details to be erased, any '
+            . 'remembered position for an address the portal holds for you (your address in the directory, a Gift Aid '
+            . 'declaration\'s address, or a small group meeting place where you are named as the host) is deleted with '
+            . 'them; a position remembered for any other address (one you have since changed, or one typed but never '
+            . 'saved) is removed by the time limit. Positions of public places, such as venues, are treated as not '
+            . 'about anybody.';
     }
 
     /**
