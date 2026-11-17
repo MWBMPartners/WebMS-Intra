@@ -14,51 +14,43 @@ package, only realistic harm blocks, narrow findings become issues (D-204). The 
 
 ## Branch
 
-`claude/alpha-wip`, pushed after each landing. HEAD `85ae1438` (pushed 17 November). Landed and pushed 15-17 November:
-#808, #1064 (merge accounts, migrations 297 and 299), #993 (exchange rates 301, spend in the provider's own currency
-302), #575, #1066, #1095, #1088 (migration 303), #539, #939, #606 (items 1, 2, 4, 5), #1096, plus decisions D-186 to D-209.
-Migration numbers in use: 290, 292, 294-303 (291, 293 never existed). **After the pilot is installed, every schema
-change needs a numbered migration again and the migration harness must upgrade from the installed commit (D-135 ends).**
+`claude/alpha-wip`. HEAD `e8cb581f` (local; last push `1703db10`, 17 November). Landed since the plan began: #808, #1064
+(merge accounts, migrations 297, 299), #993 (301, 302), #575, #1066, #1095, #1088 (303), #539, #939, #606 (1, 2, 4, 5),
+#1096, #1073, #1067, #1092, #934 (consent records, 305), #1131 (API docs restricted), #1136/#1142 (erasure notice, Offboard
+link, Remove hidden on one-organisation portals), #1137 (a whole restore ends every sign-in), #1141 (noticeboard saves).
+Migration numbers in use: 290, 292, 294-305. **After the pilot is installed, every schema change needs a numbered
+migration again and the migration harness must upgrade from the installed commit (D-135 ends).**
 
 ## Waiting on the owner
 
-- **2g (#934, consent-record clear-out)** needs two answers: a visitor's cookie-choice record is never "replaced"
-  (recommended: when its cookie runs out, 365 days); the portal does not record when a member left (recommended:
-  "leaves" means the account is erased, already deleted at once; an issue for the rest).
-- **Q-2e-1:** the privacy notice's "on" wording for "we issue tax receipts" was built on the recommended answer (the
-  giving statement is the receipt) and awaits confirmation.
-- Later, for the real-host rehearsal: a spare DreamHost subdomain and empty database; and how pilot zips are numbered
-  (D-024 keeps `version.php` at 1.4.1, so two pilot zips carry one number: measure whether Admin, Migrations still runs a
-  new migration with equal versions).
+- Run `gh auth refresh -s read:project -s project` so the plan board (#1132) can be made (milestones exist: 19 Pilot
+  install, 20 Release, 21 After release).
+- #1140: may an API key holder open `/api-docs`? Built as No.
+- For the real-host rehearsal: a spare DreamHost subdomain and an empty database (give a short checklist when the
+  local rehearsal passes; secrets never in chat).
 
 ## In flight
 
-- **2b-ii** (#1092 part two: the robot check's hosts in the page rule on four forms plus `salvation/card.php`): Sonnet
-  builder running on `p2bii-build`; then an Opus check (max three rounds).
+- **R1** (#1133, #1139: install guide corrections): built on `pR1-build` (26999fb2); an Opus read-through is running.
+  Land it, then push.
 
 ## Next, in this order
 
-1. **#1073** (D-208: linking never creates an account) and **#1067** (D-209: an erasure removes remembered map positions
-   matching the person's own address): plan (Opus), build (Sonnet), check (Opus, max three rounds). #1067 touches
-   GdprEraser and Geocoder.
-2. **2g (#934)** once the owner answers (protected arm; migration 304 only if needed).
-3. Verification before the install, in order: the whole suite; the migration harness on all engines; a zip built on a
-   clean worktree (`bash tools/package/build.sh <commit> beta <empty folder>`, then `tools/package/package-selftest.sh`);
-   confirm each paid service ships off; an install rehearsal locally then on the spare subdomain, walking the first-use
-   journey (sign in, organisation settings, invite two members, events, noticeboard, a gift and statement, backups,
-   privacy pages, My data, one erasure); an upgrade rehearsal. Then the install (the owner's action).
-4. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078 within months, #591, #1082), #754, the
-   full Codex review (about 40 allowances for the branch; about 5 for the sign-in/erasure/money/backup core and the
-   installer), then the merge.
+1. Land R1; push `claude/alpha-wip`.
+2. Build the LIVE pilot zip from the final commit (D-222): `bash tools/package/build.sh <commit> live <new empty folder>`,
+   no `--tag`, never published; then `tools/package/package-selftest.sh` and `check-package.py`. A pilot zip with a
+   database change takes a new last version number (D-218).
+3. Second local install and upgrade rehearsal (Opus agent) from that zip, following INSTALL.md (live channel, first-use
+   journey, offboard and rehire, erasure notice, restore, noticeboard saves, API docs restricted). Fix defects.
+4. DreamHost rehearsal on the owner's subdomain, then the pilot install (the owner's action). Record the installed
+   commit and add it to the migration harness as an upgrade starting point.
+5. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078, #591, #1082), #754, the full Codex
+   review (about 40 allowances for the branch, about 5 for the core), then the merge to main.
 
 ## Raised, not built (selection; the tracker is the record)
 
-#1097 (an address changed during an erasure run), #1098-#1105 (spend limits: own-limit page, per-currency maxima,
-"Pence" keys, other billing currencies, unverified prices, removed organisations' typed rates, month-boundary test, limits
-not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle with a Babel fingerprint),
-#1107/#1108 (care case: edit who it is about; the picker lists every member), #1109-#1111 (header overrides, custom
-live embed, empty test database password), #1112/#1113 (events API mark; home event coordinates), #1114-#1118
-(invitation races, wording, #606 item 3), #1119 (sign-in redirect double-encodes an address).
+#1097, #1105 (money limit not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle), #1108,
+#1123, #1127-#1130, #1143-#1149 (#1148: beta gate versus scheduled jobs; #1149: noticeboard save timeout and notice).
 
 ## Working pattern
 
@@ -75,8 +67,7 @@ self-test cap is 900 s). Never wait with `pgrep -f`.
 
 | What | Why |
 |---|---|
-| SIGNula.id | Five local commits waiting for the owner's push approval |
-| 2g answers, Q-2e-1 | See above |
+| The board command, #1140, the rehearsal host | See "Waiting on the owner" |
 
 ## Standing facts a reader needs
 
