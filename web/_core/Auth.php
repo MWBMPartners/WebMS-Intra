@@ -1475,6 +1475,59 @@ class Auth
     }
 
     /**
+     * 🔗 The account a signed-in member is LINKING from (D-208, #1073), or 0
+     * for an ordinary sign-in.
+     *
+     * Linking is the Microsoft or Google callback reached by a browser that is
+     * SIGNED IN: the Account page's "Link Google" / "Link Microsoft 365"
+     * buttons and "Add a password" (#731) send a member there on purpose.
+     * Only `user_id` counts. A browser waiting for a two-step code
+     * (`2fa_user_id`) is nobody signed in, so it is an ordinary sign-in and
+     * must not be refused; a kiosk browser (`kiosk_user_id`) is no sign-in
+     * either (see `sessionPerson()`).
+     *
+     * Read it in step 5 of each callback, BEFORE anything below can change
+     * the session.
+     *
+     * @return int The signed-in account number, or 0.
+     */
+    private static function linkingFor(): int
+    {
+        $value = $_SESSION['user_id'] ?? null;
+        if ((is_int($value) === true || (is_string($value) === true && ctype_digit($value) === true))
+            && (int) $value > 0
+        ) {
+            return (int) $value;
+        }
+
+        return 0;
+    }
+
+    /** The activity type written when a linking attempt is refused (D-208, #1073). */
+    private const LINK_REFUSED_EVENT = 'AccountLinkRefused';
+
+    /**
+     * 📝 Record that a linking attempt was refused (D-208, #1073). Fixed words
+     * only (#933): never the e-mail address the provider sent, the provider's
+     * subject, or the OTHER account's number — the record is under the
+     * signed-in member's own number. It does not call `oauthError()`: each
+     * caller names its own `SsoSignInProblem` constant there.
+     *
+     * @param string $providerWords 'Microsoft' or 'Google' — this file's own words.
+     * @param int    $linkingFor    The signed-in member's account number.
+     * @param string $why           One of three fixed phrases chosen by the caller.
+     */
+    private static function recordLinkingRefused(string $providerWords, int $linkingFor, string $why): void
+    {
+        Logger::activity(
+            self::LINK_REFUSED_EVENT,
+            'A ' . $providerWords . ' sign-in started while signed in ' . $why
+                . ', so nothing was linked or made and the sign-in was not changed',
+            $linkingFor
+        );
+    }
+
+    /**
      * 🔑 THE ONE PLACE A SIGN-IN DECIDES WHAT IT KEEPS OF THE SESSION BEFORE
      * IT (#900). Call it at every grant of an identity, IMMEDIATELY BEFORE
      * `$_SESSION['user_id']` is written (for the second step, before the
@@ -1529,7 +1582,9 @@ class Auth
      * signed-in member to exactly those addresses to prove who they are
      * (#731), so refusing would break the recovery route that feature exists
      * for. Deciding by WHO signs in covers that case and the shared browser
-     * alike.
+     * alike. (D-208, #1073: what the callbacks DO refuse while linking is
+     * creating an account or signing in as a different one; they check that in
+     * step 5, before this is reached.)
      *
      * WHAT IT CANNOT DO
      *   - Tell apart two people who share one ACCOUNT: to the portal that is
@@ -2388,6 +2443,12 @@ class Auth
      * Exchanges the authorization code for tokens, verifies the JWT ID token,
      * upserts the user in the database, and creates a session.
      *
+     * D-208 (#1073): when the browser is already SIGNED IN (the Account page's
+     * link button, "Add a password") this is LINKING, and it never creates an
+     * account or signs in as a different one: it attaches only to the member's
+     * own account, and refuses an identity that matches nobody, is linked to
+     * another account, or carries another account's e-mail address.
+     *
      * @see https://learn.microsoft.com/en-us/entra/identity-platform/id-tokens
      *
      * @return void (terminates with redirect on success or error message on failure)
@@ -2501,14 +2562,34 @@ class Auth
         }
 
         /* ----------------------- 5. Find or create user -------------------- */
+        // 🔗 D-208 (#1073): is a SIGNED-IN member linking? Read before anything
+        //    below can change the session. While linking, the only account
+        //    this may attach to is the member's own; nothing is created and
+        //    nobody is switched. Every refusal sits BEFORE any update, link,
+        //    creation or sign-in, so the other account is left untouched.
+        $linkingFor = self::linkingFor();
+
         // 🔍 Check if there's already a linked account for this MS365 sub
         $userId = self::findUserByLink('ms365', $sub !== '' ? $sub : $email, $mysqli);
+
+        if ($userId !== null && $linkingFor !== 0 && $userId !== $linkingFor) {
+            self::recordLinkingRefused('Microsoft', $linkingFor, 'is already linked to a different account');
+            self::oauthError(SsoSignInProblem::LINKED_ELSEWHERE, 'Microsoft', 403);
+        }
 
         if ($userId === null) {
             // 🔍 Try to match by email address (auto-link / legacy upsert)
             $userId = self::findUserByEmail($email, $mysqli);
 
             if ($userId !== null) {
+                // 🔗 D-208 (#1073): its e-mail address is somebody ELSE's account.
+                //    Refused before the update and the link below, which would
+                //    change that account and sign this browser in as it.
+                if ($linkingFor !== 0 && $userId !== $linkingFor) {
+                    self::recordLinkingRefused('Microsoft', $linkingFor, 'carries the e-mail address of a different account');
+                    self::oauthError(SsoSignInProblem::EMAIL_ELSEWHERE, 'Microsoft', 403);
+                }
+
                 // ♻️ Update existing user's name and avatar
                 // 🔒 #1064 round 8: never on an account a merge has closed. The look-up
                 //    above found it switched on, but a merge committing in between
@@ -2547,6 +2628,13 @@ class Auth
                 //    and address changed after a restored backup looks like,
                 //    and why it is a setting. A refusal signs nobody in and
                 //    makes nothing.
+                // 🔗 D-208 (#1073): linking NEVER makes an account, whatever
+                //    `auth.sso.createAccounts` says. Only somebody signing in can.
+                if ($linkingFor !== 0) {
+                    self::recordLinkingRefused('Microsoft', $linkingFor, 'matched no account');
+                    self::oauthError(SsoSignInProblem::NO_ACCOUNT, 'Microsoft', 403);
+                }
+
                 self::refuseNewAccountUnlessAllowed('Microsoft');
 
                 // ➕ Create new user + link
@@ -2704,6 +2792,9 @@ class Auth
      * Google's JWKS, upserts the user, creates a linked account record, and
      * starts a session.
      *
+     * D-208 (#1073): a browser already SIGNED IN is LINKING, and as in
+     * callbackMS365() it never creates an account or signs in as another.
+     *
      * @see https://developers.google.com/identity/protocols/oauth2/openid-connect
      *
      * @return void (terminates with redirect on success or error message on failure)
@@ -2821,14 +2912,34 @@ class Auth
         }
 
         /* ----------------------- 5. Find or create user -------------------- */
+        // 🔗 D-208 (#1073): is a SIGNED-IN member linking? Read before anything
+        //    below can change the session. While linking, the only account
+        //    this may attach to is the member's own; nothing is created and
+        //    nobody is switched. Every refusal sits BEFORE any update, link,
+        //    creation or sign-in, so the other account is left untouched.
+        $linkingFor = self::linkingFor();
+
         // 🔍 Check if there's already a linked account for this Google sub
         $userId = self::findUserByLink('google', $sub, $mysqli);
+
+        if ($userId !== null && $linkingFor !== 0 && $userId !== $linkingFor) {
+            self::recordLinkingRefused('Google', $linkingFor, 'is already linked to a different account');
+            self::oauthError(SsoSignInProblem::LINKED_ELSEWHERE, 'Google', 403);
+        }
 
         if ($userId === null) {
             // 🔍 Try to match by email address (auto-link)
             $userId = self::findUserByEmail($email, $mysqli);
 
             if ($userId !== null) {
+                // 🔗 D-208 (#1073): its e-mail address is somebody ELSE's account.
+                //    Refused before the update and the link below, which would
+                //    change that account and sign this browser in as it.
+                if ($linkingFor !== 0 && $userId !== $linkingFor) {
+                    self::recordLinkingRefused('Google', $linkingFor, 'carries the e-mail address of a different account');
+                    self::oauthError(SsoSignInProblem::EMAIL_ELSEWHERE, 'Google', 403);
+                }
+
                 // ♻️ Update name/avatar from Google profile
                 // 🔒 #1064 round 8: never on an account a merge has closed. The look-up
                 //    above found it switched on, but a merge committing in between
@@ -2858,6 +2969,13 @@ class Auth
                 //    D-185). Asked only here, after every way of matching an
                 //    existing account has failed. A refusal signs nobody in
                 //    and makes nothing.
+                // 🔗 D-208 (#1073): linking NEVER makes an account, whatever
+                //    `auth.sso.createAccounts` says. Only somebody signing in can.
+                if ($linkingFor !== 0) {
+                    self::recordLinkingRefused('Google', $linkingFor, 'matched no account');
+                    self::oauthError(SsoSignInProblem::NO_ACCOUNT, 'Google', 403);
+                }
+
                 self::refuseNewAccountUnlessAllowed('Google');
 
                 // ➕ Create new user + link
@@ -5138,6 +5256,9 @@ class Auth
     /**
      * 🆕 Stop a Microsoft or Google sign-in here unless it may make a new
      * account (#1042, D-185). `SsoNewAccounts::allowed()` is the ONE rule.
+     *
+     * D-208 (#1073): a member who is already signed in (linking) never reaches
+     * this: the callbacks refuse them first, whatever the setting says.
      *
      * On a refusal: nobody is signed in (the callback has granted nothing yet
      * — `beginSessionFor()` and `$_SESSION['user_id']` come after the account
