@@ -398,6 +398,10 @@ or by typing its address.
    | `/cron/backup-check` | once a day | `?token=`, `maintenance.cronToken` | 36 hours |
    | `/cron/discipleship-sweep` | once a day, while Discipleship Pathways is switched on | `?key=`, `discipleship.cron_token` | 36 hours |
    | `/cron/giving-statements` | at least once a week, while Giving is switched on or statements are waiting to be sent | `?key=`, `giving.cron_token` | 8 days |
+7a. **Name your organisation on giving statements.** A giving statement is the donor's receipt, and it is headed with
+   your organisation's name. A new installation's organisation is called "Portal" until you rename it (Admin, Sites),
+   and a registered charity should also type its name and number in Admin, Settings (`giving.charityName`,
+   `giving.charityNumber`). Do this before the first statement is sent.
 7. **Name your organisation as the data controller.** The Privacy page tells members and visitors who is
    responsible for their personal details and how to reach them. In Admin, Settings, set `privacy.controllerName`
    (your organisation's legal name) and `privacy.contactEmail` (where people write about their data). Until both

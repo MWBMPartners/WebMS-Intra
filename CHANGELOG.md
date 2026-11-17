@@ -81,6 +81,15 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### The giving statement names the organisation that issued it (#1156)
+
+- The statement PDF and its e-mail were headed with nothing, because they read the request's merged giving settings. They now
+  take the statement's own organisation: its typed charity name, else its own name, and "Charity <number>" only when one is
+  held. Figures are unchanged. Before the first statement, rename the organisation (it starts as "Portal") and type the charity
+  name and number (INSTALL.md step 7a). Opus check round 1: pass. Open: on a portal with several organisations the charity
+  name and number can only be set for the whole installation, so every organisation's receipt carries them; nothing tests the
+  e-mail half. Codex has not reviewed this.
+
 ### API keys work behind Apache with PHP as a module; two job tokens are secret (#1153, #1154)
 
 - Under Apache with PHP as a module the `Authorization` header never reached PHP, so every API key was refused
