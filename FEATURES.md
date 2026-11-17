@@ -2390,3 +2390,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Care register, "Open new case": required "Who is this case about?" list (`Site::membersForPicker()`); typed name only for people with no account (#1066).
 
 - Events: the "a public place" mark decides whether the event page shows an OpenStreetMap map (`tblEvents.locationNotAHome`, #1088).
+
+- Invitations: volunteer and staff roles really granted on acceptance (#539). Giving records: "We issue tax receipts" tick (#939). Admin home: Upgrade, Organisation settings and E-mail tiles (#606).

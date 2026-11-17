@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Invitations grant their role; the tax-receipt wording follows the organisation; the administrator's first ten minutes (#539, #939, #606)
+
+- Invitations for "volunteer" and "staff" now grant that role when accepted (#539). Both are judged by D-093 (asked of
+  the inviter when the invitation is saved and again, under the lock, when it is accepted); a role the organisation no
+  longer has refuses the whole acceptance with nothing written; the New invitation form offers only roles that can be
+  handed out and now prints a refusal. "admin" is unchanged.
+- The privacy notice, the administrators' help, the giving-records page and the erasure report no longer say "tax
+  receipt" for every organisation (#939, D-167). New per-organisation tick on the giving-records page, "We issue tax
+  receipts", stored as `giving.retention.taxReceipts` (`true`/`false`, not seeded: a missing row means no); it changes
+  words only, never which gifts keep a name. **The "on" wording ("gifts covered by a tax declaration, or by a giving
+  statement (this organisation's tax receipt)") awaits the owner's confirmation (Q-2e-1).**
+- Admin home links Upgrade and E-mail (global administrator) and Organisation settings (any administrator); the
+  installer's last page says where the organisation's name and time zone are changed (Admin, Organisations);
+  "umbrella administrator", "FTP sync" and "web/_backups/" wording replaced (#606 items 1, 2, 4; item 5 was already
+  done; item 3 deferred). Open: two accepting at once can deadlock (a retry works), a revoke crossing an accept, the
+  erasure page's catalogue sentence still says "receipt" for everyone, the Organisation settings tile's description is
+  untrue (it edits country, currency, address and support e-mail, not the name or time zone). Codex has not reviewed
+  this.
+
 ### An event at a home no longer asks an outside map company for a map (#1088; D-120, D-128, D-183)
 
 - An event page no longer asks OpenStreetMap for a map unless whoever set the event marked its place as "a public

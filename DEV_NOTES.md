@@ -24993,3 +24993,19 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   `$insertColumns`; `series-repattern.php` reads `SELECT *`, so it is carried with no edit.
 - Guard: `check_outside_services_gated.py` rule 8 checks presence only; an extra, ungated tile-host widening would
   pass it, and only the self-test's P2 plant catches that (D-065).
+
+### Invitations grant roles, and the receipt phrase has one place (#539, #939, #606)
+
+- `invites/accept.php` grants through `Roles::grant()` inside its transaction; D-093 is asked of the INVITER at save and
+  again under `lockMappingOf()` at acceptance, and recorded AFTER the rollback (the log shares the connection).
+- `GivingRetention::receiptedGiftWords()` / `keptGiftWords()` are the ONE place the phrase naming the gifts that keep a
+  donor's name is written; `ruleForSite()['issuesReceipts']` is read from the organisation's OWN row only, exact word
+  `true`. The tick sends a marker (`taxReceiptsShown`) so an unticked box is told apart from a missing field (#677).
+- Known, from the independent check: two acceptances at once for the same organisation can deadlock (error 1213; the
+  loser is told the username is in use, a retry works; fix: ask `whyRoleChangeRefusedUnderLock()` straight after
+  `begin_transaction()`); the acceptance's `UPDATE tblInvitation SET acceptedAt` does not check it is still unaccepted
+  and unrevoked; an invitation outlives a demoted inviter (D-093 is re-asked); `invites/index.php` never prints its
+  flash, so "Issued N invitation(s)" turns up later on the New invitation form.
+- #606: an organisation's name AND time zone are edited at Admin, Organisations (`admin/sites`); `site.name` and
+  `tblSites.siteName` are both still read and not merged (product change). Item 3: the package carries no local
+  Bootstrap or Font Awesome copy (gitignored, fetched by `tools/download-cdn-fallbacks.sh`, not added by `build.sh`).

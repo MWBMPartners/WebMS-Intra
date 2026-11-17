@@ -3271,6 +3271,7 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   `AccountMerge::mergedInto()`. A merged-away account is never changed again (`AccountGuard` row 3b, from
   `AccountMerge::mergedAwaySql()`). Only the person, signed in to both accounts in one browser, at least 7 days after
   the notice, completes it.
+- **Invitations grant volunteer and staff (#539; D-093) and the receipt phrase has one place (#939; D-167).** `invites/accept.php` grants through `Roles::grant()` inside its transaction; D-093 is asked of the INVITER at save and again under `lockMappingOf()` at acceptance (test `tools/invite-roles-selftest.php`). `GivingRetention::receiptedGiftWords()` is the ONE place "tax receipt" can be written, and only where the organisation ticked `giving.retention.taxReceipts`.
 - **An event's map (#1088; D-120, D-128, D-183).** `OutsideServices::allowsEventPlaceMap()` is the ONE decision whether an event page may show a map: only for an event whose `locationNotAHome` is 1, and then on the viewer's tiers. `calendar/event.php` never names the tile host. Guard: `check_outside_services_gated.py` rule 8; test `tools/event-place-map-selftest.php`.
 - **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place
   that decides whether a member's details may go to an outside company (Gravatar, a sign-in
