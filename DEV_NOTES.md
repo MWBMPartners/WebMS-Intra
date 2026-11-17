@@ -25270,3 +25270,13 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   captures `window.NoticeboardHost.csrf` once is the #768 fault again: copy the nearest pattern (`Portal.csrf` +
   `Portal.rememberCsrf`). The real-browser test is `tools/noticeboard-babel-browser-selftest.mjs` (sections C and D) and the HTTP
   test `tools/noticeboard-save-selftest.php`.
+
+### A whole-suite run found six red tests, four of them red before this stretch (17 November 2026)
+
+- Two were caused by this stretch: the `.htaccess` rule added for #1153 needs its new checksum in `ALLOWED_HTACCESS` in
+  `tools/package/check-package.py` (otherwise EVERY package build fails the allow-list guard; the pre-push hook does not
+  catch it), and the two job tokens marked secret by migration 306 must be listed in `SEEDED_SINCE` of
+  `tools/settings-secrets-selftest.php`. Four were already red: #1134 changed every geocoder answer (a new `csrfToken`)
+  and the map script's call shape, and #1137 ends every sign-in at a whole restore, which two tests had not been taught.
+  No portal fault. Lesson: run `tools/run-all-selftests.sh` after every few packages, not once at the end (D-055's
+  "red baseline" warning, repeated); a rule change in `web/public_html/.htaccess` needs its checksum updated in the same commit.
