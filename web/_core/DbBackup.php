@@ -4465,6 +4465,27 @@ class DbBackup
                 $warnings[] = self::leftEmptyWords($leftEmpty, $dryRun);
             }
 
+            // 🔐 EVERY SESSION ENDS (#1137). A restore may hand an account number
+            //    to a different person, and a session knows only the number, so
+            //    every account's sign-in number moves and every session is
+            //    ended on its next request. INSIDE the transaction, so a
+            //    rehearsal (rolled back below) and a stopped restore move
+            //    nothing. Auth::endEverySessionAfterRestore() is the ONE place.
+            //    Loaded here when nothing has loaded it (a self-test runs this
+            //    class with no autoloader), as holdRestoredMail() does for
+            //    MailQueue; a missing class would stop the restore and undo it.
+            if (class_exists(Auth::class) === false) {
+                require_once __DIR__ . DIRECTORY_SEPARATOR . 'Auth.php';
+            }
+            $sessionsEnded = Auth::endEverySessionAfterRestore($this->db);
+            if ($sessionsEnded === false) {
+                $warnings[] = 'Nobody could be signed out: the database upgrade that records sign-in numbers '
+                            . '(migration 270) has not been run. Everybody who was signed in '
+                            . ($dryRun === true ? 'would stay' : 'stays')
+                            . ' signed in under the restored accounts, which may be different people. Run the upgrade '
+                            . 'at Admin, Upgrade, then sign everybody out by changing their passwords or restoring again.';
+            }
+
             if ($dryRun === true) {
                 // 🎭 THE REHEARSAL ENDS HERE, BY UNDOING EVERYTHING. A rehearsal
                 //    that failed to undo would be a restore nobody asked for,
@@ -4491,6 +4512,7 @@ class DbBackup
                     ),
                     'pointers_emptied'     => $emptied,
                     'other_tables_changed' => $outsideChanged,
+                    'sessions_ended'       => $sessionsEnded,
                     'connection_closed'    => false,
                 ];
             }
@@ -4543,6 +4565,7 @@ class DbBackup
             'warnings'             => $warnings,
             'pointers_emptied'     => $emptied,
             'other_tables_changed' => $outsideChanged,
+            'sessions_ended'       => $sessionsEnded,
             'connection_closed'    => false,
         ];
     }

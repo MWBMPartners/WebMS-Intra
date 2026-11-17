@@ -241,7 +241,30 @@ function bps_portAnswers(int $port): bool
 /** Send one request as one signed-in person (the cookie jar says who). */
 function bps_request(string $jar, string $method, string $path, ?array $post = null): array
 {
-    global $bps;
+    global $bps, $password, $child;
+    if (($bps['resignDue'] ?? false) === true) {
+        // A whole restore ended every session (#1137); see below.
+        $bps['resignDue'] = false;
+        // Signing in writes "last signed in" on the account; put each back
+        // afterwards so the proofs' whole-database comparisons see only what
+        // the restore did (bookkeeping, not a claim).
+        $logMarkBefore = (int) Brs::$writer->query('SELECT COALESCE(MAX(`logID`), 0) FROM `tblActivityLogs`')->fetch_row()[0];
+        $lastLogins = Brs::$writer->query('SELECT `localID`, `lastLogin` FROM `tblLocalAccounts`')->fetch_all(MYSQLI_ASSOC);
+        foreach (['root', 'admin', 'member'] as $who) {
+            $own = $child . '/jar-' . $who . '.txt';
+            @unlink($own);
+            $tok = bps_token(bps_request($own, 'GET', '/login')['body']);
+            bps_request($own, 'POST', '/login', ['csrf_token' => $tok, 'username' => 'selftest-backup-' . $who, 'password' => $password]);
+        }
+        // The sign-in lines this bookkeeping caused are not the page's own lines.
+        Brs::$writer->query("DELETE FROM `tblActivityLogs` WHERE `logID` > " . $logMarkBefore . " AND `activityType` IN ('LoginLocal')");
+        foreach ($lastLogins as $one) {
+            $put = Brs::$writer->prepare('UPDATE `tblLocalAccounts` SET `lastLogin` = ? WHERE `localID` = ?');
+            $put->bind_param('si', $one['lastLogin'], $one['localID']);
+            $put->execute();
+            $put->close();
+        }
+    }
     $handle = curl_init('http://127.0.0.1:' . $bps['port'] . $path);
     curl_setopt_array($handle, [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 900,
@@ -255,6 +278,15 @@ function bps_request(string $jar, string $method, string $path, ?array $post = n
     $raw = curl_exec($handle);
     if ($raw === false) {
         return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle)];
+    }
+    // 🔐 #1137: a whole restore now ends EVERY session, the one that pressed it
+    //    included. Every proof below was written for a world where the three
+    //    standard browsers stay signed in across a restore, so after one the
+    //    three are signed in again, with the password made for this run. That
+    //    is bookkeeping for the later proofs, NOT a claim: proof 33 turns it
+    //    off ($bps['resign']) and checks that the old cookie is refused.
+    if ($method === 'POST' && ($post['action'] ?? '') === 'restore_full' && ($bps['resign'] ?? true) === true) {
+        $bps['resignDue'] = true;
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $head     = substr((string) $raw, 0, $headSize);
@@ -607,6 +639,66 @@ brs_check(isset($lines['BackupRestored']) === true, 'the restore left its line i
 brs_check(bps_portalIsOpen() === true, 'the portal is open again afterwards');
 bps_settle();
 brs_checkSame($before, 'every value of every table is as it was when the snapshot was taken');
+
+echo "\nD3. A whole restore ends every session, the restorer's included (#1137)\n";
+// The rehearsal that found this restored a snapshot from ANOTHER installation
+// and stayed signed in as whoever held the same account number there. Every
+// browser below is signed in BEFORE the press (premise), the helper's
+// automatic re-sign-in is switched off for this section, and the OLD cookie of
+// each browser must then be refused. A rehearsal ("check only") must not end
+// anybody's session.
+$bps['resign'] = false;
+$d3Home = static fn (string $who): array => bps_request($jar[$who], 'GET', '/account');
+brs_check(
+    $d3Home('root')['status'] === 200 && $d3Home('member')['status'] === 200,
+    'D3 premise: Rae (who will press the button) and Mel are both signed in before it',
+    'Rae HTTP ' . $d3Home('root')['status'] . ', Mel HTTP ' . $d3Home('member')['status']
+);
+$answer = bps_press($jar['root'], ['action' => 'check_snapshot', 'name' => $good]);
+brs_check(
+    $d3Home('root')['status'] === 200 && $d3Home('member')['status'] === 200,
+    'D3 a rehearsal ("check only") ends nobody\'s session: both are still signed in after it',
+    'Rae HTTP ' . $d3Home('root')['status'] . ', Mel HTTP ' . $d3Home('member')['status'] . ' ' . bps_message($answer['body'])
+);
+bps_settle();
+$answer = bps_press($jar['root'], ['action' => 'restore_full', 'name' => $good]);
+brs_check(str_starts_with(bps_message($answer['body']), '[success] Snapshot put back in full:') === true, 'D3 the whole restore itself succeeds', bps_message($answer['body']));
+$rae = $d3Home('root');
+$mel = $d3Home('member');
+brs_check(
+    $rae['status'] === 302 && str_starts_with($rae['location'], '/login') === true,
+    'D3 the OLD cookie of the person who pressed the button is now sent to sign in',
+    'HTTP ' . $rae['status'] . ' ' . $rae['location']
+);
+brs_check(
+    $mel['status'] === 302 && str_starts_with($mel['location'], '/login') === true,
+    'D3 and so is the old cookie of a member who did nothing (every session ends, not just the restorer\'s)',
+    'HTTP ' . $mel['status'] . ' ' . $mel['location']
+);
+$notice = bps_request($jar['member'], 'GET', '/login')['body'];
+brs_check(str_contains($notice, 'restored from a backup') === true, 'D3 and the sign-in page says a restore is one of the reasons', 'no notice');
+bps_settle();
+$bps['resign'] = true;
+$bps['resignDue'] = true;   // the next request signs the three standard browsers in again, for the proofs after this
+
+// D4: the activity line must not name a DIFFERENT person. A snapshot from
+// another installation can hand the restorer's account number to somebody else;
+// here that is made by changing Rae's e-mail address after the snapshot, so the
+// restore puts a different address (a different person, as far as a record can
+// tell) under her number. The line must then name no account, and say why.
+Brs::$writer->query("UPDATE `tblUsers` SET `emailAddress` = 'rae.changed.d4@selftest.invalid' WHERE `userID` = " . BPS_ROOT);
+$answer = bps_press($jar['root'], ['action' => 'restore_full', 'name' => $good]);
+$d4Line = Brs::$writer->query("SELECT `userID`, `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = 'BackupRestored' AND `logID` > "
+    . (int) $bps['logMark'] . ' ORDER BY `logID` DESC LIMIT 1')->fetch_assoc();
+brs_check(
+    str_starts_with(bps_message($answer['body']), '[success] Snapshot put back in full:') === true
+    && $d4Line !== null && $d4Line['userID'] === null
+    && str_contains((string) $d4Line['activityDescription'], 'It was run by an account that is a different person in the restored database, so this line names no account.') === true,
+    'D4 when the restored row under the restorer\'s number is a different person, the activity line names NO account and says why',
+    json_encode($d4Line)
+);
+bps_settle();
+$bps['resignDue'] = true;
 
 echo "\nD2. A portal an administrator had already closed\n";
 $theirs  = 'Closed by an administrator before the self-test pressed anything.';
@@ -3037,7 +3129,8 @@ brs_check($qSignIn($qJar, 'root') === 1, 'Q2 the premise: Rae signs in after the
 $qInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnapshot)['body'];
 $qWarning = $qWarningOf($qInspect);
 brs_check(
-    str_contains($qWarning, 'Putting this snapshot back whole signs out 4 accounts on their next page.') === true
+    str_contains($qWarning, 'Putting this snapshot back whole signs out EVERY account on its next page, yours included') === true
+    && str_contains($qWarning, '4 accounts also differ from the snapshot in a way that matters:') === true
     && str_contains($qWarning, '2 accounts have a sign-in number that differs from the snapshot\'s') === true
     && str_contains($qWarning, 'they must sign in again, and their passwords, passkeys and Microsoft or Google links are as they were when the snapshot was taken.') === true
     && str_contains($qWarning, 'unaffected') === false && str_contains($qWarning, 'only a password') === false && str_contains($qWarning, 'only the way') === false
@@ -3050,15 +3143,15 @@ brs_check(
     $qWarning
 );
 brs_check(
-    preg_match('/data-confirm="[^"]*Every account whose sign-in number differs from the snapshot\'s[^"]*an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on\."[^>]*data-confirm-confirm-label="Restore all"/', $qInspect) === 1,
+    preg_match('/data-confirm="[^"]*Every account is signed out, yours too; an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on\."[^>]*data-confirm-confirm-label="Restore all"/', $qInspect) === 1,
     'Q4 and the Restore button\'s own confirmation box says all three'
 );
 $qAnswer = bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qInspect), 'action' => 'restore_full', 'name' => $qSnapshot]);
 $qSaid   = bps_message($qAnswer['body']);
 brs_check(
-    str_starts_with($qSaid, '[warning] Snapshot put back in full:') === true
-    && str_contains($qSaid, 'Your own sign-in is not current in the restored database') === true
-    && str_contains($qSaid, 'The next page you open will ask you to sign in again. Your password, passkeys and Microsoft or Google links are as they were when the snapshot was taken.') === true
+    str_starts_with($qSaid, '[success] Snapshot put back in full:') === true
+    && str_contains($qSaid, 'Everybody, you included, must sign in again') === true
+    && str_contains($qSaid, 'The next page you open will ask you to sign in. Your password, passkeys and Microsoft or Google links are as they were when the snapshot was taken.') === true
     && str_contains($qSaid, 'unaffected') === false && str_contains($qSaid, 'only a password') === false && str_contains($qSaid, 'only the way') === false
     && str_contains($qSaid, 'This result stays at the top of this page for seven days.') === true,
     'Q5 DURING: the restore\'s own answer says it worked AND that Rae\'s next page will ask her to sign in again',
@@ -3097,8 +3190,11 @@ brs_check(
 // snapshot would sign out nobody, and the page then says nothing at all.
 $qControl = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnapshot)['body'];
 brs_check(
-    str_contains($qControl, 'Inspecting:') === true && str_contains($qControl, 'id="snapshot-sign-ins-warning"') === false,
-    'Q11 CONTROL: with every account now as the snapshot holds it, the same page draws no sign-in warning'
+    str_contains($qControl, 'Inspecting:') === true
+    && str_contains($qWarningOf($qControl), 'signs out EVERY account on its next page, yours included') === true
+    && str_contains($qWarningOf($qControl), 'unaffected') === false,
+    'Q11 CONTROL: after the restore the page still says every account is signed out (the numbers now differ from the snapshot\'s, because the restore moved them on purpose: #1137)',
+    $qWarningOf($qControl)
 );
 // A SWITCHED-OFF account is told NOTHING on the sign-in page (#922 round 2):
 // switching an account off is an administrator's decision about a person, and
@@ -3133,10 +3229,12 @@ brs_check(count($qNew2) === 1 && $qSignIn($qGilJar, 'gone') === 1, 'Q13 the prem
 $qGilInspect = bps_request($qGilJar, 'GET', '/admin/maintenance/backup?inspect=' . $qSnap2)['body'];
 $qGilWarning = $qWarningOf($qGilInspect);
 brs_check(
-    str_contains($qGilWarning, 'signs out 1 account on their next page.') === true
+    str_contains($qGilWarning, 'signs out EVERY account on its next page, yours included') === true
+    && str_contains($qGilWarning, '1 account also differs from the snapshot in a way that matters:') === true
     && str_contains($qGilWarning, '1 account is not in this snapshot, and cannot be used to sign in afterwards.') === true
     && str_contains($qGilWarning, 'your account is not in this snapshot, so once it is put back you cannot sign in with it') === true
-    && str_contains($qGilWarning, 'sign in again') === false && str_contains($qGilWarning, 'asked to sign in') === false,
+    // The general sentence now says an account in the snapshot "can sign in again"; what Gil is told about HIMSELF is the tail.
+    && str_contains((string) substr($qGilWarning, (int) strpos($qGilWarning, 'Yours is one of them')), 'sign in again') === false && str_contains($qGilWarning, 'asked to sign in') === false,
     'Q14 BEFORE: Gil is told that his own account is not in the snapshot and he will not be able to sign in at all - never that he will be asked to sign in again',
     $qGilWarning
 );
@@ -3158,10 +3256,12 @@ brs_check(
     'Q16 AND IT IS RECORDED: one BackupRestored line, naming no account, saying who ran it and why it names nobody (it used to be refused by the account link and reach only PHP\'s error log)',
     json_encode($qGilLines)
 );
+// Gil's restore ended Rae's sign-in too (#1137: every restore ends every session), so she signs in again first.
+$qSignIn($qJar, 'root');
 $qRaeBox = $qBoxOf(bps_request($qJar, 'GET', '/admin/maintenance/backup')['body']);
 brs_check(
     str_contains($qRaeBox, 'Snapshot ' . $qSnap2 . ' put back in full:') === true && str_contains($qRaeBox, 'names no account') === true
-    && str_contains($qRaeBox, 'A whole restore signs out every account whose sign-in number differs') === true,
+    && str_contains($qRaeBox, 'A whole restore signs out every account, and an account that is not in the snapshot or is switched off in it cannot sign in again') === true,
     'Q17 AFTER: Rae, another global administrator, opens the backup page and sees the result of the restore Gil ran',
     $qRaeBox
 );
@@ -3239,6 +3339,7 @@ brs_check(
     'Q24 AFTER: her next click signs her out, the sign-in page says nothing about why (a switched-off account is told nothing), and she cannot sign in',
     'HTTP ' . $qXenaNext['status'] . ' ' . $qXenaNext['location']
 );
+$qSignIn($qJar, 'root');   // Xena's restore ended Rae's sign-in too (#1137)
 $qXenaBox = $qBoxOf(bps_request($qJar, 'GET', '/admin/maintenance/backup')['body']);
 brs_check(
     str_contains($qXenaBox, 'Snapshot ' . $qSnap3 . ' put back in full:') === true && str_contains($qXenaBox, 'by Xena Off') === true,
@@ -3261,7 +3362,8 @@ $qBadInspect = bps_request($qJar, 'GET', '/admin/maintenance/backup?inspect=' . 
 $qBadWarning = $qWarningOf($qBadInspect);
 brs_check(
     $qSpoilt === true && str_contains($qBadWarning, 'could not be worked out') === true
-    && str_contains($qBadWarning, 'such an account must sign in again, and its password, passkeys and Microsoft or Google links are as they were when the snapshot was taken. Yours may be one of them.') === true
+    && str_contains($qBadWarning, 'signs out EVERY account on its next page, yours included') === true
+    && str_contains($qBadWarning, 'How many accounts are not in it, or are switched off in it, could not be worked out.') === true
     && str_contains($qBadWarning, 'unaffected') === false && str_contains($qBadWarning, 'only the way') === false,
     'Q26 a snapshot whose account list cannot be read: the warning says how many could not be worked out, in the general sentence',
     $qBadWarning
@@ -3330,7 +3432,7 @@ brs_check(
 );
 $qNgSaid = bps_message(bps_request($qJar, 'POST', '/admin/maintenance/backup', ['csrf_token' => bps_token($qNgInspect), 'action' => 'restore_full', 'name' => $qSnap5])['body']);
 brs_check(
-    str_contains($qNgSaid, 'Your own sign-in is not current in the restored database') === true
+    str_contains($qNgSaid, 'Everybody, you included, must sign in again') === true
     && str_contains($qNgSaid, 'Your account is not a global administrator in the restored database, so you will not be able to open this page again') === true
     && str_contains($qNgSaid, 'This result stays at the top of this page for seven days.') === false,
     'Q30 DURING: the restore\'s answer tells her she is not a global administrator in the restored database and will not be able to open this page again',

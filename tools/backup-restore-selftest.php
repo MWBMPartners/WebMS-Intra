@@ -414,6 +414,17 @@ function brs_fingerprint(array $leaveOut = []): array
     );
     while (($row = $rs->fetch_row()) !== null) {
         $quoted = '`' . $row[1] . '`';
+        // 🔐 THE ONE COLUMN THIS COMPARISON DOES NOT READ (#1137). A whole
+        //    restore now moves every account's sign-in number on purpose, so
+        //    every whole-restore proof would otherwise go red on it. It is
+        //    exempted BY NAME and nothing else is. An exemption that hides a
+        //    column must not hide that it stopped changing, so proof 32
+        //    reads `tblUsers.signInVersion` itself and requires it to MOVE.
+        if ((string) $row[0] === 'tblUsers' && (string) $row[1] === 'signInVersion') {
+            $columns['tblUsers'][] = '0';
+            $colNames['tblUsers'][] = (string) $row[1];
+            continue;
+        }
         $columns[(string) $row[0]][] = in_array(strtolower((string) $row[2]), $hexTypes, true) === true ? 'HEX(' . $quoted . ')' : $quoted;
         $colNames[(string) $row[0]][] = (string) $row[1];
     }
@@ -5695,6 +5706,101 @@ function brs_proof31(): void
     }
 }
 
+/**
+ * PROOF 32 (#1137). A whole-database restore ends every session: at its end,
+ * inside its own transaction, every account's `signInVersion` moves by a fresh
+ * random amount (Auth::endEverySessionAfterRestore()). A session carries the
+ * number it was stamped with, so every session in existence then carries a
+ * number no account holds and is ended on its next request. This exists
+ * because a restore can hand account 1 to a different person while the old
+ * session still says "account 1, number 0".
+ *
+ * A. a real restore moves EVERY account's number, to a value that is neither
+ *    its old value nor the snapshot's (so a session stamped with either is
+ *    ended);
+ * B. a rehearsal ("check only") leaves every number exactly as it was;
+ * C. a restore of ONE table cannot replace `tblUsers` (refused), so it moves
+ *    nobody's number and the gap cannot open that way;
+ * D. two real restores give two different results (a number never comes back).
+ *
+ * WHAT IT CANNOT SHOW: that the old session cookie is refused; that is driven
+ * over HTTP by part R of tools/sign-in-limits-selftest.php.
+ */
+function brs_proof32(): void
+{
+    $backup = brs_backup('p32');
+    $numbers = static function (): array {
+        $out = [];
+        $rs  = Brs::$writer->query('SELECT `userID`, `signInVersion` FROM `tblUsers` ORDER BY `userID`');
+        while (($row = $rs->fetch_assoc()) !== null) {
+            $out[(int) $row['userID']] = (int) $row['signInVersion'];
+        }
+        $rs->free();
+
+        return $out;
+    };
+
+    // The fresh database holds no accounts: two made-up ones, one carrying a
+    // known number. The proof's own end removes them again (the restores put
+    // them back, so the starting-state comparison needs them gone).
+    $stamp = 777;
+    Brs::$writer->query("INSERT INTO `tblUsers` (`userID`, `emailAddress`, `signInVersion`) VALUES (970901, 'p32-a@example.invalid', " . $stamp . "), (970902, 'p32-b@example.invalid', 0)");
+    $inSnapshot = $numbers();
+    if (brs_check($inSnapshot !== [] && in_array($stamp, $inSnapshot, true) === true, 'premise: an account carries a known number and the snapshot will hold it', brs_say($inSnapshot)) === false) {
+        return;
+    }
+    $taken = $backup->snapshot('proof 32');
+    if (brs_check($taken['success'] === true, 'a snapshot is taken', brs_say($taken)) === false) {
+        return;
+    }
+    $dir = (string) $taken['directory'];
+
+    // The live number moves on after the snapshot, so "snapshot's value" and
+    // "value before the restore" are two different things.
+    Brs::$writer->query('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 5');
+    $beforeRestore = $numbers();
+
+    // B first: the rehearsal changes nothing.
+    $rehearsal = $backup->restoreAll($dir, true);
+    brs_check(($rehearsal['success'] ?? false) === true, 'the rehearsal succeeds', brs_say($rehearsal));
+    brs_check($numbers() === $beforeRestore, 'B. a rehearsal leaves every account\'s sign-in number exactly as it was', brs_say([$beforeRestore, $numbers()]));
+
+    // C: one table.
+    $one = $backup->restoreTable($dir, 'tblUsers');
+    brs_check(($one['success'] ?? true) === false, 'C. restoring tblUsers alone is refused (other tables point at it)', brs_say($one));
+    brs_check($numbers() === $beforeRestore, 'C. and the refused one-table restore moved nobody\'s number', brs_say([$beforeRestore, $numbers()]));
+
+    // A: a real restore.
+    $real = $backup->restoreAll($dir);
+    if (brs_check(($real['success'] ?? false) === true, 'the real restore succeeds', brs_say($real)) === false) {
+        return;
+    }
+    brs_check(($real['sessions_ended'] ?? null) === true, 'and says every session was ended', brs_say($real));
+    $afterOne = $numbers();
+    $bad = [];
+    foreach ($afterOne as $id => $value) {
+        // Neither the live number from before, nor the snapshot's own number.
+        if ($value === ($beforeRestore[$id] ?? null) || $value === ($inSnapshot[$id] ?? null)) {
+            $bad[] = $id;
+        }
+    }
+    brs_check($afterOne !== [] && $bad === [], 'A. every account\'s number now differs from its number before the restore AND from the snapshot\'s', 'accounts still matching: ' . implode(',', $bad));
+    brs_check(array_keys($afterOne) === array_keys($inSnapshot), 'A. and the same accounts exist (the restore put the snapshot\'s accounts back)', brs_say([array_keys($afterOne), array_keys($inSnapshot)]));
+
+    // D: again, from the same snapshot.
+    $again = $backup->restoreAll($dir);
+    brs_check(($again['success'] ?? false) === true, 'a second real restore succeeds', brs_say($again));
+    $afterTwo = $numbers();
+    $same = [];
+    foreach ($afterTwo as $id => $value) {
+        if ($value === ($afterOne[$id] ?? null)) {
+            $same[] = $id;
+        }
+    }
+    brs_check($same === [], 'D. a second restore of the same snapshot gives every account yet another number', 'accounts repeating: ' . implode(',', $same));
+    Brs::$writer->query('DELETE FROM `tblUsers` WHERE `userID` IN (970901, 970902)');
+}
+
 $proofs = [
     1  => ['Imported calendar events with awkward raw bytes (#577)', 'brs_proof1', false],
     2  => ['Rows that point at rows of their own table (#578)', 'brs_proof2', false],
@@ -5722,6 +5828,7 @@ $proofs = [
     29 => ['A snapshot says whether it was read at one moment in time, and whether anything is calling the scheduled job (#581)', 'brs_proof29', false],
     30 => ['This month\'s translation counters are not put back by a restore (#801)', 'brs_proof30', false],
     31 => ['A snapshot taken before migration 290 puts no remembered map answer back (#1037, D-183)', 'brs_proof31', false],
+    32 => ['A whole restore moves every account\'s sign-in number, so every session ends (#1137)', 'brs_proof32', false],
     // These four need the large table, so they run together at the end.
     5  => ['A large table under a fixed memory limit (#579)', 'brs_proof5', true],
     7  => ['A snapshot that fails or is killed is never counted as a backup', 'brs_proof7', true],
