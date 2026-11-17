@@ -532,6 +532,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    an order from how the database is actually put together,
             //    and does the whole thing inside one transaction. If
             //    anything fails, nothing changes.
+            // 🪪 WHO PRESSED IT, read BEFORE the restore (#1137). A restore can
+            //    put a DIFFERENT person under the same account number (a
+            //    snapshot from another installation), and the activity line
+            //    below is stamped with that number. So the e-mail address and
+            //    the day the account was made are remembered now and compared
+            //    after. This is for the RECORD only; it never decides a sign-in
+            //    (every session ends anyway: Auth::endEverySessionAfterRestore()).
+            $restorerBefore = null;
+            $restorerIdBefore = (int) ($_SESSION['user_id'] ?? 0);
+            $whoStmt = $db->prepare('SELECT `emailAddress`, `createdAt` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+            if ($whoStmt !== false) {
+                $whoStmt->bind_param('i', $restorerIdBefore);
+                $whoStmt->execute();
+                $restorerBefore = $whoStmt->get_result()->fetch_assoc();
+                $whoStmt->close();
+            }
             [$result, $asFound] = $whileClosed(
                 sprintf('Putting snapshot %s back. The portal is closed while this runs.', $name),
                 static fn (): array => $backup->restoreAll($backup->pathOf($name))
@@ -558,6 +574,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    makes on that next request (Auth::signInStateNow()).
             $restorerNow = $result['success'] === true ? Auth::signInStateNow() : null;
             $restorerGone = $restorerNow === Auth::SIGN_IN_NO_ACCOUNT;
+            // 🪪 Is the row that now carries the restorer's number the same person?
+            //    Both the address and the creation moment must match; "could
+            //    not read before" counts as different, so the line then names
+            //    nobody rather than possibly the wrong person.
+            $restorerDifferent = false;
+            if ($result['success'] === true && $restorerGone === false) {
+                $restorerAfter = null;
+                $whoStmt = $db->prepare('SELECT `emailAddress`, `createdAt` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+                if ($whoStmt !== false) {
+                    $whoStmt->bind_param('i', $restorerIdBefore);
+                    $whoStmt->execute();
+                    $restorerAfter = $whoStmt->get_result()->fetch_assoc();
+                    $whoStmt->close();
+                }
+                $restorerDifferent = $restorerBefore === null
+                    || $restorerAfter === null
+                    || (string) $restorerBefore['emailAddress'] !== (string) $restorerAfter['emailAddress']
+                    || (string) $restorerBefore['createdAt'] !== (string) $restorerAfter['createdAt'];
+            }
+            $namesNobody = $restorerGone === true || $restorerDifferent === true;
             $record(
                 $result['success'] === true ? 'BackupRestored' : 'BackupRestoreFailed',
                 ($result['success'] === true
@@ -566,8 +602,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $reasonToErrors('Putting a whole snapshot back failed', (string) $result['error'])))
                 . ($restorerGone === true
                     ? sprintf(' It was run by account #%d, which is not in the restored database, so this line names no account.', (int) ($_SESSION['user_id'] ?? 0))
+                    : '')
+                . ($restorerDifferent === true
+                    ? ' It was run by an account that is a different person in the restored database, so this line names no account.'
                     : ''),
-                $restorerGone
+                $namesNobody
             );
 
             if ($result['success'] === true) {
@@ -603,11 +642,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 $restorerWords = [
-                    Auth::SIGN_IN_NOT_CURRENT  => ' Your own sign-in is not current in the restored database: its sign-in '
-                        . 'number differs from the one you signed in under (usually because your password was reset, '
-                        . 'changed or set after this snapshot was taken). The next page you open will ask you to sign in '
-                        . 'again. Your password, passkeys and Microsoft or Google links are as they were when the snapshot '
-                        . 'was taken.'
+                    Auth::SIGN_IN_NOT_CURRENT  => ' Everybody, you included, must sign in again: a restore ends every '
+                        . 'sign-in, because the restored accounts may be different people from the ones who were signed in. '
+                        . 'The next page you open will ask you to sign in. Your password, passkeys and Microsoft or Google '
+                        . 'links are as they were when the snapshot was taken.'
                         . ($restorerGlobal === true
                             ? ' This result stays at the top of this page for seven days.'
                             : ' Your account is not a global administrator in the restored database, so you will not be '
@@ -623,8 +661,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         . 'for seven days for any global administrator who signs in.',
                 ];
                 if (isset($restorerWords[$restorerNow]) === true) {
-                    $flash    .= $restorerWords[$restorerNow];
-                    $flashType = 'warning';
+                    $flash .= $restorerWords[$restorerNow];
+                    // "Everybody signs in again" (a number that no longer matches)
+                    // is now true after EVERY whole restore (#1137), so on its own
+                    // it is no reason to turn a clean result into a warning; the
+                    // switched-off and no-account cases still are one.
+                    if ($restorerNow !== Auth::SIGN_IN_NOT_CURRENT) {
+                        $flashType = 'warning';
+                    }
                 }
             } else {
                 // The message already explains, in plain words, that nothing
@@ -953,17 +997,23 @@ if (DbBackup::isSnapshotName($inspect) === true) {
         //   never also told it cannot sign in "at all";
         // - the result is kept on THIS page, which only a global administrator
         //   opens, so somebody who is not one in the snapshot is told so.
+        // 🔐 #1137: EVERY sign-in ends when a whole restore finishes (every
+        //    account's number moves, DbBackup::restoreAllWork()), because the
+        //    restored accounts may be different people from the ones signed in.
+        //    So the per-group counts below are no longer "who is signed out":
+        //    they say which accounts ALSO differ from the snapshot in a way
+        //    that matters.
+        $everyoneOut = 'Putting this snapshot back whole signs out EVERY account on its next page, yours included, because '
+            . 'the restored accounts may be different people from the ones signed in now. An account that is in the '
+            . 'snapshot and switched on there can sign in again, and its password, passkeys and Microsoft or Google '
+            . 'links are as they were when the snapshot was taken.';
         $accounts = static fn (int $n, string $one, string $many): string => $n === 1 ? '1 account ' . $one : $n . ' accounts ' . $many;
         if ($signIns === null) {
-            $inspectSignIns = 'How many accounts putting this snapshot back would sign out could not be worked out. Put back '
-                . 'whole, it signs out every account that is not in it or is switched off in it, and every account whose '
-                . 'sign-in number differs from the snapshot\'s (usually because its password was reset, changed or set '
-                . 'since); such an account must sign in again, and its password, passkeys and Microsoft or Google links '
-                . 'are as they were when the snapshot was taken. Yours may be one of them.';
+            $inspectSignIns = $everyoneOut . ' How many accounts are not in it, or are switched off in it, could not be worked out.';
         } elseif ($signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'] > 0) {
             $total          = $signIns['changed'] + $signIns['switchedOff'] + $signIns['missing'];
-            $inspectSignIns = 'Putting this snapshot back whole signs out ' . ($total === 1 ? '1 account' : $total . ' accounts')
-                . ' on their next page.';
+            $inspectSignIns = $everyoneOut . ' ' . ($total === 1 ? '1 account also differs' : $total . ' accounts also differ')
+                . ' from the snapshot in a way that matters:';
             if ($signIns['changed'] > 0) {
                 $inspectSignIns .= ' ' . ucfirst($accounts(
                     $signIns['changed'],
@@ -1005,6 +1055,8 @@ if (DbBackup::isSnapshotName($inspect) === true) {
                     . 'global administrator who signs in.',
                 default        => '',
             };
+        } else {
+            $inspectSignIns = $everyoneOut;
         }
     } elseif (is_dir($backup->pathOf($inspect)) === true || is_link($backup->pathOf($inspect)) === true) {
         // Something by that name IS there and was not opened: say why. (A
@@ -1048,7 +1100,7 @@ $csrf = Auth::csrfToken();
         <?php echo htmlspecialchars((string) $lastRestore['activityDescription'], ENT_QUOTES, 'UTF-8'); ?>
         <?php // A FAILED restore changed nothing and signed nobody out, so it is never given the signing-out sentence (#922 round 3). ?>
         <?php if ($lastRestore['activityType'] === 'BackupRestored'): ?>
-            <span class="d-block small mt-1">A whole restore signs out every account whose sign-in number differs from its snapshot's, and every account that is not in the snapshot or is switched off in it, which is why this is kept here for seven days. It is also in the activity log.</span>
+            <span class="d-block small mt-1">A whole restore signs out every account, and an account that is not in the snapshot or is switched off in it cannot sign in again until that is put right, which is why this is kept here for seven days. It is also in the activity log.</span>
         <?php else: ?>
             <span class="d-block small mt-1">Nothing was changed by it, so nobody was signed out. It is kept here for seven days, and is also in the activity log.</span>
         <?php endif; ?>
@@ -1410,7 +1462,7 @@ $scheduleBadge    = $scheduleFrequency === 'off'
                 </button>
                 <span class="text-muted small ms-2">Rehearses the whole restore and changes nothing.</span>
             </form>
-            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs. Every account whose sign-in number differs from the snapshot's (usually a password changed since) is signed out, yours too if so; an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
+            <form method="post" class="mb-3" data-confirm="Restore ALL tables from this snapshot? Every table in it is emptied and filled again from the snapshot, so anything saved since the snapshot was taken is lost. A table that is not in the snapshot is not put back, but rows in it that are linked to rows being replaced can be deleted or lose their links: the result names exactly what went, and the Check button shows it beforehand. Where the portal can keep such rows it does, and this page then offers them back. If anything goes wrong, nothing is changed. The portal is closed to everyone else while it runs. Every account is signed out, yours too; an account not in the snapshot cannot sign in afterwards, and one switched off in it cannot until it is switched back on." data-confirm-destructive="true" data-confirm-confirm-label="Restore all">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <input type="hidden" name="action" value="restore_full">
                 <input type="hidden" name="name" value="<?php echo htmlspecialchars($inspect, ENT_QUOTES, 'UTF-8'); ?>">

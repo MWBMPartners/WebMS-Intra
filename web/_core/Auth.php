@@ -1327,6 +1327,71 @@ class Auth
     }
 
     /**
+     * 🔐 END EVERY SESSION AFTER A WHOLE-DATABASE RESTORE (#1137).
+     * The ONE place it is done; only `DbBackup::restoreAllWork()` calls it.
+     *
+     * THE FAULT. A session names an account by NUMBER and is kept while that
+     * account exists, is switched on and carries the number the session was
+     * stamped with. Nothing identifies the PERSON. A restore replaces
+     * `tblUsers`, so a snapshot from another installation (or an older state
+     * of this one) can hand account 1 to somebody else, with the same sign-in
+     * number (0 on a fresh installation), and the restorer stayed signed in
+     * as that other person. The install rehearsal measured exactly that.
+     *
+     * THE CURE. Every account's `signInVersion` goes up by one fresh RANDOM
+     * amount, inside the restore's own transaction. Every session that
+     * existed carries a number no account now holds, so each is ended on its
+     * next request and the sign-in page already says why.
+     *
+     * WHY NOT COMPARE THE PERSON (e-mail address, name)? It would miss the
+     * commonest real case: the same administrator installs a test copy and the
+     * live portal with the same address, both as account 1. WHY RANDOM, NOT
+     * +1? A number must never come back (see endOtherSessionsOf()).
+     *
+     * COST, said plainly: after ANY whole restore, this installation's own
+     * snapshot included, everybody signs in again. That is the safe direction.
+     *
+     * No column yet (error 1054, migration 270 not run): an error is recorded
+     * and false answered, so the caller can WARN; any other error is thrown, so
+     * the restore's transaction rolls back (a restore that cannot end sessions
+     * must not complete). It opens no transaction and writes no session.
+     *
+     * @param \mysqli $db The restore's own connection, inside its transaction.
+     *
+     * @return bool True when every session will be ended; false when the
+     *              database has no column to record it in.
+     */
+    public static function endEverySessionAfterRestore(\mysqli $db): bool
+    {
+        $step = random_int(1, 2147483647);
+        try {
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + ?');
+        } catch (\mysqli_sql_exception $unknownColumn) {
+            if ($unknownColumn->getCode() !== 1054) {
+                throw $unknownColumn;
+            }
+            Logger::errorPlatform(
+                'Auth',
+                'Error',
+                'SIGN_OUT_ALL_NO_COLUMN',
+                'A database was restored, but nobody could be signed out: the database upgrade that adds this '
+                    . '(migration 270) has not been run. Run it at Admin, Upgrade.',
+                ''
+            );
+
+            return false;
+        }
+        if ($stmt === false) {
+            return false;
+        }
+        $stmt->bind_param('i', $step);
+        $stmt->execute();
+        $stmt->close();
+
+        return true;
+    }
+
+    /**
      * The number the last endOtherSessionsOf() produced, waiting for its
      * caller's commit; null when none is waiting. See passwordChangeCommitted().
      *
