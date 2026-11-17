@@ -1,5 +1,7 @@
 # Handoff — where the work is right now
 
+**Starting a new session:** read this file, then `docs/PROJECT.md`, `.claude/CLAUDE.md` (standing rules) and `docs/decisions/README.md`. Nothing is half-done: the working tree is clean at the commit below and nothing is running. First action: ask the owner for the three things under "Waiting on the owner", or, if they have none, work the queue below from group 1.
+
 *Overwritten, never appended. Current state only. 17 November 2026. Updated at every landing and every change of a
 package's state (the owner, 10 November 2026).*
 
@@ -47,10 +49,25 @@ Nothing.
 3. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078, #591, #1082), #754, the full Codex
    review (about 40 allowances for the branch, about 5 for the core), then the merge to main.
 
-## Raised, not built (selection; the tracker is the record)
+## The queue (the tracker is the record; this is only the map)
 
-#1150-#1162 (rehearsal findings), #1097, #1105 (money limit not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle), #1108,
-#1123, #1127-#1130, #1143-#1149 (#1148: beta gate versus scheduled jobs; #1149: noticeboard save timeout and notice).
+Get the live list with `gh issue list --state open --milestone "<name>" --limit 200`. Milestones: **Pilot install** (#19),
+**Release (D-055: whole backlog cleared)** (#20, about 140 open issues), **After release** (#21). Open now: Pilot install
+holds only #1157 (narrow rehearsal findings, none blocking). Groups in the Release milestone, in the order to take them:
+1. *Rehearsal and pilot follow-ups:* #1143-#1150, #1157-#1162 (guide/help wording, several-organisation gaps in
+   offboarding return and statements, noticeboard timeout/notice, statement PDF em dash, snapshot names, visitor role in two
+   places), #1132 (plan board: needs the owner's `gh auth refresh -s read:project -s project`), #1140 (owner question).
+2. *Dated or time-boxed (D-055):* #777 (time zones, reading half; before 28 March 2027), #1077/#1078 (keeping periods, within
+   months), #591, #1082, #754 (six workflows never run on GitHub; first run at the final merge).
+3. *Money and erasure limits raised by #993/#1064:* #1097-#1105, #1107/#1108, #1121-#1130.
+4. *Everything else* (older small findings #614-#1076; features such as #658, #659, #662, #664): clear before the first release
+   to anybody else (D-055); none blocks the pilot.
+**Release gate (not started, needs the owner's go):** the full Codex review of the branch (D-007; about 40 allowances for the
+branch, about 5 for the sign-in/erasure/money/backup core and the installer), then the merge into the release branch.
+
+**Housekeeping needing the owner's approval (do not do unprompted):** about 120 leftover `p*-build` branches and about 150
+worktrees under `/tmp/claude-501/` exist from the builders; removing a worktree or branch needs reviewed candidates and
+approval (a missing worktree path is not proof of safe pruning).
 
 ## Working pattern
 
