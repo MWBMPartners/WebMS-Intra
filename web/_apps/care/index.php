@@ -47,6 +47,18 @@ if ($rs !== false) {
     $rs->free();
 }
 
+// 👥 Who the worker may choose as the person a case is about (#1066): the one
+//    list in Site::membersForPicker(), never a query of this page's own. A
+//    failed read leaves the list empty and says so, rather than a page that
+//    throws part-way.
+$pickable = [];
+try {
+    $pickable = Site::membersForPicker($siteId, $db);
+} catch (\Throwable $e) {
+    $_SESSION['flash_type'] = 'danger';
+    $_SESSION['flash_msg']  = 'The list of members could not be read, so a case about a member cannot be opened just now.';
+}
+
 $pageTitle   = 'Care Register';
 $pageSection = 'care';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Care Register' => ''];
@@ -54,6 +66,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 $csrf = Auth::csrfToken();
 ?>
 
+<?php
+// 💬 This page prints the message the save handler leaves (it is not printed centrally).
+$flashMsg = $_SESSION['flash_msg'] ?? null;
+if (is_string($flashMsg) === true && $flashMsg !== '') {
+    $flashType = ($_SESSION['flash_type'] ?? '') === 'success' ? 'success' : 'danger';
+    unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+    echo '<div class="alert alert-' . $flashType . '" role="alert" data-care-flash>' . htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8') . '</div>';
+}
+?>
 <div class="alert alert-warning small mb-3">
     <i class="fa-solid fa-lock me-1"></i>
     <strong>Confidential.</strong> All access is audit-logged. Notes are visible only to the care team.
@@ -73,8 +94,16 @@ $csrf = Auth::csrfToken();
             <form method="post" action="<?php echo htmlspecialchars(Site::url('care/case-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                 <div class="col-md-4">
-                    <label class="form-label small">Person (name, if not a portal user)</label>
-                    <input type="text" name="personName" class="form-control form-control-sm" maxlength="255">
+                    <label class="form-label small" for="careCasePerson">Who is this case about?</label>
+                    <select name="personUserID" id="careCasePerson" class="form-select form-select-sm" required>
+                        <option value="" selected disabled>Choose who this case is about</option>
+                        <option value="none">Somebody without an account here (type their name)</option>
+                        <?php foreach ($pickable as $member): ?>
+                            <option value="<?php echo (int) $member['userID']; ?>"><?php echo htmlspecialchars($member['fullName'], ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label class="form-label small mt-2" for="careCaseName">Their name, if they have no account here</label>
+                    <input type="text" name="personName" id="careCaseName" class="form-control form-control-sm" maxlength="255">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small">Category</label>

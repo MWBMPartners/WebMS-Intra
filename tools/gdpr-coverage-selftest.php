@@ -3093,13 +3093,13 @@ sort($writersFound);
 // as the exact sub-query, so a NULL or a session value in its place fails.
 $fromAccount = [
     '_apps/care/visit-save.php'                 => "'SELECT ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?), ?, ?, ?'",
-    '_apps/care/case-save.php'                  => "'SELECT ?, ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'",
+    '_apps/care/case-save.php'                  => "'SELECT ?, ?, ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'",
     '_apps/admin/safeguarding/dbs-save.php'     => "(SELECT `r`.`fullName` FROM `tblUsers` `r` WHERE `r`.`userID` = ?)'",
     '_apps/kids/checkin-do.php'                 => "'SELECT ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'",
 ];
 $bindsTwice = [
     '_apps/care/visit-save.php'             => "bind_param('iiisss', \$caseId, \$userId, \$userId,",
-    '_apps/care/case-save.php'              => "bind_param('isssii', \$siteId, \$person, \$category, \$summary, \$userId, \$userId);",
+    '_apps/care/case-save.php'              => "bind_param('iisssii', \$siteId, \$personUserId, \$personName, \$category, \$summary, \$userId, \$userId);",
     '_apps/admin/safeguarding/dbs-save.php' => "\$status, \$recorder, \$recorder);",
     '_apps/kids/checkin-do.php'             => "bind_param('iisii', \$childId, \$eventIdArg, \$badge, \$staffId, \$staffId);",
     '_apps/kids/checkout.php'               => "bind_param('iisi', \$staffId, \$staffId, \$pickupName, \$checkinId);",
