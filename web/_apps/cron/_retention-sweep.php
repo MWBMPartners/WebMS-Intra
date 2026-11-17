@@ -85,6 +85,7 @@ declare(strict_types=1);
 // list is written down rather than remembered.
 // -----------------------------------------------------------------------------
 
+use Portal\Core\AccountMerge;
 use Portal\Core\ActivityLogRetention;
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
@@ -93,6 +94,7 @@ use Portal\Core\GdprEraser;
 use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
+use Portal\Core\Memberships;
 use Portal\Core\NetworkAddressRetention;
 use Portal\Core\ConsentRetention;
 use Portal\Core\Pdf;
@@ -113,6 +115,13 @@ if (class_exists(NetworkAddressRetention::class, false) === false) {
 }
 if (class_exists(ConsentRetention::class, false) === false) {
     require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ConsentRetention.php';
+}
+// 🚪 #934 (D-211): the member-has-left rule's two helpers, loaded the same way.
+if (class_exists(Memberships::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Memberships.php';
+}
+if (class_exists(AccountMerge::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'AccountMerge.php';
 }
 // 🗺️ #1037: the same, for the address look-up cache's period.
 if (class_exists(GeocodeCacheRetention::class, false) === false) {
@@ -476,6 +485,74 @@ function address_sweep(bool $reallyEmpty): int
 }
 
 /**
+ * 🚪 Which signed-in people have LEFT one organisation, for the consent clear-out
+ *    (#934, D-211): the account numbers (as they appear in `tblConsentLog`)
+ *    whose records the member-has-left rule may delete now.
+ *
+ * Only a PREVIEW of the decision: the delete asks the same question again
+ * inside its own statement, so a rehire in between is seen. A person is the
+ * account they NOW are: a merged-away account's records (consent records are
+ * history, D-199) are judged by `AccountMerge::survivorOf()`, and only while
+ * the old account is still exactly as the merge closed it (`stillClosedSql()`),
+ * because an account found open may be somebody else's now. The membership
+ * test is `Memberships::hasLeftSql()`, the ONE definition of "left".
+ *
+ * @return array<int, int> consent-log account number => the account that person now is
+ */
+function consent_left_people(\mysqli $db, int $siteId, int $days): array
+{
+    $cand = $db->prepare('SELECT DISTINCT `userID` FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` IS NOT NULL '
+        . 'AND `createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY)');
+    if ($cand === false) {
+        throw new \RuntimeException('The consent-record clear-out could not prepare the list of people.');
+    }
+    $cand->bind_param('ii', $siteId, $days);
+    $cand->execute();
+    $users = [];
+    $res = $cand->get_result();
+    while ($row = $res->fetch_assoc()) {
+        $users[] = (int) $row['userID'];
+    }
+    $cand->close();
+
+    $hasLeft  = [];
+    $out      = [];
+    foreach ($users as $u) {
+        $kept = AccountMerge::survivorOf($db, $u);
+        $person = $kept ?? $u;
+        if ($kept !== null) {
+            // 🔒 A merged-away account must still be as the merge closed it.
+            $closed = $db->prepare('SELECT 1 FROM `tblUsers` `x` WHERE `x`.`userID` = ? AND ' . AccountMerge::stillClosedSql('x'));
+            if ($closed === false) {
+                throw new \RuntimeException('The consent-record clear-out could not prepare a merge check.');
+            }
+            $closed->bind_param('i', $u);
+            $closed->execute();
+            $stillClosed = $closed->get_result()->fetch_row() !== null;
+            $closed->close();
+            if ($stillClosed === false) {
+                continue;
+            }
+        }
+        if (array_key_exists($person, $hasLeft) === false) {
+            $q = $db->prepare('SELECT 1 FROM `tblUserSites` `us` JOIN `tblUsers` `p` ON `p`.`userID` = `us`.`userID` '
+                . 'WHERE `us`.`userID` = ? AND `us`.`siteID` = ? AND ' . Memberships::hasLeftSql('us', 'p'));
+            if ($q === false) {
+                throw new \RuntimeException('The consent-record clear-out could not prepare a membership check.');
+            }
+            $q->bind_param('iii', $person, $siteId, $days);
+            $q->execute();
+            $hasLeft[$person] = $q->get_result()->fetch_row() !== null;
+            $q->close();
+        }
+        if ($hasLeft[$person] === true) {
+            $out[$u] = $person;
+        }
+    }
+    return $out;
+}
+
+/**
  * 🍪 Count, or really DELETE, the records of privacy-notice and cookie choices
  *    that are past their period (#934, D-166, D-210).
  *
@@ -512,13 +589,60 @@ function consent_sweep(bool $reallyDelete): int
     }
     $sites->free();
 
-    $from = ConsentRetention::replacedFrom();
     $total = 0;
     foreach ($siteDays as $siteId => $days) {
         if ($days === ConsentRetention::NEVER) {
             continue; // ♾️ This organisation keeps these records for ever.
         }
-        $binds = ConsentRetention::binds($siteId, $days);
+
+        // 🚪 Rule 3 (D-211) FIRST: a member who has left. The people are judged
+        //    now; the delete re-asks the membership inside its own statement.
+        $left = consent_left_people($db, $siteId, $days);
+        if ($reallyDelete === false) {
+            foreach (array_keys($left) as $u) {
+                $cnt = $db->prepare('SELECT COUNT(*) AS `cnt` FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` = ? '
+                    . 'AND `createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY)');
+                if ($cnt === false) {
+                    throw new \RuntimeException('The consent-record clear-out could not prepare a count.');
+                }
+                $cnt->bind_param('iii', $siteId, $u, $days);
+                $cnt->execute();
+                $total += (int) ($cnt->get_result()->fetch_assoc()['cnt'] ?? 0);
+                $cnt->close();
+            }
+        } else {
+            foreach ($left as $u => $person) {
+                for ($round = 0; $round < $maxBatches; $round++) {
+                    // 🔒 The membership is asked AGAIN inside the delete (a rehire since the
+                    //    list was made is seen), by the same condition. Whole rows, in pieces.
+                    $del = $db->prepare('DELETE FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` = ? '
+                        . 'AND `createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY) '
+                        . 'AND EXISTS (SELECT 1 FROM `tblUserSites` `us` JOIN `tblUsers` `p` ON `p`.`userID` = `us`.`userID` '
+                        . 'WHERE `us`.`userID` = ? AND `us`.`siteID` = ? AND ' . Memberships::hasLeftSql('us', 'p') . ') '
+                        . 'ORDER BY `consentID` LIMIT ' . (int) ConsentRetention::BATCH);
+                    if ($del === false) {
+                        throw new \RuntimeException('The consent-record clear-out could not prepare a delete.');
+                    }
+                    $del->bind_param('iiiiii', $siteId, $u, $days, $person, $siteId, $days);
+                    $del->execute();
+                    $gone = (int) $del->affected_rows;
+                    $del->close();
+                    $total += $gone;
+                    if ($gone < ConsentRetention::BATCH) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 2g's rules (replaced; a visitor's outlived record) on what remains. In the
+        // preview the rows rule 3 already counted are left out, so none is counted twice.
+        $leftIds = ($reallyDelete === false) ? array_keys($left) : [];
+        if (count($leftIds) > 30000) {
+            throw new \RuntimeException('The consent-record clear-out could not count: too many people who have left at once.');
+        }
+        $from  = ConsentRetention::replacedFrom(count($leftIds));
+        $binds = ConsentRetention::binds($siteId, $days, $leftIds);
         $types = str_repeat('i', count($binds));
 
         if ($reallyDelete === false) {
@@ -974,7 +1098,7 @@ function preview_retention_counts(): array
 
     // 🍪 Records of privacy-notice and cookie choices past their period (#934): counted by the
     //    same function, from the same condition, as the delete.
-    $out['consentRecords'] = consent_sweep(false);
+    $out['consentRecords'] = run_consent_sweep(false);
 
     // 🚪 Anonymous check-in detail, counted one organisation at a time with
     //    that organisation's own setting — the same loop the clear-out itself
@@ -1530,6 +1654,24 @@ function run_part_file_sweep(): array
  * A fault here never stops the rest of the nightly job, and "could not work
  * the period out" deletes NOTHING rather than guessing one (answers -1 then).
  */
+/**
+ * 🍪 `consent_sweep()` that can never stop the rest of the sweep (#934). A count or a clear-out
+ * that cannot be done answers -1, which the page words as "could not be counted" / "could not
+ * run" and the totals treat as 0, and every later step still runs. Only the exception's CLASS is
+ * logged, never its message (it can carry a row's values).
+ */
+function run_consent_sweep(bool $reallyDelete): int
+{
+    try {
+        return consent_sweep($reallyDelete);
+    } catch (\Throwable $e) {
+        error_log('[WebMS-Intra] retention sweep: the consent records could not be '
+            . ($reallyDelete === true ? 'cleared' : 'counted') . ' (' . get_class($e) . ').');
+
+        return -1;
+    }
+}
+
 function run_geocode_cache_sweep(bool $reallyDelete): int
 {
     try {
@@ -1661,7 +1803,7 @@ function run_retention_sweep(): array
 
     // 🍪 Records of privacy-notice and cookie choices (#934, D-166, D-210): really deleted,
     //    so counted in totalDeleted. See consent_sweep().
-    $consentRecordsDeleted = consent_sweep(true);
+    $consentRecordsDeleted = run_consent_sweep(true);
 
     // 🧾 Giving records that kept an erased donor's name for tax reasons.
     //    Not a delete either: see run_giving_identity_sweep() above.
@@ -1730,6 +1872,6 @@ function run_retention_sweep(): array
         'partFilesRemoved'     => $partFiles['removed'],
         'partFilesLeft'        => $partFiles['left'],
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
-                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted) + $consentRecordsDeleted,
+                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted) + max(0, $consentRecordsDeleted),
     ];
 }

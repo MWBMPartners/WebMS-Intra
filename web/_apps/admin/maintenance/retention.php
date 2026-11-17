@@ -541,9 +541,12 @@ $conInstNever = $conInstDays === ConsentRetention::NEVER;
 $conExplained = 'The portal keeps a record of each choice made about the privacy notice and about cookies. A record that a '
     . 'newer choice by the same person has replaced is deleted by the nightly clear-out once the newer one is older than the '
     . 'figure below, if that scheduled job has been set up. A choice made without signing in counts as replaced when its cookie '
-    . 'runs out, ' . ConsentRetention::COOKIE_DAYS . ' days after it was made. A signed-in person&rsquo;s latest choice is never '
-    . 'deleted by this, and an erasure deletes all of a person&rsquo;s records at once. <strong>A member who has left but whose '
-    . 'account has not been erased is not yet cleared by a leaving date</strong>; that follows in a later release. '
+    . 'runs out, ' . ConsentRetention::COOKIE_DAYS . ' days after it was made. A signed-in person&rsquo;s latest choice is kept '
+    . 'while they belong to the organisation, and an erasure deletes all of a person&rsquo;s records at once. '
+    . '<strong>When a membership is ended through Offboarding, every record of that person here, the latest included, may be '
+    . 'deleted once the figure below has passed since it ended, unless the person has been brought back by then.</strong> Switching an account off with the Active tick does not '
+    . 'end a membership, and removing a person from an organisation under Admin, Organisations, Users keeps no leaving date, so '
+    . 'neither starts that clock. A merged account&rsquo;s records follow the account the person now has. '
     . '&ldquo;Keep for ever&rdquo; keeps the records, where this installation allows it.';
 // What the network-address period does, in words true of both forms (D-178).
 // The places are NetworkAddressRetention::PLACES; the privacy pages list them.
@@ -777,7 +780,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction !== 'sweep') {
                    . $result['registrationsDeleted'] . ' event registration(s), '
                    . $result['transcriptsDeleted'] . ' transcript(s)'
                    // 🍪 #934: really deleted, so in the total, so itemised.
-                   . ', ' . $result['consentRecordsDeleted'] . ' record(s) of privacy-notice and cookie choices'
+                   //    -1 is "that step could not run", said as such and not as 0.
+                   . ($result['consentRecordsDeleted'] >= 0
+                    ? ', ' . $result['consentRecordsDeleted'] . ' record(s) of privacy-notice and cookie choices'
+                    : ', no records of privacy-notice and cookie choices (that step could not run)')
                    // 🗺️ #1037: really deleted, so in the total, so itemised.
                    //    -1 is "could not run", said as such and not as 0.
                    . ($result['geocodeCacheDeleted'] >= 0
@@ -1038,7 +1044,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     The rules are the activity log&rsquo;s: an organisation may choose a shorter figure, never a
                     longer one, and &ldquo;Keep for ever&rdquo; only where the installation keeps them for ever.
                 </p>
-                <p class="mb-2">Records that would be deleted now, across every organisation: <strong><?php echo number_format($preview['consentRecords']); ?></strong></p>
+                <p class="mb-2">Records that would be deleted now, across every organisation: <strong><?php echo $preview['consentRecords'] >= 0 ? number_format($preview['consentRecords']) : 'could not be counted (too many to show at once, or a read failed)'; ?></strong></p>
                 <div class="row g-4">
                     <div class="col-lg-6">
                         <h3 class="h6">For every organisation on this installation</h3>

@@ -540,8 +540,8 @@ $naPlant = static function (string $relPath, string $from, string $to, string $s
     foreach (['_core', '_apps' . $sep . 'cron'] as $dir) {
         mkdir($copy . $sep . $dir, 0700, true);
     }
-    // GeocodeCacheRetention since #1037: the sweep loads it beside the others.
-    foreach (['InstallationSettings', 'App', 'SettingLimit', 'RetentionPeriod', 'ActivityLogRetention', 'NetworkAddressRetention', 'ConsentRetention', 'GeocodeCacheRetention'] as $class) {
+    // GeocodeCacheRetention since #1037, Memberships and AccountMerge since #934 (D-211): the sweep loads them beside the others.
+    foreach (['InstallationSettings', 'App', 'SettingLimit', 'RetentionPeriod', 'ActivityLogRetention', 'NetworkAddressRetention', 'ConsentRetention', 'GeocodeCacheRetention', 'Memberships', 'AccountMerge'] as $class) {
         copy($naWeb . $sep . '_core' . $sep . $class . '.php', $copy . $sep . '_core' . $sep . $class . '.php');
     }
     copy($naWeb . $sep . '_apps' . $sep . 'cron' . $sep . '_retention-sweep.php', $copy . $sep . '_apps' . $sep . 'cron' . $sep . '_retention-sweep.php');

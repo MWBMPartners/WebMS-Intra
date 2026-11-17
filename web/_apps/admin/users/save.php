@@ -64,6 +64,7 @@ use Portal\Core\AccountGuard;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\Memberships;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -781,6 +782,28 @@ if ($action === 'update') {
         }
         $stmt->execute();
         $stmt->close();
+
+        // 🚪 #934 (D-211, D-213): an account switched back ON is a person who has RETURNED.
+        //    On a ONE-organisation portal the membership row decides nothing about access, so
+        //    a person offboarded and later brought back with this tick still has a membership
+        //    that is off and DATED, and a later pause (untick) would let the privacy clear-out
+        //    read them as having left and delete their consent records. So the membership is
+        //    switched on and its date emptied, through Memberships (the ONE place). With
+        //    SEVERAL organisations nothing is touched on purpose: there the membership IS what
+        //    lets somebody in, switching the account on does not give back an organisation
+        //    they left, so that organisation's date stands (and still says they left).
+        //    The mode is read inside the statement, and only the organisation open here is
+        //    considered. Inside this transaction: a failure rolls the whole save back.
+        if ($isActive === 1 && $storedIsActive === 0) {
+            $back = $mysqli->prepare(Memberships::SWITCH_ON_ONE_IF_SINGLE_SQL);
+            if ($back === false) {
+                throw new \RuntimeException('Failed to prepare the membership return: ' . $mysqli->error);
+            }
+            $openSiteId = Site::id();
+            $back->bind_param('ii', $userID, $openSiteId);
+            $back->execute();
+            $back->close();
+        }
 
         // 🔑 #586: the password is stored whichever of the two cases step
         //    10b found. There is no third case and no silent one: a

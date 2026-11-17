@@ -39,10 +39,20 @@
  * THE LATEST RECORD OF A SIGNED-IN PERSON'S CHOICE IS NEVER DELETED by this: it
  * is the live consent. An erasure deletes a person's records at once, as before.
  *
- * WHAT IT DOES NOT DO, said plainly: D-211 will add a leaving date to
- * memberships so that a member who has left stops being a "live" person; until
- * that exists (a later release), the records of a member who has left but whose
- * account has not been erased are kept.
+ * 3. A MEMBER WHO HAS LEFT (D-211, #934 package 2h): every record of a person
+ *      who left the organisation more than the period ago, the latest included.
+ *      `Memberships::hasLeftSql()` is the ONE definition of "left" (the
+ *      membership is off and dated, a global administrator never counts, and
+ *      with one organisation the account must be off too). The record's own
+ *      date must also be older than the period, so a record made after
+ *      leaving still waits its own period: late, never early. A merged-away
+ *      account's records are judged by the account the person now is
+ *      (`AccountMerge::survivorOf()`), only while the old account is still as
+ *      the merge closed it. A membership switched off with NO date has not
+ *      started the clock. If the person returns they are asked again.
+ *      Switching an ACCOUNT off (the Active tick) is not leaving (D-213), and
+ *      Admin, Organisations, Users, Remove deletes the membership without a
+ *      date (D-212): their records wait for rules 1, 2 or an erasure.
  *
  * WHOSE PERIOD: every record belongs to an organisation (`siteID` is not
  * empty), so each organisation's figure, held to the installation's, decides
@@ -123,8 +133,20 @@ final class ConsentRetention extends RetentionPeriod
      * the cookie's life plus the period. Every name is a literal here.
      * Six placeholders: see binds().
      */
-    public static function replacedFrom(): string
+    public static function replacedFrom(int $leftUserCount = 0): string
     {
+        // 🚪 D-211: in the PREVIEW, rows the member-has-left rule already counts
+        //    are left out here, so a row due under both rules is counted ONCE.
+        //    `IS NOT NULL` comes first on purpose: a visitor's row has no
+        //    account, and `NULL IN (...)` is NULL, which would make the whole
+        //    NOT(...) NULL and drop the visitor rule's rows from the count.
+        $leftOut = '';
+        if ($leftUserCount > 0) {
+            $leftOut = ' AND NOT (`t`.`userID` IS NOT NULL AND `t`.`userID` IN ('
+                . implode(',', array_fill(0, $leftUserCount, '?'))
+                . ') AND `t`.`createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY))';
+        }
+
         return '`tblConsentLog` AS `t`'
             . ' LEFT JOIN (SELECT `siteID`, `consentType`, `userID`, MAX(`consentID`) AS `newest` FROM `tblConsentLog`'
             . '   WHERE `siteID` = ? AND `userID` IS NOT NULL AND `createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY)'
@@ -139,7 +161,8 @@ final class ConsentRetention extends RetentionPeriod
             . ' WHERE `t`.`siteID` = ? AND ('
             . '   `t`.`consentID` < `mu`.`newest`'
             . '   OR `t`.`consentID` < `ms`.`newest`'
-            . '   OR (`t`.`userID` IS NULL AND `t`.`createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY)))';
+            . '   OR (`t`.`userID` IS NULL AND `t`.`createdAt` < DATE_SUB(NOW(), INTERVAL ? DAY)))'
+            . $leftOut;
     }
 
     /**
@@ -147,11 +170,22 @@ final class ConsentRetention extends RetentionPeriod
      * and the period (account list), the organisation and the period (session
      * list), then the organisation and the period plus the cookie's life.
      *
+     * With `$leftUserIds` (the same list whose COUNT was given to
+     * `replacedFrom()`), the account numbers and then the period follow.
+     *
+     * @param list<int> $leftUserIds
      * @return list<int>
      */
-    public static function binds(int $siteId, int $days): array
+    public static function binds(int $siteId, int $days, array $leftUserIds = []): array
     {
-        return [$siteId, $days, $siteId, $days, $siteId, $days + self::COOKIE_DAYS];
+        $binds = [$siteId, $days, $siteId, $days, $siteId, $days + self::COOKIE_DAYS];
+        if ($leftUserIds !== []) {
+            foreach ($leftUserIds as $one) {
+                $binds[] = $one;
+            }
+            $binds[] = $days;
+        }
+        return $binds;
     }
 
     /** Records-of-choices' own words for RetentionPeriod. */
@@ -189,22 +223,26 @@ final class ConsentRetention extends RetentionPeriod
             . 'which choice, when, and the browser session or account that made it. ';
         $cookie = ' A choice made without signing in counts as replaced when the cookie that remembers it runs out, '
             . self::COOKIE_DAYS . ' days after it was made, and is then deleted the same way.';
-        $tail = ' Your latest choice while signed in is never deleted by this. '
-            . 'Asking for your account to be erased deletes all of your records at once. A member who has left but whose account '
-            . 'has not been erased is not yet cleared by a leaving date; that follows in a later release. '
+        $tail = ' Your latest choice while signed in is never deleted by this while you belong to the organisation. '
+            . 'Asking for your account to be erased deletes all of your records at once. '
             . 'A record made at another organisation on this portal follows that organisation\'s period.';
+
+        // 🚪 Said only where a period applies: with "keep for ever" nothing is deleted at all.
+        $left = ' If your membership of this organisation is ended, your records here, the latest included, may be deleted once '
+            . 'the period above has passed since it ended, unless you have been brought back by then. Your account being switched off '
+            . 'for a while does not end your membership.';
 
         $core = match ($facts['state']) {
             self::MEMBER_DAYS => 'A record that a newer choice has replaced is deleted by a nightly clear-out once the newer one is '
                 . self::inWords($facts['days']) . ' old, if that scheduled job has been set up. This organisation\'s administrators set '
-                . 'that period, within the limit set for the whole portal.' . $cookie,
+                . 'that period, within the limit set for the whole portal.' . $cookie . $left,
             self::MEMBER_OWN_NEVER => 'This organisation has chosen to keep these records for ever, so nothing deletes them '
                 . 'except an erasure.',
             self::MEMBER_INSTALLATION_NEVER => 'This portal keeps these records for ever, and this organisation has not chosen a '
                 . 'shorter period, so nothing deletes them except an erasure.',
             default => 'A record that a newer choice has replaced is deleted by a nightly clear-out after the period set for this '
                 . 'organisation, if that scheduled job has been set up, unless that period is for ever. The period in force here '
-                . 'could not be read just now.' . $cookie,
+                . 'could not be read just now.' . $cookie . $left,
         };
 
         return $what . $core . $tail;

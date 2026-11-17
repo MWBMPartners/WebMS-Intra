@@ -364,6 +364,7 @@ CREATE TABLE IF NOT EXISTS `tblUserSites` (
                       COMMENT 'Full control within this site, can assign site admins',
     `isActive`        TINYINT(1) NOT NULL DEFAULT 1,
     `joinedAt`        DATETIME   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `leftAtUtc`       DATETIME   NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this membership was last switched off (isActive set to 0). Written only through the Memberships class: offboarding stamps it, a rehire empties it. Empty on a switched-on membership, and on one switched off before migration 305 or put back from a backup taken before it: nobody knows when, and no date is guessed (D-211). The consent records of a member who has left are deleted the privacy data-retention period after it (D-166, #934)',
     PRIMARY KEY (`userSiteID`),
     UNIQUE KEY `uq_user_site` (`userID`, `siteID`),
     KEY `idx_us_site` (`siteID`),
@@ -12092,6 +12093,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('302_provider_spend_in_its_own_
 -- tblEvents.locationNotAHome is written above, in the table itself. This is
 -- the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('303_event_place_not_a_home.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 305_membership_leaving_date.sql (#934; D-211) ──────────────────────
+-- tblUserSites.leftAtUtc is written above, in the table itself. This is the
+-- record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('305_membership_leaving_date.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
