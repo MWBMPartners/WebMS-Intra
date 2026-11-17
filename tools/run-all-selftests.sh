@@ -253,6 +253,7 @@ geo-token|tools/geo-token-selftest.php|selftest_geotoken|SELFTEST_WEB_PORT=9664
 privacy-page|tools/privacy-page-selftest.php|selftest_privpage|SELFTEST_WEB_PORT=9165
 erasure-notice|tools/erasure-notice-selftest.php|selftest_erasurenotice|SELFTEST_WEB_PORT=9166
 noticeboard-save|tools/noticeboard-save-selftest.php|selftest_nbsave|SELFTEST_WEB_PORT=9167
+visitors-access|tools/visitors-access-selftest.php|selftest_visitors|SELFTEST_WEB_PORT=9171
 event-place-map|tools/event-place-map-selftest.php|selftest_eventplace|
 invite-roles|tools/invite-roles-selftest.php|selftest_inviteroles|SELFTEST_WEB_PORT=9164
 consent-retention|tools/consent-retention-selftest.php|selftest_consent|

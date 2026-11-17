@@ -81,6 +81,17 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### First-time visitors are for the people who follow them up (#1151)
+
+- Until now any signed-in member could open the visitors pages and see a first-time visitor's name, e-mail and telephone
+  number, add visitors and record contacts. The six pages now need the capability "Follow up first-time visitors"
+  (`visitors.followup`), which ships with the Visitor Coordinator role and always admits an administrator; an organisation
+  can point it at another role on Admin, Roles. Members without it are refused, and the menu and dashboard no longer offer
+  them the Visitors card. The public "I'm new" form is unchanged. **To use the feature, give the person the Visitor
+  Coordinator role (Admin, User Management, their Roles).** Opus check round 1: clean, driven over HTTP including re-pointing
+  the capability. Open: the role is named in two places (the capability and the `visitors.coordinator_role` assignment list),
+  and the refusal is a bare text page. Codex has not reviewed this.
+
 ### Install guide corrected after the local rehearsal (#1133, #1139)
 
 - `docs/INSTALL.md`: package size (about 14 MB, about 1,800 files); stop if the installer reports a beta or alpha copy
