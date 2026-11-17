@@ -83,14 +83,14 @@ is (`live` for the real one), and it belongs to the installation: the installer 
 
 ### If your hosting will not let you do what step 1 asks
 
-**The file manager refuses the upload.** The zip is about 11 MB, and some file managers stop at less. Use FTP
+**The file manager refuses the upload.** The zip is about 14 MB, and some file managers stop at less. Use FTP
 (or SFTP) instead: a way of copying files to the hosting account with a program on your own computer. The hosting
 panel has a page, usually called "FTP accounts", with the details to type in; FileZilla and WinSCP are two free
 programs for it.
 
 - Upload the zip into `portal` by FTP, then Extract it with the file manager as above.
 - If the panel has no Extract at all: unpack the zip on your own computer and upload what is inside it into
-  `portal` by FTP. That is about 1,600 files and takes a while. Tell the FTP program to show hidden files first
+  `portal` by FTP. That is about 1,800 files and takes a while. Tell the FTP program to show hidden files first
   (in FileZilla: the "Server" menu, "Force showing hidden files"), and check afterwards that
   `portal/admin_html/.htaccess` arrived.
 
@@ -182,6 +182,10 @@ that needs attention says what to do: put it right in the hosting panel, then pr
 The last line says **which copy of the portal this is**. For a real installation it should say "This is the live
 portal".
 
+**If the line says the package is a beta or alpha copy, stop and ask for the live package.** A test copy lets only
+administrators in: every member you invite would be turned away with "Forbidden", and most of the scheduled jobs
+in step 11 would never run.
+
 - It also says this is **ASSUMED**, because nothing on the server says which copy this is yet. That is as it
   should be at this step. The line goes on to say what the package is (the live portal, or a beta or alpha test
   copy) and that the installer will write that word into the file `.channel` when the installation finishes.
@@ -258,11 +262,18 @@ password needs at least 12 characters, with a capital letter, a small letter, a 
   begins with `https://` if your website has a security certificate. Every link in an e-mail the portal sends
   begins with this address.
 - **Support e-mail address.** Where people should write when they need help. You may leave it empty.
+- **The publisher's website.** The page that describes the portal's programming interface (API), which developers
+  use, names its publisher with a "Website" link. Type the address that link should open, or leave the box empty
+  for no link. A global administrator can change it later in Admin, Settings (the setting `product.publisherUrl`).
 - **Country.** The country this installation is in. Nothing is assumed: the installer suggests one from your own
   computer's time zone (for example, a computer set to London suggests the United Kingdom), and nothing is looked up
   or sent anywhere to do that. Check it. Each organisation on the installation starts from this country and can
   choose its own later, in Admin, Settings, Organisation. You may leave it unchosen; then no country is known, and a
   new venue needs one typed in.
+- **Currency.** The money every amount is recorded, shown and paid in. Choosing a country suggests its currency.
+  Each organisation can choose its own later, in Admin, Settings, Organisation, until it has money recorded. Left
+  unchosen, amounts are shown as plain numbers and no payment can be taken. Only currencies counted in hundredths
+  (such as pounds and pence) can be chosen.
 - **Time zone of your organisation.** Suggested from the country when the country has only one time zone, or from
   your computer's when it is in that country. On a new database it is set for your organisation; a database you
   chose to carry on with keeps the time zone it already has. Change it later in Admin, Organisations.
@@ -293,9 +304,17 @@ The last page is shown **once**. It tells you:
 
 ## 11. Straight afterwards
 
-Some of the pages below have no link leading to them yet, so this guide gives the address to type. Each is your
-portal's own address with a few words after it: `/admin/settings/organisation` means, for example,
+Most of the pages below can be reached from the Admin menu or from cards on the Admin page. For each one this
+guide also gives its address, in case you want to type it: the address is your portal's own address with a few
+words after it, so `/admin/settings/organisation` means, for example,
 `https://portal.example.org/admin/settings/organisation`.
+
+Pages that have **no menu link** and are reached only by the card on the Admin page, signed in as an administrator:
+Backups (`/admin/maintenance/backup`, global administrators only), Health (`/admin/maintenance/health`), Check this
+portal (`/admin/check`), the Upgrade page (`/admin/upgrade`, global administrators only) and Offboarding
+(`/offboarding`, once switched on). "Erasure requests" (`/admin/erasure-requests`) is in the Admin menu as well as a
+card. A page not named here and not in the menu, such as the e-mail page, is reached from its card on the Admin page
+or by typing its address.
 
 1. **Copy the whole `_auth_keys` folder somewhere safe and private** (in the file manager: select the folder and
    choose Download, or Compress and then download the result), and keep it with every backup of the database. It
@@ -303,12 +322,13 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    restored without it loses every one of them.
 2. **Sign in** with the administrator's e-mail address and password. The installer's last page has a button to
    the sign-in page; so does the portal's plain address.
-3. **Give the portal your organisation's name and time zone.** Until they are set, the portal calls itself
-   "Portal" and keeps its clock on UTC (the world's standard time, which has no summer time).
-   - Open **Admin, then Organisations**. Press "Edit" on the one organisation listed. Change "Organisation name" and the
-     copyright name below it (printed at the foot of every page), choose your "Time zone" from the list, and
-     save. This is the name on every page once somebody has signed in, and the time zone the portal's clock runs
-     on. This page is the only place the time zone is set.
+3. **Check your organisation's name, country, currency and time zone.** The installer set the country, currency
+   and time zone you chose at step 9. Until you give a name, the portal calls itself "Portal".
+   - Open **Admin, then Organisations**. Press "Edit" on the one organisation listed. Change "Organisation name" and
+     the copyright name below it (printed at the foot of every page), check the "Time zone", and save. If you left
+     the time zone unchosen at step 9, choose it here: until then the portal's clock runs on UTC (the world's
+     standard time, which has no summer time). This is the name on every page once somebody has signed in. This
+     page is the only place the time zone is set after the installation.
    - The name is kept in a second place as well, and both have to be set. Open **Admin, then Settings**. The page
      is one long list of named settings. Find `site.name`, press the pencil button on its line, type your
      organisation's name and press "Save Changes". This is the name on the sign-in page.
@@ -318,11 +338,26 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    The dashboard's set-up list has a line that leads to the same page. Until this is done the portal cannot send
    a password-reset link.
 6. **Add the scheduled jobs.** A few of the portal's tasks have to be started from outside, every few minutes:
-   for example sending e-mail that could not be sent at once. Hosting panels call the page for this "Cron jobs"
-   or "Scheduled tasks". What to add there, line for line, is in the release notes: open Admin, then Release
-   Notes, and use your browser's "Find" to look for **what an administrator must do after upgrading**. That
-   entry, about the mail queue, applies to a new installation too. The portal's Help has the same, under Admin
-   Guide, "The mail queue: mail that cannot go at once".
+   sending e-mail that could not be sent at once, the nightly clear-out of personal details past their keeping
+   period, the daily backup. Hosting panels call the page for this "Cron jobs" or "Scheduled tasks".
+
+   First give each job its token, a password that only the scheduler knows. Make up a long random value: at least
+   32 letters and digits, for example from a password manager's generator. In Admin, Settings, find the setting
+   named in the table below (for most jobs `maintenance.cronToken`), press the pencil button on its line, paste the
+   value and press "Save Changes". **Keep a copy somewhere safe and private: the page never shows a saved token
+   again.** A job whose token is empty refuses every call.
+
+   Then add one line per job in the hosting panel, with the token at the end of the address, for example:
+
+       */5 * * * *  curl -fsS "https://portal.example.org/cron/mail-queue?token=YOUR_TOKEN" > /dev/null
+
+   Replace `YOUR_TOKEN` with your own value. Use the address and the `?token=` or `?key=` shown in the table, and
+   call each job at least as often as its second column says. If the panel asks for an address rather than a
+   command, give it the address alone. Some older release notes show the token sent as an "Authorization: Bearer"
+   header instead. On hosting where PHP runs inside the Apache web server, that header did not reach the portal in
+   testing and every call was refused, so use the form above. The token is part of the address, so it can appear
+   in the web server's access log, which only your hosting account can read.
+
    **The `/cron/mail-queue` job also sends text messages that were held because the person was inside their
    Sabbath quiet hours. Without it, a held text is never sent** — its record is corrected to "not sent" instead.
 
@@ -362,7 +397,15 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    | `/cron/backup-check` | once a day | `?token=`, `maintenance.cronToken` | 36 hours |
    | `/cron/discipleship-sweep` | once a day, while Discipleship Pathways is switched on | `?key=`, `discipleship.cron_token` | 36 hours |
    | `/cron/giving-statements` | at least once a week, while Giving is switched on or statements are waiting to be sent | `?key=`, `giving.cron_token` | 8 days |
-7. **Add the people** who will use the portal: Admin, then User Management.
+7. **Name your organisation as the data controller.** The Privacy page tells members and visitors who is
+   responsible for their personal details and how to reach them. In Admin, Settings, set `privacy.controllerName`
+   (your organisation's legal name) and `privacy.contactEmail` (where people write about their data). Until both
+   are set, the Privacy page cannot name them, and shows administrators a notice saying so.
+8. **Add the people** who will use the portal: Admin, then User Management. When somebody leaves, press
+   **Offboard** on their line there. That button appears only once the Offboarding app is switched on (Admin, then
+   Apps; it ships switched off). On a portal with one organisation, "Remove" on an organisation's user list is not
+   offered, because removing a person from the only organisation does not stop them signing in: Offboarding, or
+   switching the account off, is how a person leaves.
 
 The installer has locked itself. It cannot be run again by anybody who only has the portal's address.
 
@@ -398,6 +441,11 @@ which copy this is (`.channel`) stay as they are: no package holds any of them.
 - If it brings **none**, the portal does not close and people can go on using it. The new version is still not
   recorded until you press **"Finish the upgrade"** on the Upgrade page, and until you do, the portal asks its
   database one small question on every request. So open the Upgrade page all the same.
+
+A package that brings a database upgrade always carries a higher version number than the one you run, and that
+is how the portal knows to close itself. If step 10 below shows the same version as before while database
+upgrades are listed as waiting, run them before anybody uses the portal: open Admin, then Upgrade, and press the
+"Run … Pending Migration" button. The portal takes a safety copy of the database first.
 
 The notes do not always say which it will be, so plan for the first: choose a quiet time, and do the steps from
 "Unpack" to "Open the Upgrade page" in one sitting.
@@ -503,7 +551,8 @@ If your web folder is not beside `_core` at all, stop and ask whoever supports y
 ### Open the Upgrade page
 
 9. Open the portal's address followed by `/admin/upgrade`, for example
-   `https://portal.example.org/admin/upgrade`. No page links to it yet, so type it. It asks you to sign in if you
+   `https://portal.example.org/admin/upgrade`. A global administrator's Admin page has a card headed "Upgrade" with
+   the button "Open the Upgrade page"; or type the address. It asks you to sign in if you
    are not signed in; signing in still works while the holding page is up. Only a global administrator can open
    it.
 10. Read **"Current Version"**. It shows the version of the files you have just unpacked and how many database
