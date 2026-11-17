@@ -191,6 +191,7 @@ TESTS=$(cat <<'LIST'
 gdpr-coverage|tools/gdpr-coverage-selftest.php|-|
 giving-retention|tools/giving-retention-selftest.php|-|
 php-runtime|tools/php-runtime-selftest.php|-|
+job-tokens-secret|tools/job-tokens-secret-selftest.php|-|
 sso-new-accounts|tools/sso-new-accounts-selftest.php|-|
 brand-colour|tools/brand-colour-selftest.php|-|
 clock-change|tools/clock-change-selftest.php|-|

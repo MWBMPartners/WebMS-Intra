@@ -81,6 +81,16 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### API keys work behind Apache with PHP as a module; two job tokens are secret (#1153, #1154)
+
+- Under Apache with PHP as a module the `Authorization` header never reached PHP, so every API key was refused
+  (`/api/v1/…` gave 401 and `/openapi.json` 404 to a valid key). One reader, `ApiAuth::authorizationHeader()`, now tries the
+  server variable, its redirect copy and `getallheaders()`, and the web root's `.htaccess` passes the header on. Measured on a
+  real Apache with the real portal: valid key 200, bad key 401, on both addresses; the header is never logged or printed.
+  Not tested on PHP-FPM or CGI hosting (the host may drop the header before PHP runs). Migration 306 and the install script
+  mark `reminders.cron_token` and `feeds.cron_token` secret like the other nine, so the Settings page no longer shows them.
+  Opus check round 1: clean. Open: nothing sends a real header through Apache automatically. Codex has not reviewed this.
+
 ### First-time visitors are for the people who follow them up (#1151)
 
 - Until now any signed-in member could open the visitors pages and see a first-time visitor's name, e-mail and telephone

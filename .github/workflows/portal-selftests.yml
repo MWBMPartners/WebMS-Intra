@@ -166,6 +166,10 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
 
+      - name: Job tokens are secret settings (#1154)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/job-tokens-secret-selftest.php
+
       # 🔑 Whether a Microsoft or Google sign-in may make a new account
       #    (#1042, D-185): the two rules two-step-selftest.php cannot reach
       #    (nothing stored means allow; an unrecognised value means refuse).

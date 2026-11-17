@@ -355,8 +355,8 @@ or by typing its address.
    Replace `YOUR_TOKEN` with your own value. Use the address and the `?token=` or `?key=` shown in the table, and
    call each job at least as often as its second column says. If the panel asks for an address rather than a
    command, give it the address alone. Some older release notes show the token sent as an "Authorization: Bearer"
-   header instead. On hosting where PHP runs inside the Apache web server, that header did not reach the portal in
-   testing and every call was refused, so use the form above. The token is part of the address, so it can appear
+   header instead. The portal now also reads that header on hosting where PHP runs inside the Apache web server (tested), but
+   not every host passes it on, so use the form above. The token is part of the address, so it can appear
    in the web server's access log, which only your hosting account can read.
 
    **The `/cron/mail-queue` job also sends text messages that were held because the person was inside their
