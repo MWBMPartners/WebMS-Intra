@@ -29,18 +29,23 @@
  *
  * WHO CAN SEE THIS PAGE
  * ---------------------
- * Public on the live portal — the description at /openapi.json is public too,
- * and only the endpoints it describes require a login. On a pre-release copy
- * (beta, alpha, dev) it is behind the staff sign-in gate like every other
- * page, and while the portal is closed for an upgrade it shows the holding
- * page.
+ * Signed-in ADMINISTRATORS only, on every channel (D-215, #1131). A signed-out
+ * visitor is sent to the sign-in page and brought back here afterwards; a
+ * signed-in person who is not an administrator gets the portal's ordinary 404
+ * page. The rule lives in Portal\Core\ApiDescriptionAccess, which the
+ * description at /openapi.json asks too. Somebody who holds an API key reads
+ * the same description from /openapi.json by sending the key in an
+ * `Authorization: Bearer` header; the page ignores keys, because a browser
+ * that opens a page cannot send one. On a pre-release copy (beta, alpha, dev)
+ * the staff sign-in gate comes first, as for every other page, and while the
+ * portal is closed for an upgrade it shows the holding page.
  *
  * This comment used to say "set isProtected = 1 on the `api-docs` row in
  * tblRoutes" to put the page behind the login wall. That never worked: this
  * folder really exists in the web folder, so the web server answers
  * /api-docs/ with this file directly and the router, which reads tblRoutes,
- * never sees the request. There is no setting that puts this page behind a
- * sign-in on the live portal.
+ * never sees the request. D-215 put the page's own check in this file
+ * instead, which covers both ways in.
  *
  * HOW IT STARTS, AND WHAT WAS WRONG (found 12 October 2026)
  * ---------------------------------------------------------
@@ -66,12 +71,13 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.3.0
+ * @version   1.4.0
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\ApiDescriptionAccess;
 use Portal\Core\Asset;
 use Portal\Core\Auth;
 use Portal\Core\Gatekeeper;
@@ -135,6 +141,12 @@ if (defined('PORTAL_ROOT') === false) {
         Gatekeeper::enforce(PORTAL_ENV);
     }
 }
+
+// 🔐 D-215 (#1131): signed-in administrators only. Asked on BOTH ways in, so it
+//    sits OUTSIDE the block above (a server that hands every address to
+//    index.php skips that block), and BEFORE anything is printed, so a refused
+//    request gets the error page's own headers and no form token is minted.
+ApiDescriptionAccess::enforce(true);
 
 // 📚 Decide which copies of Swagger UI to load. Local-only mode is opt-in per
 //    site; the default keeps the CDN-first behaviour with the local copies as

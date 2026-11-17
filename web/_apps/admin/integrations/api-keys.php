@@ -100,6 +100,12 @@ if (isset($_SESSION['api_key_minted']) === true) {
         rotation carries a grace window so in-flight callers can switch over before the old
         key stops working.
     </p>
+    <?php // 🔐 D-215 / #1131: say how a key holder reads the API description. ?>
+    <p class="text-muted small">
+        A developer you give a key to reads the description of every address and field at
+        <code>/openapi.json</code>, sending the key in the same <code>Authorization: Bearer</code>
+        header. The browsable page at <code>/api-docs</code> is for administrators only.
+    </p>
     <?php // 🔑 #514 part 8 (plan section 7.2): this is where an administrator hands
           //    out a key, so it is where they need to know what a key receives from
           //    outside calendars. The link comes from Site::url(), so it keeps the
