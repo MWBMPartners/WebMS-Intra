@@ -464,8 +464,8 @@ $offboardingOpens = AppRegistry::isEnabled('offboarding');
                             data-rootadmin="<?php echo $isRoot ? '1' : '0'; ?>">
                         <i class="fa-solid fa-pen me-1"></i>Edit
                     </button>
-                    <?php // 🚪 #1136: the way to the per-person offboarding page, which nothing linked. Drawn only where that page would open: the Offboarding app is on, and the same verdict the page asks for its button (REACH_ACCOUNT, which is $rowVerdict) allows. An erased or merged account gets the badges below instead, never this link. ?>
-                    <?php if ($offboardingOpens === true): ?>
+                    <?php // 🚪 #1136: the way to the per-person offboarding page, which nothing linked. Drawn only where that page would open: the Offboarding app is on, and the same verdict the page asks for its button (REACH_ACCOUNT, which is $rowVerdict) allows. An erased or merged account gets the badges below instead, never this link, and nobody is offered it on their OWN line (the offboarding page refuses "You can't offboard your own account"). ?>
+                    <?php if ($offboardingOpens === true && $uid !== (int) ($_SESSION['user_id'] ?? 0)): ?>
                         <a class="btn btn-sm btn-outline-danger ms-1" data-offboard-link
                            href="<?php echo htmlspecialchars(Site::url('offboarding/user') . '?id=' . $uid, ENT_QUOTES, 'UTF-8'); ?>">
                             <i class="fa-solid fa-door-open me-1"></i>Offboard

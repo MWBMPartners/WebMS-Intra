@@ -60,15 +60,19 @@ final class ErasureNotice
      * @return int How many administrators were e-mailed or had a message queued
      *             for them. 0 when nobody could be told, and never an exception.
      */
-    public static function requestWaiting(\mysqli $db, int $siteId, int $requestId): int
+    public static function requestWaiting(int $siteId, int $requestId): int
     {
         try {
+            // Its own connection, so a page calling this keeps no database
+            // handling of its own (gdpr-coverage-selftest pins that for
+            // "Delete my account").
+            $db = App::db();
             // The use-by moment is worked out by the database: dueBy is a
             // reading on its own clock, and the queue wants UTC. The offset
             // between the database's two clocks is added to UTC_TIMESTAMP(),
             // so the result does not depend on the session's time zone.
             $stmt = $db->prepare(
-                'SELECT DATE_FORMAT(`dueBy`, \'%e %M %Y\') AS `dueText`, '
+                'SELECT `userID`, DATE_FORMAT(`dueBy`, \'%e %M %Y\') AS `dueText`, '
                 . 'DATE_FORMAT(UTC_TIMESTAMP() + INTERVAL TIMESTAMPDIFF(SECOND, NOW(), `dueBy`) SECOND, \'%Y-%m-%d %H:%i:%s\') AS `useBy` '
                 . 'FROM `tblErasureRequest` WHERE `requestID` = ? AND `siteID` = ? AND `status` = \'pending_review\' LIMIT 1'
             );
@@ -82,6 +86,8 @@ final class ErasureNotice
             if ($row === null || $row['dueText'] === null) {
                 return 0;
             }
+
+            $requestUser = $row['userID'] === null ? null : (int) $row['userID'];
 
             $name = Mailer::organisationNameFor($siteId);
             if ($name === '') {
@@ -122,12 +128,29 @@ final class ErasureNotice
                 }
             }
 
-            // Numbers only: no name, no address (the e-mail names nobody and
-            // neither does the log).
-            Logger::activity(
-                'GdprErasureRequestAnnounced',
-                'Erasure request #' . $requestId . ' is waiting; ' . $told . ' administrator(s) were e-mailed or had the message queued for them'
-            );
+            // 🧾 The activity line. Two rules, both about erasure reaching it.
+            //    1. An erasure finds activity records by their `userID` and by
+            //       nothing else, and Logger::activity() fills in the network
+            //       address, the browser and the headers of whoever is making
+            //       THIS request. When a member confirms from a phone, signed
+            //       out, that line would hold their address and name nobody,
+            //       and would outlive the very erasure it announces. So the
+            //       request's own account number is passed, and the line is
+            //       reached by the erasure like every other record of theirs.
+            //    2. Logger files a line under the ADDRESS's organisation
+            //       (Site::id()), which for a link opened at another
+            //       organisation's address is not the request's. Then no line
+            //       is written at all: the queued messages already say who
+            //       was told, and a line in the wrong organisation's log
+            //       would carry a stranger's network address into it.
+            //    The words are numbers only.
+            if (Site::id() === $siteId && $requestUser !== null) {
+                Logger::activity(
+                    'GdprErasureRequestAnnounced',
+                    'Erasure request #' . $requestId . ' is waiting; ' . $told . ' administrator(s) were e-mailed or had the message queued for them',
+                    $requestUser
+                );
+            }
 
             return $told;
         } catch (\Throwable $e) {

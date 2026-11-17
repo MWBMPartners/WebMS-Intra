@@ -162,7 +162,7 @@ Logger::activity(
 //    the one-month deadline). The "already asked" case returned above, so this
 //    is always a NEW request. It never throws and never changes what the
 //    person sees next.
-ErasureNotice::requestWaiting(App::db(), Site::id(), (int) $filed['requestID']);
+ErasureNotice::requestWaiting(Site::id(), (int) $filed['requestID']);
 
 // The person stays signed in: their account has not been touched. They land
 // on "My data", which shows the message and lists the request as waiting.

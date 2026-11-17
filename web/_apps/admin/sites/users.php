@@ -90,6 +90,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
+    // 🚪 D-223 (#1142): on a ONE-organisation portal Remove is not offered and is
+    //    refused here too (a hidden button is not a boundary). There a
+    //    membership gates nothing, so Remove does not end anybody's access and
+    //    reads as if it did; Offboarding and the Active tick are how a person
+    //    leaves. AccountGuard::isSingleOrganisation() answers false (several
+    //    organisations) when it cannot read, so a failed read never hides or
+    //    refuses Remove wrongly. With several organisations nothing changes
+    //    (D-212: Remove stays a deletion).
+    if ($action === 'remove' && AccountGuard::isSingleOrganisation() === true) {
+        $_SESSION['flash_msg']  = 'This portal has one organisation, so removing someone from it would not end their access. To make someone leave, use Offboarding or untick Active on Admin, Users. Nothing was changed.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('admin/sites/users') . '?site=' . $siteId, true, 302);
+        exit();
+    }
+
     if ($action === 'add') {
         // ➕ Add user to site
         $addUserId = (int) ($_POST['userID'] ?? 0);
@@ -234,6 +249,9 @@ $pageTitle   = 'Users — ' . $siteInfo['siteName'];
 $pageSection = 'admin';
 $breadcrumbs = ['Admin' => Site::url('admin'), 'Organisations' => Site::url('admin/sites'), $siteInfo['siteName'] . ' Users' => ''];
 
+// 🚪 D-223 (#1142): Remove is drawn only where several organisations are certain.
+$removeOffered = AccountGuard::isSingleOrganisation() === false;
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
@@ -251,6 +269,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
+<?php endif; ?>
+
+<?php if ($removeOffered === false): ?>
+<div class="alert alert-info" data-single-organisation-note>This portal has one organisation, so being a member of it does not control anybody's access. To make someone leave, use Offboarding or untick Active on Admin, Users.</div>
 <?php endif; ?>
 
 <?php if (count($unassignedUsers) > 0): ?>
@@ -343,6 +365,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 </td>
                 <td class="text-end">
+                    <?php if ($removeOffered === true): ?>
                     <form method="post" class="d-inline"
                           data-confirm="Remove this user from the organisation?" data-confirm-destructive="true">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -352,6 +375,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <i class="fa-solid fa-user-minus"></i>
                         </button>
                     </form>
+                    <?php endif; ?>
                 </td>
             </tr>
             <?php endforeach; ?>

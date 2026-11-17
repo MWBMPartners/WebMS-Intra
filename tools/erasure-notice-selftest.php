@@ -281,7 +281,8 @@ function cleanup(): void
 function req(string $jar, string $method, string $path, ?array $post = null, string $address = ''): array
 {
     global $port, $state;
-    $address = $address === '' ? addr(KEY_A) : $address;
+    // '-' means no organisation part at all: the address of a ONE-organisation portal.
+    $address = $address === '' ? addr(KEY_A) : ($address === '-' ? '' : $address);
     $handle  = curl_init('http://127.0.0.1:' . $port . $address . $path);
     curl_setopt_array($handle, [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 180,
@@ -650,8 +651,10 @@ ok('A5 neither the member\'s name nor their e-mail address is in any message', $
 $useBy = (string) $rowsA[0]['expiresAt'];
 ok('A6 each message lapses at the due date (about a month away, in UTC), not sooner',
     (int) one('SELECT TIMESTAMPDIFF(DAY, UTC_TIMESTAMP(), ?) AS d', 's', [$useBy])['d'] >= 27, $useBy);
-ok('A7 one activity line records the numbers, naming nobody',
-    (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityDescription LIKE ? AND activityDescription NOT LIKE '%Quillfeather%'", 's', ['Erasure request #' . $melReq . ' is waiting; ' . count($expectA) . ' administrator%'])['n'] === 1);
+$lines = q('SELECT userID, visitorIP, activityDescription FROM tblActivityLogs WHERE activityDescription LIKE ?', 's', ['Erasure request #' . $melReq . ' is waiting; ' . count($expectA) . ' administrator%']);
+ok('A7 one activity line records the numbers and names the request\'s own member by number, not by words',
+    count($lines) === 1 && (int) $lines[0]['userID'] === MEL && str_contains((string) $lines[0]['activityDescription'], 'Quillfeather') === false, json_encode($lines));
+ok('A7b premise: that line holds a network address, so an erasure that could not reach it would leave one behind', (string) ($lines[0]['visitorIP'] ?? '') !== '');
 
 // =============================================================================
 head('D. The same link twice tells once; a request that has moved on is not announced');
@@ -764,7 +767,9 @@ head('F. The Users page: Offboard where the offboarding page opens');
 // =============================================================================
 /** The chunk of the Users page for one person, from their name to the next row. */
 $rowOf = static function (string $html, string $name): string {
-    $pos = strpos($html, htmlspecialchars($name, ENT_QUOTES, 'UTF-8'));
+    // From the list's own header: the menu bar names the viewer too, and the first place a name appears is not their line.
+    $from = strpos($html, 'portal-data-header');
+    $pos  = strpos($html, htmlspecialchars($name, ENT_QUOTES, 'UTF-8'), $from === false ? 0 : $from);
     if ($pos === false) {
         return '';
     }
@@ -779,6 +784,7 @@ $expectHref = addr(KEY_A) . '/offboarding/user?id=' . MEL;
 ok('F2 the member\'s line shows Offboard, to the offboarding page for that account', str_contains($melRow, 'data-offboard-link') && str_contains($melRow, $expectHref), substr($melRow, 0, 300));
 ok('F3 the erased account\'s line shows no Offboard', str_contains($rowOf($users['body'], '[Deleted User]'), 'data-offboard-link') === false);
 ok('F4 a global administrator\'s line shows none to an organisation administrator (they cannot offboard it)', str_contains($rowOf($users['body'], 'Rae Root'), 'data-offboard-link') === false);
+ok('F4b the viewer\'s OWN line shows no Offboard (the page would refuse it)', $rowOf($users['body'], 'Ada Admin') !== '' && str_contains($rowOf($users['body'], 'Ada Admin'), 'data-offboard-link') === false);
 ok('F5 the link opens', req($jar['adm'], 'GET', '/offboarding/user?id=' . MEL)['status'] === 200);
 $offIndex = req($jar['adm'], 'GET', '/offboarding');
 $offText  = text($offIndex['body']);
@@ -799,6 +805,53 @@ $waiting = (int) one("SELECT COUNT(*) AS n FROM tblErasureRequest WHERE siteID =
 $first   = (string) one("SELECT DATE_FORMAT(MIN(dueBy), '%e %M %Y') AS d FROM tblErasureRequest WHERE siteID = ? AND status = 'pending_review'", 'i', [ORG_A])['d'];
 $dashNow = req($jar['adm'], 'GET', '/admin');
 ok('G6 the erasure card counts the waiting requests and gives the earliest due date', str_contains(text($dashNow['body']), $waiting . ' waiting; the first is due by ' . $first . '.') && $waiting >= 4, $waiting . ' / ' . $first);
+
+// =============================================================================
+head('A9. Erasing the member removes the activity line that announced their request');
+// =============================================================================
+$executed = req($jar['root'], 'GET', '/admin/erasure-requests');
+req($jar['root'], 'POST', '/admin/erasure-requests/process', ['csrf_token' => token($executed['body']), 'requestID' => $melReq, 'action' => 'execute']);
+$after = q('SELECT userID, visitorIP FROM tblActivityLogs WHERE activityDescription LIKE ?', 's', ['Erasure request #' . $melReq . ' is waiting;%']);
+$melNow = (string) one('SELECT fullName AS n FROM tblUsers WHERE userID = ?', 'i', [MEL])['n'];
+ok('A9 premise: the erasure ran (the account is emptied)', $melNow === '[Deleted User]', $melNow . ' / ' . statusOf($melReq));
+ok('A9b the announcing line no longer holds the member\'s number or network address', count($after) === 1 && (int) ($after[0]['userID'] ?? 0) !== MEL && (string) ($after[0]['visitorIP'] ?? '') !== '127.0.0.1', json_encode($after));
+
+// =============================================================================
+head('K. Admin, Organisations, Users: Remove only where several organisations are certain (D-223, #1142)');
+// =============================================================================
+const TOM = 917435; // a member of A whose membership the Remove press would delete
+q("INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, 'Tom Member', 'u917435.notice917@selftest.invalid', 1, 0, 0)", 'i', [TOM]);
+$member = static fn (): bool => one('SELECT 1 AS x FROM tblUserSites WHERE userID = ? AND siteID = ?', 'ii', [TOM, ORG_A]) !== null;
+$giveMembership = static function (): void {
+    q('INSERT IGNORE INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [TOM, ORG_A]);
+};
+$giveMembership();
+$setMode = static function (string $multi): void {
+    setting('multisite.enabled', $multi);
+};
+/** The membership page as the global administrator sees it, at the address the portal mode uses. */
+$membersPage = static function (bool $single) use ($jar): array {
+    return req($jar['root'], 'GET', '/admin/sites/users?site=' . ORG_A, null, $single === true ? '-' : '');
+};
+$pressRemove = static function (bool $single) use ($jar, $membersPage): array {
+    $page = $membersPage($single);
+
+    return req($jar['root'], 'POST', '/admin/sites/users?site=' . ORG_A, ['csrf_token' => token($page['body']), 'action' => 'remove', 'userID' => TOM], $single === true ? '-' : '');
+};
+$multi = $membersPage(false);
+ok('K1 with several organisations the page offers Remove, as before, and has no single-organisation note',
+    $multi['status'] === 200 && str_contains($multi['body'], 'name="action" value="remove"') && str_contains($multi['body'], 'data-single-organisation-note') === false, (string) $multi['status']);
+$setMode('false');
+$one = $membersPage(true);
+ok('K2 with ONE organisation the page offers no Remove and says in a sentence how a person leaves',
+    $one['status'] === 200 && str_contains($one['body'], 'name="action" value="remove"') === false && str_contains(text($one['body']), 'use Offboarding or untick Active'), (string) $one['status']);
+$refused = $pressRemove(true);
+ok('K3 a posted Remove on a one-organisation portal is refused: the membership stays, in words', $member() === true && $refused['status'] === 302
+    && str_contains(text(req($jar['root'], 'GET', '/admin/sites/users?site=' . ORG_A, null, '-')['body']), 'removing someone from it would not end their access'), (string) $refused['status']);
+$setMode('true');
+$pressRemove(false);
+ok('K4 with several organisations the same press still deletes the membership (D-212: Remove stays a deletion)', $member() === false);
+$giveMembership();
 
 // =============================================================================
 head('I. Planted faults: each new check can go red, and every file is put back byte for byte');
@@ -835,7 +888,7 @@ $probeA = static function () use ($expectA, $confirmPage, $queuedTo): bool {
     return count(array_slice(notices(), $before)) === count($expectA);
 };
 ok('I0 the probe for A passes unplanted', $probeA() === true);
-$plant('I1 the call in erasure-confirm.php removed', '_apps/account/erasure-confirm.php', 'ErasureNotice::requestWaiting($db, $requestSite, $requestId);', '$requestSite = $requestSite;', $probeA);
+$plant('I1 the call in erasure-confirm.php removed', '_apps/account/erasure-confirm.php', 'ErasureNotice::requestWaiting($requestSite, $requestId);', '$requestSite = $requestSite;', $probeA);
 
 $probeName = static function () use ($confirmPage, $keyText): bool {
     $mel = one('SELECT fullName AS n FROM tblUsers WHERE userID = ?', 'i', [SAM])['n'];
@@ -874,7 +927,7 @@ $plant(
     'I5 a notice sent on an administrator route too',
     '_apps/admin/erasure/process.php',
     '$result = GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId);',
-    '$result = GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId); \Portal\Core\ErasureNotice::requestWaiting(\Portal\Core\App::db(), $siteId, $requestId);',
+    '$result = GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId); \Portal\Core\ErasureNotice::requestWaiting($siteId, $requestId);',
     $probeAdminRoute
 );
 
@@ -904,7 +957,7 @@ $probeOffboard = static function () use ($jar): bool {
     return str_contains($html, 'data-offboard-link') === false;
 };
 ok('I8 the probe for the app being off passes unplanted', $probeOffboard() === true);
-$plant('I9 Offboard drawn whatever the app switch says', '_apps/admin/users/index.php', '<?php if ($offboardingOpens === true): ?>', '<?php if (true): ?>', $probeOffboard);
+$plant('I9 Offboard drawn whatever the app switch says', '_apps/admin/users/index.php', '<?php if ($offboardingOpens === true && $uid !== (int) ($_SESSION[\'user_id\'] ?? 0)): ?>', '<?php if ($uid !== (int) ($_SESSION[\'user_id\'] ?? 0)): ?>', $probeOffboard);
 
 $probeBackups = static function () use ($jar, $tile): bool {
     return $tile(req($jar['adm'], 'GET', '/admin')['body'], 'backups') === false;
@@ -917,6 +970,51 @@ $probeMenu = static function () use ($jar): bool {
 };
 ok('I12 the probe for the menu link passes unplanted', $probeMenu() === true);
 $plant('I13 the menu link removed', '_core/templates/nav.php', "Site::url('admin/erasure-requests')", "Site::url('admin/zzz-erasure-requests')", $probeMenu);
+
+// Own line: the condition without the own-line test.
+$probeOwnLine = static function () use ($jar, $rowOf): bool {
+    $page = req($jar['adm'], 'GET', '/admin/users')['body'];
+
+    return str_contains($rowOf($page, 'Ada Admin'), 'data-offboard-link') === false;
+};
+ok('I14 the probe for the viewer\'s own line passes unplanted', $probeOwnLine() === true);
+$plant('I15 Offboard drawn on the viewer\'s own line', '_apps/admin/users/index.php', " && \$uid !== (int) (\$_SESSION['user_id'] ?? 0)): ?>", "): ?>", $probeOwnLine);
+
+// The announcing line must carry the request's own account number.
+$probeLineOwner = static function () use ($confirmPage): bool {
+    [$id, $tok] = seedConfirmable(ORG_A, SAM);
+    $confirmPage($tok);
+    $line = one('SELECT userID FROM tblActivityLogs WHERE activityDescription LIKE ?', 's', ['Erasure request #' . $id . ' is waiting;%']);
+    q("UPDATE tblErasureRequest SET status = 'cancelled' WHERE requestID = ?", 'i', [$id]);
+
+    return $line !== null && (int) $line['userID'] === SAM;
+};
+ok('I16 the probe for the line\'s owner passes unplanted', $probeLineOwner() === true);
+$plant('I17 the line written without the request\'s account number', '_core/ErasureNotice.php', "\n                    \$requestUser\n", "\n                    null\n", $probeLineOwner);
+
+// Remove on a one-organisation portal.
+$probeSingleGet = static function () use ($membersPage, $setMode, $giveMembership): bool {
+    $giveMembership();
+    $setMode('false');
+    $html = $membersPage(true)['body'];
+    $setMode('true');
+
+    return str_contains($html, 'name="action" value="remove"') === false;
+};
+ok('I18 the probe for the hidden Remove passes unplanted', $probeSingleGet() === true);
+$plant('I19 Remove drawn on a one-organisation portal', '_apps/admin/sites/users.php', '$removeOffered = AccountGuard::isSingleOrganisation() === false;', '$removeOffered = true;', $probeSingleGet);
+$probeSinglePost = static function () use ($pressRemove, $setMode, $giveMembership, $member): bool {
+    $giveMembership();
+    $setMode('false');
+    $pressRemove(true);
+    $setMode('true');
+    $still = $member();
+    $giveMembership();
+
+    return $still === true;
+};
+ok('I20 the probe for the refused Remove passes unplanted', $probeSinglePost() === true);
+$plant('I21 the posted Remove accepted on a one-organisation portal', '_apps/admin/sites/users.php', "if (\$action === 'remove' && AccountGuard::isSingleOrganisation() === true) {", "if (false) {", $probeSinglePost);
 
 // =============================================================================
 echo "\n" . ($fail === 0 ? 'ALL PASSED' : 'FAILED') . " — {$pass} passed, {$fail} failed\n";

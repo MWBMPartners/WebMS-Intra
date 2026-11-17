@@ -67,7 +67,7 @@ if ($stmt !== false) {
 //    of the same link changes nothing and so tells nobody. It never throws and
 //    never changes the page below.
 if ($affected === 1 && $requestId > 0) {
-    ErasureNotice::requestWaiting($db, $requestSite, $requestId);
+    ErasureNotice::requestWaiting($requestSite, $requestId);
 }
 ?>
 <!doctype html>
