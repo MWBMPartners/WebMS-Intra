@@ -20,6 +20,7 @@ goal, a requirement or a plan changes, at the time it changes.*
 
 - **Hosting:** PHP 8.5 (minimum 8.4), MySQL 8.0 or 8.4 or MariaDB 10.6+ (a warning shows for versions past end of life),
   Apache with `.htaccess`, a scheduler able to call the `cron/` addresses (the mail queue job is the one that matters first).
+- **Pilot state (17 November 2026):** the live pilot zip `webms-intra-1.4.1-live-a0ab6b67.zip` is built and was rehearsed three times locally; it waits on the real-host rehearsal (see the handoff).
 - **To install the pilot:** a spare hosting subdomain and an empty database, the installation zip built from a named commit
   (`tools/package/build.sh`), the installer's ownership code, and `docs/INSTALL.md` followed word for word.
 - **To build or check:** Docker (named throwaway containers), `gh`, Python 3, PHP 8.5, node 22+, Edge or Chrome for the
