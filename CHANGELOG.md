@@ -40,6 +40,20 @@
   other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
   limits not exact under two simultaneous requests). Codex has not reviewed this.
 
+### An erasure removes the remembered map positions of the person's own addresses (#1067; D-209)
+
+- An erasure now also deletes the remembered map positions whose address matches an address the portal holds for the
+  person (their directory address, a Gift Aid declaration's address, and any small-group meeting place they are the
+  named host of), as its own step before the rest of the erasure; a failed step stops the run so a retry still finds
+  the addresses. A shared address (household, hall) loses its remembered answer too: it is a memo nobody owns and the next
+  look-up asks again. A multi-line home address could never have been found before: the directory stored `\r\n` line
+  breaks while the look-up sent `\n`; the key now ignores white space and the space around commas (the text sent to the map
+  service is unchanged; rows filed under the old spelling are simply not found again and age out, D-135). Limits: a
+  position remembered for an address changed since, or typed and never saved, is removed only by the keeping period; a
+  group saved with a country code the portal does not list is not reached; a merged-in account's own directory address is
+  already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
+  Codex has not reviewed this.
+
 ### Linking a Microsoft or Google identity never creates an account or switches the session (#1073; D-208)
 
 - A member who is already signed in and links Microsoft or Google from their Account page (or signs in again from "Add a

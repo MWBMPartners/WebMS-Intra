@@ -25127,3 +25127,21 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - The #900 checks K11-K14, K19 and K24 used to drive "A signed in, B signs in by Microsoft on that browser", which is now
   refused, so `$k4Journey` starts B on a browser where C is waiting for a code; that is the case `beginSessionFor()` still
   has to clear (planting `if (false)` on the clearing still turns K19 red). Google's linked-elsewhere refusal is driven by N04b.
+
+### Erasing remembered map positions (#1067)
+
+- Sources: `tblUsers.displayAddress` (stored CR LF; the browser sends LF and cuts at 500, both tried), `tblSmallGroups` and
+  `tblSmallGroupPlaces` by `hostUserID` (not `placeEnteredByID`), `tblGiftAidDeclaration` by donor, for the account and
+  every account merged into it. NOT sources: kept donors (copied by this erasure), salvation cards, `tblEvents.locationAddress`
+  (#1112), venues, organisation, resources, assets, an address held before and changed.
+- `Geocoder::rememberedKeysFor()` is the ONE place the keys are made (every country in `Countries::choices()` plus none, public
+  and home); a look-up limited to a code not in the list is not reached. `forwardKeyText()` folds white space and ", " in the
+  address half only.
+- The step THROWS and runs BEFORE `eraseMergeRecords()` and the walk: a failed step would otherwise let the walk empty the
+  addresses and the retry would find nothing and close as completed. Not in `DEDICATED_STEP_TABLES` (only matching rows go).
+- Shared address: every match deleted, home and public; do not "fix" into a sharing check. Key unreadable: public rows go,
+  home rows cannot be looked for, the audit line says so and the run does not stop.
+- Audit-line order: `tblGeocodeCache` comes straight after the e-mail steps, before `tblAuditTrail`; counts in
+  `gdpr-eraser-selftest.php` moved.
+- Known (independent check): a replaced (not missing) installation key leaves old rows unfound with no caveat on the audit line;
+  the catalogue reason says "other people's" rows are kept though a shared address's row is deleted.

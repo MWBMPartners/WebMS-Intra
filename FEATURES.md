@@ -2397,3 +2397,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Spend in the company's own currency: each outside company's charge is shown in the currency it charges in; each limit is in the currency of the level that set it; the AI Assist, Translation, Transcription and text-message pages say what the month's spending counts as against each limit, and why spending is stopped (#993).
 
 - Sign-in / linked accounts: linking a Microsoft or Google identity attaches only to the account you are signed in to; it never creates an account or switches the session (#1073, D-208).
+
+- Erasure: remembered map positions of the person's own addresses are deleted (#1067, D-209).
