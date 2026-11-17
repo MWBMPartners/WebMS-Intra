@@ -270,7 +270,14 @@ appended with its real date and a note that it was added later.
 | [D-212](212-removing-a-person-from-an-organisation-stays-a-deletion.md) | 2026-11-17 | D-212 · "Remove" on the organisation users page stays a deletion; no leaving date is recorded for it | in force |
 | [D-213](213-switching-an-account-off-is-not-leaving.md) | 2026-11-17 | D-213 · Switching an account off (unticking Active) does not count as the member leaving | in force |
 | [D-214](214-one-source-of-truth-per-job-kept-current-and-usable-by-any-llm-platform.md) | 2026-11-17 | D-214 · One source of truth per job, kept current at every stage, and usable by any LLM platform | in force |
+| [D-215](215-the-api-documentation-page-is-for-signed-in-administrators-and-api-key-holders.md) | 2026-11-17 | D-215 · The API documentation page (/api-docs and /openapi.json) is for signed-in administrators and API key holders only | in force |
+| [D-216](216-github-milestones-now-and-a-project-board-after-the-owner-widens-the-token.md) | 2026-11-17 | D-216 · GitHub milestones are created now; the project board follows once the owner widens the gh permission | in force |
+| [D-217](217-a-giving-statement-is-the-organisations-tax-receipt.md) | 2026-11-17 | D-217 · The yearly giving statement is the organisation's tax receipt, for the privacy notice wording | in force |
+| [D-218](218-pilot-zips-take-a-new-version-number-when-they-carry-a-database-change.md) | 2026-11-17 | D-218 · A pilot zip that carries a database change takes a new last version number | in force |
+| [D-219](219-the-care-case-member-list-stays-as-built-for-the-pilot.md) | 2026-11-17 | D-219 · The care case member list stays as built for the pilot | in force |
+| [D-220](220-the-data-copy-does-not-list-remembered-map-positions-until-the-release.md) | 2026-11-17 | D-220 · The data copy does not list remembered map positions until the release | in force |
+| [D-221](221-consent-records-on-two-devices-are-noted-not-guarded.md) | 2026-11-17 | D-221 · A consent record replaced from another device is noted, not guarded against; the 730-day default stands | in force |
 
-*214 decisions. This index is checked against the folder by
+*221 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
