@@ -278,7 +278,8 @@ appended with its real date and a note that it was added later.
 | [D-220](220-the-data-copy-does-not-list-remembered-map-positions-until-the-release.md) | 2026-11-17 | D-220 · The data copy does not list remembered map positions until the release | in force |
 | [D-221](221-consent-records-on-two-devices-are-noted-not-guarded.md) | 2026-11-17 | D-221 · A consent record replaced from another device is noted, not guarded against; the 730-day default stands | in force |
 | [D-222](222-the-pilot-zip-is-built-as-the-live-channel.md) | 2026-11-17 | D-222 · The pilot zip is built as the live channel | in force |
+| [D-223](223-remove-is-hidden-on-a-one-organisation-portal.md) | 2026-11-17 | D-223 · "Remove" on the organisation users page is hidden on a one-organisation portal | in force |
 
-*222 decisions. This index is checked against the folder by
+*223 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
