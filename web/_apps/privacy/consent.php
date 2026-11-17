@@ -11,9 +11,11 @@
  * EVERY ANSWER GIVEN AFTER THE TOKEN WAS ACCEPTED CARRIES THE REPLACEMENT as a
  * top-level `csrfToken` (#1134). verifyCsrf() replaces the session's one form
  * token each time it accepts one (#768), and the banner is shown to every NEW
- * visitor on whatever page they land on, the sign-in page included. Without
- * the replacement the banner spent the token its page's form was holding and
- * the visitor's next post (the sign-in itself) was refused. The banner script
+ * visitor on any page that draws the standard footer (the visitor's event
+ * suggestion form and any member form on such a page; NOT the sign-in page,
+ * which draws its own footer and no banner, measured by the independent check).
+ * Without the replacement the banner spent the token its page's form was
+ * holding and the visitor's or member's next post was refused. The banner script
  * (footer.php) already hands the answer to Portal.rememberCsrf(). A visitor
  * with no account gets the session's token: a page on another site cannot read
  * this reply (no CORS), so returning it gives an attacker nothing.

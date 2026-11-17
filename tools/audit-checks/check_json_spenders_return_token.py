@@ -11,7 +11,7 @@ accepts one (#768). A handler that accepts a token and answers JSON to a script
 on a page, without handing the replacement back, leaves that page holding a
 spent token: its next ordinary form post is refused. Four handlers did exactly
 that -- `geo/lookup`, `geo/w3w-suggest`, `privacy/consent` (the cookie banner,
-shown to every new visitor, sign-in page included) and `worship/plan-reorder`
+shown to every new visitor on a page with the standard footer; not the sign-in page) and `worship/plan-reorder`
 -- and the "Look up coordinates" button on eight pages lost the member's Save.
 
 WHAT IT CHECKS (presence only, D-065)
@@ -62,7 +62,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 APPS = os.path.join(ROOT, "web", "_apps")
 
 # Files that may spend a token and answer JSON without handing one back, each
-# with the reason. Empty today. Fails both ways (see main()).
+# with the reason. One entry today (the report builder's preview, which hands
+# the token back as `csrf`). Fails both ways (see main()).
 ON_PURPOSE: dict = {
     # Returns the replacement under the name `csrf`, which its own script
     # (report-builder.js) reads; it is not one of the four faults and works.

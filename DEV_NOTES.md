@@ -25195,3 +25195,17 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - Test changes: channel-selftest A08/A09/J17 and `routedFromWebFolder()` fetch as the Root Admin; page-head-selftest has an
   administrator fixture of its own (user 982301, also used by `page-rule-selftest.php` on a separate database); feed-admin W51
   reads the description with the administrator jar; public-door P38/P48 measure "not the door's answer" instead of "200".
+
+### A background request that spends the form token must hand back the next one (#1134)
+
+- Four non-`api/` JSON handlers spent the token and returned none; each now answers through ONE closure (`$answer`) that adds a
+  top-level `csrfToken`. Answers given before the token was accepted (wrong method, refused token) never carry it. The
+  client side reads `Portal.csrf()` at posting time, gives EVERY answer to `Portal.rememberCsrf()` and sends one request at a
+  time (`location-map-assets.php`, `worship/plan.php`).
+- A fifth handler, `admin/reports/builder/preview.php`, returns the token as `csrf` (read by its own script): `ON_PURPOSE`
+  in `check_json_spenders_return_token.py`, which accepts only the exact string `'csrfToken'` ('csrf_token' and 'csrf' are in
+  every handler already).
+- The independent check measured the banner in a real browser: it never appears on `/login` (that page draws its own footer);
+  the real harm was a visitor's event suggestion and any member form on a page with the banner. The geo-token test's section C
+  still tests the handler; its label describes a path the interface does not have.
+- Not covered by the guard: faults in page scripts (`api/` is excluded and the noticeboard's save ignores the answer: #1141).

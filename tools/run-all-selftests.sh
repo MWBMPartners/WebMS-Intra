@@ -249,6 +249,7 @@ page-head|tools/page-head-selftest.php|selftest_pagehead|SELFTEST_WEB_PORT=9674
 care-case-person|tools/care-case-person-selftest.php|selftest_carecase|SELFTEST_WEB_PORT=9162
 page-rule|tools/page-rule-selftest.php|selftest_pagerule|SELFTEST_WEB_PORT=9163
 api-description-access|tools/api-description-access-selftest.php|selftest_apidesc|SELFTEST_WEB_PORT=9131
+geo-token|tools/geo-token-selftest.php|selftest_geotoken|SELFTEST_WEB_PORT=9664
 event-place-map|tools/event-place-map-selftest.php|selftest_eventplace|
 invite-roles|tools/invite-roles-selftest.php|selftest_inviteroles|SELFTEST_WEB_PORT=9164
 consent-retention|tools/consent-retention-selftest.php|selftest_consent|
@@ -322,6 +323,7 @@ scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
 document-write-check|python3 -I tools/document-write-check-selftest.py
 clock-writes-check|python3 -I tools/wall-clock-writes-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
+geo-lookup-csrf|node tools/geo-lookup-csrf-selftest.mjs
 installer-country-script|node tools/installer-country-script-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs

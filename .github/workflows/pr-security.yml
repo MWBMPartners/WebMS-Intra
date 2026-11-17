@@ -2093,6 +2093,19 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_one_membership_switch.py --self-test
 
+      # 🔑 A request that SPENDS the form token must hand back the next one
+      #    (#1134, #768). Four handlers did not and the next Save was refused.
+      #    Needs `php` on the path (it asks PHP's own tokeniser); fails both ways.
+      - name: 'A token-spending handler hands back the next token (hard gate)'
+        id: json_spenders_return_token
+        if: always()
+        run: python3 -I tools/audit-checks/check_json_spenders_return_token.py
+
+      - name: 'A token-spending handler hands back the next token (self-test, hard gate)'
+        id: json_spenders_return_token_selftest
+        if: always()
+        run: python3 -I tools/audit-checks/check_json_spenders_return_token.py --self-test
+
       # 💷 A money record's currency is written by ONE rule (#966, D-139):
       #    an UPDATE that writes it goes through Currency::onEdit(), and a
       #    child row takes its parent's. "An edit relabels a record" failed

@@ -81,6 +81,18 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### A background request hands back the replacement form token (#1134)
+
+- A background request that spends the form token now hands back the new one, so the next Save is not refused. "Look up
+  coordinates" on eight pages (and the what3words suggestions) no longer make the next Save fail ("Bad request" / "Invalid or
+  expired form token"); the cookie banner no longer leaves a visitor's event suggestion or a member's form on the same page
+  holding a spent token (the sign-in page draws no banner); the second drag of a service plan row is saved, and the page
+  renumbers the rows only when the server kept the order. Four handlers were fixed (`geo/lookup`, `geo/w3w-suggest`,
+  `privacy/consent`, `worship/plan-reorder`) and a new hard check, `check_json_spenders_return_token.py`, keeps it so.
+  Measured in a real browser: before, Accept then Save on `/calendar/submit` gave `?err=csrf`; after, it is accepted. Open:
+  the noticeboard has the same fault (#1141), two browser tabs share one token (inherent), a request that hangs stalls later
+  look-ups. Codex has not reviewed this.
+
 ### The API documentation page and the API description are for administrators and key holders only (#1131; D-215)
 
 - `/api-docs` (the Swagger UI) and `/openapi.json` (the description of every API address) were public on the live portal.
