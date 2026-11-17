@@ -2580,11 +2580,17 @@ return [
         // not, and which an address is is chosen per form (`addressKind`).
         //
         // WHY 'retain' AND NOT 'erase': nothing on the row says whose home it
-        // is — no account number, no address — so an erasure request has
-        // nothing to match a person's rows against (the same position as
-        // `tblAnonymousCheckins` and `tblLiveRateLimits`). The protection is
-        // the keeping period, which 'period' states. Public rows sit in the
-        // same table and are swept by the same period; they are not personal.
+        // is — no account number, no address — so the walk has nothing to
+        // match a person's rows against (the same position as
+        // `tblAnonymousCheckins` and `tblLiveRateLimits`). #1067 (D-209) adds
+        // a dedicated step, `GdprEraser::eraseRememberedMapPositions()`, that
+        // runs BEFORE the walk: it rebuilds the keys of every address held for
+        // the person and deletes those rows. It is deliberately not in
+        // DEDICATED_STEP_TABLES (only matching rows go; the rest are kept for
+        // the period, like `eraseAuditTrailAboutPerson()` for tblAuditTrail).
+        // The protection for every other row is the keeping period, which
+        // 'period' states. Public rows sit in the same table and are swept by
+        // the same period; they are not personal.
         'reason'   => 'When an address is looked up on a map, the position found is remembered so the map'
                     . ' service is not asked again. A row keeps a fingerprint of the address, the position'
                     . ' (to about a centimetre), which service found it and whether the address was marked'
@@ -2592,9 +2598,14 @@ return [
                     . ' the position is the house, so anyone who can read the database can find the'
                     . ' address with any online map: home rows are personal data, and their fingerprint is'
                     . ' mixed with this installation\'s own secret key. Nothing on a row says whose home it'
-                    . ' is, so an erasure request cannot single out one person\'s rows; what removes them'
-                    . ' is the keeping period below. Rows for public places (venues, the organisation\'s'
-                    . ' own address) are not personal.',
+                    . ' is, so an erasure deletes every remembered position whose address is written the same'
+                    . ' way (capitals, spacing and line breaks aside) as an address the portal holds for the'
+                    . ' person: their directory address, a Gift Aid declaration\'s address, and any small'
+                    . ' group meeting place they are the named host of. That is its own step, before the rest'
+                    . ' of the erasure. Every other row (other people\'s, public places, and any address of'
+                    . ' theirs the portal no longer holds or never saved) is kept until the keeping period'
+                    . ' below removes it. Rows for public places (venues, the organisation\'s own address)'
+                    . ' are not personal.',
         'period'   => 'until the answer has not been used for the period in force: each organisation\'s'
                     . ' own figure, held to the installation\'s (a year unless changed, at most ten years,'
                     . ' never "for ever"), and because one remembered answer serves every organisation,'

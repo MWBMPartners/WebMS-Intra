@@ -226,7 +226,8 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 318; // #938/#1065 added section 24's five: 313 + 5.
+const EXPECTED_CHECKS = 328; // #1067 added section 25's ten: 318 + 10.
+                             // #938/#1065 added section 24's five: 313 + 5.
                              // #970 added two to section 23: 311 + 2.
                              // HOW THE ROUNDS ARE NAMED BELOW: "#941 round N" is the commit
                              // that answered "check round N-1" (the independent check of the
@@ -330,7 +331,7 @@ const EXPECTED_CHECKS = 318; // #938/#1065 added section 24's five: 313 + 5.
                              // with a kept gift inside, is DELETED. 282.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -439,6 +440,16 @@ const SITE_C2  = 14;     // section 23: "every gift", where a planted fault stop
 const P_ASSET   = 921001; // erased in section 24: the scrambled address on their own asset changes and scans goes (#938, #1065)
 const P_ASSET_2 = 921002; // section 24: somebody else, whose asset changes and scans must survive whole
 const REQ_ASSET = 941001;
+const P_GEO     = 921101; // erased in section 25: the remembered map positions of her addresses go (#1067, D-209)
+const P_GEO_Q   = 921102; // section 25: somebody else, whose home and group must survive
+const P_GEO_S   = 921103; // section 25: shares her directory address; their own record must not change
+const P_GEO_M   = 921104; // section 25: an account merged into hers
+const P_GEO_K   = 921105; // section 25: erased while the installation's key cannot be read
+const REQ_GEO   = 941101;
+const REQ_GEO_K = 941102;
+const AMR_GEO   = 951101; // section 25: the completed merge of P_GEO_M into P_GEO
+const SG_GEO_P  = 960701; // section 25: a group she hosts
+const SG_GEO_Q  = 960702; // section 25: a group Quinn hosts, whose place she only typed in
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
 const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
 const REQ_AUDIT = 940401;
@@ -2326,6 +2337,11 @@ function ge_checkAudit(array $world, array $lines, bool $demoLine, array $failTa
     // made-up worlds nothing has written a change history about this person,
     // so it says that nothing was held; section 20 builds a world where it
     // really has something to empty.
+    // #1067: the remembered map positions of the person's own addresses come BEFORE
+    // the change history (and before the merged-in accounts' details are emptied):
+    // the walk empties the addresses they are found by. The made-up worlds hold no
+    // such position.
+    $expected[] = ['tblGeocodeCache', ['none']];
     $expected[] = ['tblAuditTrail', ['none']];
     $rowsFor = [];
     foreach ($world['rows'] as $tracked) {
@@ -2578,8 +2594,8 @@ ge_ok('it reports no failed step, and the number of steps it ran',
     // CHANGED by #1064 round 5: + 2 more when the person has an earlier address
     // (the mail queue and send log searched by it too).
     $resultA['failed'] === 0 && $resultA['changed'] === true
-        && $resultA['steps'] === $instructionCount + 8 + 2 * $worldA['earlier'],
-    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 8 + 2 * $worldA['earlier']) . ')');
+        && $resultA['steps'] === $instructionCount + 9 + 2 * $worldA['earlier'],
+    json_encode($resultA) . ' (expected steps: ' . ($instructionCount + 9 + 2 * $worldA['earlier']) . ')');
 
 $reqA = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_A]);
 ge_ok('the request row still exists and is "completed"', $reqA !== null && $reqA['status'] === 'completed', json_encode($reqA));
@@ -2715,7 +2731,7 @@ ge_ok('the number of lines is the instructions, the Demo Data step, the giving-r
     // CHANGED by #707: five became six (the change history about the person).
     . ', one per organisation), the six dedicated lines and the closing line',
     // CHANGED by #1064 round 5: + 2 when the person has an earlier address.
-    count($auditA) === $instructionCount + 8 + 2 * $worldA['earlier'] + $givingCountA && $givingCountA >= 3,
+    count($auditA) === $instructionCount + 9 + 2 * $worldA['earlier'] + $givingCountA && $givingCountA >= 3,
     count($auditA) . ' lines for ' . $instructionCount . ' instructions and ' . $givingCountA . ' organisations');
 ge_ok('the chain of the audit trail verifies', GdprEraser::verifyAuditChain(REQ_A) === true);
 // CHANGED by roll-out package A2b, in two ways. The giving-records step
@@ -3505,7 +3521,7 @@ ge_ok('the run still ends without an exception, and reports exactly one failed s
     // CHANGED by #707: + 7 became + 8 (the change-history step).
     // CHANGED by #1064 round 5: + 2 when the person has an earlier address.
     is_array($resultB1) === true && $resultB1['failed'] === 1
-        && $resultB1['steps'] === $instructionCount + 8 + 2 * $worldB['earlier'],
+        && $resultB1['steps'] === $instructionCount + 9 + 2 * $worldB['earlier'],
     $resultB1 instanceof Throwable ? get_class($resultB1) . ': ' . $resultB1->getMessage() : json_encode($resultB1));
 $reqB = ge_one('SELECT * FROM tblErasureRequest WHERE requestID = ?', 'i', [REQ_B]);
 ge_ok('the request is back at "pending review" with its account number, name, address and notes all still on it',
@@ -3518,7 +3534,7 @@ ge_ok('the audit trail has a line for EVERY instruction: one "failed", and nothi
     $auditB1Problems === [], implode('; ', array_slice($auditB1Problems, 0, 8)));
 $summary = $auditB1[count($auditB1) - 1] ?? ['details' => ''];
 ge_ok('its last line says how many steps failed and that the request can be run again',
-    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 8 + 2 * $worldB['earlier']) . ' steps failed')
+    str_contains((string) $summary['details'], '1 of ' . ($instructionCount + 9 + 2 * $worldB['earlier']) . ' steps failed')
     && str_contains((string) $summary['details'], 'back at pending review'), (string) $summary['details']);
 $rowsB1 = ge_checkRows($worldB, $beforeRowsB, ['tblExternalFeedRuns.triggeredByID']);
 ge_ok('the failed table\'s row is untouched, and every other instruction still did its work',
@@ -3566,7 +3582,7 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // (And one line for the counted envelopes, which is why "- 1" below.)
     // CHANGED by mail package M3: + 5 became + 6 (the mail queue's line).
     // CHANGED by #707: + 6 became + 7 (the change-history step's line).
-    count($auditB2) === $instructionCount + 7 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
+    count($auditB2) === $instructionCount + 8 + $givingCountB2 && $givingCountB2 >= 3 && $noneLines > 100
     && ($auditB2[count($auditB2) - 1]['action'] ?? '') === 'completed'
     && count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'already dealt with by an earlier run')
@@ -3575,7 +3591,7 @@ ge_ok('the second run also wrote one line per instruction, most of them "nothing
     // The expected count printed here said "+ 6" after #707 made the check
     // "+ 7", so a failure here printed a wrong expectation. It prints the
     // number the check really asks for, and the "not overwritten" count.
-    count($auditB2) . ' lines, expected ' . ($instructionCount + 7 + $givingCountB2) . '; "already dealt with ... nothing was overwritten" lines: '
+    count($auditB2) . ' lines, expected ' . ($instructionCount + 8 + $givingCountB2) . '; "already dealt with ... nothing was overwritten" lines: '
     . count(array_filter($auditB2, static fn (array $l): bool => $l['tableName'] === 'GivingRecords'
         && str_contains((string) $l['details'], 'nothing was overwritten'))) . ', expected ' . ($givingCountB2 - 1));
 $lateNow = ge_row($lateLog);
@@ -3637,9 +3653,12 @@ ge_ok('run again with the audit trail working: completed, and the first step is 
     && (ge_audit(REQ_PC)[2]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[2]['action'] ?? '') === 'none'
     && (ge_audit(REQ_PC)[3]['tableName'] ?? '') === 'tblEmailLog'
     && ($offC === 0 || ((ge_audit(REQ_PC)[4]['tableName'] ?? '') === 'tblMailQueue' && (ge_audit(REQ_PC)[3 + $offC]['tableName'] ?? '') === 'tblEmailLog'))
-    && (ge_audit(REQ_PC)[4 + $offC]['tableName'] ?? '') === 'tblAuditTrail'
-    && (ge_audit(REQ_PC)[5 + $offC]['tableName'] ?? '') === (string) $first['table']
-    && in_array(ge_audit(REQ_PC)[5 + $offC]['action'] ?? '', ['anonymise', 'delete'], true),
+    // CHANGED by #1067: the remembered map positions come first, also before the
+    // walk, then the change history, so the first instruction's line is the seventh.
+    && (ge_audit(REQ_PC)[4 + $offC]['tableName'] ?? '') === 'tblGeocodeCache'
+    && (ge_audit(REQ_PC)[5 + $offC]['tableName'] ?? '') === 'tblAuditTrail'
+    && (ge_audit(REQ_PC)[6 + $offC]['tableName'] ?? '') === (string) $first['table']
+    && in_array(ge_audit(REQ_PC)[6 + $offC]['action'] ?? '', ['anonymise', 'delete'], true),
     $resultC2 instanceof Throwable ? $resultC2->getMessage() : json_encode([$resultC2, $reqPc2, ge_audit(REQ_PC)[0] ?? null, ge_audit(REQ_PC)[4] ?? null]));
 
 // =============================================================================
@@ -7568,6 +7587,229 @@ ge_ok('A SCAN AND A CHANGE MADE WITHOUT SIGNING IN ARE NOT REACHED: they carry n
     $readScan($publicScan) === $before['publicScan'] && $readChange($publicChange) === $before['publicChange']
     && is_array($before['publicScan']) === true && $before['publicScan']['ipHash'] !== null,
     json_encode(['scan' => $readScan($publicScan), 'change' => $readChange($publicChange)]));
+
+// =============================================================================
+ge_section('25', 'An erasure deletes the remembered map positions of the addresses held for the person, and stops rather than finishing without doing it (#1067; D-209)');
+// =============================================================================
+// 🧠 WHY THIS SECTION EXISTS. `tblGeocodeCache` keeps the position an address
+//    look-up found, and for a HOME that position is the house (D-183). A row
+//    says nothing about whose it is, so the erasure finds them by REBUILDING the
+//    keys of every address the portal holds for the person and deleting those
+//    (`GdprEraser::eraseRememberedMapPositions()`), as a step that runs BEFORE
+//    the table walk empties the addresses it needs.
+//
+//    Rows are seeded through Geocoder's own private key methods (reflection,
+//    the precedent of the geocoder and time-zone tests), never by a hash worked
+//    out in this file (#647), and from the spelling the BROWSER sends: the
+//    directory's address box has `\n` line breaks in the look-up request while
+//    the stored copy has `\r\n`, which is the fault the key's spacing fold
+//    exists for. Without the fold the directory row would survive.
+//
+//    THREE KINDS OF CHECK are here and each is needed: the rows that must go,
+//    the rows that must stay (somebody else's, a public venue's, a place the
+//    person only TYPED IN, and the stated limit of a country code the portal
+//    does not list), and what happens when the step cannot do its work (it
+//    STOPS the run rather than failing one step, because a failed step lets the
+//    walk empty the addresses and the next run would close the request as
+//    completed with the positions still there).
+$geoRef  = new ReflectionClass(\Portal\Core\Geocoder::class);
+$geoText = $geoRef->getMethod('forwardKeyText');
+$geoPub  = $geoRef->getMethod('cacheKey');
+$geoHome = $geoRef->getMethod('homeCacheKey');
+/** The key a look-up of this address, limited to this country, as this kind, is filed under. */
+$geoKey = static function (string $address, ?string $country, string $kind) use ($geoText, $geoPub, $geoHome): ?string {
+    $text = $geoText->invoke(null, trim($address), $country);
+
+    return $kind === 'public' ? $geoPub->invoke(null, 'forward', $text) : $geoHome->invoke(null, $text);
+};
+$geoKeyFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'enc.key';
+if (is_dir(dirname($geoKeyFile)) === false) {
+    mkdir(dirname($geoKeyFile), 0700, true);
+}
+file_put_contents($geoKeyFile, 'selftest-installation-key-for-1067');
+/** One remembered answer, filed under the key a look-up would use. */
+$geoSeed = static function (string $address, ?string $country, string $kind) use ($geoKey): string {
+    $key = $geoKey($address, $country, $kind);
+    if ($key === null) {
+        throw new RuntimeException('the self-test could not make a home key: its key file is missing');
+    }
+    ge_q("INSERT INTO `tblGeocodeCache` (`queryHash`, `direction`, `latitude`, `longitude`, `provider`, `addressKind`) "
+        . "VALUES (?, 'forward', 52.2053000, 0.1218000, 'selftest', ?)", 'ss', [$key, $kind]);
+
+    return $key;
+};
+$geoThere = static fn (array $keys): int => count(array_filter($keys, static fn (string $k): bool => ge_one(
+    'SELECT 1 AS `x` FROM `tblGeocodeCache` WHERE `queryHash` = ?', 's', [$k]) !== null));
+
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+foreach ([[P_GEO, 'Gerda Geo', 'gerda.geo@selftest.invalid'], [P_GEO_Q, 'Quinn Geo', 'quinn.geo@selftest.invalid'],
+    [P_GEO_S, 'Sam Share', 'sam.share@selftest.invalid'], [P_GEO_M, 'Mia Merged', 'mia.merged@selftest.invalid'],
+    [P_GEO_K, 'Kit Key', 'kit.key@selftest.invalid']] as [$gid, $gname, $gemail]) {
+    ge_user($gid, $gname, $gemail);
+}
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+// ---- the person's own addresses, as the portal holds them ------------------
+$geoDirectory = "1 Selftest Row\r\nCambridge";   // stored: a posted form turns each \n into \r\n
+$geoBrowser   = "1 Selftest Row\nCambridge";     // sent by the "Look up coordinates" button
+ge_q('UPDATE `tblUsers` SET `displayAddress` = ?, `latitude` = 52.2053000, `longitude` = 0.1218000 WHERE `userID` = ?', 'si', [$geoDirectory, P_GEO]);
+// Sam shares the same address (a household). Their own record must not change.
+ge_q('UPDATE `tblUsers` SET `displayAddress` = ?, `latitude` = 52.2053000, `longitude` = 0.1218000 WHERE `userID` = ?', 'si', [$geoDirectory, P_GEO_S]);
+ge_q('UPDATE `tblUsers` SET `displayAddress` = ?, `latitude` = 51.5, `longitude` = -0.1 WHERE `userID` = ?', 'si', ['99 Other Street, Cambridge', P_GEO_Q]);
+ge_q('UPDATE `tblUsers` SET `displayAddress` = ? WHERE `userID` = ?', 'si', ["5 Merged Lane\r\nCambridge", P_GEO_M]);
+ge_q("UPDATE `tblUsers` SET `isActive` = 0, `emailAddress` = CONCAT('merged-', `userID`, '@merged.invalid') WHERE `userID` = ?", 'i', [P_GEO_M]);
+ge_q("INSERT INTO `tblAccountMergeRequest` (`requestID`, `siteID`, `requestedAtUtc`, `expiresAtUtc`, `notBeforeUtc`, `status`) "
+    . "VALUES (?, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP(), UTC_TIMESTAMP(), 'completed')", 'i', [AMR_GEO]);
+ge_q("INSERT INTO `tblAccountMergeSide` (`requestID`, `userID`, `side`, `formerEmail`) VALUES (?, ?, 'kept', NULL), (?, ?, 'duplicate', ?)",
+    'iiiis', [AMR_GEO, P_GEO, AMR_GEO, P_GEO_M, 'mia.merged@selftest.invalid']);
+ge_q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `addressLine1`, `city`, `postcode`, `countryCode`, "
+    . "`placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome`) VALUES (?, 1, 'Selftest Geo Group', 'selftest-geo-group', "
+    . "'7 Host Way', 'Cambridge', 'CB1 1AA', 'GB', ?, ?, 1, 0)", 'iii', [SG_GEO_P, P_GEO_Q, P_GEO]);
+// Quinn's own group, whose place Gerda only TYPED IN: it is Quinn's home, not hers.
+ge_q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `addressLine1`, `city`, `countryCode`, "
+    . "`placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome`) VALUES (?, 1, 'Selftest Quinn Group', 'selftest-quinn-group', "
+    . "'20 Entered Close', 'Cambridge', 'GB', ?, ?, 1, 0)", 'iii', [SG_GEO_Q, P_GEO, P_GEO_Q]);
+// A listed place with Gerda as host. The "Look up" button joins the raw box
+// values, so the text it sent has a space before the comma.
+ge_q("INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `city`, `countryCode`, `hostUserID`, "
+    . "`placeEnteredByID`, `placeMapAgreed`, `notAHome`) VALUES (1, ?, 'Gerda home', '12 Oak Road ', 'Cambridge', NULL, ?, ?, 1, 0)",
+    'iii', [SG_GEO_P, P_GEO, P_GEO_Q]);
+ge_q("INSERT INTO `tblGiftAidDeclaration` (`siteID`, `donorID`, `status`, `validFrom`, `address`, `postcode`) "
+    . "VALUES (1, ?, 'active', '2026-01-01', ?, 'CB3 3GG')", 'is', [P_GEO, "3 Gift Street\r\nCambridge"]);
+
+// ---- the remembered answers ------------------------------------------------
+$geoHers = [
+    'directory, from the browser\'s line breaks' => $geoSeed($geoBrowser, null, 'home'),
+    'directory, looked up as a public place'     => $geoSeed($geoBrowser, null, 'public'),
+    'group host, no country'                     => $geoSeed('7 Host Way, Cambridge, CB1 1AA', null, 'home'),
+    'group host, limited to the group\'s country' => $geoSeed('7 Host Way, Cambridge, CB1 1AA', 'gb', 'home'),
+    'listed place, a space before the comma'     => $geoSeed('12 Oak Road , Cambridge', null, 'home'),
+    // Held with a CR LF line break; a look-up from another form would send LF. Only the key's own
+    // spacing fold bridges the two for this source (the directory address also has the browser's form tried).
+    'Gift Aid declaration'                       => $geoSeed("3 Gift Street\nCambridge, CB3 3GG", null, 'home'),
+    'an account merged into hers'                => $geoSeed("5 Merged Lane\nCambridge", null, 'home'),
+];
+$geoKept = [
+    'somebody else\'s home'                         => $geoSeed('99 Other Street, Cambridge', null, 'home'),
+    'a home Gerda only typed in, hosted by Quinn'   => $geoSeed('20 Entered Close, Cambridge', 'GB', 'home'),
+    'a public venue'                                => $geoSeed('Selftest Venue Hall, Cambridge', null, 'public'),
+    'her address limited to a country the portal does not list' => $geoSeed($geoBrowser, 'ZZ', 'home'),
+];
+$geoPeopleBefore = [
+    'Sam' => ge_one('SELECT `displayAddress`, `latitude`, `longitude` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO_S]),
+    'Quinn' => ge_one('SELECT `displayAddress`, `latitude`, `longitude` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO_Q]),
+    'Quinn group' => ge_one('SELECT `addressLine1`, `hostUserID` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SG_GEO_Q]),
+];
+ge_ok('the premise: before any run every remembered answer is there (' . count($geoHers) . ' of hers, ' . count($geoKept) . ' that are not), and each is under a different key',
+    $geoThere(array_values($geoHers)) === count($geoHers) && $geoThere(array_values($geoKept)) === count($geoKept)
+    && count(array_unique(array_merge(array_values($geoHers), array_values($geoKept)))) === count($geoHers) + count($geoKept),
+    json_encode([$geoThere(array_values($geoHers)), $geoThere(array_values($geoKept))]));
+
+// ---- a delete that cannot be made STOPS the run -----------------------------
+$geoAddressesBefore = static fn (): array => [
+    ge_one('SELECT `displayAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO])['displayAddress'],
+    ge_one('SELECT `addressLine1` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SG_GEO_P])['addressLine1'],
+    ge_one('SELECT `addressLine1` FROM `tblSmallGroupPlaces` WHERE `hostUserID` = ?', 'i', [P_GEO])['addressLine1'],
+];
+$geoAddressesWas = $geoAddressesBefore();
+ge_request(REQ_GEO, P_GEO, 'gerda.geo@selftest.invalid', 'Gerda Geo', 'processing');
+ge_trigger('selftest_gdpr_geo_delete', "CREATE TRIGGER `selftest_gdpr_geo_delete` BEFORE DELETE ON `tblGeocodeCache` "
+    . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: the delete was made to fail'");
+$geoStopped = ge_execute(REQ_GEO, P_GEO);
+ge_dropTrigger('selftest_gdpr_geo_delete');
+$geoRequest = ge_one('SELECT `status`, `userID` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [REQ_GEO]);
+ge_ok('A DELETE THAT CANNOT BE MADE STOPS THE RUN (it does not merely fail one step): an exception says the request can be run again, and it quotes no address and no key',
+    $geoStopped instanceof RuntimeException && str_contains($geoStopped->getMessage(), 'stopped before it finished')
+    && str_contains($geoStopped->getMessage(), 'remembered map positions')
+    && preg_match('/[0-9a-f]{64}/', $geoStopped->getMessage()) !== 1 && str_contains($geoStopped->getMessage(), 'Selftest Row') === false
+    && str_contains($geoStopped->getMessage(), 'selftest: the delete') === false,
+    $geoStopped instanceof Throwable ? $geoStopped->getMessage() : json_encode($geoStopped));
+ge_ok('...and NOTHING AFTER IT RAN: the request is back at pending review with her number on it, every address she holds is still there to be found, and every remembered answer is still there',
+    $geoRequest !== null && $geoRequest['status'] === 'pending_review' && (int) $geoRequest['userID'] === P_GEO
+    && $geoAddressesBefore() === $geoAddressesWas && $geoThere(array_values($geoHers)) === count($geoHers),
+    json_encode([$geoRequest, $geoAddressesBefore(), $geoThere(array_values($geoHers))]));
+
+// ---- a run in which a LATER step fails, then a second run -------------------
+ge_q("UPDATE `tblErasureRequest` SET `status` = 'processing' WHERE `requestID` = ?", 'i', [REQ_GEO]);
+ge_trigger('selftest_gdpr_geo_later', "CREATE TRIGGER `selftest_gdpr_geo_later` BEFORE UPDATE ON `tblSmallGroups` "
+    . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: this update was made to fail'");
+$geoRun1 = ge_execute(REQ_GEO, P_GEO);
+ge_dropTrigger('selftest_gdpr_geo_later');
+$geoAudit1 = ge_audit(REQ_GEO);
+// The catalogue's own line for the table says "retain" (every OTHER row is kept for the
+// period); the step's line is the one that says delete or none.
+$geoStepLines = static fn (array $audit): array => array_values(array_filter(
+    $audit,
+    static fn (array $l): bool => $l['tableName'] === 'tblGeocodeCache' && $l['action'] !== 'retain'
+));
+$geoLines1 = $geoStepLines($geoAudit1);
+ge_ok('A LATER STEP FAILS, and the run still ends with the request put back (at least one failed step)',
+    is_array($geoRun1) === true && $geoRun1['failed'] >= 1
+    && ge_one('SELECT `status` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [REQ_GEO])['status'] === 'pending_review',
+    $geoRun1 instanceof Throwable ? $geoRun1->getMessage() : json_encode($geoRun1));
+ge_ok('EVERY REMEMBERED ANSWER FOR HER ADDRESSES IS GONE, in every spelling the pages build: the directory address (browser line breaks and public kind), the group host (with and without its country), the listed place (space before the comma), the Gift Aid declaration, and an account merged into hers',
+    $geoThere(array_values($geoHers)) === 0, json_encode(array_map(static fn (string $k): int => $geoThere([$k]), $geoHers)));
+ge_ok('NOBODY ELSE\'S ANSWER WENT: another member\'s home, a home Gerda only typed in for somebody else, a public venue, and (the stated limit) her own address limited to a country code the portal does not list',
+    $geoThere(array_values($geoKept)) === count($geoKept), json_encode(array_map(static fn (string $k): int => $geoThere([$k]), $geoKept)));
+ge_ok('A SHARED ADDRESS: the answer went (it is a memo nobody owns), and the other member\'s OWN address, position, and the other person\'s group are exactly as they were',
+    ge_one('SELECT `displayAddress`, `latitude`, `longitude` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO_S]) === $geoPeopleBefore['Sam']
+    && ge_one('SELECT `displayAddress`, `latitude`, `longitude` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO_Q]) === $geoPeopleBefore['Quinn']
+    && ge_one('SELECT `addressLine1`, `hostUserID` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SG_GEO_Q]) === $geoPeopleBefore['Quinn group'],
+    json_encode([ge_one('SELECT `displayAddress` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_GEO_S])]));
+$geoFirstWalk = null;
+foreach ($geoAudit1 as $position => $line) {
+    if (in_array($line['tableName'], ['tblUsers', 'tblSmallGroups', 'tblSmallGroupPlaces'], true) === true) {
+        $geoFirstWalk = $position;
+        break;
+    }
+}
+$geoLineAt = null;
+foreach ($geoAudit1 as $position => $line) {
+    if ($line['tableName'] === 'tblGeocodeCache' && $line['action'] !== 'retain') {
+        $geoLineAt = $position;
+        break;
+    }
+}
+ge_ok('ONE audit line, "delete", with the number of rows; it names no address and no key; and it comes BEFORE the table walk\'s first line about an account or a group',
+    count($geoLines1) === 1 && $geoLines1[0]['action'] === 'delete' && $geoLines1[0]['recordKey'] === count($geoHers) . ' rows'
+    && preg_match('/[0-9a-f]{64}/', (string) $geoLines1[0]['details']) !== 1
+    && preg_match('/Selftest Row|Host Way|Oak Road|Gift Street|Merged Lane/', (string) $geoLines1[0]['details']) !== 1
+    && $geoFirstWalk !== null && $geoLineAt !== null && $geoLineAt < $geoFirstWalk,
+    json_encode([$geoLines1, $geoLineAt, $geoFirstWalk]));
+
+ge_q("UPDATE `tblErasureRequest` SET `status` = 'processing' WHERE `requestID` = ?", 'i', [REQ_GEO]);
+$geoRun2 = ge_execute(REQ_GEO, P_GEO);
+$geoLines2 = $geoStepLines(ge_audit(REQ_GEO));
+ge_ok('A SECOND RUN finishes: the request is completed, the second run found nothing left to delete (its line says none), and the answers deleted by the first run are still gone',
+    is_array($geoRun2) === true && $geoRun2['failed'] === 0
+    && ge_one('SELECT `status` FROM `tblErasureRequest` WHERE `requestID` = ?', 'i', [REQ_GEO])['status'] === 'completed'
+    && count($geoLines2) === 2 && $geoLines2[1]['action'] === 'none' && $geoThere(array_values($geoHers)) === 0
+    && $geoThere(array_values($geoKept)) === count($geoKept),
+    $geoRun2 instanceof Throwable ? $geoRun2->getMessage() : json_encode([$geoRun2, $geoLines2]));
+
+// ---- the installation's key cannot be read: the public rows still go --------
+ge_q('UPDATE `tblUsers` SET `displayAddress` = ? WHERE `userID` = ?', 'si', ['8 Keyless Lane, Cambridge', P_GEO_K]);
+$geoKeyHome   = $geoSeed('8 Keyless Lane, Cambridge', null, 'home');
+$geoKeyPublic = $geoSeed('8 Keyless Lane, Cambridge', null, 'public');
+ge_request(REQ_GEO_K, P_GEO_K, 'kit.key@selftest.invalid', 'Kit Key', 'processing');
+rename($geoKeyFile, $geoKeyFile . '.away');
+try {
+    $geoRunK = ge_execute(REQ_GEO_K, P_GEO_K);
+} finally {
+    rename($geoKeyFile . '.away', $geoKeyFile);
+}
+$geoLineK = $geoStepLines(ge_audit(REQ_GEO_K));
+ge_ok('WITH THE INSTALLATION\'S KEY UNREADABLE the run does not stop: the public-place answer goes, a home answer cannot be looked for and stays (and the line SAYS so, so nobody reads "none" as "nothing was there")',
+    is_array($geoRunK) === true && $geoRunK['failed'] === 0 && $geoThere([$geoKeyPublic]) === 0 && $geoThere([$geoKeyHome]) === 1
+    && count($geoLineK) === 1 && $geoLineK[0]['action'] === 'delete'
+    && str_contains((string) $geoLineK[0]['details'], 'could not be looked for'),
+    $geoRunK instanceof Throwable ? $geoRunK->getMessage() : json_encode([$geoRunK, $geoLineK]));
+
+ge_q("DELETE FROM `tblGeocodeCache` WHERE `queryHash` IN ('" . implode("','", array_merge(array_values($geoHers), array_values($geoKept), [$geoKeyHome, $geoKeyPublic])) . "')");
+ge_q('DELETE FROM `tblSmallGroupPlaces` WHERE `groupID` IN (?, ?)', 'ii', [SG_GEO_P, SG_GEO_Q]);
+ge_q('DELETE FROM `tblSmallGroups` WHERE `groupID` IN (?, ?)', 'ii', [SG_GEO_P, SG_GEO_Q]);
+ge_q('DELETE FROM `tblAccountMergeRequest` WHERE `requestID` = ?', 'i', [AMR_GEO]);
+ge_q('DELETE FROM `tblGiftAidDeclaration` WHERE `donorID` = ?', 'i', [P_GEO]);
 
 
 ge_finish();

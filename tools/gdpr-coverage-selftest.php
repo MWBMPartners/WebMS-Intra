@@ -68,7 +68,8 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 114; // #1064 round 10 added one: section 10b, the addresses emptied at the close. #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 115; // #1067 added one: the remembered map positions' step, pinned for order and keys. 114 before.
+    // #1064 round 10 added one: section 10b, the addresses emptied at the close. #1063 added one: every erased table in the data copy or named as left out. #938/#1065 added one: the "actor's own request" list pinned whole. 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -3524,7 +3525,7 @@ foreach ([
     }
 }
 foreach (['processEntry(', 'self::catalogue(', 'keepGivingRecords(', 'eraseProfileImages(', 'eraseAuditTrailAboutPerson(',
-          'eraseDemoDataRegisterEntries(', 'self::closeRequest(', 'eraseGivingStatementFiles('] as $accountStep) {
+          'eraseDemoDataRegisterEntries(', 'self::closeRequest(', 'eraseGivingStatementFiles(', 'eraseRememberedMapPositions('] as $accountStep) {
     if (str_contains($executeVisitorBody, $accountStep) === true) {
         $accountFaults[] = 'executeVisitorAddress() calls an account erasure\'s step: ' . $accountStep;
     }
@@ -3852,6 +3853,58 @@ check(
     'every table the written list erases with a person is in their data copy, or is named with its reason as deliberately left out, and no stale reason remains (#1063)',
     $copyGaps === [],
     implode('; ', $copyGaps)
+);
+
+
+// -----------------------------------------------------------------------------
+// 25. THE REMEMBERED MAP POSITIONS ARE DELETED BEFORE THE WALK, THROUGH GEOCODER'S
+//     OWN KEYS, AND THE STEP IS NOT A "WHOLE TABLE" STEP (#1067, D-209).
+//
+//     PRESENCE AND ORDER ONLY (D-065). Whether it RUNS, deletes the right rows and
+//     STOPS the run when it cannot is driven by section 25 of
+//     `tools/gdpr-eraser-selftest.php`; this pins what no run can show:
+//       - the call comes BEFORE `self::catalogue()` (the walk empties the addresses
+//         the rows are found by: #709's ordering trap) and before the merged-in
+//         accounts' details are emptied (`eraseMergeRecords()` empties their own
+//         address);
+//       - it is called ONCE, from `execute()` alone (the visitor-address route
+//         must never reach it: it has no account);
+//       - the step builds its keys through `Geocoder::rememberedKeysFor()` and deletes
+//         through `Geocoder::forgetRemembered()`, the one place each is written, and
+//         holds no hash call of its own (a copy of the key rule goes stale: #647);
+//       - `tblGeocodeCache` is NOT in DEDICATED_STEP_TABLES, whose meaning is "this
+//         whole table is erased by a step and handed over in the data copy", while
+//         here only matching rows go and every other row is kept for the period.
+// -----------------------------------------------------------------------------
+$geoCallAt   = strpos($eraserCode, 'self::eraseRememberedMapPositions(');
+$geoCalls    = substr_count($eraserCode, 'self::eraseRememberedMapPositions(');
+$geoWalkAt   = strpos($eraserCode, 'foreach (self::catalogue() as $entry)');
+$geoMergeAt  = strpos($eraserCode, 'self::eraseMergeRecords($requestId, array_keys($mergedIn))');
+$geoStepBody = $methodBody($eraserMasked, 'function eraseRememberedMapPositions(');
+$geoFaults   = [];
+if ($geoCalls !== 1 || $geoCallAt === false || $geoWalkAt === false || $geoMergeAt === false) {
+    $geoFaults[] = 'the step is called ' . $geoCalls . ' time(s) (it must be exactly once, inside execute())';
+} else {
+    if ($geoCallAt > $geoWalkAt) {
+        $geoFaults[] = 'it is called AFTER the table walk, which has already emptied the addresses its rows are found by';
+    }
+    if ($geoCallAt > $geoMergeAt) {
+        $geoFaults[] = 'it is called AFTER the merged-in accounts\' details are emptied';
+    }
+}
+if (str_contains($geoStepBody, 'Geocoder::rememberedKeysFor(') === false || str_contains($geoStepBody, 'Geocoder::forgetRemembered(') === false) {
+    $geoFaults[] = 'the step no longer builds its keys with Geocoder::rememberedKeysFor() and deletes with Geocoder::forgetRemembered()';
+}
+if (preg_match('/\b(hash|sha1|md5|hash_hmac)\s*\(|STEP_FAILED/', $geoStepBody) === 1) {
+    $geoFaults[] = 'the step makes its own hash, or answers STEP_FAILED instead of throwing (a failed step lets the walk empty the addresses and the next run close the request with the positions still there)';
+}
+if (isset($dedicatedSteps['tblGeocodeCache']) === true) {
+    $geoFaults[] = 'tblGeocodeCache is in DEDICATED_STEP_TABLES, which would claim the whole table is erased and handed over';
+}
+check(
+    'the remembered map positions of a person\'s addresses are deleted by ONE step, called once from execute() before the walk and before the merged-in details are emptied, through Geocoder\'s own keys, throwing rather than failing, and the table is not a whole-table step (#1067)',
+    $geoFaults === [] && $geoStepBody !== '',
+    implode('; ', $geoFaults) . ($geoStepBody === '' ? ' (the step\'s body was not found)' : '')
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

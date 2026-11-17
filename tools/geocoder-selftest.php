@@ -1306,6 +1306,76 @@ check('R8 with the key back, the notice says again that a home\'s position is ke
      str_contains($said, 'cannot be read just now')],
     [true, false]);
 
+// ── W. Finding a person's remembered answers again, to delete them (#1067, D-209) ─
+// An erasure cannot tell whose a row is, so it REBUILDS the keys of the addresses
+// held for the person. That only works if (a) the same address spelt a little
+// differently (a line break of either kind, a space before a comma) reaches the SAME
+// key, and (b) rememberedKeysFor() contains the key a look-up REALLY used. Both are
+// asked of the real page and the real table below, never of a copy of the rule.
+// The parent process needs the key file to make a home key, so it is pointed at
+// THIS RUN'S COPY, which is where the page keeps (and reads) it.
+if (defined('PORTAL_ROOT') === false) {
+    define('PORTAL_ROOT', $child . $sep . 'web');
+}
+foreach (['SecretSettings', 'AddressFingerprint', 'Countries'] as $needed) {
+    require_once $repo . $sep . 'web' . $sep . '_core' . $sep . $needed . '.php';
+}
+$markW = $cacheMark();
+$stubReset();
+$lookup(GT_MARK . " 5 Fold Street,\nSomewhere", '', 'public');
+$lookup(GT_MARK . "  5 Fold Street ,\r\n  Somewhere ", '', 'public');
+check('W1 the same address with a line break, a space before the comma and doubled spaces is ONE remembered answer: the map service is asked once and one row is written',
+    [$stubCalls(), $rowsSince($markW)], [['nominatim'], 1]);
+$stubReset();
+$lookup(GT_MARK . ' 6 Fold Street, Somewhere', '', 'public');
+check('W2 a genuinely different address is asked of the map service again (the fold does not merge different places)',
+    [$stubCalls(), $rowsSince($markW)], [['nominatim'], 2]);
+
+$markW2 = $cacheMark();
+$homeW  = GT_MARK . " 7 Erase Way\nCambridge";                // what the browser's button sends
+$stubReset();
+$lookup($homeW, '', 'home');
+$stubReset();
+$lookup(GT_MARK . ' 8 Erase Way, Cambridge', 'GB', 'home');
+[$rowHome, $rowHomeGb] = $hashesSince($markW2);
+$heldHome   = \Portal\Core\Geocoder::rememberedKeysFor(str_replace("\n", "\r\n", $homeW));           // what the portal HOLDS: CR LF
+$heldHomeGb = \Portal\Core\Geocoder::rememberedKeysFor(GT_MARK . ' 8 Erase Way, Cambridge');
+check('W3 rememberedKeysFor() contains the key the page REALLY filed a home under, when the held address has the other kind of line break',
+    [in_array($rowHome, $heldHome['keys'], true), $heldHome['homeKeysMade']], [true, true]);
+check('W4 ...and the key of a look-up limited to a country, without being told which country',
+    in_array($rowHomeGb, $heldHomeGb['keys'], true), true);
+$markW3 = $cacheMark();
+$stubReset();
+$lookup(GT_MARK . ' 9 Erase Way, Cambridge', '', 'public');
+[$rowPublic] = $hashesSince($markW3);
+check('W5 ...and a PUBLIC look-up\'s key too',
+    in_array($rowPublic, \Portal\Core\Geocoder::rememberedKeysFor(GT_MARK . ' 9 Erase Way, Cambridge')['keys'], true), true);
+check('W6 nothing is made for an empty address, and no key is repeated',
+    [\Portal\Core\Geocoder::rememberedKeysFor("  \n ")['keys'], count($heldHome['keys']) === count(array_unique($heldHome['keys']))],
+    [[], true]);
+
+$other = $portalKey(GT_MARK . ' 6 Fold Street, Somewhere', '');
+$gone  = \Portal\Core\Geocoder::forgetRemembered($db, [$rowHome, $rowHomeGb, $rowPublic, str_repeat('a', 64)]);
+$left  = (int) $db->query("SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `queryHash` IN ('"
+    . implode("','", [$rowHome, $rowHomeGb, $rowPublic]) . "')")->fetch_assoc()['n'];
+$otherStill = (int) $db->query("SELECT COUNT(*) AS n FROM `tblGeocodeCache` WHERE `queryHash` = '" . $db->real_escape_string($other) . "'")->fetch_assoc()['n'];
+check('W7 forgetRemembered() deletes exactly the rows it is given (3 of the 4 keys had a row), and no other row',
+    [$gone, $left, $otherStill], [3, 0, 1]);
+
+$db->query('DROP TRIGGER IF EXISTS `selftest_geo_forget_fails`');
+$db->query("CREATE TRIGGER `selftest_geo_forget_fails` BEFORE DELETE ON `tblGeocodeCache` "
+    . "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'selftest: the delete was made to fail'");
+$threw = null;
+try {
+    \Portal\Core\Geocoder::forgetRemembered($db, [$other]);
+} catch (\Throwable $e) {
+    $threw = $e;
+}
+$db->query('DROP TRIGGER IF EXISTS `selftest_geo_forget_fails`');
+check('W8 a delete the database refuses THROWS (an erasure must not believe a delete that did not happen), with words that carry no key',
+    [$threw instanceof \Throwable, $threw === null ? '' : preg_match('/[0-9a-f]{64}/', $threw->getMessage()) === 1],
+    [true, false]);
+
 $errors = trim((string) @file_get_contents($child . $sep . 'php-errors.log'));
 check('Z1 the portal wrote nothing to PHP\'s error log while this ran', $errors, '');
 
