@@ -1,58 +1,84 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 15 November 2026. Updated at every commit boundary and every
-change of a package's state (the owner, 10 November 2026: "update our handoff document regularly at each stage").*
+*Overwritten, never appended. Current state only. 17 November 2026. Updated at every landing and every change of a
+package's state (the owner, 10 November 2026).*
+
+## Aim: the PILOT install (D-205)
+
+The first install is a pilot for the owner's own organisation; D-055 (whole backlog) and the full Codex review (D-007)
+still apply before any release to anybody else. No Codex before the pilot (D-206: the owner chose speed; the pilot
+runs on independent Opus checks). The pilot ships with AI, translation, transcription, text messages and online
+payments switched OFF (D-207; confirm each default before the zip). Until the pilot: at most THREE Opus check rounds per
+package, only realistic harm blocks, narrow findings become issues (D-204). The plan is `/tmp/claude-501/firstinstall/plan.md`
+(may be gone after a reboot: its content is the list below).
 
 ## Branch
 
-`claude/alpha-wip`, pushed after each landing (D-088; the owner approved pushing on 15 November). HEAD `93c81c87`.
-Landed 15 November (all with independent Opus checks, docs written from the final state): #1018 #813 #970 #1015,
-#1051 #1050 #1053, #848, #1030 #1048, #1037 #1036 #1029 (migration 290), #1042 #1049 (294), #1019 #938 #1065 (295),
-#989 #992 (298), #847 #965 #952, #863 #910 #930 (296). Decisions recorded 15 November: D-186 (Claude checks and reviews
-always run on Opus, here and machine-wide), D-187 to D-189 (network-address periods). Earlier landings are in the changelog.
-Migration numbers in use: 290, 292, 294, 295, 296, 298. 291, 293, 297 free.
+`claude/alpha-wip`, pushed after each landing. HEAD `85ae1438` (pushed 17 November). Landed and pushed 15-17 November:
+#808, #1064 (merge accounts, migrations 297 and 299), #993 (exchange rates 301, spend in the provider's own currency
+302), #575, #1066, #1095, #1088 (migration 303), #539, #939, #606 (items 1, 2, 4, 5), #1096, plus decisions D-186 to D-209.
+Migration numbers in use: 290, 292, 294-303 (291, 293 never existed). **After the pilot is installed, every schema
+change needs a numbered migration again and the migration harness must upgrade from the installed commit (D-135 ends).**
 
 ## Waiting on the owner
 
-- **#993** (outside-provider spending counted in "pence" priced from US-dollar lists, D-173): where do exchange rates
-  come from, and are the limits in the installation's or each organisation's currency? Recommended: an administrator
-  types one rate per currency with its date, spending refused until set; limits in each organisation's own currency.
-- **#1067** an erasure cannot remove a cached home position (D-183) and **#1070** which organisation an alert e-mail
-  follows, **#1073** a signed-in member linking an identity that matches nobody gets a new account, **#1077/#1078** the
-  Gift Aid and rate-limit address periods: decisions or builds still open, see each issue.
+- **2g (#934, consent-record clear-out)** needs two answers: a visitor's cookie-choice record is never "replaced"
+  (recommended: when its cookie runs out, 365 days); the portal does not record when a member left (recommended:
+  "leaves" means the account is erased, already deleted at once; an issue for the rest).
+- **Q-2e-1:** the privacy notice's "on" wording for "we issue tax receipts" was built on the recommended answer (the
+  giving statement is the receipt) and awaits confirmation.
+- Later, for the real-host rehearsal: a spare DreamHost subdomain and empty database; and how pilot zips are numbered
+  (D-024 keeps `version.php` at 1.4.1, so two pilot zips carry one number: measure whether Admin, Migrations still runs a
+  new migration with equal versions).
 
 ## In flight
 
-Nothing was running at the time of writing; the next batch is being dispatched (see the table in the next update).
+- **2b-ii** (#1092 part two: the robot check's hosts in the page rule on four forms plus `salvation/card.php`): Sonnet
+  builder running on `p2bii-build`; then an Opus check (max three rounds).
 
 ## Next, in this order
 
-1. The fix list (D-156): #1044, #990/#1007, #1063 (one package: error rows, erasure and the data copy), #1064
-   (merge accounts, D-185), #1080/#1081/#1084 (small-group and suggestion follow-ups), #808 (D-158), #934, #939, #986,
-   #1016, #1065 done; then the decisions to build and issues #1049-#1084 raised this stretch needing triage.
-2. The 5 November backlog (D-055): #777, #569, #821, then medium and low.
-3. #754 (waits on the merge). 4. The Codex review (D-007), then the merge.
-Flaky under load (#1046): sign-in-limits 0b, public-website-tick sign-in, erasure-pages O6/O19, port clashes in the
-whole-suite runner (re-run alone before calling red).
+1. **#1073** (D-208: linking never creates an account) and **#1067** (D-209: an erasure removes remembered map positions
+   matching the person's own address): plan (Opus), build (Sonnet), check (Opus, max three rounds). #1067 touches
+   GdprEraser and Geocoder.
+2. **2g (#934)** once the owner answers (protected arm; migration 304 only if needed).
+3. Verification before the install, in order: the whole suite; the migration harness on all engines; a zip built on a
+   clean worktree (`bash tools/package/build.sh <commit> beta <empty folder>`, then `tools/package/package-selftest.sh`);
+   confirm each paid service ships off; an install rehearsal locally then on the spare subdomain, walking the first-use
+   journey (sign in, organisation settings, invite two members, events, noticeboard, a gift and statement, backups,
+   privacy pages, My data, one erasure); an upgrade rehearsal. Then the install (the owner's action).
+4. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078 within months, #591, #1082), #754, the
+   full Codex review (about 40 allowances for the branch; about 5 for the sign-in/erasure/money/backup core and the
+   installer), then the merge.
 
-## Working pattern that is paying off
+## Raised, not built (selection; the tracker is the record)
 
-Builders and checkers run in their own worktrees and their own scratch folders under /tmp/claude-501/<pkg>/
-(never the shared session scratchpad — one builder overwrote another's files there). The commissioning session
-cherry-picks a clean package, writes its docs FROM THE FINAL STATE (builders' first drafts carry claims later
-rounds corrected), runs the whole suite, pushes, closes the issue. Brief checkers neutrally. When the same item
-fails two rounds running, simplify (P4d's sentences, #620's and #902's static checks — D-065: presence only,
-behaviour proven over HTTP). A round whose findings are all in tooling counts toward the three-round cap (D-064).
-Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
-leak (403 vs 404) on one endpoint of a class — enumerate the class.
+#1097 (an address changed during an erasure run), #1098-#1105 (spend limits: own-limit page, per-currency maxima,
+"Pence" keys, other billing currencies, unverified prices, removed organisations' typed rates, month-boundary test, limits
+not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle with a Babel fingerprint),
+#1107/#1108 (care case: edit who it is about; the picker lists every member), #1109-#1111 (header overrides, custom
+live embed, empty test database password), #1112/#1113 (events API mark; home event coordinates), #1114-#1118
+(invitation races, wording, #606 item 3), #1119 (sign-in redirect double-encodes an address).
+
+## Working pattern
+
+Builders and checkers run in their own worktrees and scratch folders under `/tmp/claude-501/<pkg>/`. Model tiers (D-202):
+Opus plans and checks, Sonnet/Haiku build. The commissioning session merges a clean package, writes its docs FROM THE FINAL
+STATE, adds runner and workflow wiring (builders may not edit shared documents, `tools/run-all-selftests.sh` or
+workflows), runs pre-push, pushes (only `claude/alpha-wip`, owner-approved), closes the issue with the `status: done`
+label. Run DB self-tests ONE at a time on their own database and port; whole-suite runs collide when several sessions
+run (re-run a red alone before calling it a fault). Runner row format: `name|script|database|env` (a lone `-` in the env
+field is wrong; leave it empty). `check_outside_hosts_named.py --self-test` takes about five minutes (the audit
+self-test cap is 900 s). Never wait with `pgrep -f`.
 
 ## Blocked on the owner
 
 | What | Why |
 |---|---|
 | SIGNula.id | Five local commits waiting for the owner's push approval |
+| 2g answers, Q-2e-1 | See above |
 
-## Six standing facts a reader needs
+## Standing facts a reader needs
 
 - **A new script in `tools/audit-checks/` is NOT wired until `pr-security.yml`
   NAMES it.** That file lists every script individually; no workflow has a
