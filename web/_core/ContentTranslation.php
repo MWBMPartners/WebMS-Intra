@@ -370,6 +370,13 @@ class ContentTranslation
                 return 'Translation cannot be used right now: there is no exchange '
                      . 'rate to check this month\'s spending limit. An administrator '
                      . 'can add one under Admin, Exchange rates.';
+            case 'no-currency':
+                // #993: a spending limit has to be checked and no currency has
+                // been chosen to check it in. Adding an exchange rate would fix
+                // nothing, so the words name the real way out.
+                return 'Translation cannot be used right now: no currency has been '
+                     . 'chosen to check this month\'s spending limit in. An administrator '
+                     . 'can choose one under Admin, Settings, Organisation.';
             case 'not-set-up':
                 // #762: the translation company chosen has no key, or is not
                 // one the portal knows, so the request was never sent and

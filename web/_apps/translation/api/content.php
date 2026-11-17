@@ -174,6 +174,8 @@ if ($out === false) {
         // #993: a limit has to be compared and there is no exchange rate (or
         // no currency) to compare in. Nothing was sent (D-192).
         $reason = 'no-rate';
+    } elseif ($why === 'no-currency') {
+        $reason = 'no-currency';
     } elseif ($why === 'unreadable') {
         $reason = 'limit-unknown';
     } elseif ($why === 'not-set-up') {

@@ -125,10 +125,27 @@ check('P2b ...and so is a call with no model name at all',
 check('P3 gpt-4o-mini, 1,000 tokens each way: 150,000,000 + 600,000,000 = 750,000,000 over a million = 750',
     ($c('ai', 'openai', 'gpt-4o-mini', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750);
 check('P3b a dated gpt-4o-mini name is matched by its prefix, and the SMALLER model is matched before gpt-4o: 750, not 12,500',
-    ($c('translation', 'openai', 'gpt-4o-mini-2024-07-18', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750);
-check('P3c gpt-4o is 2,500,000 + 10,000,000 per million: 1,000 each way is 12,500; an unknown OpenAI model is charged the same (the dearest listed)',
+    ($c('translation', 'openai', 'gpt-4o-mini-2024-07-18', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750
+    && ($c('translation', 'openai', 'gpt-4o-mini', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750);
+check('P3c gpt-4o (EXACT name) is 2,500,000 + 10,000,000 per million: 1,000 each way is 12,500; any other OpenAI name is charged at the dearest OpenAI price known (150,000,000 + 600,000,000: 750,000)',
     ($c('ai', 'openai', 'gpt-4o', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 12500
-    && ($c('ai', 'openai', 'gpt-9', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 12500);
+    && ($c('ai', 'openai', 'gpt-9', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750000);
+// A typed model is free text. Each of these really costs LESS than the dearest known price; the
+// check is that none is priced below what it really costs (the loose prefix used to price o1-pro
+// 60x under, o1 6x, gpt-4 7.2x, gpt-5-pro 10.8x, gpt-4o-2024-05-13 1.6x). Real prices are the
+// recalled list prices per million tokens, in millionths for 1,000,000 in and 1,000,000 out.
+foreach (['o1' => 75000000, 'gpt-4' => 90000000, 'gpt-5-pro' => 135000000, 'o1-pro' => 750000000, 'gpt-4o-2024-05-13' => 20000000,
+          'gpt-4o-mini-evil' => 750000, 'gpt-4oX' => 12500000, 'GPT-4O-MINI' => 750000] as $typed => $reallyCosts) {
+    foreach (['ai', 'translation'] as $svc) {
+        $charged = (int) ($c($svc, 'openai', $typed, ['in' => 1000000, 'out' => 1000000])['millionths'] ?? 0);
+        check("P3d {$svc}: a typed OpenAI model \"{$typed}\" is charged " . number_format($charged) . ' millionths for 1M in and 1M out, never LESS than its real ' . number_format($reallyCosts),
+            $charged >= $reallyCosts && $charged === 750000000, (string) $charged);
+    }
+}
+check('P3e the dated names of the two models whose price does not change by date are still matched: gpt-4o-mini-2024-07-18 is 750 per 1,000 each way; claude-haiku-4-5-20251001 is 1,550 for 300/250; but "gpt-4o-2024-08-06" (not the bare name) is the dearest, not 12,500',
+    ($c('ai', 'openai', 'gpt-4o-mini-2024-07-18', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750
+    && ($c('ai', 'anthropic', 'claude-haiku-4-5-20251001', ['in' => 300, 'out' => 250])['millionths'] ?? 0) === 1550
+    && ($c('ai', 'openai', 'gpt-4o-2024-08-06', ['in' => 1000, 'out' => 1000])['millionths'] ?? 0) === 750000);
 check('P4 Google Translation: 1,000 characters at $20 per million characters is 20,000 millionths of a dollar',
     $c('translation', 'google', null, ['chars' => 1000]) === ['currency' => 'USD', 'millionths' => 20000]);
 check('P4b DeepL is in EUROS: 1,000 characters is 20,000 millionths of a euro',
@@ -329,8 +346,11 @@ check('R5 last year\'s record is not this month\'s: a charge written for January
     (ProviderSpend::monthTotals($db, PS_SITE_A, 'translation') === ['EUR' => 20000, 'USD' => 3100]
         || ProviderSpend::monthTotals($db, PS_SITE_A, 'translation') === ['USD' => 3100, 'EUR' => 20000])
     && ProviderSpend::monthTotals($db, PS_SITE_A, 'translation', '2020-01-01') === ['USD' => 5]);
-check('R5b ...and the month is the first day of the current month IN UTC (written out by hand from the clock, not from the constant)',
-    $MONTH === gmdate('Y') . '-' . gmdate('m') . '-01');
+// NOTE ON WHAT THIS CAN AND CANNOT SEE: the month is written with gmdate(). On this machine PHP's own zone is
+// UTC, so a plant that wrote date('Y-m-01') instead would give the SAME answer and this check could not tell;
+// the two only differ near a month end in a zone that is not UTC. It pins the SHAPE (first day, this month).
+check('R5b ...and the month is the first day of the current month (the SHAPE only: it cannot see UTC against local time while this machine runs in UTC)',
+    $MONTH === gmdate('Y') . '-' . gmdate('m') . '-01' && preg_match('/^\d{4}-\d{2}-01$/', $MONTH) === 1);
 
 // An erasure DELETES the rows of tblAiUsage and tblSmsMessage; the month's money must not fall.
 $reset();
@@ -638,8 +658,8 @@ check('S1 AI drafting with the free local route and nothing spent: a draft comes
 $reqs = $requests();
 $setting('ai_assist.monthCapPence', '0');
 $out = AiAssistant::improve(1, PS_USER, 'announcement', 'Another draft');
-check('S2 a monthly figure of 0 means nothing may be spent: no draft, lastRefusal "money", and the stub was NOT asked',
-    $out === null && AiAssistant::lastRefusal() === 'money' && $requests() === $reqs);
+check('S2 a monthly figure of 0 means nothing may be spent: no draft, lastRefusal "no-budget" (a budget of nothing, NOT "reached"), and the stub was NOT asked',
+    $out === null && AiAssistant::lastRefusal() === 'no-budget' && $requests() === $reqs);
 $setting('ai_assist.monthCapPence', '100');
 ProviderSpend::record($db, 1, 'ai', ['currency' => 'GBP', 'millionths' => 2000000]);   // £2.00 against £1.00
 $out = AiAssistant::improve(1, PS_USER, 'announcement', 'A third draft');
@@ -648,8 +668,8 @@ check('S3 £2.00 spent against the installation\'s £1.00, while the MERGED sett
 run($db, 'DELETE FROM `tblProviderSpend` WHERE `siteID` = 1');
 $setting('org.currency', '');
 $out = AiAssistant::improve(1, PS_USER, 'announcement', 'A fourth draft');
-check('S4 no installation currency chosen and a figure to compare: refused with "no-rate" (said to the user as an exchange-rate problem), never allowed and never sent',
-    $out === null && AiAssistant::lastRefusal() === 'no-rate' && $requests() === $reqs);
+check('S4 no installation currency chosen and a figure to compare: refused with "no-currency" (an exchange rate would fix nothing, so it is NOT called no-rate), never allowed and never sent',
+    $out === null && AiAssistant::lastRefusal() === 'no-currency' && $requests() === $reqs);
 $setting('org.currency', 'GBP');
 $setting('ai_assist.monthCapPence', '5000');
 $recordUsage->invoke(null, 1, PS_USER, 'announcement', 'openai', 1000, 1000, ProviderSpend::cost('ai', 'openai', 'gpt-4o-mini', ['in' => 1000, 'out' => 1000]), 'i', 'o');
@@ -681,8 +701,8 @@ $setting('translation.monthCapPence', '5000');
 run($db, 'DELETE FROM `tblProviderSpend` WHERE `siteID` = 1');
 $setting('org.currency', '');
 $out = Translation::translate('provspend_selftest', 3, 'body', 'en', 'cy', 'A third piece');
-check('S8 no currency for the installation and a limit in force: refused as "no-rate" and nothing is sent',
-    $out === false && Translation::lastRefusal() === 'no-rate' && $requests() === $reqs);
+check('S8 no currency for the installation and a limit in force: refused as "no-currency" (not "no-rate": a rate would fix nothing) and nothing is sent',
+    $out === false && Translation::lastRefusal() === 'no-currency' && $requests() === $reqs);
 $setting('org.currency', 'GBP');
 $setting('translation.monthCapPence', '0');
 $out = Translation::translate('provspend_selftest', 4, 'body', 'en', 'cy', 'A fourth piece');
@@ -703,6 +723,50 @@ $sendTwilio = new ReflectionMethod(\Portal\Core\Sms::class, 'sendTwilio');
 check('S11 a text provider answers its cost as ProviderSpend\'s figure and nothing else (no sendTwilio, sendMessageBird or sendAwsSns builds a number of its own): the source carries no "costPence"',
     str_contains((string) file_get_contents($repo . $sep . 'web' . $sep . '_core' . $sep . 'Sms.php'), 'costPence') === false
     && $sendTwilio->isPrivate() === true);
+
+// ── Transcription: a stand-in provider that REPORTS a cost ──────────────────
+// (Nothing else drives processQueue() over a company that costs money: the page test's
+// stand-in is the free local route, so deleting the recording of a transcription's cost
+// left every other test green.) Transcription::providerTranscribe() is a protected seam
+// for exactly this, as Sms::providerSend() is.
+$reset();
+$setting('org.currency', 'USD');
+$setting('transcription.monthCapPence', '50');   // $0.50 a month
+define('PORTAL_ROOT', $work . $sep . 'root');
+@mkdir(PORTAL_ROOT . $sep . '_uploads' . $sep . 'recordings', 0700, true);
+foreach ([993701, 993702, 993703] as $recId) {
+    file_put_contents(PORTAL_ROOT . $sep . '_uploads' . $sep . 'recordings' . $sep . 'ps-' . $recId . '.mp3', 'audio');
+    run($db, "INSERT INTO `tblRecording` (`recordingID`, `siteID`, `title`, `kind`, `filePath`, `mimeType`, `externalUrl`, `isPublished`, `recordedAt`) VALUES (?, 1, 'ps talk', 'sermon', ?, 'audio/mpeg', NULL, 1, '2026-10-04') "
+        . 'ON DUPLICATE KEY UPDATE `filePath` = VALUES(`filePath`)', 'is', [$recId, 'ps-' . $recId . '.mp3']);
+    run($db, 'DELETE FROM `tblTranscript` WHERE `recordingID` = ?', 'i', [$recId]);
+    run($db, "INSERT INTO `tblTranscript` (`recordingID`, `provider`, `status`) VALUES (?, 'openai', 'queued')", 'i', [$recId]);
+}
+final class PsTranscriber extends \Portal\Core\Transcription
+{
+    protected static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
+    {
+        // One hour of audio from a company that charges $0.36 an hour: $0.36 a job.
+        return ['ok' => true, 'text' => 'ps words', 'segments' => null, 'language' => 'en', 'duration' => 3600];
+    }
+}
+App::init($db, ['transcription' => ['provider' => 'openai']]);
+$ran = PsTranscriber::processQueue(1, 1);
+$afterOne = ProviderSpend::monthTotals($db, 1, 'transcription');
+check('S12 a transcription from a company that reports its audio length is PRICED and RECORDED: one hour at $0.36 an hour is 360,000 millionths in the month, and on the transcript row',
+    $ran['done'] === 1 && $afterOne === ['USD' => 360000]
+    && (int) rows($db, 'SELECT `costMillionths` AS `m` FROM `tblTranscript` WHERE `recordingID` = 993701')[0]['m'] === 360000
+    && rows($db, 'SELECT `costCurrency` AS `c` FROM `tblTranscript` WHERE `recordingID` = 993701')[0]['c'] === 'USD', json_encode([$ran, $afterOne]));
+$ran = PsTranscriber::processQueue(1, 1);
+check('S13 the second job runs ($0.36 spent, under the $0.50 limit) and brings the month to 720,000',
+    $ran['done'] === 1 && ProviderSpend::monthTotals($db, 1, 'transcription') === ['USD' => 720000], json_encode($ran));
+$ran = PsTranscriber::processQueue(1, 1);
+check('S14 the third is REFUSED at the limit ($0.72 spent against $0.50): nothing runs, it stays queued, and the answer says why (installation-limit)',
+    $ran['done'] === 0 && $ran['stoppedByCap'] === true && $ran['stoppedWhy'] === 'installation-limit'
+    && rows($db, "SELECT `status` AS `s` FROM `tblTranscript` WHERE `recordingID` = 993703")[0]['s'] === 'queued'
+    && ProviderSpend::monthTotals($db, 1, 'transcription') === ['USD' => 720000], json_encode($ran));
+run($db, 'DELETE FROM `tblTranscript` WHERE `recordingID` BETWEEN 993701 AND 993703');
+run($db, 'DELETE FROM `tblTranscriptSearch` WHERE `recordingID` BETWEEN 993701 AND 993703');
+run($db, 'DELETE FROM `tblRecording` WHERE `recordingID` BETWEEN 993701 AND 993703');
 
 // =============================================================================
 // T. Words for a page
@@ -725,13 +789,45 @@ check('T2 the page lines say the spend in the company\'s own currency, the insta
     && $lines['refusal'] === '', json_encode($lines));
 $setting('org.currency', '');
 $lines = ProviderSpend::pageLines(ProviderSpend::monthSummary($db, PS_SITE_A, 'translation'));
-check('T3 with no currency the page says so and explains the refusal in words that name the fix (Admin, Settings, Organisation)',
-    str_contains($lines['limits'][0], 'no currency has been chosen') === true && str_contains($lines['refusal'], 'Admin, Settings, Organisation') === true, json_encode($lines));
+check('T3 with no currency the page says so, names the fix (Admin, Settings, Organisation), and shows the figure as 50.00 and NOT as the raw 5000 hundredths',
+    str_contains($lines['limits'][0], 'no currency has been chosen') === true && str_contains($lines['refusal'], 'Admin, Settings, Organisation') === true
+    && str_contains($lines['limits'][0], '50.00') === true && str_contains($lines['limits'][0], '5000') === false, json_encode($lines));
 $setting('org.currency', 'GBP');
 run($db, 'DELETE FROM `tblExchangeRate`');
 $lines = ProviderSpend::pageLines(ProviderSpend::monthSummary($db, PS_SITE_A, 'translation'));
 check('T4 with no rate the page says what is stopping spending and points at Admin, Exchange rates',
     str_contains($lines['refusal'], 'Admin, Exchange rates') === true && str_contains($lines['limits'][0], 'no exchange rate') === true, json_encode($lines));
+// A NEW installation: pounds chosen, no rates fetched yet, nothing spent. A real request is refused for want of a
+// rate, and the page must say so too (it used to ask with no currency and show nothing wrong).
+$reset();
+$setting('org.currency', 'GBP');
+$asked  = $why(1, 'ai', 'USD');
+$pageAi = ProviderSpend::pageLines(ProviderSpend::monthSummary($db, 1, 'ai', 'anthropic'));
+$pageTr = ProviderSpend::pageLines(ProviderSpend::monthSummary($db, 1, 'transcription', 'openai'));
+$pageFree = ProviderSpend::pageLines(ProviderSpend::monthSummary($db, 1, 'ai', 'local'));
+check('T6 a request is refused no-rate on a new installation (pounds, no rates, nothing spent), AND the AI and transcription pages say exactly that (the same question is asked), while a free route shows nothing wrong',
+    $asked === 'no-rate' && $pageAi['refusal'] === ProviderSpend::refusalWords('no-rate') && $pageTr['refusal'] === ProviderSpend::refusalWords('no-rate')
+    && $pageFree['refusal'] === '' && ProviderSpend::whyRefusedFor($db, 1, 'ai', 'anthropic') === $asked, json_encode([$asked, $pageAi, $pageTr]));
+check('T7 the member-facing words: no-currency says to CHOOSE a currency (never "add an exchange rate"), no-rate says to add a rate, and a budget of nothing is never "reached", "used up" or "try again next month"',
+    (static function () use ($repo, $sep): bool {
+        $ai   = (string) file_get_contents($repo . $sep . 'web' . $sep . '_apps' . $sep . 'api' . $sep . 'ai-improve.php');
+        // The arm is the one source LINE that starts with the word (each arm is one line).
+        $lineOf = static function (string $word) use ($ai): string {
+            foreach (explode("\n", $ai) as $line) {
+                if (str_contains($line, "'" . $word . "'") === true && str_contains($line, '=>') === true) {
+                    return $line;
+                }
+            }
+            return '';
+        };
+        $armCurrency = $lineOf('no-currency');
+        $armBudget   = $lineOf('no-budget');
+        $tr = \Portal\Core\ContentTranslation::refusalWords('no-currency');
+        return $armCurrency !== '' && str_contains($armCurrency, 'Settings, Organisation') === true && str_contains($armCurrency, 'Exchange rates') === false
+            && $armBudget !== '' && str_contains($armBudget, 'next month') === false && str_contains($armBudget, 'reached') === false && str_contains($armBudget, 'nothing') === true
+            && str_contains($tr, 'Settings, Organisation') === true && str_contains($tr, 'Exchange rates') === false
+            && str_contains(\Portal\Core\ContentTranslation::refusalWords('no-rate'), 'Exchange rates') === true;
+    })() === true);
 check('T5 a refusal word has a sentence for every word the class can answer, and "used up" is never said of a limit of nothing',
     ProviderSpend::refusalWords('') === '' && ProviderSpend::refusalWords('no-budget') !== '' && str_contains(ProviderSpend::refusalWords('no-budget'), 'used up') === false
     && ProviderSpend::refusalWords('installation-limit') !== '' && ProviderSpend::refusalWords('organisation-limit') !== ''

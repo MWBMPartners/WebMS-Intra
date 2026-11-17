@@ -141,7 +141,7 @@ foreach ($flatten($merged) as $name => $value) {
 //    says what each level allows and what this month's spending counts as
 //    against it, so a number on screen is always attributed to a level.
 $installCap  = \Portal\Core\ProviderSpend::installationFigure($db, 'transcription');
-$spendLines  = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'transcription'));
+$spendLines  = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'transcription', (string) ((App::settings()['transcription'] ?? [])['provider'] ?? 'openai')));
 $queueStats   = Transcription::queueStatsFor($siteId);
 $recent       = Transcription::recentFor($siteId, 30);
 

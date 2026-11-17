@@ -50,6 +50,15 @@
  * translation 0 is "no limit"; for AI and transcription it is "nothing may be
  * spent". A uniform rule would let AI or transcription spend without limit.
  *
+ * A KNOWN LIMIT, STATED PLAINLY: THE LIMIT IS NOT EXACT UNDER CONCURRENCY. The
+ * check runs BEFORE the paid call and the charge is recorded AFTER it, and a
+ * database lock cannot span a call to another company. So two requests made at
+ * the same moment can both pass the check and both be charged, ending past the
+ * limit (measured with two processes: $66.10 spent, both allowed). A limit here
+ * is "stops new calls once the recorded spend has reached it", not "the bill can
+ * never pass it". (Translation's number-of-requests limit IS exact: it takes its
+ * slot in one conditional statement before the call.)
+ *
  * WHAT THIS CANNOT DO. Prices are the company's list prices written here by
  * hand, not read from the company: see `PRICES` for which were checked and
  * when. A model dearer than any listed is under-counted. A company that bills
@@ -117,7 +126,9 @@ final class ProviderSpend
      *     and $0.21 per hour for speech-to-text, plus add-ons; the $0.37 an hour
      *     already in this code (above both, so it leans towards refusing) stays.
      *   - OpenAI chat models (gpt-4o-mini $0.15/$0.60, gpt-4o $2.50/$10 per
-     *     million tokens) and Whisper ($0.006 a minute): RECALLED, not checked.
+     *     million tokens), the dearest OpenAI price used for any OTHER model
+     *     (o1-pro, $150/$600 per million tokens), and Whisper ($0.006 a
+     *     minute): RECALLED, not checked.
      *   - DeepL: EUR 20 per million characters: RECALLED, not checked.
      *   - Texts: NOT list prices. The old flat 4p (Twilio), 5p (MessageBird) and
      *     6p (AWS) written in `Sms.php`, re-expressed in the currency each
@@ -128,26 +139,42 @@ final class ProviderSpend
      *
      * Token prices are `in`/`out` per million tokens; character prices are per
      * million characters; transcription prices are per hour; text prices are
-     * per text. A `models` entry is matched as a PREFIX of the model name; a
-     * model that matches none is charged at `unknown`, the dearest listed for
-     * that company, so an unfamiliar model makes a limit bite early.
+     * per text.
+     *
+     * WHICH MODEL A NAME MEANS (a model name is free text on the AI and
+     * translation pages, so a typed one is untrusted). A `models` entry matches
+     * the name EXACTLY, or, when the entry says `dated`, the name followed by a
+     * date (`-20251001` or `-2024-07-18`) — and only for a model whose price does
+     * not change between dated versions. It is never a loose prefix: the bare
+     * `gpt-4o` prefix used to price `gpt-4o-2024-05-13` ($5/$15) at $2.50/$10, and
+     * `gpt-4o` also begins `gpt-4o-mini`. Every other name is charged at
+     * `unknown`, which is the DEAREST model that company is known to list (for
+     * OpenAI the recalled o1-pro price, for Anthropic Opus 4.1), so an unfamiliar
+     * model makes a limit bite early rather than late. A model dearer than the
+     * one named here is still under-counted; that is a stated limit.
      */
     public const PRICES = [
         'ai' => [
             'anthropic' => ['currency' => 'USD', 'per' => 'tokens',
-                'models' => ['claude-haiku-4-5' => ['in' => 1000000, 'out' => 5000000]],
+                'models' => ['claude-haiku-4-5' => ['in' => 1000000, 'out' => 5000000, 'dated' => true]],
                 'unknown' => ['in' => 15000000, 'out' => 75000000]],
             'openai' => ['currency' => 'USD', 'per' => 'tokens',
-                'models' => ['gpt-4o-mini' => ['in' => 150000, 'out' => 600000], 'gpt-4o' => ['in' => 2500000, 'out' => 10000000]],
-                'unknown' => ['in' => 2500000, 'out' => 10000000]],
+                'models' => [
+                    'gpt-4o-mini' => ['in' => 150000, 'out' => 600000, 'dated' => true],
+                    'gpt-4o'      => ['in' => 2500000, 'out' => 10000000, 'dated' => false],
+                ],
+                'unknown' => ['in' => 150000000, 'out' => 600000000]],
         ],
         'translation' => [
             'anthropic' => ['currency' => 'USD', 'per' => 'tokens',
-                'models' => ['claude-haiku-4-5' => ['in' => 1000000, 'out' => 5000000]],
+                'models' => ['claude-haiku-4-5' => ['in' => 1000000, 'out' => 5000000, 'dated' => true]],
                 'unknown' => ['in' => 15000000, 'out' => 75000000]],
             'openai' => ['currency' => 'USD', 'per' => 'tokens',
-                'models' => ['gpt-4o-mini' => ['in' => 150000, 'out' => 600000], 'gpt-4o' => ['in' => 2500000, 'out' => 10000000]],
-                'unknown' => ['in' => 2500000, 'out' => 10000000]],
+                'models' => [
+                    'gpt-4o-mini' => ['in' => 150000, 'out' => 600000, 'dated' => true],
+                    'gpt-4o'      => ['in' => 2500000, 'out' => 10000000, 'dated' => false],
+                ],
+                'unknown' => ['in' => 150000000, 'out' => 600000000]],
             'google' => ['currency' => 'USD', 'per' => 'characters', 'price' => 20000000],
             'deepl'  => ['currency' => 'EUR', 'per' => 'characters', 'price' => 20000000],
         ],
@@ -221,8 +248,16 @@ final class ProviderSpend
         switch ((string) $entry['per']) {
             case 'tokens':
                 $price = $entry['unknown'];
-                foreach ($entry['models'] as $prefix => $modelPrice) {
-                    if ($model !== null && \str_starts_with($model, (string) $prefix) === true) {
+                foreach ($entry['models'] as $name => $modelPrice) {
+                    $name = (string) $name;
+                    if ($model === null) {
+                        break;
+                    }
+                    // Exactly the name, or (only where the price does not change
+                    // between dated versions) the name and a date.
+                    if ($model === $name
+                        || ($modelPrice['dated'] === true
+                            && \preg_match('/\A' . \preg_quote($name, '/') . '-(?:\d{8}|\d{4}-\d{2}-\d{2})\z/', $model) === 1)) {
                         $price = $modelPrice;
                         break;
                     }
@@ -381,6 +416,16 @@ final class ProviderSpend
     }
 
     /**
+     * `whyRefused()` for the company a request would really go to: the ONE
+     * question a request and an admin page both ask, so they cannot disagree.
+     * `$provider` null is a free route (no currency of its own).
+     */
+    public static function whyRefusedFor(\mysqli $db, int $siteId, string $service, ?string $provider): string
+    {
+        return self::whyRefused($db, $siteId, $service, $provider === null ? null : self::currencyOf($service, $provider));
+    }
+
+    /**
      * One level's comparison: '' when the spend is under that level's figure
      * (or the level has no limit), else the refusal word.
      *
@@ -459,12 +504,18 @@ final class ProviderSpend
      * what the whole month's spend counts as against it (hundredths, null when
      * it could not be worked out).
      *
+     * `$provider` is the company a request would go to (null: a free route), so
+     * `refusal` is exactly what a request would be told (`whyRefusedFor()`).
+     *
      * @return array{totals:array<string,int>|null, refusal:string, installation:array<string,mixed>, organisation:array<string,mixed>|null}
      */
-    public static function monthSummary(\mysqli $db, int $siteId, string $service): array
+    public static function monthSummary(\mysqli $db, int $siteId, string $service, ?string $provider = null): array
     {
         $totals  = self::monthTotals($db, $siteId, $service);
-        $refusal = self::whyRefused($db, $siteId, $service, null);
+        // The page asks EXACTLY what a request asks: with the company's own
+        // currency, so a missing rate shows here too (it is the normal state of
+        // a new installation until the first fetch).
+        $refusal = self::whyRefusedFor($db, $siteId, $service, $provider);
         $key     = self::CAP_KEYS[$service] ?? null;
         $levels  = ['installation' => null, 'organisation' => null];
         if ($key !== null) {
@@ -543,7 +594,10 @@ final class ProviderSpend
                 continue;
             }
             if ((string) $facts['currency'] === '') {
-                $limits[] = $label . ': ' . (string) $facts['figure'] . ' — but no currency has been chosen for it, so it cannot be checked until one is (Admin, Settings, Organisation).';
+                // The figure is in hundredths: shown as an amount with two
+                // decimals and no symbol (Currency::format with no currency), never
+                // the raw count of hundredths, which would read 100 times too big.
+                $limits[] = $label . ': ' . Currency::format((int) $facts['figure'], '') . ' a month — but no currency has been chosen for it, so it cannot be checked until one is (Admin, Settings, Organisation).';
                 continue;
             }
             $line = $label . ': ' . Currency::format((int) $facts['figure'], (string) $facts['currency']) . ' a month';

@@ -210,7 +210,8 @@ def main() -> int:
         print("Translation engine: %s matches its pin (%d tokens). Comments and "
               "spacing are free; any change to the code fails here." % (ENGINE, current.count("\n")))
         print("Every built-in it calls is written with a leading backslash, so no other file can "
-              "replace one. NOT CHECKED HERE: the code of SettingLimit, App, Site, "
+              "replace one. NOT CHECKED HERE: the code of ProviderSpend (prices, recording and the "
+              "money check), SettingLimit, App, Site, "
               "ContentTranslation and the endpoint that calls the engine.")
         return 0
 

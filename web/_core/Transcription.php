@@ -561,7 +561,7 @@ class Transcription
             //    D-194), and refuses where a rate is missing (D-192). It is asked
             //    with THIS job's provider, because the currency is the provider's.
             $jobProvider = (string) ($job['provider'] ?? $defaultProvider);
-            $whyMoney    = ProviderSpend::whyRefused($db, $siteId, 'transcription', ProviderSpend::currencyOf('transcription', $jobProvider));
+            $whyMoney    = ProviderSpend::whyRefusedFor($db, $siteId, 'transcription', $jobProvider);
             if ($whyMoney !== '') {
                 $stoppedByCap = true;
                 $stoppedWhy   = $whyMoney;
@@ -632,7 +632,7 @@ class Transcription
                 }
 
                 $provider = (string) ($job['provider'] ?? $defaultProvider);
-                $result   = self::providerTranscribe($provider, $settings, $path, (string) ($job['mimeType'] ?? 'audio/mpeg'));
+                $result   = static::providerTranscribe($provider, $settings, $path, (string) ($job['mimeType'] ?? 'audio/mpeg'));
                 if ($result['ok'] !== true) {
                     self::markFailed($tid, $result['error'] ?? 'provider-error');
                     $failed++;
@@ -748,7 +748,7 @@ class Transcription
      * The cost is NOT here: `processQueue()` prices the seconds of audio the
      * company reports, in one place (`ProviderSpend::cost()`).
      */
-    private static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
+    protected static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
     {
         switch ($provider) {
             case 'openai':

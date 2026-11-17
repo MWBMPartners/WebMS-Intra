@@ -82,11 +82,12 @@ $providerIsReady    = Translation::providerReady($providerInForce, $translationI
 //    `Translation::translate()` (which asks `whyRefused()` with the same
 //    provider's currency), so this page cannot say "reached" while a press
 //    still sends (or the reverse).
-$moneySummary = \Portal\Core\ProviderSpend::monthSummary(App::db(), Site::id(), 'translation');
-$moneyWhy     = \Portal\Core\ProviderSpend::whyRefused(App::db(), Site::id(), 'translation', \Portal\Core\ProviderSpend::currencyOf('translation', $providerInForce));
+$moneySummary = \Portal\Core\ProviderSpend::monthSummary(App::db(), Site::id(), 'translation', $providerInForce);
+$moneyWhy     = \Portal\Core\ProviderSpend::whyRefusedFor(App::db(), Site::id(), 'translation', $providerInForce);
 $moneyLines   = \Portal\Core\ProviderSpend::pageLines($moneySummary);
 $moneyReached = $usage !== null && ($moneyWhy === 'installation-limit' || $moneyWhy === 'organisation-limit');
 $rateMissing  = $moneyWhy === 'no-rate' || $moneyWhy === 'no-currency';
+$rateFixIsHere = $moneyWhy === 'no-rate';
 $callsReached = $usage !== null && Translation::callsReached($usage['calls']);
 
 // 🗂️ THIS ORGANISATION'S CACHED TRANSLATIONS (#762's check, #800 item 2).
@@ -197,7 +198,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-warning" role="alert" data-limit-reached="no-rate">
         <strong>New translations are stopped because the money limit cannot be checked.</strong>
         <?php echo htmlspecialchars(\Portal\Core\ProviderSpend::refusalWords($moneyWhy), ENT_QUOTES, 'UTF-8'); ?>
-        <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a>
+        <?php if ($rateFixIsHere === true): ?>
+            <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a>
+        <?php endif; ?>
     </div>
 <?php elseif ($moneyReached === true && $callsReached === true): ?>
     <div class="alert alert-warning" role="alert" data-limit-reached="both">

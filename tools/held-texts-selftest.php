@@ -196,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 122; // 117 + four in part N (#782) + B2b (#1063)
+const EXPECTED_CHECKS = 123; // 117 + four in part N (#782) + B2b (#1063) + L4b (#993)
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@held-texts-selftest@@';
@@ -2425,6 +2425,22 @@ ok(
         && str_contains($listPage, "strtotime((string) \$m['createdAt'])") === false
         && ($listed[$L4b] ?? null) === ['sent', onClock($m1 + 60, QUIET_ZONE)] && ($listed[$L4a] ?? null) === ['sent', onClock($m0 + 7200, QUIET_ZONE)] && onClock($m1 + 60, QUIET_ZONE) !== onClock($m0 + 7200, QUIET_ZONE),
     'the page\'s question: ' . json_encode($listSql) . '; what it lists: ' . json_encode($listed)
+);
+
+// A text the provider REFUSED costs nothing and records nothing (#993): the cost is kept only for a text that went.
+$mysqli->query("SET time_zone = '" . QUIET_ZONE . "'");
+fresh();
+at($m0 + 7200);
+RecordingSms::$answer = 'refuse';
+$L4c = 'ZQXT L4 refused at once';
+text('off', 'rota_changes', $L4c);
+RecordingSms::$answer = 'accept';
+$mysqli->query("SET time_zone = '" . DB_ZONE . "'");
+ok(
+    'L4b a text the provider refused records NO cost: the row has no currency and no amount, and the month\'s record is empty',
+    rowOf($L4c) !== null && rowOf($L4c)['status'] === 'failed' && rowOf($L4c)['costMillionths'] === null && rowOf($L4c)['costCurrency'] === null
+        && ProviderSpend::monthTotals($mysqli, ORG, 'sms') === [],
+    json_encode([rowOf($L4c), ProviderSpend::monthTotals($mysqli, ORG, 'sms')])
 );
 
 // Every sentence the class records, against its copy written out at the top

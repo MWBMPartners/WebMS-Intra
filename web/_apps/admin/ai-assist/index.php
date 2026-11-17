@@ -56,7 +56,7 @@ $localBase = (string) ($settings['local']['baseUrl'] ?? '');
 
 // 💷 What this month has cost and what each limit allows, in each currency's own
 //    terms, from the ONE place that works it out (ProviderSpend, #993).
-$spendLines = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'ai'));
+$spendLines = \Portal\Core\ProviderSpend::pageLines(\Portal\Core\ProviderSpend::monthSummary($db, $siteId, 'ai', $providerInForce));
 
 $callsToday = 0;
 $rs = $db->query('SELECT COUNT(*) AS n FROM tblAiUsage WHERE siteID = ' . (int) $siteId . ' AND DATE(occurredAt) = CURDATE()');
@@ -126,7 +126,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="small text-muted"><?php echo htmlspecialchars($limitLine, ENT_QUOTES, 'UTF-8'); ?></div>
         <?php endforeach; ?>
         <?php if ($spendLines['refusal'] !== ''): ?>
-            <div class="small text-danger mt-1"><?php echo htmlspecialchars($spendLines['refusal'], ENT_QUOTES, 'UTF-8'); ?> <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a></div>
+            <div class="small text-danger mt-1"><?php echo htmlspecialchars($spendLines['refusal'], ENT_QUOTES, 'UTF-8'); ?>
+                <?php if (\Portal\Core\ProviderSpend::whyRefusedFor($db, $siteId, 'ai', $providerInForce) === 'no-rate'): ?>
+                    <a href="<?php echo htmlspecialchars(Site::url('admin/exchange-rates'), ENT_QUOTES, 'UTF-8'); ?>">Exchange rates</a>
+                <?php endif; ?></div>
         <?php endif; ?>
     </div></div></div>
     <div class="col-md-4"><div class="card"><div class="card-body">

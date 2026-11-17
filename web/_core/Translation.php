@@ -149,8 +149,9 @@ class Translation
      *                be sent and nothing was counted
      *   'money'      the month's money limit is reached
      *   'no-rate'    a limit has to be checked and there is no usable exchange
-     *                rate (or no currency chosen) to check it in, so nothing
-     *                was sent (D-192)
+     *                rate for the company's currency, so nothing was sent (D-192)
+     *   'no-currency' a limit has to be checked and no currency has been
+     *                chosen for the level that set it, so nothing was sent
      *   'calls'      the month's limit on the number of requests is reached
      *   'unreadable' this month's use could not be read or recorded, so
      *                nothing was sent: on a money path, "we could not tell"
@@ -282,7 +283,8 @@ class Translation
         if ($whyMoney !== '') {
             self::$lastRefusal = match ($whyMoney) {
                 'installation-limit', 'organisation-limit' => 'money',
-                'no-rate', 'no-currency'                   => 'no-rate',
+                'no-rate'                                  => 'no-rate',
+                'no-currency'                              => 'no-currency',
                 default                                    => 'unreadable',
             };
             return false;

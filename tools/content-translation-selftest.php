@@ -1621,9 +1621,10 @@ $answer = press($jarA, 'tblProjectUpdate', $updA, 'fr', freshToken($jarA));
 ok('F01f with no currency chosen and a limit in force, a piece never translated before is refused with 503 and nothing is sent',
     $answer['status'] === 503 && count(stubCalls()) === $before,
     'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
-ok('F01g ...and the member is told there is no exchange rate to check the spending limit, and an administrator can add one (not "the limit is reached")',
-    str_contains((string) ($answer['json']['message'] ?? ''), 'no exchange rate') === true
-    && str_contains((string) ($answer['json']['message'] ?? ''), 'Admin, Exchange rates') === true,
+ok('F01g ...and the member is told no currency has been chosen and an administrator can choose one (NOT "add an exchange rate", which would fix nothing, and not "the limit is reached")',
+    str_contains((string) ($answer['json']['message'] ?? ''), 'no currency has been chosen') === true
+    && str_contains((string) ($answer['json']['message'] ?? ''), 'Admin, Settings, Organisation') === true
+    && str_contains((string) ($answer['json']['message'] ?? ''), 'Exchange rates') === false,
     'said: ' . (string) ($answer['json']['message'] ?? '(nothing)'));
 setSetting('translation.monthCapPence', '0');
 $before = count(stubCalls());

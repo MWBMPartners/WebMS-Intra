@@ -62,7 +62,9 @@ if ($out === null) {
     $msg = match (AiAssistant::lastRefusal()) {
         'off'        => 'AI Assist is disabled.',
         'money'      => 'Monthly AI budget reached — try again next month.',
+        'no-budget'  => 'AI Assist cannot be used: its monthly budget is set to nothing. An administrator sets the budget under Admin, AI Assist.',
         'no-rate'    => 'AI Assist cannot be used right now: there is no exchange rate to check this month\'s spending limit. An administrator can add one under Admin, Exchange rates.',
+        'no-currency' => 'AI Assist cannot be used right now: no currency has been chosen to check this month\'s spending limit in. An administrator can choose one under Admin, Settings, Organisation.',
         'unreadable' => 'AI Assist is not available just now, because the portal could not check this month\'s spending. Nothing was sent.',
         'daily'      => 'Daily AI limit reached — try again tomorrow.',
         default      => 'AI provider unavailable — please try again.',

@@ -54,8 +54,11 @@ class AiAssistant
      *   'bad-request' an unknown kind or empty text
      *   'off'         AI assist is switched off
      *   'money'       the month's money limit is reached
+     *   'no-budget'   the monthly limit is set to nothing: nothing may be spent
      *   'no-rate'     a limit has to be checked and there is no exchange rate
-     *                 (or no currency chosen) to check it in (D-192)
+     *                 for the company's currency (D-192)
+     *   'no-currency' a limit has to be checked and no currency has been chosen
+     *                 for the level that set it
      *   'unreadable'  this month's spend could not be read: nothing was sent
      *   'daily'       this person's daily limit is reached
      *   'provider'    the company was asked and did not give a usable answer
@@ -96,11 +99,13 @@ class AiAssistant
         //    the merged settings (D-013, D-194): see the class header. A free
         //    local route is still checked against what was already spent, as
         //    before, and a limit of 0 means nothing may be spent.
-        $whyMoney = ProviderSpend::whyRefused(App::db(), $siteId, 'ai', ProviderSpend::currencyOf('ai', $provider));
+        $whyMoney = ProviderSpend::whyRefusedFor(App::db(), $siteId, 'ai', $provider);
         if ($whyMoney !== '') {
             self::$lastRefusal = match ($whyMoney) {
-                'installation-limit', 'organisation-limit', 'no-budget' => 'money',
-                'no-rate', 'no-currency'                   => 'no-rate',
+                'installation-limit', 'organisation-limit' => 'money',
+                'no-budget'                                => 'no-budget',
+                'no-rate'                                  => 'no-rate',
+                'no-currency'                              => 'no-currency',
                 default                                    => 'unreadable',
             };
             return null;

@@ -91,7 +91,7 @@ if ($canQueue === true) {
         'stillRunning'  => $tState !== null && $tState['stillRunning'] === true,
         // 💳 ONE question for both levels, in each level's own currency, with
         //    "no exchange rate" refusing (#993, D-192, D-194, #668).
-        'moneyRefusal'  => ProviderSpend::whyRefused(App::db(), $siteId, 'transcription', ProviderSpend::currencyOf('transcription', (string) ($tSettings['provider'] ?? 'openai'))),
+        'moneyRefusal'  => ProviderSpend::whyRefusedFor(App::db(), $siteId, 'transcription', (string) ($tSettings['provider'] ?? 'openai')),
     ]);
 }
 
