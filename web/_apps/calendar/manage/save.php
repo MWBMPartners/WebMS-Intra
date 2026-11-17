@@ -216,6 +216,14 @@ if ($locationW3W !== '' && What3Words::isConfigured() === true) {
     }
 }
 
+// 🏠 #1088 (D-128, D-183): the form's radio pair, remembered ON THE EVENT. Only the exact
+//    word 'public' means "not anybody's home" (1); anything else is a home (0), the safe
+//    reading, which shows no outside map. $kindArrived says whether the field was posted at
+//    all: an UPDATE that did not carry it must keep what is stored (the #677 shape), or a
+//    post from an older form would turn a public place back into a home.
+$kindArrived  = array_key_exists('locationAddressKind', $_POST);
+$notAHomeFlag = ($_POST['locationAddressKind'] ?? null) === Geocoder::KIND_PUBLIC ? 1 : 0;
+
 if (($locationGeoLat === null || $locationGeoLng === null) && Geocoder::autoEnabled() === true && $locationAddress !== '') {
     // 🏠 D-183: whether the address is somebody's home or a public place, as the
     //    form's radio pair says. Only the exact word 'public' is public; a missing
@@ -223,7 +231,7 @@ if (($locationGeoLat === null || $locationGeoLng === null) && Geocoder::autoEnab
     $geocoded = Geocoder::forward(
         $locationAddress,
         null,
-        ($_POST['locationAddressKind'] ?? null) === Geocoder::KIND_PUBLIC ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME
+        $notAHomeFlag === 1 ? Geocoder::KIND_PUBLIC : Geocoder::KIND_HOME
     );
     if ($geocoded !== null) {
         $locationGeoLat = $geocoded['lat'];
@@ -861,6 +869,12 @@ if ($action === 'create') {
     $insertColumns[] = 'cancelReason';
     $insertTypes    .= 's';
     $insertValues[]  = EventCancelReason::toStore($status, $cancelReason);
+
+    // 🏠 #1088: in the INSERT itself, so the series copies below (which take
+    //    `$insertColumns`) carry the same mark as their template.
+    $insertColumns[] = 'locationNotAHome';
+    $insertTypes    .= 'i';
+    $insertValues[]  = $notAHomeFlag;
 
     if ($venueLinkActive === true) {
         $insertColumns[] = 'venueID';
@@ -1678,6 +1692,14 @@ if ($action === 'update') {
         $paramValues[] = $websiteValues['showOnWebsite'];
         $paramValues[] = $websiteValues['websiteFrom'];
         $paramValues[] = $websiteValues['websiteUntil'];
+    }
+
+    // 🏠 #1088: only when the field ARRIVED, so an edit that did not carry it
+    //    keeps the stored mark.
+    if ($kindArrived === true) {
+        $setClauses[]  = '`locationNotAHome` = ?';
+        $paramTypes   .= 'i';
+        $paramValues[] = $notAHomeFlag;
     }
 
     $paramTypes   .= 'ii';

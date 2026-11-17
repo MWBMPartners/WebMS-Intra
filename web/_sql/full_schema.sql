@@ -1190,6 +1190,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     `locationW3W`     VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
     `locationPhone`   VARCHAR(50)   DEFAULT NULL,
     `locationEmail`   VARCHAR(255)  DEFAULT NULL,
+    `locationNotAHome` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '1 = whoever set the place said it is a public place, not anybody''s home (D-128, D-183), so a map of it may be shown if the map settings allow; 0 = a home, or not said: the safe reading, no outside map (D-120). Set by calendar/manage/save.php; never by the events API or imports (migration 303)',
 
     -- 🏢 Organisation fields
     `hostOrgName`    VARCHAR(255)  DEFAULT NULL COMMENT 'Organisation hosting the event',
@@ -12010,6 +12011,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('298_member_limits.sql')
 -- in the table itself. A fresh install holds no suggestions for the migration
 -- to mark. This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('300_suggestion_cancelled_or_postponed_while_waiting.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 303_event_place_not_a_home.sql (#1088; D-120, D-128, D-183) ────────
+-- tblEvents.locationNotAHome is written above, in the table itself. This is
+-- the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('303_event_place_not_a_home.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
