@@ -40,6 +40,21 @@
   other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
   limits not exact under two simultaneous requests). Codex has not reviewed this.
 
+### A membership records when it was switched off, and consent records of members who have left are cleared (#934, second half; D-211, D-212, D-213)
+
+- A membership now records when it was switched off (`tblUserSites.leftAtUtc`, a UTC moment, migration 305). Offboarding
+  stamps it; rehire and the Users page's Active tick (on a one-organisation portal) empty it. The consent records (agreement
+  to the privacy notice, cookie choices) of a member who has LEFT an organisation may be deleted by the nightly clear-out
+  once that organisation's keeping period has passed since they left, the latest record included, unless the person has been
+  brought back. Not counted as leaving: switching an account off with the Active tick (D-213), and Admin, Organisations,
+  Users, Remove, which deletes the membership and records no date (D-212). A membership switched off before this release
+  has no date and is never deleted because of it. With ONE organisation the account must also be off. The privacy page,
+  the Retention page, the offboarding page and the data copy say so. A failed or oversized preview no longer breaks the
+  Retention page or stops the nightly job's later steps. Open: the one-organisation Users save is not driven over HTTP by a
+  test (R1 drives the statement and the real sweep), a person offboarded then paused and unpaused with the tick, per-person
+  queries cost 7 to 9 s at 20,000 members, the Admin Add page cannot re-add a switched-off person, the rendered consent
+  paragraph is pinned by no page test. Codex has not reviewed this.
+
 ### Consent records now have a clear-out (#934, part; D-166, D-210)
 
 - The nightly retention sweep now deletes records of privacy-notice and cookie choices (`tblConsentLog`): a record replaced

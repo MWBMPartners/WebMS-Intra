@@ -25160,3 +25160,23 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   count mismatch catches its removal. Removing `t.userID IS NULL` from the visitor-session join is pinned by no test and
   unreachable today (sign-out destroys the session). On MariaDB the portal omits ONLY_FULL_GROUP_BY, so a column dropped from
   the GROUP BY would silently merge kinds of choice there.
+
+### A membership records when it was switched off (#934, D-211)
+
+- `Portal\Core\Memberships` is the ONE place a membership is switched off or on (`SWITCH_OFF_ALL_SQL`, `SWITCH_ON_ALL_SQL`,
+  `SWITCH_ON_ONE_SQL`, `SWITCH_ON_ONE_IF_SINGLE_SQL`: SQL text only) and `hasLeftSql($membershipAlias, $accountAlias)` the ONE
+  definition of "left". Hard gate `check_one_membership_switch.py` (tokeniser probe `membership-writes-probe.php`,
+  `--self-test` with 25 plants), wired in `pr-security.yml`. Writers of `tblUserSites` under `web/`: offboarding `do.php` step 4 is
+  the only `isActive = 0`; `rehire.php` and `admin/users/save.php` (single-organisation mode) the only ones that switch back on;
+  `admin/sites/users.php` Remove is the only DELETE (D-212).
+- **Assignment-order trap:** MySQL evaluates a single-table `SET` left to right with values already assigned, so a conditional
+  `SET isActive = 0, leftAtUtc = IF(isActive = 1, ...)` would read the NEW 0; the switch-off keeps its test in the WHERE.
+- The moment is the switch-off itself, never offboarding's typed effective date (unvalidated text, no zone).
+- **One-organisation trap:** with one organisation only `tblUsers.isActive` decides access, so `hasLeftSql()` also requires the
+  account off in that mode, and the mode is read INSIDE the statement (`CAST(... AS BINARY)`): `AccountGuard::isSingleOrganisation()`
+  fails towards "several organisations", the deleting direction. Returning a person with the Active tick MUST clear their
+  membership's date (R1: offboarded, tick on, pause, real sweep: nothing deleted); several organisations: nothing is touched.
+- Two clocks: `tblConsentLog.createdAt` is the database session zone (`NOW()`), `leftAtUtc` is UTC (`UTC_TIMESTAMP()`); the self-test
+  sets its session zone to +10:00. Merges: the clear-out asks "has this person left?" of the account the person now IS
+  (`AccountMerge::survivorOf()`).
+- `run_consent_sweep()` wraps the sweep for the preview and the nightly job: any failure gives -1, "could not be counted".

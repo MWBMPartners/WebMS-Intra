@@ -2401,3 +2401,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Erasure: remembered map positions of the person's own addresses are deleted (#1067, D-209).
 
 - Privacy: consent records (privacy-notice and cookie choices) are cleared nightly by `Portal\Core\ConsentRetention` per D-166 and D-210; the period is set on Admin, Maintenance, Retention (#934).
+
+- Privacy retention: a member who has left (Offboarding records when) has their privacy-notice and cookie-choice records deleted once the organisation's retention period has passed since they left; Remove and the Active tick do not count as leaving (#934, D-211 to D-213).

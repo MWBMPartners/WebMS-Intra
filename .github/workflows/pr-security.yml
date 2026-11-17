@@ -2078,6 +2078,21 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_one_password_writer.py
 
+      # 🚪 A membership is switched off or on, and its leaving moment written, by
+      #    ONE class (#934, D-211): `Portal\Core\Memberships`. A second writer
+      #    would make "has this person left?" mean two things and could start a
+      #    deletion clock on somebody who only paused. It fails BOTH ways; its own
+      #    header states what it cannot see (a statement built by sprintf).
+      - name: 'A membership is switched off by one class (hard gate)'
+        id: one_membership_switch
+        if: always()
+        run: python3 -I tools/audit-checks/check_one_membership_switch.py
+
+      - name: 'A membership is switched off by one class (self-test, hard gate)'
+        id: one_membership_switch_selftest
+        if: always()
+        run: python3 -I tools/audit-checks/check_one_membership_switch.py --self-test
+
       # 💷 A money record's currency is written by ONE rule (#966, D-139):
       #    an UPDATE that writes it goes through Currency::onEdit(), and a
       #    child row takes its parent's. "An edit relabels a record" failed
