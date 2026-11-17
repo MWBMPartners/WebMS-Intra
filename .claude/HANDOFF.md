@@ -43,8 +43,7 @@ fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.*
 Plan board: <https://github.com/orgs/MWBMPartners/projects/16> (organisation project 16, linked to the repository; every open
 issue of the three milestones is on it; #1132 can be closed once the owner has seen it). Milestones 19 (Pilot install), 20
 (Release) and 21 (After release) carry descriptions. The wiki (Home, Roadmap) names the pilot state and where records live;
-its local clone is `/tmp/claude-501/wiki` and **one wiki commit (`acdfb56`) is waiting for a push**: the dev-team push guard
-refuses the wiki's default branch, so the owner pushes it (from the clone: `git push origin HEAD`) or allows it.
+its local clone is `/tmp/claude-501/wiki` (pushed 17 November, commit `acdfb56`; a plain `git push origin HEAD` from the clone works).
 
 **Cleanup done 17 November:** 103 builder worktrees and their branches were removed (each clean, and its commits already in
 `claude/alpha-wip`, by ancestry or by patch equivalence). **37 were kept on purpose** because they hold commits not found in
