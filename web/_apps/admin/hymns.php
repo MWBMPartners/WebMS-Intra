@@ -244,8 +244,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <p class="small text-muted">
                 A generic HTTPS JSON provider (e.g. an in-house "iHymns" deployment) the hymn
                 picker can also query. <strong>Off until you turn it on</strong> — the local
-                index above always works with zero configuration. See DEV_NOTES.md for the
-                exact request/response contract an owner-controlled endpoint must speak.
+                index above always works with zero configuration. Whoever supplies the
+                endpoint can give you the request and answer format it must use.
                 Single host only; https:// required; API key is encrypted at rest and never
                 shown again once saved.
             </p>

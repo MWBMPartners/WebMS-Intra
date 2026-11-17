@@ -135,6 +135,8 @@ require __DIR__ . '/backup-restore-selftest.php';
 const UPS_ROOT      = 919001;   // a global administrator
 const UPS_MEMBER    = 919002;
 const UPS_ADMIN     = 919003;   // an administrator of ONE organisation, not a global one
+const UPS_ERASED    = 919004;   // #1138 item 7: an account emptied by an erasure, belonging to no organisation
+const UPS_ORPHAN    = 919005;   // #1138 item 7: an ordinary member with no organisation
 const UPS_MIGRATION = '998_upgrade_pages_selftest.sql';
 /** Files sections F to M put under _sql for a moment, and names they record. Each does nothing, or fails on purpose. */
 const UPS_FAILS     = '997_upgrade_pages_selftest_fails.sql';
@@ -171,7 +173,7 @@ function ups_tidyDatabase(): void
     $w = Brs::$writer;
     $w->query('SET SESSION foreign_key_checks = 0');
     foreach (['tblLocalAccounts', 'tblUserSites', 'tblUsers', 'tblActivityLogs'] as $table) {
-        $w->query('DELETE FROM `' . $table . '` WHERE userID BETWEEN ' . UPS_ROOT . ' AND ' . UPS_ADMIN);
+        $w->query('DELETE FROM `' . $table . '` WHERE userID BETWEEN ' . UPS_ROOT . ' AND ' . UPS_ORPHAN);
     }
     if ($ups['logMark'] > 0) {
         $w->query("DELETE FROM tblActivityLogs WHERE logID > " . (int) $ups['logMark'] . " AND activityType IN ('PortalVersionRecorded', 'SecretSettingsRepaired')");
@@ -788,6 +790,53 @@ brs_check(
     'pressing it records the version, switches the portal on again, and a stranger gets the portal',
     'recorded: ' . ups_setting('portal.installed_version') . '; switch: ' . ups_setting('portal.maintenance.active')
 );
+
+echo "\nN. The card for accounts with no organisation (#1138 item 7)\n";
+// An account emptied by an erasure has no membership BECAUSE the erasure
+// deleted them, so it must not be counted; an ordinary member with none must.
+// The card only appears after a run that applied an upgrade file, so one is
+// written here. The portal has ONE organisation in this database, which is the
+// case the old wording got wrong ("more than one organisation").
+$tomb = '[Deleted User]';   // GdprEraser::TOMBSTONE_NAME; the class is not loaded in this script, and a changed constant makes check N1 go red
+Brs::$writer->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 0, 0, 0)')
+    ->execute([UPS_ERASED, $tomb, 'deleted-' . UPS_ERASED . '@example.invalid']);
+$sitesHeld = (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSites')->fetch_row()[0];
+ups_setBehind();
+file_put_contents($sqlDir . '/' . UPS_WAITS, "-- Written by tools/upgrade-pages-selftest.php for one run. Does nothing.\nSELECT 1;\n");
+$page    = ups_request($jar['root'], 'GET', '/admin/upgrade');
+$pressed = ups_request($jar['root'], 'POST', '/admin/upgrade', ['csrf_token' => ups_token($page['body'])]);
+brs_check(
+    $pressed['status'] === 200 && str_contains($pressed['body'], 'Accounts with no organisation') === false,
+    'ONE ERASED ACCOUNT with no membership, nothing else: the card does not appear',
+    'HTTP ' . $pressed['status'] . '; organisations: ' . $sitesHeld
+);
+Brs::$writer->query("DELETE FROM tblMigrations WHERE filename = '" . UPS_WAITS . "'");
+Brs::$writer->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)')
+    ->execute([UPS_ORPHAN, 'Olly Orphan', 'u' . UPS_ORPHAN . '.upgrade@selftest.invalid']);
+ups_setBehind();
+$page    = ups_request($jar['root'], 'GET', '/admin/upgrade');
+$pressed = ups_request($jar['root'], 'POST', '/admin/upgrade', ['csrf_token' => ups_token($page['body'])]);
+$said    = ups_text($pressed['body']);
+brs_check(
+    $sitesHeld === 1 && str_contains($said, 'Accounts with no organisation') === true && str_contains($said, '1 account still belongs to no organisation') === true,
+    'AN ORDINARY MEMBER with no membership: the card appears and counts ONE (the erased account is not counted)',
+    'organisations: ' . $sitesHeld . '; ' . substr($said, (int) strpos($said, 'Accounts with no organisation'), 300)
+);
+brs_check(
+    str_contains($said, 'more than one organisation') === false && str_contains($said, 'A likely reason is that somebody was removed from the organisation.') === true
+    && str_contains($said, 'calendar subscription stops working') === true,
+    'on a ONE-organisation portal the card does not claim there is more than one organisation, and says what is true of the account'
+);
+// An account with no membership STILL SIGNS IN on a one-organisation portal (multisite off), so the
+// card must never say nobody can open it or that it cannot sign in. With the old clause put back in
+// upgrade.php by hand, this check goes red.
+brs_check(
+    preg_match('/nobody can open|cannot (sign|log) in|can\'?not (sign|log) in|can\'t (sign|log) in|locked out/i', $said) !== 1,
+    'and the card does not claim the account cannot sign in or cannot be opened'
+);
+unlink($sqlDir . '/' . UPS_WAITS);
+Brs::$writer->query("DELETE FROM tblMigrations WHERE filename = '" . UPS_WAITS . "'");
+Brs::$writer->query('DELETE FROM tblUsers WHERE userID IN (' . UPS_ERASED . ', ' . UPS_ORPHAN . ')');
 
 echo "\nE. The portal cannot tell whether an upgrade is waiting\n";
 $otherToken = ups_token(ups_request($jar['root'], 'GET', '/admin/maintenance/backup')['body']);

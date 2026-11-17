@@ -179,7 +179,7 @@ if ($waiting > 0) {
     $msg .= sprintf(', %d waiting in the mail queue (each is marked as emailed only once it has gone)', $waiting);
 }
 $msg .= $remaining > 0
-    ? sprintf('. %d remaining — re-run, or configure the giving cron to finish (see DEV_NOTES.md).', $remaining)
+    ? sprintf('. %d remaining — re-run, or add the scheduled job /cron/giving-statements (the installation guide, INSTALL.md, step 11) to finish unattended.', $remaining)
     : '. Done.';
 
 $_SESSION['flash_msg']  = $msg;

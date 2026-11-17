@@ -164,7 +164,7 @@ foreach (array_unique($emails) as $email) {
                     'inviterName' => '',
                     'portalName'  => $portalName,
                     'inviteUrl'   => PortalAddress::absolute('auth/invite?token=' . $plaintext, $siteId),
-                    'expiresAt'   => $days . ' days',
+                    'expiresAt'   => 'in ' . $days . ($days === 1 ? ' day' : ' days'),
                     'message'     => $message,
                 ],
                 [],

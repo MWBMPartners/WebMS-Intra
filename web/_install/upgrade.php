@@ -183,6 +183,7 @@ $ranMigrations = false;
 //    show beside the results.
 $ranWithoutWayBack = '';
 $unplacedAfterUpgrade = 0; // #533 — only computed for real after a run; see below
+$siteCountAfterUpgrade = 0; // #1138 item 7 — how many organisations, for the card's reason
 $apiNotice = ['calendars' => 0, 'organisations' => 0]; // #514 part 8 — see below
 $secretRepair = null; // #497 — what the repair of stored secrets did; null until a run
 $cleanResult  = null; // #622 — what the cleaning of old activity records did on this press; null when it did not run
@@ -467,12 +468,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    guessed here either: this only counts and reports, it never
     //    places anybody — that is what /admin/users/unplaced is for.
     $unplacedAfterUpgrade = 0;
-    $unplacedResult = $mysqli->query(
-        'SELECT COUNT(*) AS cnt FROM tblUsers u '
-        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID)'
-    );
+    // #1138 item 7: an account emptied by an erasure ("[Deleted User]") has
+    //    had every membership deleted on purpose, so it matched this count
+    //    and the card then blamed the migration. The same exclusion the two
+    //    Users pages use (GdprEraser::emptiedAccountSql(), the one
+    //    definition). An account merged into another keeps no memberships of
+    //    its own either (they moved to the kept account), so it is left out
+    //    too. If the merge tables cannot be read, fall back to the erased-only
+    //    test: a slightly high count is the safer direction for a warning.
+    $unplacedBase = 'SELECT COUNT(*) AS cnt FROM tblUsers u '
+        . 'WHERE NOT EXISTS (SELECT 1 FROM tblUserSites us WHERE us.userID = u.userID) '
+        . 'AND NOT ' . \Portal\Core\GdprEraser::emptiedAccountSql('u');
+    // Strict mysqli reporting THROWS on a missing table, so the fallback is a catch.
+    try {
+        $unplacedResult = $mysqli->query($unplacedBase . ' AND NOT ' . \Portal\Core\AccountMerge::mergedAwaySql('u'));
+    } catch (\Throwable $mergeTablesUnreadable) {
+        unset($mergeTablesUnreadable);
+        $unplacedResult = $mysqli->query($unplacedBase);
+    }
     if ($unplacedResult !== false) {
         $unplacedAfterUpgrade = (int) ($unplacedResult->fetch_assoc()['cnt'] ?? 0);
+    }
+    // How many organisations there are, so the card's reason is true.
+    $siteCountAfterUpgrade = 0;
+    $siteCountResult = $mysqli->query('SELECT COUNT(*) AS cnt FROM `tblSites`');
+    if ($siteCountResult !== false) {
+        $siteCountAfterUpgrade = (int) ($siteCountResult->fetch_assoc()['cnt'] ?? 0);
     }
 
     // 🔑 #514 part 8 (the plan's section 7.1, part 7's B7): the run that
@@ -897,9 +918,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="card-body">
                         <p class="mb-2">
                             <?php echo (int) $unplacedAfterUpgrade; ?> account<?php echo $unplacedAfterUpgrade !== 1 ? 's' : ''; ?>
-                            still belong<?php echo $unplacedAfterUpgrade === 1 ? 's' : ''; ?> to no organisation. Nothing was
-                            guessed &mdash; this portal has more than one organisation, so this migration could not
-                            safely decide which one each account belongs to.
+                            still belong<?php echo $unplacedAfterUpgrade === 1 ? 's' : ''; ?> to no organisation.
+                            <?php if ($siteCountAfterUpgrade > 1): ?>
+                                Nothing was guessed: this portal has more than one organisation, so this migration could not
+                                safely decide which one each account belongs to.
+                            <?php else: ?>
+                                <?php // #1138 item 7: NOT "nobody can open them" — with the default one-organisation set-up an
+                                      //   account with no membership still signs in. What is true is what Admin, Users, "Accounts
+                                      //   with no organisation" says: no administrator sees them, calendar links fail. ?>
+                                No organisation's administrator can see <?php echo $unplacedAfterUpgrade === 1 ? 'it' : 'them'; ?> on the Users page,
+                                and <?php echo $unplacedAfterUpgrade === 1 ? 'its' : 'their'; ?> calendar subscription stops working, until
+                                <?php echo $unplacedAfterUpgrade === 1 ? 'it is' : 'they are'; ?> placed.
+                                A likely reason is that somebody was removed from the organisation.
+                            <?php endif; ?>
                         </p>
                         <a href="<?php echo htmlspecialchars(Site::url('admin/users/unplaced'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-warning">
                             Place them

@@ -1024,13 +1024,28 @@ final class SafeFetch
         $found = [];
         // "@" because dns_get_record() raises a PHP warning for a name that
         // does not exist; that case is handled by the empty list below.
-        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
-        if ($records === false) {
-            $v4 = @gethostbynamel($host);
-            if (is_array($v4) === true) {
-                $found = $v4;
+        //
+        // #1138 item 12: the "@" alone is NOT enough. PHP 8 calls an installed
+        // error handler whatever "@" says, and the portal's handler logs every
+        // warning, so a failed look-up ("A temporary server error occurred.")
+        // was written to the error log on every failed exchange-rate fetch.
+        // For these two look-ups only, a handler that swallows the warning is
+        // put in place and always taken out again. Deliberately narrow: how the
+        // error log treats warnings silenced with "@" ELSEWHERE is a separate
+        // decision (an issue is raised for it), not changed here.
+        set_error_handler(static fn (): bool => true);
+        try {
+            $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+            if ($records === false) {
+                $v4 = @gethostbynamel($host);
+                if (is_array($v4) === true) {
+                    $found = $v4;
+                }
             }
-        } else {
+        } finally {
+            restore_error_handler();
+        }
+        if ($records !== false) {
             foreach ($records as $record) {
                 $type = (string) ($record['type'] ?? '');
                 if ($type === 'A') {

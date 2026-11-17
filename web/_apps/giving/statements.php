@@ -184,7 +184,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </form>
     </div>
     <div class="card-footer small text-muted">
-        Statements batch in groups of <?php echo (int) ($settings['statements']['batchPerRun'] ?? 25); ?> per click — re-click "Generate"/"Email" to continue a larger run, or configure the giving cron to finish unattended (see DEV_NOTES.md).
+        Statements batch in groups of <?php echo (int) ($settings['statements']['batchPerRun'] ?? 25); ?> per click — re-click "Generate"/"Email" to continue a larger run, or add the scheduled job <code>/cron/giving-statements</code> (the installation guide, INSTALL.md, step 11) to finish unattended.
     </div>
 </div>
 
