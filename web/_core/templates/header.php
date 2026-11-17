@@ -228,10 +228,29 @@ try {
 $cspMediaExtra   = $cspExtSanitise($cspMediaExtra   ?? null);
 $cspFrameExtra   = $cspExtSanitise($cspFrameExtra   ?? null);
 $cspConnectExtra = $cspExtSanitise($cspConnectExtra ?? null);
+// 🤖 #1092 — the robot check's own hosts, for the provider in use and no other.
+//    `Captcha::cspSources()` is the ONE place they are written. They are added
+//    on EVERY page, not by a per-page flag: a widget on a page nobody flagged
+//    was refused by this rule (reCAPTCHA and hCaptcha on five forms), and
+//    allowing a host causes no request by itself. WRAPPED like the picture
+//    hosts above: if the class is not there yet, nothing is added (the safe
+//    direction) and the page still draws.
+$cspCaptchaScript = '';
+$cspCaptchaStyle  = '';
+try {
+    $captchaSources    = \Portal\Core\Captcha::cspSources();
+    $cspCaptchaScript  = $cspExtSanitise($captchaSources['script']);
+    $cspCaptchaStyle   = $cspExtSanitise($captchaSources['style']);
+    $cspFrameExtra    .= $cspExtSanitise($captchaSources['frame']);
+    $cspConnectExtra  .= $cspExtSanitise($captchaSources['connect']);
+} catch (\Throwable $captchaSourcesError) {
+    error_log('[WebMS-Intra] header.php: the robot check\'s page-rule hosts could not be worked out, so none are allowed: '
+        . $captchaSourcesError->getMessage());
+}
 $mediaSrcDirective = $cspMediaExtra !== '' ? "media-src 'self'{$cspMediaExtra}; " : '';
 header("Content-Security-Policy: default-src 'self'; "
-    . "script-src 'self' 'nonce-{$csp_nonce}' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com; "
-    . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+    . "script-src 'self' 'nonce-{$csp_nonce}' 'unsafe-inline' https://cdn.jsdelivr.net https://challenges.cloudflare.com{$cspCaptchaScript}; "
+    . "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com{$cspCaptchaStyle}; "
     . "font-src 'self' https://cdnjs.cloudflare.com; "
     . "img-src 'self' data:{$cspImgExtra}; "
     . "connect-src 'self'{$cspConnectExtra}; "

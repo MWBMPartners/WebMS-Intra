@@ -297,6 +297,60 @@ class Captcha
             . 'Please try again later, or get in touch another way.';
     }
 
+    // 🛂 The page-rule sources each provider needs BEYOND the base rule in
+    //    `templates/header.php` (which already names Turnstile's one host).
+    //    Written ONCE, here, beside the script addresses above (#1092).
+    //    Source: each provider's own published page-rule guidance --
+    //    reCAPTCHA: https://developers.google.com/recaptcha/docs/faq (the
+    //    "content security policy" answer: script from www.google.com and
+    //    www.gstatic.com, frames from www.google.com and recaptcha.google.com);
+    //    hCaptcha: https://docs.hcaptcha.com/ ("Content Security Policy": its
+    //    script, frames, styles and connections all come from hcaptcha.com and
+    //    its sub-names). A host is written WITHOUT a path on purpose: a
+    //    provider that moves a file inside its own site must not break forms.
+    private const RECAPTCHA_PAGE_RULE = [
+        'script'  => ' https://www.google.com https://www.gstatic.com',
+        'frame'   => ' https://www.google.com https://recaptcha.google.com',
+        'style'   => '',
+        'connect' => '',
+    ];
+    private const HCAPTCHA_HOSTS = ' https://hcaptcha.com https://*.hcaptcha.com';
+    private const HCAPTCHA_PAGE_RULE = [
+        'script'  => self::HCAPTCHA_HOSTS,
+        'frame'   => self::HCAPTCHA_HOSTS,
+        'style'   => self::HCAPTCHA_HOSTS,
+        'connect' => self::HCAPTCHA_HOSTS,
+    ];
+
+    /**
+     * The page-rule sources the ACTIVE robot-check provider needs, and only that
+     * provider's (#1092).
+     *
+     * WHY EVERY PAGE, NOT A FLAG PER PAGE: allowing a host in the page rule makes
+     * no request by itself, and a per-page flag is the exact shape that broke
+     * four forms (a page with a widget that nobody remembered to flag). The
+     * widget's script tag is drawn by `scriptTag()` for the same provider, so
+     * the two cannot name different companies.
+     *
+     * Turnstile needs nothing here (its host is in the base rule); no provider,
+     * or keys that cannot be read, gives nothing. Each value starts with a space
+     * so it can be glued on, or is ''.
+     *
+     * @return array{script:string, frame:string, style:string, connect:string}
+     */
+    public static function cspSources(): array
+    {
+        $active = self::activeProvider();
+        if ($active === self::PROVIDER_RECAPTCHA) {
+            return self::RECAPTCHA_PAGE_RULE;
+        }
+        if ($active === self::PROVIDER_HCAPTCHA) {
+            return self::HCAPTCHA_PAGE_RULE;
+        }
+
+        return ['script' => '', 'frame' => '', 'style' => '', 'connect' => ''];
+    }
+
     /**
      * Return the <script> tag(s) required by the active captcha provider.
      *
