@@ -2405,3 +2405,5 @@ reads as reassurance. Run the loop above — it takes seconds.
 - Privacy retention: a member who has left (Offboarding records when) has their privacy-notice and cookie-choice records deleted once the organisation's retention period has passed since they left; Remove and the Active tick do not count as leaving (#934, D-211 to D-213).
 
 - Data copy: every record about you, kept or erased, in plain rows; every other kind My data lists, as counts in plain words (#1135).
+
+- Admin, Erasure requests: reachable from the Admin menu and dashboard; administrators are e-mailed when a member's own request is waiting (#1136). Admin, Users: Offboard button (#1136). One-organisation portal: no Remove button (#1142).

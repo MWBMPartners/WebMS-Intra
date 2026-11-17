@@ -81,6 +81,22 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### Administrators are told of a waiting erasure request; Offboard is reachable; Remove is hidden on a one-organisation portal (#1136, #1142; D-223)
+
+- Administrators are now e-mailed when a member's own erasure request reaches "waiting for an administrator" (the e-mailed
+  confirmation link and "Delete my account"; an administrator confirming for a member, offboarding with erasure and visitor
+  requests send nothing). The e-mail names nobody and gives the due date (one month) and the requests page address;
+  `Portal\Core\ErasureNotice` is the one place it is worded and sent; recipients are `ImportNotifier::recipients()`; no
+  notification switch silences it; it never throws; it is sent once per request and only while the request is still waiting.
+  The announcing activity line carries the member's account number, so an erasure removes it, and is written only when the
+  open organisation is the request's own. Admin, Users has an Offboard button on each line the offboarding page would open for
+  (not the viewer's own line); the Admin menu has "Erasure requests"; the Admin dashboard has cards for Erasure requests
+  (count and earliest due date), Backups (global administrators), Health, Check this portal and Offboarding.
+- On a one-organisation portal Admin, Organisations, Users no longer offers Remove (it did not end anyone's access there): it
+  says Offboarding and the Active tick are how a person leaves, and a posted Remove is refused. Several-organisation portals
+  keep Remove (D-212). Open: the notice reaches nobody if no mail route is set up (the dashboard card is the backstop). Codex has
+  not reviewed this.
+
 ### Small first-install fixes found by the rehearsal (#1138)
 
 - The upgrade page's "accounts with no organisation" card no longer counts erased or merged-away accounts, and on a

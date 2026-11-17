@@ -25237,3 +25237,16 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   early): never write that a removed person cannot sign in. D-223 hides Remove on that portal.
 - `check_no_developer_notes_on_pages.py` reads PHP tokens: `DEV_NOTES` in a PHP comment is allowed, in HTML, a string or a
   heredoc is not.
+
+### The erasure-request notice (#1136) and Remove on one organisation (#1142)
+
+- `Portal\Core\ErasureNotice::requestWaiting($siteId, $requestId)` gets its own connection (a page that must change nothing itself
+  keeps no `App::db(`: `gdpr-coverage-selftest.php` watches `delete-confirm.php`). The announcing activity line MUST carry the
+  request's `userID` (an erasure finds activity records only by `userID`; a line with no number keeps the visitor's IP address
+  and headers past the erasure it announces), and only when `Site::id()` equals the request's organisation.
+- A race with one worker is reproduced with a BEFORE UPDATE trigger on `tblErasureRequest` that rewrites `NEW.status`. A queued
+  mail's body is encrypted with the installation key: the test writes its own `enc.key`.
+- The dashboard card for Check this portal asks `App::isAdmin()` only (a capability there would need the page added to
+  `askedAt`, `check_capability_registry.py`).
+- `admin/sites/users.php`: Remove is drawn only when `AccountGuard::isSingleOrganisation() === false` (a failed read answers
+  false, so nothing is hidden or refused wrongly); a posted `remove` on one organisation is refused first.
