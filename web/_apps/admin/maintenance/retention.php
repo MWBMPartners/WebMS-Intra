@@ -151,6 +151,7 @@ use Portal\Core\Auth;
 use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\Logger;
 use Portal\Core\NetworkAddressRetention;
+use Portal\Core\ConsentRetention;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -260,10 +261,13 @@ $retentionForms = [
     'activity-retention-installation' => [ActivityLogRetention::class, false],
     'address-retention-organisation'  => [NetworkAddressRetention::class, true],
     'address-retention-installation'  => [NetworkAddressRetention::class, false],
+    'consent-retention-organisation'  => [ConsentRetention::class, true],
+    'consent-retention-installation'  => [ConsentRetention::class, false],
 ];
 $retentionNames = [
     ActivityLogRetention::class    => ['what' => 'the activity log', 'refused' => 'ActivityLogRetentionRefused', 'saved' => 'ActivityLogRetentionSaved'],
     NetworkAddressRetention::class => ['what' => 'network addresses', 'refused' => 'NetworkAddressRetentionRefused', 'saved' => 'NetworkAddressRetentionSaved'],
+    ConsentRetention::class        => ['what' => 'records of privacy-notice and cookie choices', 'refused' => 'ConsentRetentionRefused', 'saved' => 'ConsentRetentionSaved'],
 ];
 if ($_SERVER['REQUEST_METHOD'] === 'POST'
     && isset($retentionForms[$postedAction]) === true
@@ -530,6 +534,17 @@ $alrNeverCost = 'The log then grows without limit. Some records describe a perso
 $narInstDays  = NetworkAddressRetention::installationDays();
 $narOwn       = NetworkAddressRetention::ownDays($mysqli, Site::id());
 $narInstNever = $narInstDays === NetworkAddressRetention::NEVER;
+// 🍪 #934: the same three figures for the period records of privacy-notice and cookie choices are kept.
+$conInstDays  = ConsentRetention::installationDays();
+$conOwn       = ConsentRetention::ownDays($mysqli, Site::id());
+$conInstNever = $conInstDays === ConsentRetention::NEVER;
+$conExplained = 'The portal keeps a record of each choice made about the privacy notice and about cookies. A record that a '
+    . 'newer choice by the same person has replaced is deleted by the nightly clear-out once the newer one is older than the '
+    . 'figure below, if that scheduled job has been set up. A choice made without signing in counts as replaced when its cookie '
+    . 'runs out, ' . ConsentRetention::COOKIE_DAYS . ' days after it was made. A signed-in person&rsquo;s latest choice is never '
+    . 'deleted by this, and an erasure deletes all of a person&rsquo;s records at once. <strong>A member who has left but whose '
+    . 'account has not been erased is not yet cleared by a leaving date</strong>; that follows in a later release. '
+    . '&ldquo;Keep for ever&rdquo; keeps the records, where this installation allows it.';
 // What the network-address period does, in words true of both forms (D-178).
 // The places are NetworkAddressRetention::PLACES; the privacy pages list them.
 $narExplained = 'A network address (IP address) is kept on some records for security, to look into misuse and for '
@@ -548,9 +563,16 @@ $narExplained = 'A network address (IP address) is kept on some records for secu
  * or the network addresses', and the activity log's output is unchanged.
  */
 $alrOrganisationForm = static function (string $which = 'activity') use (
-    $alrOwn, $alrInstNever, $alrSiteName, $activityInstallationDays, $narOwn, $narInstNever, $narInstDays
+    $alrOwn, $alrInstNever, $alrSiteName, $activityInstallationDays, $narOwn, $narInstNever, $narInstDays,
+    $conOwn, $conInstNever, $conInstDays
 ): void {
-    $f = $which === 'address'
+    $f = $which === 'consent'
+        ? [
+            'class' => ConsentRetention::class, 'own' => $conOwn, 'instNever' => $conInstNever, 'instDays' => $conInstDays,
+            'action' => 'consent-retention-organisation', 'id' => 'con', 'held' => 'data-consent-never-held',
+            'acts' => 'deletes replaced records', 'acted' => 'its replaced records are deleted', 'olderThan' => 'Delete replaced records once the newer one is older than',
+        ]
+        : ($which === 'address'
         ? [
             'class' => NetworkAddressRetention::class, 'own' => $narOwn, 'instNever' => $narInstNever, 'instDays' => $narInstDays,
             'action' => 'address-retention-organisation', 'id' => 'nar', 'held' => 'data-network-address-never-held',
@@ -560,7 +582,7 @@ $alrOrganisationForm = static function (string $which = 'activity') use (
             'class' => ActivityLogRetention::class, 'own' => $alrOwn, 'instNever' => $alrInstNever, 'instDays' => $activityInstallationDays,
             'action' => 'activity-retention-organisation', 'id' => 'alr', 'held' => 'data-activity-log-never-held',
             'acts' => 'deletes records', 'acted' => 'its records are deleted', 'olderThan' => 'Delete records older than',
-        ];
+        ]);
     $cls    = $f['class'];
     $own    = $f['own'];
     $never  = htmlspecialchars($cls::neverChoice(), ENT_QUOTES, 'UTF-8');
@@ -703,6 +725,15 @@ if ($isGlobalAdmin === false) {
             <?php $alrOrganisationForm('address'); ?>
         </div>
     </div>
+    <h2 class="h4 mt-4 mb-3"><i class="fa-solid fa-cookie-bite me-2"></i>How long records of privacy-notice and cookie choices are kept</h2>
+    <div class="card shadow-sm border-primary" id="consent-retention" data-consent-retention-card="organisation">
+        <div class="card-body" data-consent-in-force="<?php echo (int) ConsentRetention::daysForSite(Site::id()); ?>">
+            <p class="small text-muted" data-consent-explained="organisation">
+                <?php echo $conExplained; ?>
+            </p>
+            <?php $alrOrganisationForm('consent'); ?>
+        </div>
+    </div>
     <div class="card shadow-sm border-primary mt-3" id="geocode-cache-retention" data-geocode-retention-card="organisation">
         <div class="card-body" data-geocode-cache-in-force="<?php echo (int) $gcrSiteDays; ?>">
             <h2 class="h6"><i class="fa-solid fa-map-location-dot me-1"></i>How long remembered map answers are kept</h2>
@@ -743,8 +774,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction !== 'sweep') {
         //    breakdown having come apart.
         $flashMsg  = 'Sweep complete. Deleted ' . $result['activityDeleted']
                    . ' activity log row(s), ' . $result['errorsDeleted'] . ' error row(s), '
-                   . $result['registrationsDeleted'] . ' event registration(s) and '
+                   . $result['registrationsDeleted'] . ' event registration(s), '
                    . $result['transcriptsDeleted'] . ' transcript(s)'
+                   // 🍪 #934: really deleted, so in the total, so itemised.
+                   . ', ' . $result['consentRecordsDeleted'] . ' record(s) of privacy-notice and cookie choices'
                    // 🗺️ #1037: really deleted, so in the total, so itemised.
                    //    -1 is "could not run", said as such and not as 0.
                    . ($result['geocodeCacheDeleted'] >= 0
@@ -990,6 +1023,52 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-lg-6">
                         <?php $alrOrganisationForm('address'); ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12" id="consent-retention">
+        <div class="card shadow-sm border-primary" data-consent-retention-card="1">
+            <div class="card-body" data-consent-in-force="<?php echo (int) ConsentRetention::daysForSite(Site::id()); ?>">
+                <h2 class="h6"><i class="fa-solid fa-cookie-bite me-1"></i>How long records of privacy-notice and cookie choices are kept
+                    (setting: <code><?php echo htmlspecialchars(ConsentRetention::KEY, ENT_QUOTES, 'UTF-8'); ?></code>)</h2>
+                <p class="small text-muted" data-consent-explained="installation">
+                    <?php echo $conExplained; ?>
+                    The rules are the activity log&rsquo;s: an organisation may choose a shorter figure, never a
+                    longer one, and &ldquo;Keep for ever&rdquo; only where the installation keeps them for ever.
+                </p>
+                <p class="mb-2">Records that would be deleted now, across every organisation: <strong><?php echo number_format($preview['consentRecords']); ?></strong></p>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <h3 class="h6">For every organisation on this installation</h3>
+                        <p class="small text-muted">
+                            This is the most any organisation may choose. A figure shorter than one an organisation
+                            has already chosen for itself is refused and those organisations are named.
+                        </p>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="consent-retention-installation">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="conInstDays"
+                                       <?php echo $conInstNever === false ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="conInstDays">Delete replaced records once the newer one is older than</label>
+                                <input type="number" min="1" max="<?php echo ConsentRetention::HARD_MAX_DAYS; ?>"
+                                       class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                       name="days" aria-label="Number of days, for every organisation"
+                                       value="<?php echo $conInstNever === true ? '' : (int) $conInstDays; ?>">
+                                <span class="small">days (1 to <?php echo ConsentRetention::HARD_MAX_DAYS; ?>)</span>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="choice" value="never" id="conInstNever"
+                                       <?php echo $conInstNever === true ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="conInstNever"><strong>Keep for ever</strong></label>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm">Save for every organisation</button>
+                        </form>
+                    </div>
+                    <div class="col-lg-6">
+                        <?php $alrOrganisationForm('consent'); ?>
                     </div>
                 </div>
             </div>

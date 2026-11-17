@@ -21,6 +21,7 @@
 declare(strict_types=1);
 
 use Portal\Core\ActivityLogRetention;
+use Portal\Core\ConsentRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GeocodeCacheRetention;
@@ -48,6 +49,7 @@ if ($externalURL !== '') {
 //    portal, or "could not be read". Read after the redirect above, so a
 //    site sending members to its own policy never asks.
 $activityLogFacts = ActivityLogRetention::memberFactsForSite($mysqli, Site::id());
+$consentFacts     = ConsentRetention::memberFactsForSite($mysqli, Site::id());
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -130,6 +132,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     well (records you made as a worker or volunteer, and gifts kept for tax);
     what a log record says is also kept as it was written &mdash; see the
     privacy notice for what stays.
+</p>
+
+<?php // 🍪 #934 (D-166, D-210): how long the record of privacy-notice and cookie choices is kept, from the
+      //    reader the nightly clear-out uses. Its own heading, so the pinned "Retention" section above is unchanged. ?>
+<h2 class="h4 mt-4">Your privacy-notice and cookie choices</h2>
+<p data-consent-retention="<?php echo htmlspecialchars($consentFacts['state'], ENT_QUOTES, 'UTF-8'); ?>">
+    <?php echo htmlspecialchars(ConsentRetention::privacyPageWords($consentFacts), ENT_QUOTES, 'UTF-8'); ?>
 </p>
 
 <?php // 🌐 #1019 (D-178): every place a network address is kept, and for how long, from the

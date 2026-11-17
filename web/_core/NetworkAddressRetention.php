@@ -44,7 +44,8 @@
  *     tools/audit-checks/network_address_period_pending.txt, as is the
  *     declaration's address);
  *   - the record of privacy-notice choices (`tblConsentLog`), which follows
- *     the privacy data-retention setting under D-166 once #934 builds it.
+ *     the privacy data-retention setting under D-166 and is DELETED whole when
+ *     replaced (Portal\Core\ConsentRetention, #934), not emptied of its address.
  *
  * THE DATE EACH PLACE IS MEASURED FROM is the moment the address was written:
  * the row's creation for most, the play for a recording play, and the last

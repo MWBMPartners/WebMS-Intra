@@ -313,7 +313,9 @@ def self_test() -> int:
     added_column = '\nALTER TABLE `tblUsers` ADD COLUMN `lastSeenIP` VARCHAR(45) DEFAULT NULL;\n'
     country_column = '\nALTER TABLE `tblUsers` ADD COLUMN `ipCountry` CHAR(2) DEFAULT NULL;\n'
     commented_column = '\n-- ALTER TABLE `tblUsers` ADD COLUMN `oldIP` VARCHAR(45) DEFAULT NULL;\n'
-    consent_words = "choice was made from. No time limit is set yet: a choice made while signed in is kept until "
+    # The Gift Aid declaration is the pending column these cases plant against (the consent record left the list when #934
+    # built its clear-out).
+    gift_words = "No time limit is set yet while you keep your account: the declaration, "
     chat_place = "['table' => 'tblLiveChatMessages', 'column' => 'senderIP',"
     cases = [
         ('the real files', schema, catalogue, pending, places, set()),
@@ -326,12 +328,12 @@ def self_test() -> int:
          schema, catalogue.replace("'visitorIP' => 'Error records keep", "'visitorIPX' => 'Error records keep", 1), pending, places,
          {'MISSING', 'STALE'}),
         ('a sentence cut short (it still says there is no limit, so only SHORT)', schema,
-         re.sub(r"'ipAddress' => 'The record of your choices.*?',\n", "'ipAddress' => 'Kept. " + NO_LIMIT + ".',\n", catalogue, count=1, flags=re.S),
+         re.sub(r"'acceptedIP' => 'Tax declarations keep.*?',\n", "'acceptedIP' => 'Kept. " + NO_LIMIT + ".',\n", catalogue, count=1, flags=re.S),
          pending, places, {'SHORT'}),
         ('a column taken off the pending list while its sentence says there is no limit',
-         schema, catalogue, pending.replace('tblConsentLog.ipAddress', '', 1), places, {'PENDING'}),
+         schema, catalogue, pending.replace('tblGiftAidDeclaration.acceptedIP', '', 1), places, {'PENDING'}),
         ('a pending column whose sentence stops saying there is no limit',
-         schema, catalogue.replace(consent_words, "choice was made from. A time limit applies: a choice made while signed in is kept until ", 1),
+         schema, catalogue.replace(gift_words, "A time limit applies while you keep your account: the declaration, ", 1),
          pending, places, {'PENDING'}),
         ('a pending line that is not table.column', schema, catalogue, pending + '\nnot a column\n', places, {'REFUSED'}),
         # #1019 round 2: the sentences and the clear-out's list, both ways.

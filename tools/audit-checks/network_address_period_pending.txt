@@ -11,7 +11,8 @@
 # owner keeps their addresses for ever (D-187), and their sentences say so rather than "no time limit yet".
 #
 # What is left (round 3) waits on its OWN decision or build, not on the network-address period:
-#   - the record of privacy-notice choices follows the privacy data-retention setting (D-166); #934 builds it;
+#   - (the record of privacy-notice choices left this list when #934 built its clear-out on D-166's setting; it
+#     DELETES whole rows rather than emptying the address, so it is not in NetworkAddressRetention::PLACES.)
 #   - a Gift Aid declaration's address goes with the declaration (D-189), and nothing yet ends a LIVING member's
 #     declaration: only an erasure starts its keep-until clock;
 #   - the two rate-limit tables are tidied only when a later request of the same kind arrives, which is no
@@ -22,7 +23,6 @@
 #
 # FORM: one `table.column` per line, then `#` and what it is waiting for.
 
-tblConsentLog.ipAddress          # #934 builds the clear-out, on D-166's setting (privacy.dataRetentionDays)
 tblGiftAidDeclaration.acceptedIP # D-189: kept with the declaration; no keep-until date for a living member's declaration
 tblApiRateLimits.bucket          # tidied only by a later request of the same kind (RateLimiter); no period of its own
 tblLiveRateLimits.senderFingerprint # tidied only as later chat messages are sent (LiveChat); no period of its own

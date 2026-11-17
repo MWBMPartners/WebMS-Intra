@@ -475,9 +475,11 @@ return [
         'columns'  => ['userID', 'sessionID', 'ipAddress', 'userAgent'],
         'addressKept' => [
             'ipAddress' => 'The record of your choices about the privacy notice and cookies keeps the network address each '
-                . 'choice was made from. No time limit is set yet: a choice made while signed in is kept until '
-                . 'your account is erased, which deletes it, and one made without signing in is kept with no end '
-                . 'date.',
+                . 'choice was made from, and is deleted whole, address included, not just emptied of it. A record that a newer '
+                . 'choice of yours has replaced is deleted by a nightly clear-out once the newer one is older than the privacy '
+                . 'data-retention period set for the organisation (shown on this page), and a choice made without signing in counts '
+                . 'as replaced when its cookie runs out, a year after it was made. Your latest choice while signed in is kept '
+                . 'until your account is erased, which deletes it at once.',
         ],
     ],
     'tblCountEnvelopes' => [
