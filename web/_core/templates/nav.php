@@ -317,6 +317,12 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                                 <i class="fa-solid fa-users me-1"></i> <?php echo htmlspecialchars(t('nav.user_management'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
+                        <?php // Erasure requests (#1136): the page admits any administrator (App::isAdmin()), and this whole menu is already only for them. A request waits there under a one-month deadline, so the way to it must be on the menu. ?>
+                        <li>
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/erasure-requests'), ENT_QUOTES, 'UTF-8'); ?>">
+                                <i class="fa-solid fa-eraser me-1"></i> <?php echo htmlspecialchars(t('nav.erasure_requests'), ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                        </li>
                         <?php // Migrations is for a global administrator only (#499): the page refuses everybody else, so nobody else is shown the way to it. ?>
                         <?php if (App::isUmbrellaAdmin() === true): ?>
                         <li>

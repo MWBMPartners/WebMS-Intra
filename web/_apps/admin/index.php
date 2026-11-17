@@ -63,6 +63,8 @@ declare(strict_types=1);
 
 use Portal\Core\AccountGuard;
 use Portal\Core\App;
+use Portal\Core\AppRegistry;
+use Portal\Core\ErasureNotice;
 use Portal\Core\Auth;
 use Portal\Core\Channel;
 use Portal\Core\Mailer;
@@ -795,6 +797,16 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
     //    Organisation settings admits any administrator, and the e-mail page's
     //    server, certificate and test-message controls are a global
     //    administrator's. Every address goes through Site::url().
+    // Erasure card words: what is waiting, from the one place that counts it.
+    //   A failed read says so; it never reads as "none waiting" (#1012).
+    $erasureWaiting = ErasureNotice::waitingFor(App::db(), Site::id());
+    if ($erasureWaiting['count'] === null) {
+        $erasureBlurb = 'Could not be read.';
+    } elseif ($erasureWaiting['count'] === 0) {
+        $erasureBlurb = 'None waiting.';
+    } else {
+        $erasureBlurb = $erasureWaiting['count'] . ' waiting; the first is due by ' . (string) $erasureWaiting['earliestDue'] . '.';
+    }
     $setupCards = [
         ['show' => $isUmbrella === true, 'colour' => 'secondary', 'icon' => 'fa-arrow-up-from-bracket', 'title' => 'Upgrade',
          'blurb' => 'Finish an upgrade after new files are in place, and see which version is running.',
@@ -805,6 +817,32 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
         ['show' => App::isRootAdmin() === true, 'colour' => 'secondary', 'icon' => 'fa-envelope', 'title' => 'E-mail',
          'blurb' => 'How the portal sends e-mail, the waiting queue and the certificate check.',
          'path' => 'admin/integrations/email', 'link' => 'Open the e-mail page', 'marker' => 'email'],
+        // 🧭 #1136: pages an administrator needs and no menu or card led to. Each `show` is
+        //    that page's OWN gate, read again from the page: erasure requests,
+        //    health and offboarding admit any administrator (offboarding only while its
+        //    app is on, since the router refuses a switched-off app); Backups
+        //    refuses all but a global administrator (App::isRootAdmin() after
+        //    App::isAdmin()); Check this portal admits an administrator or whoever
+        //    holds the PORTAL_CHECK capability, but this home page is itself
+        //    for administrators only, so the card asks the administrator ground
+        //    alone (a capability asked here would also have to be listed in
+        //    Capabilities::askedAt, for a card nobody else can see).
+        ['show' => App::isAdmin() === true, 'colour' => $erasureWaiting['count'] === null || $erasureWaiting['count'] > 0 ? 'warning' : 'secondary',
+         'icon' => 'fa-eraser', 'title' => 'Erasure requests',
+         'blurb' => $erasureBlurb,
+         'path' => 'admin/erasure-requests', 'link' => 'Open the erasure requests', 'marker' => 'erasure-requests'],
+        ['show' => App::isAdmin() === true && App::isRootAdmin() === true, 'colour' => 'secondary', 'icon' => 'fa-floppy-disk', 'title' => 'Backups',
+         'blurb' => 'Take, download and restore a backup of the whole portal.',
+         'path' => 'admin/maintenance/backup', 'link' => 'Open Backups', 'marker' => 'backups'],
+        ['show' => App::isAdmin() === true, 'colour' => 'secondary', 'icon' => 'fa-heart-pulse', 'title' => 'Health',
+         'blurb' => 'Whether the portal\'s scheduled jobs, mail and database are in good order.',
+         'path' => 'admin/maintenance/health', 'link' => 'Open Health', 'marker' => 'health'],
+        ['show' => App::isAdmin() === true, 'colour' => 'secondary', 'icon' => 'fa-clipboard-check', 'title' => 'Check this portal',
+         'blurb' => 'A plain list of what is and is not set up properly.',
+         'path' => 'admin/check', 'link' => 'Open the check', 'marker' => 'check'],
+        ['show' => App::isAdmin() === true && AppRegistry::isEnabled('offboarding') === true, 'colour' => 'secondary', 'icon' => 'fa-door-open', 'title' => 'Offboarding',
+         'blurb' => 'What has been done when somebody left. To offboard a person, press Offboard on their line in Users.',
+         'path' => 'offboarding', 'link' => 'Open Offboarding', 'marker' => 'offboarding'],
     ];
     foreach ($setupCards as $setupCard):
         if ($setupCard['show'] !== true) {

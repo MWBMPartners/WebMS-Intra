@@ -33,6 +33,7 @@ return [
     'nav.error_log'         => 'Error Log',
     'nav.activity_log'      => 'Activity Log',
     'nav.user_management'   => 'User Management',
+    'nav.erasure_requests'  => 'Erasure requests',
     'nav.migrations'        => 'Migrations',
     'nav.public_website'    => 'Public website',
     'nav.settings'          => 'Settings',
