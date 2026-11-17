@@ -24948,3 +24948,15 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - Limits: a row written naming the duplicate after the commit names a closed account; a NEW polymorphic column is
   invisible to the text gate; lock order is not pinned; the clash-row lock is not observable by a test; a sign-in
   callback racing a merge can still link to the closed account and start a session that ends at the next request.
+
+### The noticeboard's Babel (#575)
+
+- The bundle is generated from a design page outside this repository, so the page stubs `window.Babel` instead of the
+  bundle being edited. Lasting fix for whoever regenerates it: add `BABEL_SRI` (sha384 of the exact 7.26.4 file) and
+  `s.integrity = BABEL_SRI` as REACT_SRI does, then delete the JS_EXEMPT entry in `check_cdn_sri.py`.
+- Known blind spots of the new rule (independent check): a constant name with an underscore in it
+  (`REACT_DOM_URL`) or camelCase is not seen; a stub that does nothing (`window.Babel = null`) passes the audit check
+  and is caught only by the browser test; in pull-request checks `check_cdn_sri.py` only advises (`|| true`), the hard
+  stop is the pre-push hook.
+- Trap: reading `<script>` bodies out of a PHP file with a regex breaks on the nonce's `?>`; strip PHP blocks first.
+

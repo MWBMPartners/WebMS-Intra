@@ -317,6 +317,7 @@ csrf-carriers|node tools/csrf-carriers-selftest.mjs
 installer-country-script|node tools/installer-country-script-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
+noticeboard-babel-browser|node tools/noticeboard-babel-browser-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
 offline-page-browser|node tools/offline-page-selftest.mjs
 page-headers-browser|node tools/page-headers-wrap-selftest.mjs

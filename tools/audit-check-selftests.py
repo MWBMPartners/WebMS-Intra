@@ -150,7 +150,10 @@ LOOKS_LIKE_A_SELF_TEST = re.compile(r"^_?(run_)?self_?test$", re.IGNORECASE)
 # ⏱️ Longest any one self-test may take before it counts as not green. The
 #    slowest measured on 11 November 2026 took under four seconds; a hang must
 #    end as a red line, not as a hook that never returns.
-TIMEOUT_SECONDS = 300
+# 900, not 300: check_outside_hosts_named.py --self-test takes 270-310 s on this Mac when nothing else
+# is running and longer when builders share the machine, so 300 made the pre-push hook fail at random (measured
+# 17 Nov 2026, 64 cases). It is slow, not hung. Speeding that self-test up is the lasting fix.
+TIMEOUT_SECONDS = 900
 
 
 def find() -> tuple[list[tuple[str, str]], list[str]]:

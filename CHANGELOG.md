@@ -4,6 +4,17 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The noticeboard can no longer fetch Babel from a public server (#575)
+
+- The noticeboard page defines a stand-in `window.Babel` before the generated bundle, so the bundle can never fetch
+  Babel from unpkg.com with no fingerprint. An `<x-import>` of a `.jsx` file now fails with a plain message; nothing
+  shipped uses one.
+- `check_cdn_sri.py` gained a JavaScript rule: a `*_URL` pointing at a CDN host in a `.js` file needs a `*_SRI` in the
+  same file; one named exemption (the Babel URL), checked both ways. `tools/noticeboard-babel-browser-selftest.mjs`
+  drives a real browser. `tools/audit-check-selftests.py` now allows 900 seconds per self-test (the outside-hosts one
+  needs about 310). Open: regenerate the bundle with `BABEL_SRI` (needs the owner's design tool). Codex has not
+  reviewed this.
+
 ### Merging two accounts that belong to one person (#1064; D-185, D-190, D-191, D-199, D-200, D-201)
 
 - **Merging two accounts that belong to one person (#1064; D-185, D-190, D-191, D-199, D-200, D-201).** An administrator
