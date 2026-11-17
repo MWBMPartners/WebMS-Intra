@@ -14,42 +14,42 @@ package, only realistic harm blocks, narrow findings become issues (D-204). The 
 
 ## Branch
 
-`claude/alpha-wip`. HEAD `e8cb581f` (local; last push `1703db10`, 17 November). Landed since the plan began: #808, #1064
-(merge accounts, migrations 297, 299), #993 (301, 302), #575, #1066, #1095, #1088 (303), #539, #939, #606 (1, 2, 4, 5),
-#1096, #1073, #1067, #1092, #934 (consent records, 305), #1131 (API docs restricted), #1136/#1142 (erasure notice, Offboard
-link, Remove hidden on one-organisation portals), #1137 (a whole restore ends every sign-in), #1141 (noticeboard saves).
-Migration numbers in use: 290, 292, 294-305. **After the pilot is installed, every schema change needs a numbered
-migration again and the migration harness must upgrade from the installed commit (D-135 ends).**
+`claude/alpha-wip`, pushed. HEAD `a0ab6b67`. Everything planned for the pilot has landed (see CHANGELOG and the issue
+tracker: milestone "Pilot install" holds what remains). Migration numbers in use: 290, 292, 294-306. **After the pilot is
+installed, every schema change needs a numbered migration again and the migration harness must upgrade from the installed
+commit (D-135 ends).**
+
+## The pilot zip
+
+`webms-intra-1.4.1-live-a0ab6b67.zip` (14 MB, LIVE channel, never published, no tag; D-222), with its `.sha256`, kept in
+`Build Infrastructure/Releases/LocalReview/WebMS-Intra-pilot/`. Built by `bash tools/package/build.sh a0ab6b67 live <empty
+folder>`; the package self-test passed 340 of 340. Three independent local rehearsals (fresh install, first-use journey,
+every fix re-proved over real HTTP and a real browser) found no data leak, wrongful access, money misstatement or broken
+install in the last one. The whole suite (169 tests) was run once after the last package; six reds were test faults and are
+fixed. **Rebuild the zip if any file under `web/` or `docs/INSTALL.md` changes.**
 
 ## Waiting on the owner
 
-- Run `gh auth refresh -s read:project -s project` so the plan board (#1132) can be made (milestones exist: 19 Pilot
-  install, 20 Release, 21 After release).
+- A spare DreamHost subdomain and an empty database for the real-host rehearsal (secrets never in chat), then the pilot
+  install itself (the owner's action).
+- Run `gh auth refresh -s read:project -s project` so the plan board (#1132) can be made.
 - #1140: may an API key holder open `/api-docs`? Built as No.
-- For the real-host rehearsal: a spare DreamHost subdomain and an empty database (give a short checklist when the
-  local rehearsal passes; secrets never in chat).
 
 ## In flight
 
-- **R1** (#1133, #1139: install guide corrections): built on `pR1-build` (26999fb2); an Opus read-through is running.
-  Land it, then push.
+Nothing.
 
-## Next, in this order
+## Next
 
-1. Land R1; push `claude/alpha-wip`.
-2. Build the LIVE pilot zip from the final commit (D-222): `bash tools/package/build.sh <commit> live <new empty folder>`,
-   no `--tag`, never published; then `tools/package/package-selftest.sh` and `check-package.py`. A pilot zip with a
-   database change takes a new last version number (D-218).
-3. Second local install and upgrade rehearsal (Opus agent) from that zip, following INSTALL.md (live channel, first-use
-   journey, offboard and rehire, erasure notice, restore, noticeboard saves, API docs restricted). Fix defects.
-4. DreamHost rehearsal on the owner's subdomain, then the pilot install (the owner's action). Record the installed
-   commit and add it to the migration harness as an upgrade starting point.
-5. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078, #591, #1082), #754, the full Codex
+1. Real-host rehearsal on DreamHost (not tested so far: PHP-FPM/CGI hosting, MariaDB, https, a hosting panel's scheduler;
+   on such hosts the Authorization header may not reach PHP, so API keys need the host's own setting: say so in the report).
+2. The pilot install. Then record the installed commit and add it to the migration harness as an upgrade starting point.
+3. After the pilot: the backlog (D-055: #777 before 28 March 2027, #1077/#1078, #591, #1082), #754, the full Codex
    review (about 40 allowances for the branch, about 5 for the core), then the merge to main.
 
 ## Raised, not built (selection; the tracker is the record)
 
-#1097, #1105 (money limit not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle), #1108,
+#1150-#1162 (rehearsal findings), #1097, #1105 (money limit not exact under two simultaneous requests), #1106 (regenerate the noticeboard bundle), #1108,
 #1123, #1127-#1130, #1143-#1149 (#1148: beta gate versus scheduled jobs; #1149: noticeboard save timeout and notice).
 
 ## Working pattern
