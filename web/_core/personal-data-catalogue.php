@@ -1887,8 +1887,9 @@ return [
                 . 'THAT, said plainly: the sweep is a scheduled job the customer has to set up, so on '
                 . 'an installation where nothing runs it, nothing expires and this column is simply '
                 . 'kept. The health page says whether the job is running.',
-            'requestURL' => 'The whole address asked for, including everything after the question mark — which can '
-                . 'carry an e-mail address or a name. Not emptied, and kept for the same reason as the '
+            'requestURL' => 'The address asked for, including what follows the question mark — which can '
+                . 'carry a name somebody typed (an e-mail address typed there is replaced by "[address]" '
+                . 'as the row is written, #1096). Not emptied, and kept for the same reason as the '
                 . 'detail beside it: the row is deleted outright by the nightly sweep once '
                 . '`errors.retentionDays` has passed — on an installation where that scheduled job '
                 . 'is set up and running, which is the same condition as the detail beside it (#715).',

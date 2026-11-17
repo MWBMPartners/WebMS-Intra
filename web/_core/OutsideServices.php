@@ -392,15 +392,13 @@ final class OutsideServices
             'when'      => 'When something goes wrong in the portal: while a page is being made, in a scheduled job, '
                          . 'or when an e-mail cannot be sent. The administrator can choose to send only a share of these '
                          . 'reports.',
-            // 🔍 #808 round 9: ErrorMonitor::currentUrl() takes out only a scheduled job's token, so a
-            //    search typed into ?q= (admin/users invites "name, email, or username") reaches the monitor
-            //    WITH any e-mail address in it; the address sentence says so (D-174's residual, recorded in
-            //    the package's notes; the code fix is outside this package, which must not touch Logger's
-            //    error recording). The account-number field is filled by exactly three callers, tokenised
-            //    and pinned by V09 of tools/outside-services-selftest.php: AccountGuard (twice) and
-            //    ImportNotifier (once).
-            'sends'     => 'The whole address of the page, including anything after a question mark, which can include '
-                         . 'what somebody typed into a search box, such as a name or an e-mail address; the '
+            // 🔍 The address goes through Logger::recordableAddress() (#1096), which takes e-mail
+            //    addresses out of the path and the query; a typed NAME can still get through. The
+            //    account-number field is filled by exactly three callers, tokenised and pinned by V09
+            //    of tools/outside-services-selftest.php: AccountGuard (twice) and ImportNotifier (once).
+            'sends'     => 'The address of the page, including anything after a question mark, which can include '
+                         . 'what somebody typed into a search box, such as a name (an e-mail address typed there '
+                         . 'is taken out first); the '
                          . 'description the asking browser or program gives of itself; and the fault\'s own message '
                          . 'with any e-mail addresses taken out. That message can include account numbers (of the '
                          . 'person acting, or of the person acted on), request numbers and other details of what was '

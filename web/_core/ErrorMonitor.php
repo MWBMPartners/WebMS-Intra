@@ -248,7 +248,8 @@ class ErrorMonitor
 
     /**
      * The address this request asked for, as it is SENT TO THE OUTSIDE
-     * service, with a scheduled job's token cut out of it.
+     * service, with a scheduled job's token and any e-mail address typed into
+     * the query cut out of it (Logger::recordableAddress(), #1096).
      *
      * WHAT WAS HERE: the whole address. A scheduled job's address carries
      * the job's token after the "?", so the first error on such a request
@@ -261,7 +262,7 @@ class ErrorMonitor
     {
         $scheme = (($_SERVER['HTTPS'] ?? '') !== '' && (string) ($_SERVER['HTTPS'] ?? '') !== 'off') ? 'https' : 'http';
         $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'unknown');
-        $uri    = Logger::withoutJobToken((string) ($_SERVER['REQUEST_URI'] ?? '/'));
+        $uri    = Logger::recordableAddress((string) ($_SERVER['REQUEST_URI'] ?? '/'));
         return $scheme . '://' . $host . $uri;
     }
 }

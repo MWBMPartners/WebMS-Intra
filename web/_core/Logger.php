@@ -1464,10 +1464,112 @@ class Logger
         return substr($address, 0, $queryStart + 1) . implode('&', $pairs);
     }
 
-    /** The address THIS request asked for, as it may be recorded: see withoutJobToken(). */
+    /**
+     * 🔗 THE ONE WAY A REQUEST'S ADDRESS BECOMES SAFE TO RECORD OR SEND (#1096).
+     *
+     * WHAT WAS WRONG. withoutJobToken() cuts only the secret of a scheduled
+     * job, and withoutAddresses() (D-174) was applied to an error's WORDS
+     * only. So a fault on `/admin/users?q=bob@example.com` stored that
+     * address in `tblErrors.requestURL`, put it in the alert e-mail and sent
+     * it to the outside monitoring service. An error row names no person, so
+     * no erasure could ever find it.
+     *
+     * WHAT IT DOES. First withoutJobToken() (unchanged). Then, for the QUERY
+     * only, each name and each value is read once as a browser would write it
+     * (a "+" or "%40"), run through withoutAddresses(), and, where that
+     * changed it, written back with "[address]" in its place. A part that
+     * held no address is left as the exact bytes it arrived in. The PATH is
+     * treated the same way one "/" part at a time, so
+     * `/unsubscribe/a@b.co/x` becomes `/unsubscribe/[address]/x` and the rest
+     * of the path stays readable. The whole address is NEVER run through
+     * withoutAddresses() in one go: "?" and "=" are among the characters that
+     * pattern allows inside an address, so `/admin/users?q=bob@example.com`
+     * would become `/admin/[address]`, losing the page that failed.
+     *
+     * WHAT IT CANNOT SEE, said plainly (the same limits as withoutAddresses()):
+     *   - an address encoded twice (`%2540`): it is read once, so it comes out
+     *     as `a%40b.co`, which is no longer an address in the form the pattern
+     *     knows;
+     *   - an address broken across two parameters, or with no dot after the @;
+     *   - a name, a telephone number or any other typed value. D-174 is about
+     *     e-mail addresses only.
+     * It does not clean rows written before this change.
+     *
+     * @param string $address A path with its query, as $_SERVER['REQUEST_URI'] holds it.
+     */
+    public static function recordableAddress(string $address): string
+    {
+        $address = self::withoutJobToken($address);
+
+        // A "#" part is never sent by a browser, but a program may send one.
+        // Keep it exactly as it came, so nothing breaks on it.
+        $fragment = '';
+        $hash     = strpos($address, '#');
+        if ($hash !== false) {
+            $fragment = substr($address, $hash);
+            $address  = substr($address, 0, $hash);
+        }
+
+        $query      = '';
+        $queryStart = strpos($address, '?');
+        if ($queryStart !== false) {
+            $query   = substr($address, $queryStart);
+            $address = substr($address, 0, $queryStart);
+        }
+
+        // 🛤️ The path, one "/" part at a time.
+        $segments = explode('/', $address);
+        foreach ($segments as $i => $segment) {
+            $segments[$i] = self::cleanedAddressPart($segment, true);
+        }
+        $path = implode('/', $segments);
+
+        // ❓ The query: names and values, rebuilt by hand from the original
+        // pairs (http_build_query would reorder and re-encode all of them).
+        if ($query !== '') {
+            $pairs = explode('&', substr($query, 1));
+            foreach ($pairs as $i => $pair) {
+                $equals = strpos($pair, '=');
+                if ($equals === false) {
+                    $pairs[$i] = self::cleanedAddressPart($pair, false);
+                    continue;
+                }
+                $pairs[$i] = self::cleanedAddressPart(substr($pair, 0, $equals), false)
+                    . '='
+                    . self::cleanedAddressPart(substr($pair, $equals + 1), false);
+            }
+            $query = '?' . implode('&', $pairs);
+        }
+
+        return $path . $query . $fragment;
+    }
+
+    /**
+     * One piece of an address (a path part, a parameter name or a value): read
+     * ONCE as written on the wire, cleaned by withoutAddresses(), and put back
+     * only if that changed it. Anything else keeps its original bytes.
+     */
+    private static function cleanedAddressPart(string $part, bool $isPath): string
+    {
+        if ($part === '') {
+            return $part;
+        }
+        $decoded = $isPath === true ? rawurldecode($part) : urldecode($part);
+        $cleaned = self::withoutAddresses($decoded);
+        if ($cleaned === $decoded) {
+            return $part;
+        }
+
+        // The marker is written with its square brackets showing, because a
+        // person reading the error list should see "[address]" and not
+        // "%5Baddress%5D". Anything else the cleaning left is encoded.
+        return str_replace(['%5Baddress%5D'], ['[address]'], rawurlencode($cleaned));
+    }
+
+    /** The address THIS request asked for, as it may be recorded: see recordableAddress(). */
     private static function requestAddress(): string
     {
-        return self::withoutJobToken((string) ($_SERVER['REQUEST_URI'] ?? ''));
+        return self::recordableAddress((string) ($_SERVER['REQUEST_URI'] ?? ''));
     }
 
     private static function requestHeaders(): array
@@ -1519,9 +1621,25 @@ class Logger
             $lower = strtolower((string) $name);
             if (in_array($lower, $sensitive, true) === true) {
                 $headers[$name] = '[redacted]';
-            } elseif ($lower === 'referer') {
+            } elseif ($lower === 'referer' || $lower === 'origin') {
                 // strcspn(): how many characters come before the first "?" or "#".
-                $headers[$name] = substr((string) $value, 0, strcspn((string) $value, '?#'));
+                // The query is dropped whole (#580, stricter than cleaning it:
+                // a search the member typed on the PREVIOUS page, #1096, is
+                // in it too). What is left is the scheme, host and path; the
+                // path goes through recordableAddress() so an address written
+                // into it is "[address]" (#1096).
+                $kept  = substr((string) $value, 0, strcspn((string) $value, '?#'));
+                $split = strpos($kept, '://');
+                $slash = $split === false ? false : strpos($kept, '/', $split + 3);
+                if ($slash === false) {
+                    $headers[$name] = self::withoutAddresses($kept);
+                } else {
+                    $headers[$name] = substr($kept, 0, $slash) . self::recordableAddress(substr($kept, $slash));
+                }
+            } else {
+                // Any other header's value can quote an address too (a
+                // "From" or "X-Forwarded-..." line, a custom header): #1096.
+                $headers[$name] = self::withoutAddresses((string) $value);
             }
         }
         return $headers;

@@ -39,6 +39,9 @@
  *   F  The pattern is linear: in a child PHP with the pattern JIT switched off
  *      (pcre.jit=0), 1 MB of "a.a.a…" is cleaned in under half a second (the
  *      first version took about 156 s there).
+ *   H  (#1096) recordableAddress(): an e-mail address typed into a search box or
+ *      written into a path is "[address]" in the stored page address and the
+ *      headers, the page itself stays named. Before G, which silences headers.
  *   G  After `Logger::promiseAnonymity()` (#1044 round 2), an ordinary
  *      errorPlatform() line and an ordinary activity() record both name
  *      nobody, though the session names a member. Last, because the promise
@@ -232,6 +235,94 @@ $parts = explode('|', trim($said));
 ew_check('F with the JIT off, 1 MB of "a.a.a…" and an address is cleaned in under half a second, and the address still goes',
     count($parts) === 3 && $parts[0] === '0' && (float) $parts[1] < 0.5 && $parts[2] === ' [address]', $said);
 
+echo "H  a request's address is cleaned before it is stored or sent (#1096)\n";
+$ra = static fn (string $a): string => Logger::recordableAddress($a);
+$addrCases = [
+    'an address typed into a search'              => ['/admin/users?q=bob@example.com', '/admin/users?q=[address]'],
+    'the same address, percent-encoded'           => ['/admin/users?q=bob%40example.com', '/admin/users?q=[address]'],
+    'a name typed there is left byte-identical'   => ['/admin/users?q=Bob+Smith&page=2', '/admin/users?q=Bob+Smith&page=2'],
+    'a job token and an address, both cut'        => ['/x?token=abc&q=a@b.co', '/x?token=[removed]&q=[address]'],
+    'an address as a parameter NAME'              => ['/x?a%40b.co=1', '/x?[address]=1'],
+    'an address in an array parameter'            => ['/x?q[]=a@b.co', '/x?q[]=[address]'],
+    'an address as a path part'                   => ['/unsubscribe/a@b.co/x', '/unsubscribe/[address]/x'],
+    'no query at all'                             => ['/admin/users', '/admin/users'],
+    'an empty value'                              => ['/x?q=&r=1', '/x?q=&r=1'],
+    'malformed percent text is left as it came'   => ['/x?q=%zz&r=1', '/x?q=%zz&r=1'],
+    'a fragment is kept and does not break it'    => ['/x?q=a@b.co#top', '/x?q=[address]#top'],
+    'empty'                                       => ['', ''],
+];
+foreach ($addrCases as $label => [$in, $want]) {
+    $got = $ra($in);
+    ew_check('H ' . $label, $got === $want, 'got: ' . $got);
+}
+// The stated limit, asserted so a change is seen: an address encoded TWICE is read once.
+ew_check('H the stated limit: a double-encoded address (%2540) is NOT recognised', $ra('/x?q=a%2540b.co') === '/x?q=a%2540b.co');
+
+// Linear time, with the pattern JIT off (as part F).
+$child = PHP_BINARY . ' -d pcre.jit=0 -r ' . escapeshellarg(
+    'require ' . var_export($core . $sep . 'Logger.php', true) . ';'
+    . '$v = str_repeat("a.", 100000); $t = microtime(true); $o = \\Portal\\Core\\Logger::recordableAddress("/x?q=" . $v . "&r=y@z.org");'
+    . 'echo round(microtime(true) - $t, 3), "|", substr($o, -12);'
+);
+$said  = explode('|', trim((string) shell_exec($child)));
+ew_check('H a 200 KB value is cleaned in under half a second with the JIT off, and a later address still goes',
+    count($said) === 2 && (float) $said[0] < 0.5 && $said[1] === '&r=[address]', implode('|', $said));
+
+// The real writer: a fault on a search page, reached from a search page.
+$_SERVER['REQUEST_URI']  = '/admin/users?q=bob@example.com&page=2';
+$_SERVER['HTTP_REFERER'] = 'https://portal.example.invalid/admin/users?q=ann@example.com';
+$_SERVER['HTTP_X_PROBE'] = 'quoting zed@example.com';
+Logger::errorPlatform('PHP', 'Error', '8', 'a fault on a search page', 'detail');
+$row  = $lastError();
+$hold = $row === null ? '' : (string) $row['requestURL'] . ' ' . (string) $row['requestHeaders'];
+ew_check('H the stored row holds no address anywhere in its page address or headers', $row !== null && str_contains($hold, '@') === false && str_contains($hold, 'example.com') === false, $hold);
+ew_check('H the stored page address still names the page and the other parameter', $row !== null && (string) $row['requestURL'] === '/admin/users?q=[address]&page=2', (string) ($row['requestURL'] ?? ''));
+$hdrs = $row === null ? [] : (array) json_decode((string) $row['requestHeaders'], true);
+$ref  = '';
+foreach ($hdrs as $hn => $hv) {
+    if (strtolower((string) $hn) === 'referer') {
+        $ref = (string) $hv;
+    }
+}
+ew_check('H the Referer keeps its host and path', $ref === 'https://portal.example.invalid/admin/users', $ref);
+unset($_SERVER['HTTP_REFERER'], $_SERVER['HTTP_X_PROBE']);
+$_SERVER['REQUEST_URI'] = '/prayer-requests/anonymous-save';
+
+// ErrorMonitor: nothing here can be sent to a service, so pin by PHP's own
+// tokeniser (presence only, D-065) that currentUrl() asks recordableAddress().
+$tok      = token_get_all((string) file_get_contents($core . $sep . 'ErrorMonitor.php'));
+$inFn     = false;
+$seenCall = false;
+$depth    = 0;
+$n        = count($tok);
+for ($i = 0; $i < $n; $i++) {
+    $t = $tok[$i];
+    if ($inFn === false && is_array($t) === true && $t[0] === T_FUNCTION) {
+        for ($j = $i + 1; $j < $n; $j++) {
+            if (is_array($tok[$j]) === true && $tok[$j][0] === T_STRING) {
+                $inFn = $tok[$j][1] === 'currentUrl';
+                break;
+            }
+        }
+        continue;
+    }
+    if ($inFn === true) {
+        if ($t === '{') {
+            $depth++;
+        }
+        if ($t === '}') {
+            $depth--;
+            if ($depth === 0) {
+                break;
+            }
+        }
+        if (is_array($t) === true && $t[0] === T_STRING && $t[1] === 'recordableAddress') {
+            $seenCall = true;
+        }
+    }
+}
+ew_check('H ErrorMonitor::currentUrl() calls Logger::recordableAddress() (the outside service gets the cleaned address)', $seenCall === true);
+
 echo "G  once a request PROMISES anonymity, every error and activity record of it names nobody (#1044)\n";
 // LAST, because the promise cannot be taken back within a request (here: this
 // process). A signed-in member, as on the anonymous form.
@@ -255,7 +346,7 @@ $db->query('DELETE FROM `tblErrors` WHERE `errorID` > ' . $mark);
 
 echo "\n" . str_repeat('=', 78) . "\n";
 printf("%d passed, %d failed\n", $passes, $failures);
-const EW_EXPECTED_CHECKS = 30;
+const EW_EXPECTED_CHECKS = 48;
 if ($passes + $failures !== EW_EXPECTED_CHECKS) {
     printf("FAIL: %d checks were made, %d expected - a check was skipped or added without changing EW_EXPECTED_CHECKS\n", $passes + $failures, EW_EXPECTED_CHECKS);
     exit(1);
