@@ -40,6 +40,18 @@
   other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
   limits not exact under two simultaneous requests). Codex has not reviewed this.
 
+### Linking a Microsoft or Google identity never creates an account or switches the session (#1073; D-208)
+
+- A member who is already signed in and links Microsoft or Google from their Account page (or signs in again from "Add a
+  password") is never given a new account and is never signed in as a different account. An identity that matches nobody
+  (including one whose e-mail differs from the member's portal e-mail) is refused whatever the "new accounts" setting
+  says; one already linked to, or carrying the e-mail address of, a different account is refused with its own words, and
+  that account is left untouched (before, the old code even rewrote that account's name and switched the session to it).
+  Each refusal is recorded as `AccountLinkRefused` with fixed words only. Somebody not signed in, a browser waiting for a
+  two-step code, and a kiosk browser sign in exactly as before (D-185). Open: signing in with another account's passkey in
+  an already signed-in browser still switches to that account (a sign-in, not linking); `Auth::linkAccount()` reports
+  "linked" when the link row belongs to a switched-off account. Codex has not reviewed this.
+
 ### The robot check can load on the forms that use the shared header (#1092 part two)
 
 - reCAPTCHA and hCaptcha were refused by the page rule on the five forms drawn through the shared header (event

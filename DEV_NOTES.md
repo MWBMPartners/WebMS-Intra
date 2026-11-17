@@ -25115,3 +25115,15 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   needs `actions/setup-node` and Chrome (`CHROME_PATH`); workflows have never run on GitHub (#754).
 - Allowing `www.google.com` and `www.gstatic.com` on every page adds no real new way in: `script-src` already allows
   `https://cdn.jsdelivr.net`, which serves anything anyone publishes there.
+
+### Linking never creates or switches (#1073)
+
+- Linking = the Microsoft/Google callback reached by a browser with `$_SESSION['user_id']` set. `Auth::linkingFor()` reads
+  only `user_id` (not `2fa_user_id`, not kiosk), in step 5 of both callbacks, before anything can change the session.
+- Three refusals, each BEFORE any UPDATE, `linkAccount()`, `createUser()` or `beginSessionFor()`: identity linked to another
+  account (`SsoSignInProblem::LINKED_ELSEWHERE`), identity carrying another account's e-mail (`EMAIL_ELSEWHERE`), identity
+  matching nobody (`NO_ACCOUNT`). Why refuse rather than attach to the other account: D-208 rules out switching the session,
+  and D-018/D-190 say nobody adds a sign-in method to somebody else's account.
+- The #900 checks K11-K14, K19 and K24 used to drive "A signed in, B signs in by Microsoft on that browser", which is now
+  refused, so `$k4Journey` starts B on a browser where C is waiting for a code; that is the case `beginSessionFor()` still
+  has to clear (planting `if (false)` on the clearing still turns K19 red). Google's linked-elsewhere refusal is driven by N04b.
