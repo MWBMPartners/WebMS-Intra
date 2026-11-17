@@ -99,6 +99,18 @@ RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$
 RewriteCond %{REQUEST_URI} !^/error\.php$
 RewriteRule .* - [R=404,L]
 
+# 🔑 Hand the Authorization header to PHP (#1153). Under Apache with PHP as a
+# MODULE the header is not passed on, so an API key (`Authorization: Bearer
+# wbms_...`) looked absent: /api/v1/* answered 401 and /openapi.json 404 to a
+# valid key. This copies it into the environment, where PHP finds it as
+# HTTP_AUTHORIZATION (or REDIRECT_HTTP_AUTHORIZATION after the rewrite to the
+# front controller); ApiAuth::authorizationHeader() is the one reader. It sits
+# AFTER the deny rule on purpose (that rule's text is pinned by
+# check_htaccess_php_denied.py) and before the rules that hand the request on.
+# It cannot help a PHP-FPM or CGI host whose web server drops the header
+# before this file is read: that needs that server's own setting (untested).
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 # 🏷️ Asset Tracker app route (#393). The bare `/assets` URL collides with
 #     the physical static `assets/` directory (css/js/images/fonts/vendor)
 #     below — the `!-d` check two rules down would resolve `/assets` to

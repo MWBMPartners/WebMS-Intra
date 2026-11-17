@@ -87,6 +87,48 @@ final class ApiAuth
     /* ====================================================================== */
 
     /**
+     * The request's `Authorization` header, or '' when there is none. THE ONE
+     * PLACE it is read (#1153): an API key, the API description and the mail
+     * queue job all ask here, never `$_SERVER` themselves.
+     *
+     * WHY SO MANY SOURCES. Under Apache with PHP as a MODULE the header never
+     * reaches `$_SERVER` unless the web root's `.htaccess` copies it (the
+     * `E=HTTP_AUTHORIZATION` rule there), and a rewrite makes the copy appear
+     * as `REDIRECT_HTTP_AUTHORIZATION`. Where the rule cannot run, PHP's own
+     * header functions sometimes still hold it. What this CANNOT cover: a
+     * PHP-FPM or CGI host whose web server strips the header before PHP
+     * starts (that needs that server's own setting), which is untested here.
+     * Never log or print the value: it is a secret.
+     *
+     * @return string
+     */
+    public static function authorizationHeader(): string
+    {
+        foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION'] as $name) {
+            $value = $_SERVER[$name] ?? null;
+            if (is_string($value) === true && $value !== '') {
+                return $value;
+            }
+        }
+        foreach (['getallheaders', 'apache_request_headers'] as $fn) {
+            if (function_exists($fn) === false) {
+                continue;
+            }
+            $headers = $fn();
+            if (is_array($headers) === false) {
+                continue;
+            }
+            foreach ($headers as $key => $value) {
+                if (is_string($key) === true && strcasecmp($key, 'Authorization') === 0
+                    && is_string($value) === true && $value !== '') {
+                    return $value;
+                }
+            }
+        }
+        return '';
+    }
+
+    /**
      * True when the request carries an `Authorization: Bearer wbms_…` header.
      * Only OUR token prefix counts — any other bearer scheme is ignored here so
      * the session path handles it (future-proofs OAuth without hijacking it).
@@ -95,11 +137,7 @@ final class ApiAuth
      */
     public static function isBearer(): bool
     {
-        $auth = (string) (
-            $_SERVER['HTTP_AUTHORIZATION']
-            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-            ?? ''
-        );
+        $auth = self::authorizationHeader();
         if (str_starts_with($auth, 'Bearer ') === false) {
             return false;
         }
@@ -128,11 +166,7 @@ final class ApiAuth
         if (self::isBearer() === false) {
             return null;
         }
-        $auth  = (string) (
-            $_SERVER['HTTP_AUTHORIZATION']
-            ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-            ?? ''
-        );
+        $auth  = self::authorizationHeader();
         $token = trim(substr($auth, 7));
         // findByPlaintext returns null for unknown/expired/revoked tokens.
         self::$keyRow = ApiKey::findByPlaintext($token);
