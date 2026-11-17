@@ -1028,7 +1028,7 @@ $csrf = Auth::csrfToken();
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-database me-2"></i>Backup Management</h1>
-        <p class="text-secondary mb-0">Snapshots of every <code>tbl*</code> table, kept in <code>web/_backups/</code>.</p>
+        <p class="text-secondary mb-0">Snapshots of every <code>tbl*</code> table, kept in the private <code>_backups</code> folder, which sits beside the web folder rather than inside it.</p>
     </div>
     <div>
         <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/backup-check'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm me-1">Freshness check</a>

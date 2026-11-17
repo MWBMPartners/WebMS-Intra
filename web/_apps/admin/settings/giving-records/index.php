@@ -175,7 +175,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h2 class="h6 mb-2"><i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>In force for your organisation now</h2>
         <p class="mb-1">
             Gifts that keep the donor's name:
-            <strong><?php echo $e(GivingRetention::SCOPES[(string) $rule['scope']]); ?></strong>.
+            <strong><?php echo $e(ucfirst(GivingRetention::keptGiftWords($rule['issuesReceipts'] === true, (string) $rule['scope']))); ?></strong>.
         </p>
         <p class="mb-1 text-break">
             Kept for <strong><?php echo $e($yearsWords); ?></strong> after
@@ -238,7 +238,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <!-- 🎁 Which gifts. -->
             <fieldset class="mb-4">
                 <legend class="h6">Which gifts keep the donor's name</legend>
-                <?php foreach (GivingRetention::SCOPES as $value => $label): ?>
+                <?php foreach (array_keys(GivingRetention::SCOPES) as $value):
+                    // 🧾 #939: the label is worded for THIS organisation (a tax receipt is named only if it says it issues them).
+                    $label = ucfirst(GivingRetention::keptGiftWords($rule['issuesReceipts'] === true, (string) $value)); ?>
                     <div class="form-check mb-1">
                         <input class="form-check-input" type="radio" name="scope" id="scope_<?php echo $e($value); ?>"
                                value="<?php echo $e($value); ?>" <?php echo (string) $rule['scope'] === $value ? 'checked' : ''; ?>>
@@ -251,6 +253,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     Other gifts keep their amount, date and method, and lose the donor's name straight away.
                 </p>
             </fieldset>
+
+            <!-- 🧾 #939 (D-167): whether this organisation issues tax receipts. It changes only
+                 the WORDS members and administrators read; the portal records no tax receipt and
+                 still keeps a name only on gifts covered by a tax declaration or a giving statement.
+                 The hidden marker says the box was on the page: an unticked box sends nothing,
+                 and "not sent" must never be read as "unticked" (#677). -->
+            <div class="mb-4">
+                <input type="hidden" name="taxReceiptsShown" value="1">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="taxReceipts" name="taxReceipts" value="1"
+                           <?php echo $rule['issuesReceipts'] === true ? 'checked' : ''; ?> aria-describedby="taxReceiptsHelp">
+                    <label class="form-check-label" for="taxReceipts">
+                        <strong>We issue tax receipts.</strong>
+                    </label>
+                    <div class="form-text" id="taxReceiptsHelp">
+                        Tick this only if your organisation gives donors tax receipts. The portal then says,
+                        in the privacy notice and on this page, that the giving statement it makes is that
+                        receipt. It does not see receipts made anywhere else, and ticking this changes
+                        no gift's name-keeping: that is still decided by tax declarations and giving statements alone.
+                    </div>
+                </div>
+            </div>
 
             <!-- ⏳ How long. -->
             <div class="mb-4">

@@ -7595,7 +7595,10 @@ class GdprEraser
         $envelopeCount    = (int) $envelopes['n'];
         $scopeWords       = $scope === GivingRetention::SCOPE_ALL
             ? 'this organisation keeps the donor\'s name on every gift'
-            : 'this organisation keeps the donor\'s name only on gifts that have a tax declaration, receipt or statement';
+            // #939 / D-167: the words come from GivingRetention, the one place that
+            // says what covers a gift, and say "receipt" only for an organisation
+            // that has said it issues them. The keep rule itself is unchanged.
+            : 'this organisation keeps the donor\'s name only on ' . GivingRetention::receiptedGiftWords($rule['issuesReceipts'] === true);
 
         // The dates of the gifts about to lose their donor, for the
         // statement-file step later in this run: a statement the donor made

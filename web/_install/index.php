@@ -2595,7 +2595,7 @@ function installElevatedAdminCheck(\mysqli $conn): string
         return 'There is already a portal installed on this database, so this '
              . 'wizard can only be used to upgrade it or to wipe it and start '
              . 'again. Both are serious, so you have to be signed in first. '
-             . 'Please sign in to the portal as an umbrella administrator, then '
+             . 'Please sign in to the portal as a global administrator, then '
              . 'come back to this page. Nothing has been changed.';
     }
 
@@ -4544,6 +4544,13 @@ header('X-Robots-Tag: noindex, nofollow');
                 <li class="install-check" data-done="timezone" data-zone-written="<?php echo ($finishReport['zoneWritten'] ?? false) === true ? '1' : '0'; ?>">
                     <strong class="install-check-label">Time zone of your organisation</strong>
                     <span class="install-check-value"><?php echo htmlspecialchars($donePlace['zone'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php // #606 item 2: say where the two are changed afterwards. Measured: the name AND the
+                          // time zone of an organisation are edited at Admin, Organisations (a global
+                          // administrator's page), which is not linked from anywhere an installer would look. ?>
+                </li>
+                <li class="install-check" data-done="change-later">
+                    <strong class="install-check-label">Changing the name or time zone later</strong>
+                    <span class="install-check-value">Sign in as a global administrator and open Admin, then Organisations.</span>
                 </li>
                 <li class="install-check" data-done="channel" data-channel-source="<?php echo htmlspecialchars((string) $installChannel['source'], ENT_QUOTES, 'UTF-8'); ?>">
                     <strong class="install-check-label">Which copy of the portal this is</strong>

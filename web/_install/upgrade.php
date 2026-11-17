@@ -1084,7 +1084,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="card-body">
                     <ol class="small">
                         <li class="mb-2"><strong>Back up</strong> your database before upgrading</li>
-                        <li class="mb-2"><strong>Upload</strong> the new portal files to your server (FTP sync)</li>
+                        <li class="mb-2"><strong>Unpack</strong> the new package over the old one on your server, as the installation guide (<code>INSTALL.md</code>) describes under &ldquo;Upgrading to a newer package&rdquo;</li>
                         <li class="mb-2"><strong>Run migrations</strong> using this page</li>
                         <li class="mb-2"><strong>Verify</strong> the portal is working correctly</li>
                         <li><strong>Clear</strong> your browser cache if styles look wrong</li>

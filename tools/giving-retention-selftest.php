@@ -76,7 +76,7 @@ set_exception_handler(static function (Throwable $e): void {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result.
-const EXPECTED_CHECKS = 63;
+const EXPECTED_CHECKS = 65;
 
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'GivingRetention.php';
 
@@ -581,6 +581,19 @@ foreach (array_merge($sentences, G::STRENGTH_WORDS, G::SCOPES) as $what => $sent
     }
 }
 ok('no sentence this class writes says that a figure is what the law requires', $claims === [], implode('; ', $claims));
+// 🧾 #939 / D-167: a tax receipt is named ONLY for an organisation that says it issues them, and the portal
+//    never claims more than its own giving statement. Every wording of "which gifts keep the name" comes from
+//    ONE place; this pins it both ways.
+$offPhrase = G::receiptedGiftWords(false);
+$onPhrase  = G::receiptedGiftWords(true);
+ok('"tax receipt" is in NO wording of which gifts keep the name while the organisation has not said it issues them (the label, the SCOPES list and the phrase)',
+    $offPhrase === 'gifts covered by a tax declaration or a giving statement'
+    && preg_match('/receipt/i', $offPhrase . ' ' . G::keptGiftWords(false, G::SCOPE_RECEIPTED) . ' ' . implode(' ', G::SCOPES)) === 0
+    && G::keptGiftWords(false, G::SCOPE_ALL) === 'every gift' && G::keptGiftWords(true, G::SCOPE_ALL) === 'every gift');
+ok('for an organisation that issues receipts the phrase says the giving statement IS its tax receipt, and promises no receipt made elsewhere',
+    $onPhrase === 'gifts covered by a tax declaration, or by a giving statement (this organisation\'s tax receipt)'
+    && G::keptGiftWords(true, G::SCOPE_RECEIPTED) === 'only ' . $onPhrase
+    && G::KEY_TAX_RECEIPTS === 'giving.retention.taxReceipts' && str_starts_with(G::KEY_TAX_RECEIPTS, 'giving.retention.'));
 ok('dates and year ends are written in words',
     G::dateInWords($date($y, 4, 5)) === '5 April ' . $y && G::dateInWords('not a date') === 'not a date'
     && G::yearEndInWords('04-05') === '5 April' && G::yearEndInWords('12-31') === '31 December' && G::yearEndInWords('') === ''

@@ -36,6 +36,8 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsiteSetup;
+use Portal\Core\Roles;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -49,7 +51,7 @@ if (preg_match('/^[a-f0-9]{64}$/i', $token) === 1) {
     $hash = hash('sha256', $token);
     $db = App::db();
     $stmt = $db->prepare(
-        'SELECT invitationID, siteID, email, intendedRole, welcomeMessage, '
+        'SELECT invitationID, siteID, email, intendedRole, welcomeMessage, createdByID, '
         . '       expiresAt, acceptedAt, revokedAt '
         . 'FROM tblInvitation WHERE tokenHash = ? LIMIT 1'
     );
@@ -135,6 +137,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    prove what is said now, and that the half-made sign-in is taken
             //    back.
             $committed = false;
+            // 🎟️ #539: why the whole acceptance was refused, in plain words,
+            //    and whether it was D-093's rule (recorded AFTER the rollback,
+            //    because the activity log writes on this same connection).
+            $refusedWhy      = '';
+            $refusedHandOut  = false;
             try {
                 $db->begin_transaction();
 
@@ -173,6 +180,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->bind_param('iii', $newUserId, $inviteSiteId, $isSiteAdmin);
                     $stmt->execute();
                     $stmt->close();
+                }
+
+                // 🎟️ #539: "volunteer" and "staff" used to be offered, stored and
+                //    then ignored here, so the invited person arrived with no role
+                //    at all. They are granted now, inside THIS transaction, so a
+                //    role that cannot be granted takes the whole acceptance back
+                //    (no account, no membership, no half-invited person), and
+                //    the invitation stays usable once somebody has put it right.
+                //    Read fresh at acceptance, like "admin" above, so an
+                //    invitation sent before this fix is honoured too.
+                if ($intendedRole === 'volunteer' || $intendedRole === 'staff') {
+                    $inviterId = (int) ($invite['createdByID'] ?? 0);
+                    // D-093, asked of the INVITER (the person handing the role
+                    // out) a second time, on facts read under the lock: a
+                    // global administrator may have pointed "Set up the public
+                    // website" at this role since the invitation was saved.
+                    $whyNot = PublicWebsiteSetup::whyRoleChangeRefusedUnderLock($db, $inviterId, $inviteSiteId, [$intendedRole]);
+                    if ($whyNot !== '') {
+                        $refusedHandOut = true;
+                        $refusedWhy     = 'This invitation cannot be accepted as it stands. Please ask the person who invited you.';
+                        throw new \RuntimeException('Role hand-out refused (D-093)');
+                    }
+                    $roleId = 0;
+                    foreach (Roles::forSite($db, $inviteSiteId) as $roleRow) {
+                        if ($roleRow['roleKey'] === $intendedRole) {
+                            $roleId = $roleRow['roleID'];
+                        }
+                    }
+                    // The answer is checked: anything but 'ok' (a role deleted
+                    // since the invitation was sent comes back as 'not_found')
+                    // refuses the whole acceptance.
+                    $granted = $roleId > 0
+                        ? Roles::grant($db, $newUserId, $roleId, $inviteSiteId, $inviterId > 0 ? $inviterId : null)
+                        : 'not_found';
+                    if ($granted !== 'ok') {
+                        $refusedWhy = 'This invitation cannot be accepted as it stands. Please ask the person who invited you.';
+                        throw new \RuntimeException('The invited role could not be granted: ' . $granted);
+                    }
                 }
 
                 // 🔑 ONE PLACE STORES A PASSWORD (#728).
@@ -251,13 +296,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit();
                 }
                 $db->rollback();
-                // 🔐 Public pre-auth page — never reflect the raw exception
-                // message (table/column names on a duplicate-key, etc.) back
-                // to the client. Log it server-side and show a generic
-                // message instead, mirroring auth/reset-password/save.php.
-                Logger::errorPlatform('Invites', 'Error', 'INVITE_ACCEPT_FAIL', $e->getMessage(), '');
-                $flash = 'That username or email is already in use.';
-                $flashType = 'danger';
+                if ($refusedHandOut === true) {
+                    PublicWebsiteSetup::recordHandOutRefused((int) ($invite['createdByID'] ?? 0) > 0 ? (int) $invite['createdByID'] : null, (int) $invite['siteID'], 'an invitation being accepted');
+                }
+                if ($refusedWhy !== '') {
+                    Logger::errorPlatform('Invites', 'Warning', 'INVITE_ROLE_REFUSED', $e->getMessage(), '');
+                    $flash = $refusedWhy;
+                    $flashType = 'danger';
+                } else {
+                    // 🔐 Public pre-auth page — never reflect the raw exception
+                    // message (table/column names on a duplicate-key, etc.) back
+                    // to the client. Log it server-side and show a generic
+                    // message instead, mirroring auth/reset-password/save.php.
+                    Logger::errorPlatform('Invites', 'Error', 'INVITE_ACCEPT_FAIL', $e->getMessage(), '');
+                    $flash = 'That username or email is already in use.';
+                    $flashType = 'danger';
+                }
             }
         }
     }

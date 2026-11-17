@@ -784,6 +784,53 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
         </div>
     </div>
     <?php endif; ?>
+
+    <?php
+    // 🧭 #606 item 1: three pages an administrator needs and nothing on this
+    //    home page led to — the Upgrade page, the organisation's own settings
+    //    (name, time zone, address) and the e-mail page. Each is shown only to
+    //    whoever the page itself lets in, because a card that leads to a
+    //    refusal is a dead end (the Migrations card's reasoning above):
+    //    Upgrade refuses all but a global administrator (`_install/upgrade.php`),
+    //    Organisation settings admits any administrator, and the e-mail page's
+    //    server, certificate and test-message controls are a global
+    //    administrator's. Every address goes through Site::url().
+    $setupCards = [
+        ['show' => $isUmbrella === true, 'colour' => 'secondary', 'icon' => 'fa-arrow-up-from-bracket', 'title' => 'Upgrade',
+         'blurb' => 'Finish an upgrade after new files are in place, and see which version is running.',
+         'path' => 'admin/upgrade', 'link' => 'Open the Upgrade page', 'marker' => 'upgrade'],
+        ['show' => true, 'colour' => 'secondary', 'icon' => 'fa-building', 'title' => 'Organisation settings',
+         'blurb' => 'Your organisation\'s name, time zone, address and contact details.',
+         'path' => 'admin/settings/organisation', 'link' => 'Open organisation settings', 'marker' => 'organisation'],
+        ['show' => App::isRootAdmin() === true, 'colour' => 'secondary', 'icon' => 'fa-envelope', 'title' => 'E-mail',
+         'blurb' => 'How the portal sends e-mail, the waiting queue and the certificate check.',
+         'path' => 'admin/integrations/email', 'link' => 'Open the e-mail page', 'marker' => 'email'],
+    ];
+    foreach ($setupCards as $setupCard):
+        if ($setupCard['show'] !== true) {
+            continue;
+        } ?>
+    <div class="col-12 col-sm-6 col-xl-3" data-admin-setup-tile="<?php echo htmlspecialchars($setupCard['marker'], ENT_QUOTES, 'UTF-8'); ?>">
+        <div class="card border-<?php echo $setupCard['colour']; ?> h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-<?php echo $setupCard['colour']; ?>"><?php echo htmlspecialchars($setupCard['title'], ENT_QUOTES, 'UTF-8'); ?></h6>
+                        <small class="text-muted"><?php echo htmlspecialchars($setupCard['blurb'], ENT_QUOTES, 'UTF-8'); ?></small>
+                    </div>
+                    <div class="fs-1 text-<?php echo $setupCard['colour']; ?> opacity-25">
+                        <i class="fa-solid <?php echo $setupCard['icon']; ?>" aria-hidden="true"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer bg-transparent border-<?php echo $setupCard['colour']; ?>">
+                <a href="<?php echo htmlspecialchars(Site::url($setupCard['path']), ENT_QUOTES, 'UTF-8'); ?>" class="text-<?php echo $setupCard['colour']; ?> text-decoration-none small">
+                    <?php echo htmlspecialchars($setupCard['link'], ENT_QUOTES, 'UTF-8'); ?> <i class="fa-solid fa-arrow-right ms-1" aria-hidden="true"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
 </div>
 
 <!-- 🖥️ System Information -->
