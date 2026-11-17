@@ -457,6 +457,19 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🍪 #934: the same refusal for how long records of privacy-notice and cookie choices are kept.
+    if (\Portal\Core\ConsentRetention::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is how long records of privacy-notice and cookie choices are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ConsentRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     // 🗺️ #1037 (D-182): and how long remembered map answers are kept. Its page
     //    (Admin, Maintenance, Retention) holds an organisation to the
     //    installation's figure and refuses an installation figure below an
@@ -1089,6 +1102,19 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\NetworkAddressRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🍪 #934: the same refusal for how long records of privacy-notice and cookie choices are kept.
+    if (\Portal\Core\ConsentRetention::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is how long records of privacy-notice and cookie choices are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ConsentRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

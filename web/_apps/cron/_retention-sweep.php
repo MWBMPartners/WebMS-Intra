@@ -94,6 +94,7 @@ use Portal\Core\GeocodeCacheRetention;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\NetworkAddressRetention;
+use Portal\Core\ConsentRetention;
 use Portal\Core\Pdf;
 use Portal\Core\RegistrationRetention;
 use Portal\Core\SettingLimit;
@@ -109,6 +110,9 @@ if (class_exists(ActivityLogRetention::class, false) === false) {
 // 🌐 #1019: the same, for the network-address period.
 if (class_exists(NetworkAddressRetention::class, false) === false) {
     require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'NetworkAddressRetention.php';
+}
+if (class_exists(ConsentRetention::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ConsentRetention.php';
 }
 // 🗺️ #1037: the same, for the address look-up cache's period.
 if (class_exists(GeocodeCacheRetention::class, false) === false) {
@@ -465,6 +469,100 @@ function address_sweep(bool $reallyEmpty): int
         // 🏛️ And rows no organisation owns, by the installation's figure.
         if ($installationDays !== NetworkAddressRetention::NEVER) {
             $run($head . $siteCol . ' IS NULL AND ' . $old, 'i', [$installationDays]);
+        }
+    }
+
+    return $total;
+}
+
+/**
+ * 🍪 Count, or really DELETE, the records of privacy-notice and cookie choices
+ *    that are past their period (#934, D-166, D-210).
+ *
+ * Unlike `address_sweep()` this deletes WHOLE rows, so its figure IS added to
+ * `totalDeleted`. WHICH rows is decided in one place,
+ * `ConsentRetention::replacedFrom()`: a record a later record of the same
+ * person and kind has replaced (the period counted from the later one), or a
+ * visitor's record the cookie has outlived (365 days plus the period). A
+ * signed-in person's latest record is never selected. One organisation at a
+ * time by that organisation's figure; "never" runs no statement. The count an
+ * administrator is shown and the delete are built here from the one condition.
+ *
+ * BATCHED: MySQL cannot delete from a table while a subquery reads it, so the
+ * numbers of up to `ConsentRetention::BATCH` due records are read first, then
+ * deleted by number AND organisation, and the loop repeats until a short batch.
+ * It never runs an unbounded delete, and stops after `MAX_BATCHES` rounds (the
+ * rest waits for tomorrow) so a runaway backlog cannot hold the job for ever.
+ * A row's values are never read into PHP or logged: only its number.
+ *
+ * @return int Records counted, or really deleted.
+ */
+function consent_sweep(bool $reallyDelete): int
+{
+    $db = App::db();
+    $maxBatches = 2000;
+
+    $sites = $db->query('SELECT `siteID` FROM `tblSites`');
+    if ($sites === false) {
+        throw new \RuntimeException('The consent-record clear-out could not read the organisations.');
+    }
+    $siteDays = [];
+    while ($one = $sites->fetch_assoc()) {
+        $siteDays[(int) $one['siteID']] = ConsentRetention::daysForSite((int) $one['siteID']);
+    }
+    $sites->free();
+
+    $from = ConsentRetention::replacedFrom();
+    $total = 0;
+    foreach ($siteDays as $siteId => $days) {
+        if ($days === ConsentRetention::NEVER) {
+            continue; // ♾️ This organisation keeps these records for ever.
+        }
+        $binds = ConsentRetention::binds($siteId, $days);
+        $types = str_repeat('i', count($binds));
+
+        if ($reallyDelete === false) {
+            $stmt = $db->prepare('SELECT COUNT(*) AS `cnt` FROM ' . $from);
+            if ($stmt === false) {
+                throw new \RuntimeException('The consent-record clear-out could not prepare a count.');
+            }
+            $stmt->bind_param($types, ...$binds);
+            $stmt->execute();
+            $total += (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+            $stmt->close();
+            continue;
+        }
+
+        for ($round = 0; $round < $maxBatches; $round++) {
+            $pick = $db->prepare('SELECT `t`.`consentID` FROM ' . $from
+                . ' ORDER BY `t`.`consentID` LIMIT ' . (int) ConsentRetention::BATCH);
+            if ($pick === false) {
+                throw new \RuntimeException('The consent-record clear-out could not prepare a selection.');
+            }
+            $pick->bind_param($types, ...$binds);
+            $pick->execute();
+            $ids = [];
+            $found = $pick->get_result();
+            while ($row = $found->fetch_assoc()) {
+                $ids[] = (int) $row['consentID'];
+            }
+            $pick->close();
+            if ($ids === []) {
+                break;
+            }
+            // 🔒 Delete by number AND organisation: the numbers were chosen for this one.
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $del   = $db->prepare('DELETE FROM `tblConsentLog` WHERE `siteID` = ? AND `consentID` IN (' . $marks . ')');
+            if ($del === false) {
+                throw new \RuntimeException('The consent-record clear-out could not prepare a delete.');
+            }
+            $del->bind_param('i' . str_repeat('i', count($ids)), $siteId, ...$ids);
+            $del->execute();
+            $total += (int) $del->affected_rows;
+            $del->close();
+            if (count($ids) < ConsentRetention::BATCH) {
+                break;
+            }
         }
     }
 
@@ -847,7 +945,7 @@ function preview_retention_counts(): array
     $db = App::db();
     $out = ['activity' => 0, 'errors' => 0, 'registrations' => 0, 'checkinDetail' => 0,
         'givingIdentityDue' => 0, 'givingIdentityOnHold' => 0, 'givingIdentityWaiting' => 0, 'givingIdentityNotDue' => 0,
-        'givingIdentityUnfinished' => 0, 'networkAddresses' => 0, 'geocodeCache' => 0];
+        'givingIdentityUnfinished' => 0, 'networkAddresses' => 0, 'consentRecords' => 0, 'geocodeCache' => 0];
 
     // 🗺️ Remembered map answers (#1037), by the same period and the same
     //    statement as the delete. -1 when the period could not be worked out:
@@ -873,6 +971,10 @@ function preview_retention_counts(): array
     // 🌐 Network addresses past their period (#1019): counted by the same
     //    function, from the same list, as the clear-out that empties them.
     $out['networkAddresses'] = address_sweep(false);
+
+    // 🍪 Records of privacy-notice and cookie choices past their period (#934): counted by the
+    //    same function, from the same condition, as the delete.
+    $out['consentRecords'] = consent_sweep(false);
 
     // 🚪 Anonymous check-in detail, counted one organisation at a time with
     //    that organisation's own setting — the same loop the clear-out itself
@@ -1557,6 +1659,10 @@ function run_retention_sweep(): array
     //    every record stays and only its address is emptied. See address_sweep().
     $networkAddressesCleared = address_sweep(true);
 
+    // 🍪 Records of privacy-notice and cookie choices (#934, D-166, D-210): really deleted,
+    //    so counted in totalDeleted. See consent_sweep().
+    $consentRecordsDeleted = consent_sweep(true);
+
     // 🧾 Giving records that kept an erased donor's name for tax reasons.
     //    Not a delete either: see run_giving_identity_sweep() above.
     $giving = run_giving_identity_sweep();
@@ -1605,6 +1711,8 @@ function run_retention_sweep(): array
         'webhookPayloadsCleared' => $webhookPayloadsCleared,
         // 🌐 Emptied, not deleted (#1019), so NOT added to totalDeleted.
         'networkAddressesCleared' => $networkAddressesCleared,
+        // 🍪 Really deleted (#934), so counted in totalDeleted.
+        'consentRecordsDeleted'   => $consentRecordsDeleted,
         // 🎙️ Transcripts really ARE deleted, so this one IS counted in
         //    totalDeleted — unlike every figure above it, which empties rows
         //    that remain.
@@ -1622,6 +1730,6 @@ function run_retention_sweep(): array
         'partFilesRemoved'     => $partFiles['removed'],
         'partFilesLeft'        => $partFiles['left'],
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
-                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted),
+                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted) + $consentRecordsDeleted,
     ];
 }

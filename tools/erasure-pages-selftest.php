@@ -6603,11 +6603,11 @@ $q1019Observe = static function () use ($jar, $q1019Visitor, $q1019Expected): ar
     return $wrong;
 };
 $q1019Words = $q1019Expected();
-ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, four saying no time limit is set yet (the consent record, #934; a Gift Aid declaration\'s, D-189; the two rate-limit tables), seven saying they follow the period for network addresses (D-188), and the two change histories saying nothing clears them (D-187)',
+ok('Q1 the premise: the catalogue holds a sentence for every place an address is kept (at least the 18 #1019 found), among them the anonymous prayer request\'s and the equipment scan log\'s, three saying no time limit is set yet (a Gift Aid declaration\'s, D-189; the two rate-limit tables; the consent record left them when #934 built its clear-out), seven saying they follow the period for network addresses (D-188), and the two change histories saying nothing clears them (D-187)',
     count($q1019Words) >= 18
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Prayer requests keep the network address'))) === 1
     && count(array_filter($q1019Words, static fn (string $w): bool => str_starts_with($w, 'Equipment label scans keep a scrambled form'))) === 1
-    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 4
+    && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'No time limit is set yet'))) === 3
     && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'the period for network addresses'))) === 7
     && count(array_filter($q1019Words, static fn (string $w): bool => str_contains($w, 'with the address it recorded, is kept for ever: nothing clears it'))) === 2,
     count($q1019Words) . ' sentences');
