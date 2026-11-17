@@ -2093,9 +2093,10 @@ check('N3 ...so the organisation, which follows the installation, now reads Germ
 check('N4 ...and NOT ONE money row anywhere was relabelled: every table\'s currencies are exactly as before (D-139)',
     $moneyLabels() === $labelsBefore, "before: {$labelsBefore}\nafter:  " . $moneyLabels());
 $saidAfter = $followPage;
-check('N5 ...the administrator is told the new currency applies to new records only, and that outside-provider spending is not converted',
+check('N5 ...the administrator is told the new currency applies to new records only, that spending with outside companies is recorded in each company\'s own currency and is not affected, and that a saved monthly limit keeps its number and is read in the new currency (not converted) (#993, D-173)',
     str_contains($saidAfter, 'The installation&#039;s currency is now CHF. Every amount already recorded keeps the currency it was recorded in') === true
-    && str_contains($saidAfter, 'are not converted') === true);
+    && str_contains($saidAfter, 'Spending with outside companies is recorded in each company&#039;s own currency and is not affected') === true
+    && str_contains($saidAfter, 'now read in the new currency, so it is not converted') === true);
 check('N6 ...and the change is in the activity log, old and new', (int) (rows($db, $placeLogsSql)[0]['n'] ?? 0) === $placeLogsBefore + 1);
 $before_n7 = (int) (rows($db, 'SELECT COALESCE(MAX(`projectID`), 0) AS `m` FROM `tblProject`')[0]['m']);
 $http('POST', '/projects/manage-save', ['csrf_token' => $freshToken('/projects/manage'), 'title' => 'Currency selftest installation roof', 'targetAmount' => '10.00', 'status' => 'active', 'isPublic' => '0', 'description' => 'x']);

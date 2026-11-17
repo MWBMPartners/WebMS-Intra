@@ -75,8 +75,8 @@ class Translation
      * reaching a server and somebody pressing "Run migrations".
      *
      * The hard maximum is 1,000.00 a month. Nothing may ever resolve above it,
-     * whichever level asked. They are `ProviderSpend::DEFAULT_CAPS` and
-     * `HARD_MAX_CAPS`, which is what the check reads.
+     * whichever level asked. `ProviderSpend::DEFAULT_CAPS` and `HARD_MAX_CAPS`
+     * read these two, so the limit check and this class cannot disagree.
      */
     public const DEFAULT_CAP_PENCE = 5000;
     public const MAX_CAP_PENCE     = 100000;

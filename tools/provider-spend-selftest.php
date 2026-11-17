@@ -28,6 +28,8 @@
  *   S. The services: AI drafting, translation and texts through the real classes,
  *      so a service that stopped asking `ProviderSpend` goes red here.
  *   T. The words for a page.
+ *   M. Migration 302 run over a database that still holds the old columns and a
+ *      row that must survive, and run a second time.
  *
  * WHAT IT CANNOT PROVE
  *   - Nothing here reaches a paid company, so whether a company's real price is
@@ -734,6 +736,70 @@ check('T5 a refusal word has a sentence for every word the class can answer, and
     ProviderSpend::refusalWords('') === '' && ProviderSpend::refusalWords('no-budget') !== '' && str_contains(ProviderSpend::refusalWords('no-budget'), 'used up') === false
     && ProviderSpend::refusalWords('installation-limit') !== '' && ProviderSpend::refusalWords('organisation-limit') !== ''
     && ProviderSpend::refusalWords('no-rate') !== '' && ProviderSpend::refusalWords('no-currency') !== '' && ProviderSpend::refusalWords('unreadable') !== '');
+
+// =============================================================================
+// M. Migration 302 on a database that really holds the old columns
+// =============================================================================
+head('Section M — migration 302 over data (the old costPence columns, a row that must survive)');
+$migration = (string) file_get_contents($repo . $sep . 'web' . $sep . '_sql' . $sep . '302_provider_spend_in_its_own_currency.sql');
+$runFile = static function (string $sql) use ($db): string {
+    try {
+        $db->multi_query($sql);
+        do {
+            $result = $db->store_result();
+            if ($result instanceof mysqli_result) {
+                $result->free();
+            }
+        } while ($db->more_results() === true && $db->next_result() === true);
+    } catch (Throwable $e) {
+        return $e->getMessage();
+    }
+
+    return '';
+};
+$columnsOf = static fn (string $table): array => array_column(rows($db, 'SELECT `COLUMN_NAME` AS `c` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ? ORDER BY `ORDINAL_POSITION`', 's', [$table]), 'c');
+$fiveTables = ['tblAiUsage', 'tblSmsMessage', 'tblTranscript', 'tblContentTranslation', 'tblTranslationUsage'];
+$gone = static function () use ($columnsOf, $fiveTables): bool {
+    foreach ($fiveTables as $t) {
+        if (in_array('costPence', $columnsOf($t), true) === true) {
+            return false;
+        }
+    }
+    return true;
+};
+check('M1 on the database this branch\'s install script made, running migration 302 changes nothing and says nothing wrong (it is safe to run again, as an installer replay does)',
+    $runFile($migration) === '' && $gone() === true
+    && in_array('costCurrency', $columnsOf('tblAiUsage'), true) === true && in_array('costMillionths', $columnsOf('tblAiUsage'), true) === true);
+
+// Put the OLD shape back on two tables, with a row each carrying an old figure.
+run($db, 'ALTER TABLE `tblAiUsage` DROP COLUMN `costCurrency`, DROP COLUMN `costMillionths`, ADD COLUMN `costPence` INT NOT NULL DEFAULT 0 AFTER `outputTokens`');
+run($db, 'ALTER TABLE `tblTranslationUsage` ADD COLUMN `costPence` INT NOT NULL DEFAULT 0 AFTER `calls`');
+run($db, 'ALTER TABLE `tblTranscript` ADD COLUMN `costPence` INT DEFAULT NULL AFTER `durationSec`');
+run($db, 'INSERT INTO `tblAiUsage` (`siteID`, `userID`, `promptKind`, `provider`, `inputTokens`, `outputTokens`, `costPence`) VALUES (1, ?, ?, ?, 300, 250, 13)', 'iss', [PS_USER, 'announcement', 'anthropic']);
+run($db, 'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, 7, 99)', 'is', [PS_SITE_A, $MONTH]);
+check('M2 premise: the old shape is really back (a costPence column on three of the tables, none of the new ones on tblAiUsage), so M3 is not passing on a table that never had it',
+    in_array('costPence', $columnsOf('tblAiUsage'), true) === true && in_array('costCurrency', $columnsOf('tblAiUsage'), true) === false
+    && in_array('costPence', $columnsOf('tblTranslationUsage'), true) === true);
+$said = $runFile($migration);
+check('M3 migration 302 over the old shape: no error, costPence is gone from all five tables, and the new columns are there',
+    $said === '' && $gone() === true && in_array('costCurrency', $columnsOf('tblAiUsage'), true) === true
+    && in_array('costMillionths', $columnsOf('tblSmsMessage'), true) === true && in_array('costCurrency', $columnsOf('tblContentTranslation'), true) === true, $said);
+$afterAi = $columnsOf('tblAiUsage');
+$pos = array_search('costCurrency', $afterAi, true);
+check('M4 the new columns sit where costPence sat (right after outputTokens, then costMillionths), so a fresh install and an upgraded one have the same shape',
+    $pos !== false && ($afterAi[$pos - 1] ?? '') === 'outputTokens' && ($afterAi[$pos + 1] ?? '') === 'costMillionths', json_encode($afterAi));
+$survivor = rows($db, 'SELECT `inputTokens`, `outputTokens`, `costCurrency`, `costMillionths` FROM `tblAiUsage` WHERE `siteID` = 1 ORDER BY `usageID` DESC LIMIT 1');
+check('M5 the existing usage row survives with its tokens, and records NO cost (the old figure was in no currency and 100 times too large, so it is dropped, not converted)',
+    count($survivor) === 1 && (int) $survivor[0]['inputTokens'] === 300 && (int) $survivor[0]['outputTokens'] === 250
+    && $survivor[0]['costCurrency'] === null && $survivor[0]['costMillionths'] === null, json_encode($survivor));
+check('M6 the month\'s request count survives (7), with the old money column gone',
+    (int) rows($db, 'SELECT `calls` AS `c` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?', 'is', [PS_SITE_A, $MONTH])[0]['c'] === 7
+    && in_array('costPence', $columnsOf('tblTranslationUsage'), true) === false);
+check('M7 and a second run changes nothing (still no error)', $runFile($migration) === '' && $gone() === true);
+$markers = (int) rows($db, 'SELECT COUNT(*) AS `n` FROM `tblMigrations` WHERE `filename` = ?', 's', ['302_provider_spend_in_its_own_currency.sql'])[0]['n'];
+check('M8 the migration records itself, once', $markers === 1);
+run($db, 'DELETE FROM `tblAiUsage` WHERE `siteID` = 1');
+run($db, 'DELETE FROM `tblTranslationUsage` WHERE `siteID` = ?', 'i', [PS_SITE_A]);
 
 // ── Put everything back ─────────────────────────────────────────────────────
 $reset();

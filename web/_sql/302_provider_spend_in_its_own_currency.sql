@@ -51,7 +51,7 @@ SET @c := (
     WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblSmsMessage' AND `COLUMN_NAME` = 'costCurrency'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblSmsMessage` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `providerRef`',
+    'ALTER TABLE `tblSmsMessage` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `providerRef`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -71,7 +71,7 @@ SET @c := (
     WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblTranscript' AND `COLUMN_NAME` = 'costCurrency'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblTranscript` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `durationSec`',
+    'ALTER TABLE `tblTranscript` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `durationSec`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -91,7 +91,7 @@ SET @c := (
     WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblContentTranslation' AND `COLUMN_NAME` = 'costCurrency'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblContentTranslation` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `qualityScore`',
+    'ALTER TABLE `tblContentTranslation` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `qualityScore`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -111,7 +111,7 @@ SET @c := (
     WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblAiUsage' AND `COLUMN_NAME` = 'costCurrency'
 );
 SET @sql := IF(@c = 0,
-    'ALTER TABLE `tblAiUsage` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `outputTokens`',
+    'ALTER TABLE `tblAiUsage` ADD COLUMN `costCurrency` CHAR(3) DEFAULT NULL COMMENT ''The currency this charge was made in: the outside company''''s own currency as three capital letters, for example USD (D-173). Empty together with the amount when no cost was recorded'' AFTER `outputTokens`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

@@ -84,20 +84,42 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 -- own, because `siteID` and `costPence` exist in BOTH tables and a bare name in
 -- the update clause of an INSERT ... SELECT can be ambiguous.
 
-INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`)
-SELECT `b`.`bSite`, `b`.`bMonth`, `b`.`bCalls`, `b`.`bPence`
-  FROM (
-        SELECT `ct`.`siteID`                                 AS `bSite`,
-               DATE_FORMAT(`ct`.`translatedAt`, '%Y-%m-01')  AS `bMonth`,
-               COUNT(*)                                      AS `bCalls`,
-               COALESCE(SUM(`ct`.`costPence`), 0)            AS `bPence`
-          FROM `tblContentTranslation` `ct`
-         WHERE `ct`.`siteID` IS NOT NULL
-         GROUP BY `ct`.`siteID`, DATE_FORMAT(`ct`.`translatedAt`, '%Y-%m-01')
-       ) `b`
-ON DUPLICATE KEY UPDATE
-    `calls`     = GREATEST(`tblTranslationUsage`.`calls`,     VALUES(`calls`)),
-    `costPence` = GREATEST(`tblTranslationUsage`.`costPence`, VALUES(`costPence`));
+-- 🔒 THE BACKFILL RUNS ONLY WHERE `costPence` STILL EXISTS IN BOTH TABLES IT NAMES
+--    (#993, migration 302). Migration 302 drops that column from
+--    `tblContentTranslation` and from `tblTranslationUsage`, and the installer
+--    replays every numbered migration over today's install script, which no
+--    longer has it: without this question the replay failed here with "Unknown
+--    column 'costPence'" (found by the end-to-end harness, phases 2 and 7).
+--    BOTH tables are asked, not one: phase 7 loads today's install script over
+--    an older database, which leaves the OLD `tblContentTranslation` (column
+--    still there) beside a `tblTranslationUsage` the new script has just
+--    created (column gone), and asking only one of them ran the statement into
+--    the other. On a database that has not run 302 yet both columns are there
+--    and the backfill runs exactly as before; otherwise there is no cost figure
+--    left to carry (302 moved the money to `tblProviderSpend`).
+SET @c := (
+    SELECT COUNT(*) FROM `information_schema`.`COLUMNS`
+    WHERE `TABLE_SCHEMA` = DATABASE() AND `COLUMN_NAME` = 'costPence'
+      AND `TABLE_NAME` IN ('tblContentTranslation', 'tblTranslationUsage')
+);
+SET @sql := IF(@c = 2,
+    'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`)
+    SELECT `b`.`bSite`, `b`.`bMonth`, `b`.`bCalls`, `b`.`bPence`
+      FROM (
+            SELECT `ct`.`siteID`                                 AS `bSite`,
+                   DATE_FORMAT(`ct`.`translatedAt`, ''%Y-%m-01'')  AS `bMonth`,
+                   COUNT(*)                                      AS `bCalls`,
+                   COALESCE(SUM(`ct`.`costPence`), 0)            AS `bPence`
+              FROM `tblContentTranslation` `ct`
+             WHERE `ct`.`siteID` IS NOT NULL
+             GROUP BY `ct`.`siteID`, DATE_FORMAT(`ct`.`translatedAt`, ''%Y-%m-01'')
+           ) `b`
+    ON DUPLICATE KEY UPDATE
+        `calls`     = GREATEST(`tblTranslationUsage`.`calls`,     VALUES(`calls`)),
+        `costPence` = GREATEST(`tblTranslationUsage`.`costPence`, VALUES(`costPence`))',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- #############################################################################
 -- 📋 D. Self-record (safe to run a second time)
