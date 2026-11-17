@@ -25102,3 +25102,16 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
 - Other known limits, to raise as issues: hard maxima are bare numbers in the level's own currency; settings keys still say
   `Pence`; DeepL and the text companies may bill in other currencies or by country; no page lets an organisation set its OWN
   spending limit; a removed organisation's typed exchange rates are never cleared.
+
+### The robot check's page-rule hosts (#1092)
+
+- `Captcha::cspSources()` is the ONE place the page-rule hosts of reCAPTCHA / hCaptcha are written; `header.php` appends
+  them to script-src, frame-src, style-src and connect-src on every page with no per-page flag (a per-page flag is the
+  shape that broke the forms). Host-only, no path. reCAPTCHA: script www.google.com and www.gstatic.com; frame
+  www.google.com and recaptcha.google.com; connect www.google.com. hCaptcha: hcaptcha.com and *.hcaptcha.com in all four.
+- The hosts are in `OutsideServices::NAMED['captcha']['hosts']`, the list the host gate reads; no privacy page displays it.
+- `tools/page-rule-selftest.php` section D (HTTP) and section E (runs `tools/page-rule-browser-selftest.mjs` once per
+  provider plus none in a real Chromium-family browser; needs node with a global `WebSocket`). A workflow job that runs it
+  needs `actions/setup-node` and Chrome (`CHROME_PATH`); workflows have never run on GitHub (#754).
+- Allowing `www.google.com` and `www.gstatic.com` on every page adds no real new way in: `script-src` already allows
+  `https://cdn.jsdelivr.net`, which serves anything anyone publishes there.

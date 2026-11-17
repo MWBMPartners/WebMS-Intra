@@ -40,6 +40,17 @@
   other billing currencies, unverified prices, typed rates of a removed organisation, the month-boundary test, and
   limits not exact under two simultaneous requests). Codex has not reviewed this.
 
+### The robot check can load on the forms that use the shared header (#1092 part two)
+
+- reCAPTCHA and hCaptcha were refused by the page rule on the five forms drawn through the shared header (event
+  suggestion, event registration, expense claim, project page, decision card, and the salvation card). The page rule now
+  admits the hosts of the robot check in use, and only that one (`Captcha::cspSources()`), on every page; Turnstile was
+  already allowed. reCAPTCHA needs `connect-src https://www.google.com` too (its v3 background request was measured
+  refused without it). A real-browser test loads each provider's script, frame and style from stand-ins and shows the
+  other providers' hosts are still refused. A real provider's widget working needs their servers and keys and was not
+  tested. Open: `header.php` also overrides the HSTS and Permissions-Policy settings (#1109), a custom live embed is
+  refused (#1110). Codex has not reviewed this.
+
 ### No e-mail address in the error records (#1096; D-174)
 
 - An e-mail address typed into an admin search box (`?q=`), written into a path part or held in a request header is no
