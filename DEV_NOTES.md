@@ -25180,3 +25180,18 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   sets its session zone to +10:00. Merges: the clear-out asks "has this person left?" of the account the person now IS
   (`AccountMerge::survivorOf()`).
 - `run_consent_sweep()` wraps the sweep for the preview and the nightly job: any failure gives -1, "could not be counted".
+
+### Who may open the API documentation (#1131, D-215)
+
+- The rule is `Portal\Core\ApiDescriptionAccess` (`verdict()` takes five facts, `enforce()` reads the request); `/api-docs` and
+  `/openapi.json` both ask it. The page can check a sign-in although the web server runs it directly because it loads
+  start-up itself (since 12 October 2026) and starts the session; the call sits OUTSIDE the `defined('PORTAL_ROOT') === false`
+  block, so the router way in is guarded too.
+- The `tblRoutes` rows stay `isProtected = 0` ON PURPOSE: for `openapi.json` the router would send a key-bearing program to
+  the sign-in page before the file ran.
+- Cache header: `public, max-age=300` would now leak through a shared cache; it is `private, no-store` (also on the 503/500
+  branches). Stated limits: any valid key of any scope (also of a switched-off organisation); no rate limit on the key path;
+  reading stamps the key's `lastUsedAt`; on a pre-release copy the staff gate answers first.
+- Test changes: channel-selftest A08/A09/J17 and `routedFromWebFolder()` fetch as the Root Admin; page-head-selftest has an
+  administrator fixture of its own (user 982301, also used by `page-rule-selftest.php` on a separate database); feed-admin W51
+  reads the description with the administrator jar; public-door P38/P48 measure "not the door's answer" instead of "200".

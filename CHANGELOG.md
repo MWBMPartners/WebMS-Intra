@@ -81,6 +81,19 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### The API documentation page and the API description are for administrators and key holders only (#1131; D-215)
+
+- `/api-docs` (the Swagger UI) and `/openapi.json` (the description of every API address) were public on the live portal.
+  `/openapi.json` is now answered to a signed-in administrator, or to a request carrying a valid `Authorization: Bearer
+  wbms_...` key of any scope; a key that is sent but is unknown, switched off or out of date gets 401 "Invalid or expired
+  API key"; anybody else gets the ordinary 404 page. `/api-docs` is for administrators only: a signed-out visitor is sent to
+  sign in and brought back, a signed-in person who is not an administrator gets the 404 page, and a key is not accepted there
+  (a browser cannot send one): a key holder reads the description from `/openapi.json`. The description is no longer kept by
+  shared caches (`Cache-Control: private, no-store`; it was `public, max-age=300`, which would now have let a proxy hand an
+  administrator's copy to a stranger). The API Keys page says how a key holder reads it. Four existing tests changed what
+  they measure (they fetched as a visitor). Open: whether a key holder who cannot sign in as an administrator may open the
+  browsable page (built as No). Codex has not reviewed this.
+
 ### Linking a Microsoft or Google identity never creates an account or switches the session (#1073; D-208)
 
 - A member who is already signed in and links Microsoft or Google from their Account page (or signs in again from "Add a

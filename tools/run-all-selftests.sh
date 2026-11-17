@@ -248,6 +248,7 @@ event-suggester-privacy|tools/event-suggester-privacy-selftest.php|selftest_even
 page-head|tools/page-head-selftest.php|selftest_pagehead|SELFTEST_WEB_PORT=9674
 care-case-person|tools/care-case-person-selftest.php|selftest_carecase|SELFTEST_WEB_PORT=9162
 page-rule|tools/page-rule-selftest.php|selftest_pagerule|SELFTEST_WEB_PORT=9163
+api-description-access|tools/api-description-access-selftest.php|selftest_apidesc|SELFTEST_WEB_PORT=9131
 event-place-map|tools/event-place-map-selftest.php|selftest_eventplace|
 invite-roles|tools/invite-roles-selftest.php|selftest_inviteroles|SELFTEST_WEB_PORT=9164
 consent-retention|tools/consent-retention-selftest.php|selftest_consent|

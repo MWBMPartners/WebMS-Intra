@@ -1610,6 +1610,17 @@ jobs:
       #    survives it, in both directions (set and cleared); currency keeps its
       #    own refusals. Needs performance_schema, as the currency test does.
       #    Makes its own database.
+      - name: "API description: administrators and key holders only (#1131, D-215)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_apidesc
+          SELFTEST_WEB_PORT: '9131'
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_apidesc"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_apidesc < web/_sql/full_schema.sql > /dev/null
+          php tools/api-description-access-selftest.php
+
       - name: "Assets API: a partial update keeps other changes (#1001)"
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:

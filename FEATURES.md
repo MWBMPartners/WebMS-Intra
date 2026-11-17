@@ -1403,7 +1403,7 @@ place (`Geocoder::answer()`) and must be a real position; the cache is kept per 
 - Health check (`/health`): also answers while the portal is closed for an upgrade, and reports how the channel was
   decided (`channelSource`).
 - API documentation (`/api-docs/`) is reachable (it was a fatal error on every installation); behind the staff gate on a
-  pre-release copy.
+  pre-release copy. For signed-in administrators only, and its description `/openapi.json` for administrators and API key holders (D-215, #1131).
 
 ### 🔐 Secret settings (#597, #497) ✅
 
