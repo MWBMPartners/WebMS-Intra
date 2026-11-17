@@ -64,14 +64,77 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
       return (j && j.data) ? j.data : [];
     },
 
+    // 🔑 #1141 / #768: the form token is replaced by the server on every accepted
+    //    post, so a copy captured at page load works ONCE. The live token is read
+    //    at the moment of posting (Portal.csrf(), which reads every carrier) and
+    //    every answer is handed to Portal.rememberCsrf() so the next post carries
+    //    the replacement. `this.csrf` is only the first-ever fallback, and is kept
+    //    current too because upload() below reads it.
+    liveToken: function () {
+      var live = (window.Portal && typeof window.Portal.csrf === 'function') ? window.Portal.csrf() : '';
+      return (typeof live === 'string' && live !== '') ? live : window.NoticeboardHost.csrf;
+    },
+    keepToken: function (answer) {
+      if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+        window.Portal.rememberCsrf(answer);
+      }
+      var next = answer && answer.meta && typeof answer.meta.csrfToken === 'string' ? answer.meta.csrfToken : '';
+      if (next !== '') { window.NoticeboardHost.csrf = next; }
+    },
+
+    // 📣 The generated board calls save() and throws the answer away, so this host
+    //    is the only place a failed save can be told to the person. A plain notice
+    //    above the board (textContent, no handler, no inline style that needs the
+    //    nonce): it says what is known, which is that the change is shown on
+    //    screen but may not be stored.
+    tellSaveFailed: function (why) {
+      var root = document.getElementById('noticeboard-root');
+      if (!root || !root.parentNode) { return; }
+      var note = document.getElementById('noticeboard-save-failed');
+      if (!note) {
+        note = document.createElement('div');
+        note.id = 'noticeboard-save-failed';
+        note.className = 'alert alert-danger small';
+        note.setAttribute('role', 'alert');
+        root.parentNode.insertBefore(note, root);
+      }
+      note.textContent = 'Your last change could not be saved (' + why + '). It is still showing here, but it may be lost when you leave this page. Reload the page and try again.';
+    },
+    clearSaveFailed: function () {
+      var note = document.getElementById('noticeboard-save-failed');
+      if (note && note.parentNode) { note.parentNode.removeChild(note); }
+    },
+
     // Persist the full poster array (called on add / edit / delete).
-    save: async function (posters) {
-      await fetch('<?php echo Router::urlForScript('api/noticeboard/save'); ?>', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.NoticeboardHost.csrf },
-        body: JSON.stringify({ posters: posters })
+    // ONE save at a time: each call waits for the one before, so the token the
+    // earlier answer handed back is the one the next post carries. Two posts in
+    // flight with the same token could never both be accepted. The array sent is
+    // always the whole desired state, so the last one queued wins, as before.
+    // The returned promise never rejects (the board ignores it anyway); failure is
+    // shown by tellSaveFailed().
+    saveQueue: Promise.resolve(),
+    save: function (posters) {
+      var host = window.NoticeboardHost;
+      host.saveQueue = host.saveQueue.then(async function () {
+        try {
+          const r = await fetch('<?php echo Router::urlForScript('api/noticeboard/save'); ?>', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': host.liveToken() },
+            body: JSON.stringify({ posters: posters })
+          });
+          const j = await r.json().catch(function () { return null; });
+          host.keepToken(j);
+          if (r.ok !== true || !j || j.status !== 'ok') {
+            host.tellSaveFailed((j && j.message) ? j.message : ('error ' + r.status));
+            return;
+          }
+          host.clearSaveFailed();
+        } catch (e) {
+          host.tellSaveFailed('the server could not be reached');
+        }
       });
+      return host.saveQueue;
     },
 
     // 📤 Real media upload (#363) — replaces the data: URI fallback the board
@@ -85,10 +148,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
       const r = await fetch('<?php echo Router::urlForScript('api/noticeboard/upload'); ?>', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'X-CSRF-Token': window.NoticeboardHost.csrf },
+        headers: { 'X-CSRF-Token': window.NoticeboardHost.liveToken() },
         body: fd
       });
       const j = await r.json().catch(function () { return null; });
+      window.NoticeboardHost.keepToken(j);
       if (!r.ok || !j || j.status !== 'ok') {
         throw new Error((j && j.message) ? j.message : ('Upload failed (' + r.status + ')'));
       }
