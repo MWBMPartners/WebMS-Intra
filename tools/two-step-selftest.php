@@ -211,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 193; // five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13); sixteen by #1042 round 4 (M14-M29)
+const EXPECTED_CHECKS = 204; // eleven by #1073 (N00-N10); five added by #598 (part L); nine by #907 (K56-K64); nine by #1042 (part M, M01-M08 and M04b); five by #1042 round 3 (M09-M13); sixteen by #1042 round 4 (M14-M29)
 
 function refuse(string $why): never
 {
@@ -2116,10 +2116,18 @@ $k3Page = req($k3['jar'], 'GET', '/account/add-password', null, ip(104));
 ok('K09 ...and her own waiting message is shown to her',
     $k3Page['status'] === 200 && str_contains($k3Page['body'], (string) $k3['waiting']['flash_msg']) === true, describe($k3Page));
 
-// --- K4. A is signed in; B signs in with Microsoft on that browser.
+// --- K4. A different person signs in with Microsoft on a browser that holds somebody else's entries.
+// #1073 (D-208) CHANGED THIS JOURNEY: it used to be "A is SIGNED IN and B signs in
+// with Microsoft on that browser". A signed-in browser reaching the Microsoft or
+// Google callback is LINKING now, and linking never signs in as a different
+// account (N04/N05 prove the refusal), so that journey can no longer happen.
+// The case that still can, and still needs beginSessionFor() to clear the
+// session, is a browser where C has given her password and is WAITING for her
+// code (not signed in), so B's journey starts there ($as === 'sam' is the same
+// person signing in again, who really is signed in).
 /** Run K4's journey (also used by the plants). */
 $k4Journey = static function (string $provider, string $as, string $ip, string $comeBack): array {
-    [$jar]   = passwordStep('sam', $ip);
+    [$jar]   = passwordStep($as === 'sam' ? 'sam' : 'uma', $ip);
     $waiting = theirs() + ['login_redirect' => $comeBack, 'user_locale' => 'cy'];
     putInSession($jar, $waiting + ['portal_locale' => 'cy']);
     $idBefore = sessionIdOf($jar);
@@ -2128,9 +2136,12 @@ $k4Journey = static function (string $provider, string $as, string $ip, string $
     return ['jar' => $jar, 'sso' => $sso, 'now' => sessionEntries($jar), 'idBefore' => $idBefore, 'waiting' => $waiting];
 };
 $k4 = $k4Journey('ms365', 'tia', ip(105), '/p900-sams-page');
-ok('K10 /login/ms365 is NOT refused for a browser somebody is signed in on (the "Add a password" page relies on that, #731)',
-    $k4['sso']['start']['status'] === 302 && str_starts_with($k4['sso']['start']['location'], 'https://login.microsoftonline.com/') === true && $k4['sso']['state'] !== '',
-    describe($k4['sso']['start']));
+[$k10Jar]  = passwordStep('sam', ip(251));
+$k10Start = req($k10Jar, 'GET', '/login/ms365', null, ip(251));
+ok('K10 /login/ms365 is NOT refused for a browser somebody is signed in on (the "Add a password" page relies on that, #731), nor for one waiting for a code',
+    $k10Start['status'] === 302 && str_starts_with($k10Start['location'], 'https://login.microsoftonline.com/') === true
+    && $k4['sso']['start']['status'] === 302 && str_starts_with($k4['sso']['start']['location'], 'https://login.microsoftonline.com/') === true && $k4['sso']['state'] !== '',
+    describe($k10Start) . '; ' . describe($k4['sso']['start']));
 ok('K11 the Microsoft callback signs B in, and sends B to the front page rather than to the page A was waiting to come back to',
     $k4['sso']['back']['status'] === 302 && $k4['sso']['back']['location'] === '/' && (int) ($k4['now']['user_id'] ?? 0) === PEOPLE['tia'],
     describe($k4['sso']['back']));
@@ -3430,6 +3441,10 @@ $signedOutAlways = [
     'domain'         => 'Your Google account is not from the allowed organisation.',
     'switched_off'   => 'This account has been deactivated. Please contact your administrator.',
     'no_account'     => 'No account on this portal matches this sign-in. Ask an administrator to invite you.',
+    // #1073 (D-208): raised only while somebody is signed in, so there is no
+    // historic signed-out sentence; the class gives the fallback's, word for word.
+    'linked_elsewhere' => 'Your sign-in could not be completed. Please try signing in again.',
+    'email_elsewhere'  => 'Your sign-in could not be completed. Please try signing in again.',
 ];
 $m14Wrong = [];
 foreach ($signedOutAlways as $problem => $words) {
@@ -3439,7 +3454,7 @@ foreach ($signedOutAlways as $problem => $words) {
         }
     }
 }
-ok('M14 the table words exactly twelve problems, and for somebody NOT signed in each is still the sentence the callbacks have always shown (D-185\'s for no account), word for word',
+ok('M14 the table words exactly fourteen problems, and for somebody NOT signed in each is still the sentence the callbacks have always shown (D-185\'s for no account), word for word (the two added by #1073 are raised only while signed in and carry the fallback sentence)',
     $P::problems() === array_keys($signedOutAlways) && $m14Wrong === [],
     'problems ' . implode(',', $P::problems()) . '; different: ' . implode(' | ', $m14Wrong));
 
@@ -3466,7 +3481,7 @@ foreach ($P::problems() as $problem) {
 }
 $offWords = $said($P::SWITCHED_OFF, 'Microsoft', true);
 $noneWords = $said($P::NO_ACCOUNT, 'Microsoft', true);
-ok('M15 every one of the 24 signed-in sentences names the provider, says the sign-in could not be used with the member\'s account (or was not tried), ends "You are still signed in, and nothing on your account has changed." and holds no invitation, no "deactivated", no "This account" and no jargon; and the switched-off one says the address belongs to a DIFFERENT account, which the no-account one does not',
+ok('M15 every one of the 28 signed-in sentences names the provider, says the sign-in could not be used with the member\'s account (or was not tried), ends "You are still signed in, and nothing on your account has changed." and holds no invitation, no "deactivated", no "This account" and no jargon; and the switched-off one says the address belongs to a DIFFERENT account, which the no-account one does not',
     $m15Wrong === [] && str_contains($offWords, 'belongs to a different account on this portal, which is switched off') === true
     && str_contains($noneWords, 'switched off') === false && str_contains($noneWords, 'different account') === false,
     'wrong: ' . implode(', ', $m15Wrong));
@@ -3501,8 +3516,8 @@ $m16Named = array_values(array_unique($m16Named));
 sort($m16Named);
 $m16All = $P::problems();
 sort($m16All);
-ok('M16 Auth.php calls oauthError() 20 times outside its own definition and every call names a problem by SsoSignInProblem\'s constant; between them they name all twelve',
-    $m16Calls === 20 && $m16Bad === [] && $m16Named === $m16All,
+ok('M16 Auth.php calls oauthError() 26 times outside its own definition and every call names a problem by SsoSignInProblem\'s constant; between them they name all fourteen',
+    $m16Calls === 26 && $m16Bad === [] && $m16Named === $m16All,
     $m16Calls . ' call(s); not by constant: ' . implode(', ', $m16Bad) . '; named ' . implode(',', $m16Named));
 
 // The driven half. Xena is signed in by Microsoft in M12's browser; each
@@ -3648,11 +3663,171 @@ q('UPDATE tblUsers SET isActive = 1 WHERE userID = ?', 'i', [PEOPLE['zed']]);
 ok('M28 somebody NOT signed in whose sign-in names a switched-off account is sent to the sign-in page, which still says "' . $signedOutAlways['switched_off'] . '" (both callbacks), and nobody is signed in',
     $m28Fine, implode('; ', $m28Why));
 
+// =============================================================================
+// N00-N10 (#1073, D-208): LINKING NEVER CREATES AN ACCOUNT OR SWITCHES ONE.
+// =============================================================================
+// A member who is already signed in and sends Microsoft or Google through the
+// callback (the Account page's link buttons, "Add a password") is LINKING.
+// D-208: the only account that may be attached to is the one they are signed in
+// to. An identity matching nobody is refused whatever "new accounts" says; one
+// already linked to, or carrying the e-mail address of, a DIFFERENT account is
+// refused too - before anything is updated, linked or signed in. Xena is the
+// signed-in member (M12's browser); Zed (switched on again by M28) is the
+// "different account". N08 proves the ordinary sign-in for somebody NOT signed
+// in is unchanged, and N06/N07 that linking one's own identity still works,
+// because a refusal of everything would pass N01-N05.
+$refusedLinks = static fn (int $userId): array => q("SELECT * FROM tblActivityLogs WHERE activityType = 'AccountLinkRefused' AND userID = ? ORDER BY logID", 'i', [$userId]);
+$refusalsClean = static function (array $rows): bool {
+    foreach ($rows as $row) {
+        $text = (string) $row['activityDescription'];
+        if (str_contains($text, 'selftest.invalid') === true || str_contains($text, 'p1073') === true || preg_match('/#\d/', $text) === 1) {
+            return false;
+        }
+    }
+
+    return true;
+};
+ok('N00 premise: the installation allows new accounts and this organisation has no row of its own, so every refusal below is D-208 and not the setting (M10 already proves the setting\'s own refusal)',
+    $installRow() === '1' && $ownRow() === null && $madeForXena() === [], 'installation ' . var_export($installRow(), true) . ', own ' . var_export($ownRow(), true));
+
+/** One linking attempt by Xena (signed in, $xenaSso), with Zed's account and her refusal count read either side. */
+$linkTry = static function (int $ipLast, string $provider, array $claims) use ($failIn, $xenaSso, $accountState, $changedIn, $refusedLinks): array {
+    $zedBefore = $accountState(PEOPLE['zed']);
+    $refBefore = count($refusedLinks(PEOPLE['xena']));
+    $r = $failIn($xenaSso, $ipLast, $provider, static fn (string $state): array => ['state' => $state, 'code' => STUB . json_encode($claims)]);
+
+    return $r + ['zedChanged' => $changedIn($zedBefore, $accountState(PEOPLE['zed'])), 'refusals' => count($refusedLinks(PEOPLE['xena'])) - $refBefore];
+};
+$nobodyClaims = static fn (string $provider): array => $claimsFor($provider, P1042_NEW_EMAIL);
+
+// N01 / N02: an identity matching nobody, the setting at ALLOW.
+$n01 = $linkTry(240, 'ms365', $nobodyClaims('ms365'));
+[$n01Ok, $n01Why] = $judgeIn($n01, 'no_account', 'Microsoft', 240);
+ok('N01 a SIGNED-IN member linking a Microsoft sign-in that matches nobody, with new accounts ALLOWED: no account is made, she is sent to the Account page, which says "' . $said($P::NO_ACCOUNT, 'Microsoft', true) . '", once, she is still signed in as herself, nothing on her account changed, and one refusal is recorded against her with no address in it',
+    $n01Ok === true && $madeForXena() === [] && $n01['refusals'] === 1 && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true, $n01Why . '; refusals ' . $n01['refusals']);
+$n02 = $linkTry(241, 'google', $nobodyClaims('google'));
+[$n02Ok, $n02Why] = $judgeIn($n02, 'no_account', 'Google', 241);
+ok('N02 the same through the GOOGLE callback, which has its own copy of the check',
+    $n02Ok === true && $madeForXena() === [] && $n02['refusals'] === 1 && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true, $n02Why . '; refusals ' . $n02['refusals']);
+
+// N03: from "Add a password": a refusal brings her back THERE (M12's browser).
+putInSession($xenaSso, ['reauth_proof' => null]);
+req($xenaSso, 'GET', '/account/add-password', null, ip(242));
+$n03Back  = sessionEntries($xenaSso)['login_redirect'] ?? null;
+$n03      = $linkTry(242, 'ms365', $nobodyClaims('ms365'));
+$n03Page  = $n03['back']['location'] === '/account/add-password' ? req($xenaSso, 'GET', '/account/add-password', null, ip(242)) : ['status' => 0, 'body' => ''];
+$n03Words = $said($P::NO_ACCOUNT, 'Microsoft', true);
+ok('N03 sent from "Add a password", a sign-in that matches nobody makes no account and brings her back to "Add a password", which says "' . $n03Words . '"; she is still herself and nothing on her account changed',
+    $n03Back === '/account/add-password' && $n03['back']['status'] === 302 && $n03['back']['location'] === '/account/add-password' && $n03Page['status'] === 200
+    && $shows($n03Page['body'], $n03Words) === true && $madeForXena() === [] && $n03['who'] === PEOPLE['xena'] && $n03['changed'] === [] && $n03['refusals'] === 1,
+    'come-back ' . var_export($n03Back, true) . '; callback ' . describe($n03['back']) . '; changed ' . implode(',', $n03['changed']));
+putInSession($xenaSso, ['login_redirect' => null]);
+
+// N04: an identity ALREADY LINKED to another member (Zed). The old code wrote the
+// provider's name over HIS row and then signed this browser in as him.
+q("INSERT INTO tblLinkedAccounts (userID, provider, providerSub, providerEmail) VALUES (?, 'ms365', 'p1073-ms-linked-to-zed', ?)", 'is', [PEOPLE['zed'], emailOf('zed')]);
+$n04 = $linkTry(243, 'ms365', ['sub' => 'p1073-ms-linked-to-zed', 'preferred_username' => P1042_NEW_EMAIL, 'name' => 'p1073 renamed by provider']);
+[$n04Ok, $n04Why] = $judgeIn($n04, 'linked_elsewhere', 'Microsoft', 243);
+$n04Zed = one('SELECT fullName FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zed']]);
+ok('N04 an identity already linked to a DIFFERENT member is refused with its own words, she stays herself, and neither her account nor that member\'s changed (his name is not overwritten and she is not signed in as him)',
+    $n04Ok === true && $n04['zedChanged'] === [] && ($n04Zed['fullName'] ?? '') !== 'p1073 renamed by provider' && $n04['refusals'] === 1
+    && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true && $madeForXena() === [],
+    $n04Why . '; his account changed in: ' . implode(',', $n04['zedChanged']));
+q("DELETE FROM tblLinkedAccounts WHERE providerSub = 'p1073-ms-linked-to-zed'");
+
+// N05: an identity carrying ANOTHER member's e-mail address, linked to nobody.
+// Both callbacks. The old code updated his row (name, avatar, switched ON) and linked it.
+$n05Fine = true;
+$n05Why  = [];
+foreach (['ms365' => ['Microsoft', 244], 'google' => ['Google', 245]] as $provider => [$words, $ipLast]) {
+    $claims = $provider === 'ms365'
+        ? ['sub' => 'p1073-ms-zed-email', 'preferred_username' => emailOf('zed'), 'name' => 'p1073 renamed by provider']
+        : ['sub' => 'p1073-g-zed-email', 'email' => emailOf('zed'), 'name' => 'p1073 renamed by provider'];
+    $r = $linkTry($ipLast, $provider, $claims);
+    [$ok, $detail] = $judgeIn($r, 'email_elsewhere', $words, $ipLast);
+    $n05Fine  = $n05Fine && $ok && $r['zedChanged'] === [] && $r['refusals'] === 1;
+    $n05Why[] = $detail . '; his account changed in: ' . implode(',', $r['zedChanged']);
+}
+ok('N05 an identity not linked to anybody but carrying ANOTHER member\'s e-mail address is refused with its own words through both callbacks: nothing is linked to either account, his account is not updated, and she is not signed in as him',
+    $n05Fine === true && (int) one('SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ?', 'i', [PEOPLE['zed']])['n'] === 0
+    && $refusalsClean($refusedLinks(PEOPLE['xena'])) === true, implode('; ', $n05Why));
+
+// N06 / N07: the positive halves. Her OWN address through Google links it to HER
+// and she stays herself; then the same identity again signs straight through.
+$n06Before         = (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ? AND provider = 'google'", 'i', [PEOPLE['xena']])['n'];
+$refBeforePositive = count($refusedLinks(PEOPLE['xena']));
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+try {
+    $n06 = ssoIn($xenaSso, 'google', 'xena', ip(246));
+    $n07 = ssoIn($xenaSso, 'google', 'xena', ip(247));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+$n06After = one("SELECT COUNT(*) AS n, MAX(userID) AS u FROM tblLinkedAccounts WHERE provider = 'google' AND providerSub = 'p900-g-xena'");
+ok('N06 positive: a signed-in member linking a Google sign-in that carries HER OWN e-mail address gets it linked to her account (one new link), stays signed in as herself, and nothing is refused',
+    $n06Before === 0 && $n06['back']['status'] === 302 && (int) $n06After['n'] === 1 && (int) $n06After['u'] === PEOPLE['xena']
+    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && count($refusedLinks(PEOPLE['xena'])) === $refBeforePositive,
+    describe($n06['back']) . '; links ' . $n06After['n'] . ' for user ' . $n06After['u']);
+ok('N07 positive: the same identity again, now linked to her, signs straight through as herself with no second link and nothing refused',
+    $n07['back']['status'] === 302 && (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE provider = 'google' AND providerSub = 'p900-g-xena'")['n'] === 1
+    && (int) (sessionEntries($xenaSso)['user_id'] ?? 0) === PEOPLE['xena'] && count($refusedLinks(PEOPLE['xena'])) === $refBeforePositive,
+    describe($n07['back']));
+
+// N08: over-reach guard. Somebody NOT signed in still signs in the ordinary way
+// (D-185): another member's address signs them in as that member and links it;
+// an unknown address with the setting at its default still makes an account.
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+try {
+    $n08Jar = newJar();
+    $n08a   = ssoIn($n08Jar, 'ms365', 'zed', ip(248));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+$n08Out  = $xenaSignIn(249);
+$n08Who  = (int) (sessionEntries($n08Jar)['user_id'] ?? 0);
+$n08Made = $madeForXena();
+ok('N08 somebody NOT signed in is unaffected: a sign-in carrying another member\'s address signs them in as that member and links it, and an unknown address with new accounts allowed still makes an account and signs in as it',
+    $n08a['back']['status'] === 302 && $n08Who === PEOPLE['zed']
+    && (int) one("SELECT COUNT(*) AS n FROM tblLinkedAccounts WHERE userID = ? AND provider = 'ms365' AND providerSub = 'p900-ms-zed'", 'i', [PEOPLE['zed']])['n'] === 1
+    && count($n08Made) === 1 && $n08Out['in'] === true,
+    describe($n08a['back']) . '; session person ' . $n08Who . '; accounts made ' . count($n08Made));
+$dropMadeForXena();
+
+// N09 PLANT: the "never make one while linking" block taken out of BOTH
+// callbacks. A signed-in member's sign-in then makes the account and the
+// session is switched into it - so N01 is shown able to fail.
+$plantAuth([
+    "                if (\$linkingFor !== 0) {\n                    self::recordLinkingRefused('Microsoft', \$linkingFor, 'matched no account');" => "                if (false) {\n                    self::recordLinkingRefused('Microsoft', \$linkingFor, 'matched no account');",
+    "                if (\$linkingFor !== 0) {\n                    self::recordLinkingRefused('Google', \$linkingFor, 'matched no account');" => "                if (false) {\n                    self::recordLinkingRefused('Google', \$linkingFor, 'matched no account');",
+]);
+$n09Jar = newJar();
+try {
+    ssoIn($n09Jar, 'ms365', 'xena', ip(250));           // signed in as Xena (her Microsoft link is already there)
+    $n09Start = req($n09Jar, 'GET', '/login/ms365', null, ip(250));
+    $n09State = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $n09Start['location'], $m) === 1 ? $m[1] : '';
+    $n09Back  = req($n09Jar, 'GET', '/login/ms365/callback?' . http_build_query(['state' => $n09State, 'code' => STUB . json_encode($nobodyClaims('ms365'))]), null, ip(250));
+} finally {
+    file_put_contents($scratchAuth, $authAsCopied);
+    clearstatcache(true, $scratchAuth);
+}
+$n09Who  = (int) (sessionEntries($n09Jar)['user_id'] ?? 0);
+$n09Made = $madeForXena();
+$dropMadeForXena();
+ok('N09 PLANT, the never-make-one-while-linking block removed: a signed-in member\'s sign-in makes an account and the session is switched into it, so N01 can fail',
+    count($n09Made) === 1 && $n09Who === (int) ($n09Made[0]['userID'] ?? -1) && $n09Who !== PEOPLE['xena'],
+    'accounts made ' . count($n09Made) . '; session person ' . $n09Who . '; ' . describe($n09Back));
+ok('N10 the scratch Auth.php is back as it was copied and the made account is gone',
+    (string) file_get_contents($scratchAuth) === $authAsCopied && $madeForXena() === [], 'made: ' . count($madeForXena()));
+
 // M29: every problem in the table was driven for a signed-in member somewhere
 // above, so a problem added to the table without a driven check fails here.
 $m29Driven = array_values(array_unique($drivenIn));
 sort($m29Driven);
-ok('M29 every one of the twelve problems was driven for a SIGNED-IN member through a real callback and read back from the page',
+ok('M29 every one of the fourteen problems was driven for a SIGNED-IN member through a real callback and read back from the page',
     $m29Driven === $m16All, 'driven: ' . implode(',', $m29Driven));
 
 

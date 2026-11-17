@@ -45,6 +45,18 @@
  * "switched off" sentence says what the signed-out sentence says, plus that
  * the account is not the member's own, which they know.
  *
+ * LINKING NEVER CREATES OR SWITCHES (D-208, #1073). A signed-in member who
+ * links Microsoft or Google is only ever attached to the account they are
+ * signed in to. An identity that matches nobody is refused (`NO_ACCOUNT`)
+ * whatever `auth.sso.createAccounts` says; one already linked to, or carrying
+ * the e-mail address of, a DIFFERENT account is refused (`LINKED_ELSEWHERE`,
+ * `EMAIL_ELSEWHERE`). The two new sentences say "a different account" and
+ * reveal nothing a person could not learn by signing out: they control that
+ * identity, and signed OUT the same identity would sign them in to that other
+ * account (by link, or by e-mail, which is the ordinary auto-link). "An
+ * administrator can start merging them" is true: an administrator with
+ * `accounts.merge` starts a merge and the person confirms (D-190, D-191).
+ *
  * WHAT THIS CANNOT DO: it does not decide anything. Whether a sign-in fails,
  * and why, is decided in the callbacks; this only words the answer.
  *
@@ -87,6 +99,10 @@ final class SsoSignInProblem
     public const SWITCHED_OFF = 'switched_off';
     /** Nothing matched, and new accounts by Microsoft or Google sign-in are refused here (D-185). */
     public const NO_ACCOUNT = 'no_account';
+    /** While linking: the identity is already linked to a DIFFERENT account (D-208, #1073). */
+    public const LINKED_ELSEWHERE = 'linked_elsewhere';
+    /** While linking: the identity is not linked, and its e-mail address is a DIFFERENT account's (D-208, #1073). */
+    public const EMAIL_ELSEWHERE = 'email_elsewhere';
 
     /** Said after every signed-in sentence, because it is true of every problem here (see the class docblock). */
     private const SIGNED_IN_TAIL = ' You are still signed in, and nothing on your account has changed.';
@@ -144,7 +160,21 @@ final class SsoSignInProblem
         ],
         self::NO_ACCOUNT => [
             SsoNewAccounts::REFUSAL_WORDS,
+            // D-208 (#1073): a member who is linking reads this whatever the
+            // "new accounts" setting says, because linking never makes an account.
             'That {provider} account could not be used with your account, because it is not linked to your account and its e-mail address is not the one on your account here, so the portal cannot tell that it is yours.',
+        ],
+        // The two below are raised ONLY while somebody is signed in (linking),
+        // so their signed-out column is never read in practice; it is the
+        // fallback's signed-out sentence word for word, so that if it ever were
+        // read it would say what a signed-out person has always been told.
+        self::LINKED_ELSEWHERE => [
+            'Your sign-in could not be completed. Please try signing in again.',
+            'That {provider} account could not be used with your account, because it is already linked to a different account on this portal. Linking never moves a sign-in from one account to another or signs you in as the other account. If both accounts are yours, an administrator can start merging them.',
+        ],
+        self::EMAIL_ELSEWHERE => [
+            'Your sign-in could not be completed. Please try signing in again.',
+            'That {provider} account could not be used with your account, because it is not linked to your account and its e-mail address belongs to a different account on this portal. Linking never adds a sign-in to another account or signs you in as it. If both accounts are yours, an administrator can start merging them.',
         ],
     ];
 

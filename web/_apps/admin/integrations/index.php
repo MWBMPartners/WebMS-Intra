@@ -451,9 +451,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <p class="text-secondary small mb-3">
             When somebody signs in with Microsoft or Google and no account here is linked to them or has their
             e-mail address, the portal can make them a new account, or refuse. When it refuses, somebody signing in
-            is told to ask an administrator for an invitation, and a member who is already signed in (linking
-            Microsoft or Google from their Account page) is told that sign-in could not be used with their account,
-            and nothing on it changes. A member whose e-mail address changed after a backup was restored looks exactly like
+            is told to ask an administrator for an invitation. This setting is only for somebody signing in: a
+            member who is already signed in and links Microsoft or Google from their Account page is never given
+            a new account, whatever is chosen here. They are told that sign-in could not be used with their
+            account, and nothing on it changes. A member whose e-mail address changed after a backup was restored looks exactly like
             a newcomer, so making an account can give them a second, empty one. Refusing turns real newcomers away
             too. If either the installation or this organisation refuses, it is refused.
         </p>
