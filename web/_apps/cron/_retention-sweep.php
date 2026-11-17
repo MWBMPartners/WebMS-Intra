@@ -1098,7 +1098,7 @@ function preview_retention_counts(): array
 
     // 🍪 Records of privacy-notice and cookie choices past their period (#934): counted by the
     //    same function, from the same condition, as the delete.
-    $out['consentRecords'] = consent_sweep(false);
+    $out['consentRecords'] = run_consent_sweep(false);
 
     // 🚪 Anonymous check-in detail, counted one organisation at a time with
     //    that organisation's own setting — the same loop the clear-out itself
@@ -1654,6 +1654,24 @@ function run_part_file_sweep(): array
  * A fault here never stops the rest of the nightly job, and "could not work
  * the period out" deletes NOTHING rather than guessing one (answers -1 then).
  */
+/**
+ * 🍪 `consent_sweep()` that can never stop the rest of the sweep (#934). A count or a clear-out
+ * that cannot be done answers -1, which the page words as "could not be counted" / "could not
+ * run" and the totals treat as 0, and every later step still runs. Only the exception's CLASS is
+ * logged, never its message (it can carry a row's values).
+ */
+function run_consent_sweep(bool $reallyDelete): int
+{
+    try {
+        return consent_sweep($reallyDelete);
+    } catch (\Throwable $e) {
+        error_log('[WebMS-Intra] retention sweep: the consent records could not be '
+            . ($reallyDelete === true ? 'cleared' : 'counted') . ' (' . get_class($e) . ').');
+
+        return -1;
+    }
+}
+
 function run_geocode_cache_sweep(bool $reallyDelete): int
 {
     try {
@@ -1785,7 +1803,7 @@ function run_retention_sweep(): array
 
     // 🍪 Records of privacy-notice and cookie choices (#934, D-166, D-210): really deleted,
     //    so counted in totalDeleted. See consent_sweep().
-    $consentRecordsDeleted = consent_sweep(true);
+    $consentRecordsDeleted = run_consent_sweep(true);
 
     // 🧾 Giving records that kept an erased donor's name for tax reasons.
     //    Not a delete either: see run_giving_identity_sweep() above.
@@ -1854,6 +1872,6 @@ function run_retention_sweep(): array
         'partFilesRemoved'     => $partFiles['removed'],
         'partFilesLeft'        => $partFiles['left'],
         'totalDeleted'         => $activityDeleted + $errorsDeleted + $registrationsDeleted
-                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted) + $consentRecordsDeleted,
+                                + $transcriptsDeleted + max(0, $geocodeCacheDeleted) + max(0, $consentRecordsDeleted),
     ];
 }

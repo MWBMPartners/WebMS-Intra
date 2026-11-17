@@ -228,8 +228,9 @@ final class ConsentRetention extends RetentionPeriod
             . 'A record made at another organisation on this portal follows that organisation\'s period.';
 
         // 🚪 Said only where a period applies: with "keep for ever" nothing is deleted at all.
-        $left = ' If your membership of this organisation is ended, your records here, the latest included, are deleted once '
-            . 'the period above has passed since it ended. Your account being switched off for a while does not end your membership.';
+        $left = ' If your membership of this organisation is ended, your records here, the latest included, may be deleted once '
+            . 'the period above has passed since it ended, unless you have been brought back by then. Your account being switched off '
+            . 'for a while does not end your membership.';
 
         $core = match ($facts['state']) {
             self::MEMBER_DAYS => 'A record that a newer choice has replaced is deleted by a nightly clear-out once the newer one is '

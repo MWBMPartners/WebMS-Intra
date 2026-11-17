@@ -27,9 +27,8 @@
  * WHAT IT CANNOT SHOW: the nightly job page calling the step (one line,
  * `run_retention_sweep()`), nor the Retention page's forms (see
  * tools/activity-log-retention-selftest.php section N), nor the privacy
- * page's words (tools/erasure-pages-selftest.php), nor a member who has LEFT
- * without being erased: no leaving date exists yet (D-211, a later package),
- * so such records are kept and the privacy page says so.
+ * page's words (tools/erasure-pages-selftest.php). A member who has LEFT
+ * (D-211, package 2h) is driven by sections L01-L16 below.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_HOST=… SELFTEST_DB_PORT=… \
  *         SELFTEST_DB_USER=… SELFTEST_DB_PASS=… php tools/consent-retention-selftest.php
@@ -46,7 +45,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const CR_EXPECTED_CHECKS = 37;
+const CR_EXPECTED_CHECKS = 44;
 
 $crDbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($crDbName, 'selftest_') === false) {
@@ -368,6 +367,118 @@ function cr_left_scenario(mysqli $db, string $name): array
         . '; survivors unchanged: ' . var_export($same, true) . '; second run deleted ' . $second];
 }
 
+/**
+ * 🚪 Package 2h round 2 (#934, D-211, D-213): a person who RETURNS, then is PAUSED.
+ *    One organisation: offboarding left their membership off with a date; they come back
+ *    through the Active tick on Admin, Users (which runs Memberships::SWITCH_ON_ONE_IF_SINGLE_SQL
+ *    in the same transaction as the account write); a later untick pauses them; the real clear-out
+ *    must then delete NOTHING of theirs. Control: the same person where the statement is NOT run
+ *    loses their records (proves the harm is real and the world can show it). Several
+ *    organisations: the statement does nothing and the person who left stays left.
+ *
+ * @return array{ok: bool, detail: string}
+ */
+function cr_return_scenario(mysqli $db, string $name): array
+{
+    cr_world($db);
+    $db->query('DELETE FROM `tblConsentLog`');
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    $single = $name === 'return-single';
+    cr_mode($db, $single === true ? 'false' : 'true');
+    // [userID, runs the statement]
+    $people = $single === true ? [[61, true], [62, false]] : [[64, true]];
+    foreach ($people as [$id, $_]) {
+        $ins = $db->prepare('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`) VALUES (?, ?, ?, 0)');
+        $nm = 'Person ' . $id;
+        $mail = 'person-' . $id . '@example.invalid';
+        $ins->bind_param('iss', $id, $nm, $mail);
+        $ins->execute();
+        $ins->close();
+        // As offboarding leaves them: membership off, dated 60 days ago (UTC), account off.
+        $db->query("INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `leftAtUtc`) VALUES ({$id}, 1, 0, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 DAY))");
+        $db->query("INSERT INTO `tblConsentLog` (`siteID`, `userID`, `sessionID`, `consentType`, `decision`, `policyHash`, `createdAt`) "
+            . "VALUES (1, {$id}, 's-{$id}', 'cookies', 'accept', 'h{$id}', DATE_SUB(NOW(), INTERVAL 200 DAY))");
+    }
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+    $affected = [];
+    foreach ($people as [$id, $runs]) {
+        // The Active tick: the account goes on; the page then runs the statement.
+        $db->query("UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = {$id}");
+        if ($runs === true) {
+            $st = $db->prepare(\Portal\Core\Memberships::SWITCH_ON_ONE_IF_SINGLE_SQL);
+            $site = 1;
+            $st->bind_param('ii', $id, $site);
+            $st->execute();
+            $affected[$id] = (int) $st->affected_rows;
+            $st->close();
+        }
+        // Later an administrator unticks Active to PAUSE them.
+        $db->query("UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = {$id}");
+    }
+    $before  = (int) $db->query('SELECT COUNT(*) FROM `tblConsentLog`')->fetch_row()[0];
+    $counted = consent_sweep(false);
+    $deleted = consent_sweep(true);
+    $left    = (int) $db->query('SELECT COUNT(*) FROM `tblConsentLog`')->fetch_row()[0];
+    $dateOf  = static function (int $id) use ($db): string {
+        $r = $db->query("SELECT `isActive`, `leftAtUtc` FROM `tblUserSites` WHERE `userID` = {$id}")->fetch_assoc();
+        return $r['isActive'] . '/' . ($r['leftAtUtc'] === null ? 'empty' : 'dated');
+    };
+    if ($single === true) {
+        // 61 came back through the statement: kept, membership on and empty. 62 did not: deleted (the premise).
+        $ok = $before === 2 && $counted === 1 && $deleted === 1 && $left === 1 && ($affected[61] ?? -1) === 1
+            && $dateOf(61) === '1/empty' && $dateOf(62) === '0/dated'
+            && (int) $db->query('SELECT COUNT(*) FROM `tblConsentLog` WHERE `userID` = 61')->fetch_row()[0] === 1;
+    } else {
+        // Several organisations: the statement changes nothing; the person left and is cleared out.
+        $ok = $before === 1 && ($affected[64] ?? -1) === 0 && $dateOf(64) === '0/dated' && $counted === 1 && $deleted === 1 && $left === 0;
+    }
+
+    return ['ok' => $ok, 'detail' => 'before ' . $before . ', counted ' . $counted . ', deleted ' . $deleted . ', left ' . $left
+        . ', statement affected ' . json_encode($affected) . ', 61 ' . ($single === true ? $dateOf(61) : '-') . ', 62 ' . ($single === true ? $dateOf(62) : '-')];
+}
+
+/**
+ * A clear-out that cannot read something must neither stop the rest of the sweep nor delete more.
+ * The settings table is renamed for the call (put back in every case), so the membership test's
+ * own read of the organisation mode fails.
+ *
+ * @return array{ok: bool, detail: string}
+ */
+function cr_failed_read_scenario(mysqli $db): array
+{
+    cr_left_world_only($db);
+    $before = (int) $db->query('SELECT COUNT(*) FROM `tblConsentLog`')->fetch_row()[0];
+    $db->query('RENAME TABLE `tblSettings` TO `tblSettings_cr_away`');
+    try {
+        try {
+            $counted = run_consent_sweep(false);
+            $deleted = run_consent_sweep(true);
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'detail' => 'run_consent_sweep let an exception out: ' . get_class($e)];
+        }
+    } finally {
+        $db->query('RENAME TABLE `tblSettings_cr_away` TO `tblSettings`');
+    }
+    $left = (int) $db->query('SELECT COUNT(*) FROM `tblConsentLog`')->fetch_row()[0];
+
+    return ['ok' => $counted === -1 && $deleted === -1 && $left === $before && $before > 0,
+        'detail' => 'counted ' . $counted . ', deleted ' . $deleted . ', rows ' . $before . ' -> ' . $left];
+}
+
+/** One left member with old records, in the several-organisation mode (enough to make the clear-out do real work). */
+function cr_left_world_only(mysqli $db): void
+{
+    cr_world($db);
+    $db->query('DELETE FROM `tblConsentLog`');
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    cr_mode($db, 'true');
+    $db->query("INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`) VALUES (71, 'Person 71', 'person-71@example.invalid', 1)");
+    $db->query('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `leftAtUtc`) VALUES (71, 1, 0, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 60 DAY))');
+    $db->query("INSERT INTO `tblConsentLog` (`siteID`, `userID`, `sessionID`, `consentType`, `decision`, `policyHash`, `createdAt`) "
+        . "VALUES (1, 71, 's-71', 'cookies', 'accept', 'h71', DATE_SUB(NOW(), INTERVAL 200 DAY))");
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
+}
+
 function cr_scenario(mysqli $db, string $name): array
 {
     $CR = \Portal\Core\ConsentRetention::class;
@@ -489,6 +600,13 @@ function cr_scenario(mysqli $db, string $name): array
             $diff = (int) $db->query('SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW())')->fetch_row()[0];
             return ['ok' => $diff === 10, 'detail' => 'NOW() is ' . $diff . ' hours ahead of UTC_TIMESTAMP()'];
 
+        case 'return-single':
+        case 'return-multi':
+            return cr_return_scenario($db, $name);
+
+        case 'left-failed-read':
+            return cr_failed_read_scenario($db);
+
         case 'left-multi':
         case 'left-never':
         case 'left-single':
@@ -549,6 +667,9 @@ $crScenarios = [
     'left-never'             => 'L13 an organisation that keeps records for ever deletes nothing for a member who left',
     'left-single'            => 'L07-L08 ONE organisation: a left membership with the account still on keeps the records, with the account off deletes them',
     'left-single-upper'      => 'L09 the one-organisation setting stored as TRUE is read as one organisation (as PHP reads it)',
+    'return-single'          => 'R1 ONE organisation (D-213): offboarded, brought back with the Active tick (which runs the Memberships statement), later paused with the tick: the real clear-out deletes NOTHING of theirs, while the same person where the statement was not run loses their records',
+    'return-multi'           => 'R2 several organisations: switching the account on does not give back an organisation they left, so the date stands and the records are cleared out',
+    'left-failed-read'       => 'R3 a clear-out that cannot read the organisation mode answers "could not" (-1) for the count and the clear-out, throws nothing out, and deletes nothing',
     'own-key-only'           => 'F saving the figure writes its own setting and never the activity log\'s or the network-address one',
 ];
 foreach ($crScenarios as $scenario => $label) {
@@ -633,7 +754,7 @@ $crPlants = [
     ['P14 the one-organisation term dropped (an account still switched on no longer protects the records)', '_core/Memberships.php',
         "' AND (' . \$p . '.`isActive` = 0 OR EXISTS (", "' AND (1 = 1 OR EXISTS (", 'left-single'],
     ['P15 the exact-text reading of the setting dropped (TRUE read as several organisations)', '_core/Memberships.php',
-        "CAST(`msx`.`settingValue` AS BINARY) = CAST(\\'true\\' AS BINARY)", "`msx`.`settingValue` = \\'true\\'", 'left-single-upper'],
+        "CAST(`msx`.`settingValue` AS BINARY) = CAST(\\'true\\' AS BINARY))))'", "`msx`.`settingValue` = \\'true\\')))'", 'left-single-upper'],
     ['P16 merge following skipped', '_apps/cron/_retention-sweep.php',
         '$kept = AccountMerge::survivorOf($db, $u);', '$kept = null;', 'left-multi'],
     ['P17 the still-closed test skipped', '_apps/cron/_retention-sweep.php',
@@ -646,6 +767,14 @@ $crPlants = [
         "'DELETE FROM `tblConsentLog` WHERE `siteID` = ? AND `userID` = ? '", "'DELETE FROM `tblConsentLog` WHERE ? > 0 AND `userID` = ? '", 'left-multi'],
     ['P21 the preview counts a row due under both rules twice', '_apps/cron/_retention-sweep.php',
         '$leftIds = ($reallyDelete === false) ? array_keys($left) : [];', '$leftIds = [];', 'left-multi'],
+    ['P22 the return statement no longer empties the date', '_core/Memberships.php',
+        "SET `isActive` = 1, `leftAtUtc` = NULL '\n        . 'WHERE `userID` = ? AND `siteID` = ? AND `isActive` = 0 '", "SET `isActive` = 1 '\n        . 'WHERE `userID` = ? AND `siteID` = ? AND `isActive` = 0 '", 'return-single'],
+    ['P23 the return statement scoped to the WRONG organisation', '_core/Memberships.php',
+        "WHERE `userID` = ? AND `siteID` = ? AND `isActive` = 0 '", "WHERE `userID` = ? AND `siteID` <> ? AND `isActive` = 0 '", 'return-single'],
+    ['P24 the return statement ignores the organisation mode (clears a date where the person really left)', '_core/Memberships.php',
+        "'AND NOT EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = \\'multisite.enabled\\' '", "'AND EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = \\'multisite.enabled\\' '", 'return-multi'],
+    ['P25 the clear-out lets a failure out (the wrapper rethrows)', '_apps/cron/_retention-sweep.php',
+        "'cleared' : 'counted') . ' (' . get_class(\$e) . ').');\n\n        return -1;", "'cleared' : 'counted') . ' (' . get_class(\$e) . ').');\n\n        throw \$e;", 'left-failed-read'],
     ['P10 the reader\'s cap taken out (an organisation\'s own figure obeyed above the installation\'s)', '_core/RetentionPeriod.php',
         "        return SettingLimit::cappedForSite((int) \$text, static::KEY, static::DEFAULT_DAYS, self::HARD_MAX_DAYS, true);",
         "        return (int) \$text;", 'own-above-installation'],

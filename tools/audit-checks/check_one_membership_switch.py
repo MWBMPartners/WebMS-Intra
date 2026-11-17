@@ -32,7 +32,7 @@ ten hours from UTC))
       `REPLACE INTO tblUserSites` fails.
   R3  Every `DELETE FROM tblUserSites` must be in ON_PURPOSE_DELETES, per file,
       and the list fails BOTH ways (a new delete, and a listed one that is gone).
-  R4  Memberships.php must hold the three constants with exactly the pinned SQL
+  R4  Memberships.php must hold the four constants with exactly the pinned SQL
       (whitespace aside) and the function hasLeftSql(); and the two callers
       must really USE the constants (EXPECTED_USES, read from code — both files
       quote their old SQL in comments, so a text search would pass on it).
@@ -89,12 +89,17 @@ PINNED = {
     'SWITCH_OFF_ALL_SQL': 'UPDATE `tblUserSites` SET `leftAtUtc` = UTC_TIMESTAMP(), `isActive` = 0 WHERE `userID` = ? AND `isActive` = 1',
     'SWITCH_ON_ALL_SQL': 'UPDATE `tblUserSites` SET `isActive` = 1, `leftAtUtc` = NULL WHERE `userID` = ?',
     'SWITCH_ON_ONE_SQL': 'UPDATE `tblUserSites` SET `isActive` = 1, `leftAtUtc` = NULL WHERE `userID` = ? AND `siteID` = ?',
+    'SWITCH_ON_ONE_IF_SINGLE_SQL': 'UPDATE `tblUserSites` SET `isActive` = 1, `leftAtUtc` = NULL WHERE `userID` = ? AND `siteID` = ? AND `isActive` = 0 '
+                                   "AND NOT EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = 'multisite.enabled' "
+                                   'AND `msx`.`siteID` IS NULL AND CAST(`msx`.`settingValue` AS BINARY) = CAST(\'true\' AS BINARY))',
 }
 
 # file -> the constants it must use in CODE.
 EXPECTED_USES = {
     'web/_apps/offboarding/do.php': {'Memberships::SWITCH_OFF_ALL_SQL'},
     'web/_apps/offboarding/rehire.php': {'Memberships::SWITCH_ON_ALL_SQL', 'Memberships::SWITCH_ON_ONE_SQL'},
+    # D-213: switching an account ON (Admin, Users) brings a one-organisation member back, so a later pause cannot read as leaving.
+    'web/_apps/admin/users/save.php': {'Memberships::SWITCH_ON_ONE_IF_SINGLE_SQL'},
 }
 
 TABLE = r'`?tblUserSites`?(?![A-Za-z0-9_])'
@@ -259,7 +264,7 @@ def run(root: str) -> int:
         print(f'\nMembership switching: {len(problems)} problem(s).')
         return 1
     print('✓ Nothing outside Memberships switches a membership off or on, no INSERT can be born switched off or carry a date, '
-          f'the {len(ON_PURPOSE_DELETES)} listed DELETE is the only one, and the three statements and both callers are as pinned. '
+          f'the {len(ON_PURPOSE_DELETES)} listed DELETE is the only one, and the four statements and every caller are as pinned. '
           'It reads PRESENCE only; the behaviour is driven by tools/erasure-pages-selftest.php (M13s-M13v) and tools/consent-retention-selftest.php (section L).')
     return 0
 
@@ -268,7 +273,7 @@ def run(root: str) -> int:
 # Self-test: each plant is the REAL files plus one change, judged alone.
 # ─────────────────────────────────────────────────────────────────────────────
 REAL = ['web/_core/Memberships.php', 'web/_apps/offboarding/do.php', 'web/_apps/offboarding/rehire.php',
-        'web/_apps/admin/sites/users.php']
+        'web/_apps/admin/sites/users.php', 'web/_apps/admin/users/save.php']
 
 
 def make_tree(edits: dict[str, tuple[str, str]], extra: dict[str, str], drop: set[str]) -> str:
@@ -312,9 +317,11 @@ PLANTS = [
     ('the listed DELETE removed (stale entry)', {}, {}, {'web/_apps/admin/sites/users.php'}, 'R3'),
     ('SWITCH_OFF_ALL_SQL without leftAtUtc', {'web/_core/Memberships.php': ('`leftAtUtc` = UTC_TIMESTAMP(), `isActive` = 0', '`isActive` = 0')}, {}, set(), 'R4'),
     ('SWITCH_OFF_ALL_SQL without AND isActive = 1', {'web/_core/Memberships.php': (" . 'WHERE `userID` = ? AND `isActive` = 1';", " . 'WHERE `userID` = ?';")}, {}, set(), 'R4'),
-    ('SWITCH_ON_ONE_SQL not emptying the date', {'web/_core/Memberships.php': ("SET `isActive` = 1, `leftAtUtc` = NULL '", "SET `isActive` = 1 '")}, {}, set(), 'R4'),
+    ('SWITCH_ON_ONE_SQL not emptying the date', {'web/_core/Memberships.php': ("SET `isActive` = 1, `leftAtUtc` = NULL '\n        . 'WHERE `userID` = ? AND `siteID` = ?';", "SET `isActive` = 1 '\n        . 'WHERE `userID` = ? AND `siteID` = ?';")}, {}, set(), 'R4'),
     ('hasLeftSql removed', {'web/_core/Memberships.php': ('public static function hasLeftSql(', 'public static function hasLeftSqlRenamed(')}, {}, set(), 'R4'),
     ('rehire no longer using SWITCH_ON_ALL_SQL', {'web/_apps/offboarding/rehire.php': ('$db->prepare(Memberships::SWITCH_ON_ALL_SQL)', '$db->prepare($elsewhere)')}, {}, set(), 'R4'),
+    ('the Users page no longer using SWITCH_ON_ONE_IF_SINGLE_SQL', {'web/_apps/admin/users/save.php': ('$mysqli->prepare(Memberships::SWITCH_ON_ONE_IF_SINGLE_SQL)', '$mysqli->prepare($elsewhere)')}, {}, set(), 'R4'),
+    ('SWITCH_ON_ONE_IF_SINGLE_SQL without its mode test', {'web/_core/Memberships.php': ("'AND NOT EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = \\'multisite.enabled\\' '", "'AND 1 = 1 AND NOT EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = \\'multisite.enabled\\' '")}, {}, set(), 'R4'),
     # must stay green
     ('GREEN: the isSiteAdmin toggle', {}, {'web/_apps/x/a.php': php("$s = $db->prepare('UPDATE tblUserSites SET isSiteAdmin = ? WHERE userID = ? AND siteID = ?');")}, set(), None),
     ('GREEN: a comment quoting the old statements', {}, {'web/_apps/x/a.php': php("// was: UPDATE tblUserSites SET isActive = 0 WHERE userID = ?\n/* DELETE FROM tblUserSites WHERE userID = 1 */\n$x = 1;")}, set(), None),
@@ -349,8 +356,8 @@ def self_test() -> int:
         bad += 0 if ok else 1
     print(f'\nself-test: {len(PLANTS)} plants ({sum(1 for p in PLANTS if p[4] is not None)} must be caught, '
           f'{sum(1 for p in PLANTS if p[4] is None)} must stay green), {bad} wrong.')
-    if len(PLANTS) != 23:
-        print('self-test: the number of plants changed; update the pinned count (23) on purpose.')
+    if len(PLANTS) != 25:
+        print('self-test: the number of plants changed; update the pinned count (25) on purpose.')
         return 1
     return 1 if bad else 0
 

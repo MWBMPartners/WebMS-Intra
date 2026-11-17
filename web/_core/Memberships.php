@@ -64,6 +64,20 @@ final class Memberships
         . 'WHERE `userID` = ? AND `siteID` = ?';
 
     /**
+     * Bring one person back by SWITCHING THE ACCOUNT ON (Admin, Users), on a ONE-organisation
+     * portal only: switch that organisation's membership on and empty its date. Two
+     * conditions do the work: the membership must be off (a row already on is left alone), and
+     * the mode is read INSIDE the statement (no row, or any value other than exactly `true`, is
+     * one organisation, with `CAST ... AS BINARY` as in hasLeftSql()), so with several
+     * organisations it changes nothing and a failed read throws. Two `?`: the account number,
+     * then the organisation open on the page.
+     */
+    public const SWITCH_ON_ONE_IF_SINGLE_SQL = 'UPDATE `tblUserSites` SET `isActive` = 1, `leftAtUtc` = NULL '
+        . 'WHERE `userID` = ? AND `siteID` = ? AND `isActive` = 0 '
+        . 'AND NOT EXISTS (SELECT 1 FROM `tblSettings` `msx` WHERE `msx`.`settingKey` = \'multisite.enabled\' '
+        . 'AND `msx`.`siteID` IS NULL AND CAST(`msx`.`settingValue` AS BINARY) = CAST(\'true\' AS BINARY))';
+
+    /**
      * 🚪 "Has this person left this organisation for longer than the period?",
      *    as a condition to put inside a WHERE. ONE `?`: the period in days.
      *

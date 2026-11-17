@@ -233,7 +233,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 291; // #934 package 2h added M13s-M13v: 287 + 4. #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
+const EXPECTED_CHECKS = 292; // #934 package 2h added M13s-M13w: 287 + 5. #1063 round 3 added R8: 286 + 1. #1063 round 2 added R6-R7: 284 + 2. #1044 round 2 added N61-N63: 281 + 3. #1063 added R1-R5: 276 + 5. #1044 added N56-N60: 271 + 5. #1019 round 3 of the check added Q7, Q8, Q9, Q7p, Q7r, Q10: 265 + 6.
                              // MERGED (p1019 into p1042's alpha-wip): both sides grew from 252.
                              // #1019 added section Q's six and round 2 plant Q5b: +7.
                              // #1049 added M13l2-M13l7 (the Users page's
@@ -4253,6 +4253,21 @@ ok('M13s offboarding switches off every switched-on membership AND records the m
     && ($m2hAfterOff[M2H_ORG_X]['on'] ?? 1) === 0 && $m2hDate($m2hAfterOff, M2H_ORG_X) === M2H_OLD
     && ($m2hAfterOff[M2H_ORG_Y]['on'] ?? 1) === 0 && $m2hDate($m2hAfterOff, M2H_ORG_Y) === null,
     json_encode($m2hAfterOff) . ' | said: ' . $m2hSaid1);
+
+// M13w (D-213): the Active tick on Admin, Users switches the ACCOUNT on. On a portal with SEVERAL
+// organisations (this one) that gives back no organisation the person left, so every membership
+// keeps its date. (With ONE organisation the same save also brings the membership back: that is
+// driven against the real statement and the real clear-out by scenarios R1-R3 of
+// tools/consent-retention-selftest.php; this suite's world always has several organisations.)
+$m2hTok = token(req($jar['root'], 'GET', '/admin/users')['body']);
+req($jar['root'], 'POST', '/admin/users/save', ['csrf_token' => $m2hTok, 'action' => 'update', 'userID' => M2H_GLOBAL,
+    'fullName' => 'Greta Global', 'emailAddress' => 'u' . M2H_GLOBAL . '.erasure@selftest.invalid', 'phoneNumber' => '', 'isActive' => '1']);
+$m2hTicked = $m2hRows(M2H_GLOBAL);
+ok('M13w with several organisations, switching an offboarded account ON with the Active tick brings no membership back: the account is on, every membership keeps its off state and its date (D-213)',
+    (int) one('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [M2H_GLOBAL])['isActive'] === 1
+    && $m2hJustNow($m2hTicked[ORG_A] ?? null) === true && $m2hJustNow($m2hTicked[ORG_B] ?? null) === true
+    && $m2hDate($m2hTicked, M2H_ORG_X) === M2H_OLD && $m2hDate($m2hTicked, M2H_ORG_Y) === null,
+    json_encode($m2hTicked));
 
 $m2hRehire1 = $rehireM(M2H_GLOBAL);
 $m2hAfterRe = $m2hRows(M2H_GLOBAL);
