@@ -672,6 +672,17 @@ check('S4 no installation currency chosen and a figure to compare: refused with 
     $out === null && AiAssistant::lastRefusal() === 'no-currency' && $requests() === $reqs);
 $setting('org.currency', 'GBP');
 $setting('ai_assist.monthCapPence', '5000');
+// 💱 D-192, BEFORE THE FIRST PAID CALL: pounds chosen, NO rate fetched yet (a new installation until the job
+//    first runs), nothing spent, a PAID company with a key. The request must be refused for want of a rate
+//    and never reach the company. (With the fault where the request asks without the company's currency, the
+//    free-route check passes, the call goes out and the answer is 'provider'.)
+run($db, 'DELETE FROM `tblExchangeRate`');
+run($db, 'DELETE FROM `tblExchangeRateEntered`');
+App::init($db, ['ai_assist' => ['enabled' => '1', 'provider' => 'anthropic', 'anthropic' => ['apiKey' => 'selftest-not-a-real-key', 'model' => 'claude-haiku-4-5'], 'userDailyCap' => '20']]);
+$out = AiAssistant::improve(1, PS_USER, 'announcement', 'A paid draft');
+check('S4b a PAID AI company, pounds chosen, no exchange rate yet, nothing spent: refused "no-rate" BEFORE the first paid call (D-192) — not "provider", which would mean a call was made',
+    $out === null && AiAssistant::lastRefusal() === 'no-rate', 'lastRefusal ' . AiAssistant::lastRefusal());
+App::init($db, $aiSettings);
 $recordUsage->invoke(null, 1, PS_USER, 'announcement', 'openai', 1000, 1000, ProviderSpend::cost('ai', 'openai', 'gpt-4o-mini', ['in' => 1000, 'out' => 1000]), 'i', 'o');
 check('S5 a paid call\'s usage row and the month are written from ONE cost: gpt-4o-mini 1,000/1,000 is 750 millionths of a dollar in both',
     ProviderSpend::monthTotals($db, 1, 'ai') === ['USD' => 750]
@@ -743,8 +754,12 @@ foreach ([993701, 993702, 993703] as $recId) {
 }
 final class PsTranscriber extends \Portal\Core\Transcription
 {
+    /** How many times the stand-in company was really asked. */
+    public static int $asked = 0;
+
     protected static function providerTranscribe(string $provider, array $settings, string $path, string $mime): array
     {
+        self::$asked++;
         // One hour of audio from a company that charges $0.36 an hour: $0.36 a job.
         return ['ok' => true, 'text' => 'ps words', 'segments' => null, 'language' => 'en', 'duration' => 3600];
     }
@@ -764,6 +779,15 @@ check('S14 the third is REFUSED at the limit ($0.72 spent against $0.50): nothin
     $ran['done'] === 0 && $ran['stoppedByCap'] === true && $ran['stoppedWhy'] === 'installation-limit'
     && rows($db, "SELECT `status` AS `s` FROM `tblTranscript` WHERE `recordingID` = 993703")[0]['s'] === 'queued'
     && ProviderSpend::monthTotals($db, 1, 'transcription') === ['USD' => 720000], json_encode($ran));
+// D-192 again, for a transcription job: pounds chosen, NO rate held, a paid company, a job waiting.
+$reset();
+$setting('org.currency', 'GBP');
+$setting('transcription.monthCapPence', '5000');
+$asked = PsTranscriber::$asked;
+$ran = PsTranscriber::processQueue(1, 1);
+check('S15 a transcription job for a PAID company with pounds chosen and no exchange rate yet is REFUSED for want of a rate before the company is asked: stoppedWhy "no-rate", the stand-in never called, the job still queued',
+    $ran['done'] === 0 && $ran['stoppedWhy'] === 'no-rate' && PsTranscriber::$asked === $asked
+    && rows($db, 'SELECT `status` AS `s` FROM `tblTranscript` WHERE `recordingID` = 993703')[0]['s'] === 'queued', json_encode($ran));
 run($db, 'DELETE FROM `tblTranscript` WHERE `recordingID` BETWEEN 993701 AND 993703');
 run($db, 'DELETE FROM `tblTranscriptSearch` WHERE `recordingID` BETWEEN 993701 AND 993703');
 run($db, 'DELETE FROM `tblRecording` WHERE `recordingID` BETWEEN 993701 AND 993703');
@@ -820,10 +844,13 @@ check('T7 the member-facing words: no-currency says to CHOOSE a currency (never 
             }
             return '';
         };
+        $armRate     = $lineOf('no-rate');
         $armCurrency = $lineOf('no-currency');
         $armBudget   = $lineOf('no-budget');
         $tr = \Portal\Core\ContentTranslation::refusalWords('no-currency');
-        return $armCurrency !== '' && str_contains($armCurrency, 'Settings, Organisation') === true && str_contains($armCurrency, 'Exchange rates') === false
+        return $armRate !== '' && str_contains($armRate, 'no exchange rate') === true && str_contains($armRate, 'Admin, Exchange rates') === true
+            && str_contains($armRate, 'choose') === false
+            && $armCurrency !== '' && str_contains($armCurrency, 'Settings, Organisation') === true && str_contains($armCurrency, 'Exchange rates') === false
             && $armBudget !== '' && str_contains($armBudget, 'next month') === false && str_contains($armBudget, 'reached') === false && str_contains($armBudget, 'nothing') === true
             && str_contains($tr, 'Settings, Organisation') === true && str_contains($tr, 'Exchange rates') === false
             && str_contains(\Portal\Core\ContentTranslation::refusalWords('no-rate'), 'Exchange rates') === true;

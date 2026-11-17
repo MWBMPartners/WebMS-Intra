@@ -5318,8 +5318,10 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     -- 💳 A LIMIT, so the installation's value CAPS an organisation's and is
     --    never simply overridden by it (#668, owner 29 October 2026). ONE
     --    API key below pays for every organisation on the installation, so
-    --    the two administrators may be different people. Worked out only by
-    --    Transcription::capFrom(). Migration 229.
+    --    the two administrators may be different people. Read only through
+    --    ProviderSpend::whyRefused() since #993 (it replaced the old
+    --    Transcription::capFrom()), in hundredths of the currency of the level
+    --    that stores it. Migration 229.
     (NULL, 'transcription.monthCapPence',   '5000', '5000', 0),
     -- 🎙️ How long a transcript is kept, in days (#714). A transcript is the
     --    VERBATIM words of a recording, and nothing removed one before: the

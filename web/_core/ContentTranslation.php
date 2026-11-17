@@ -364,7 +364,7 @@ class ContentTranslation
                      . 'sent. Ask an administrator.';
             case 'no-rate':
                 // #993 (D-192): a spending limit has to be checked and there is
-                // no exchange rate (or no currency chosen) to check it in, so
+                // no exchange rate for the company's currency to check it with, so
                 // nothing was sent. Said to the member in the same words as any
                 // "ask an administrator" refusal; the ADMIN page says which rate.
                 return 'Translation cannot be used right now: there is no exchange '

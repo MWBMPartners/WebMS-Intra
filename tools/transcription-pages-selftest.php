@@ -1455,6 +1455,22 @@ ok(
     'recorded: ' . (string) ($refusedRow['activityDescription'] ?? 'nothing')
 );
 
+// 💱 D-192 AT THE PAGE AND THE HANDLER, before the first paid call: pounds chosen, a company that charges in
+//    dollars, NO exchange rate held, nothing spent. The page must say there is no rate and offer no button, and
+//    a posted request must be refused and queue nothing. (Asking without the company's currency passes while
+//    anything has been spent, so this runs at zero spend, where only the company's own currency can refuse.)
+spendUsd(ORG, 0);
+installSetting('org.currency', 'GBP');
+$noRatePage = req($jar['global'], 'GET', $recPage);
+$noRatePost = req($jar['global'], 'POST', '/recordings/transcribe', ['csrf_token' => freshToken($jar['global']), 'recordingID' => (string) REC_FILE]);
+ok(
+    'J13 a paid company, pounds chosen, no exchange rate, nothing spent: the page says there is no exchange rate and offers no button, and a posted request queues NOTHING',
+    str_contains(text($noRatePage['body']), 'no exchange rate') === true
+        && preg_match('#<form[^>]+action="[^"]*recordings/transcribe"#', $noRatePage['body']) !== 1
+        && in_array($noRatePost['status'], [302, 303], true) === true && transcriptRow(REC_FILE) === null,
+    'page said: ' . mb_substr(text($noRatePage['body']), 0, 200)
+);
+installSetting('org.currency', 'USD');
 q('DELETE FROM tblTranscript WHERE recordingID = ?', 'i', [REC_SPEND]);
 spendUsd(ORG, 0);
 

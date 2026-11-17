@@ -171,10 +171,12 @@ if ($out === false) {
     if ($why === 'money' || $why === 'calls') {
         $reason = 'cap-reached';
     } elseif ($why === 'no-rate') {
-        // #993: a limit has to be compared and there is no exchange rate (or
-        // no currency) to compare in. Nothing was sent (D-192).
+        // #993: a limit has to be compared and there is no exchange rate for the
+        // company's currency. Nothing was sent (D-192).
         $reason = 'no-rate';
     } elseif ($why === 'no-currency') {
+        // No currency chosen for the level that set the limit: a different
+        // message, because adding an exchange rate would fix nothing.
         $reason = 'no-currency';
     } elseif ($why === 'unreadable') {
         $reason = 'limit-unknown';

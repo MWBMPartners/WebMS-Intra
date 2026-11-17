@@ -194,8 +194,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         updated and the database upgrade has not been run yet &mdash; ask a global
         administrator to open Admin &rarr; Upgrade. Pieces already translated keep working.
     </div>
+<?php elseif ($moneyWhy === 'unreadable'): ?>
+    <div class="alert alert-danger" role="alert" data-limit-reached="unreadable-money">
+        <strong>This month&rsquo;s spending could not be read, so no new translations are being
+        sent.</strong> The usual cause is that the database upgrade has not been run yet &mdash; ask a
+        global administrator to open Admin &rarr; Upgrade.
+    </div>
 <?php elseif ($rateMissing === true): ?>
-    <div class="alert alert-warning" role="alert" data-limit-reached="no-rate">
+    <div class="alert alert-warning" role="alert" data-limit-reached="<?php echo $moneyWhy === 'no-rate' ? 'no-rate' : 'no-currency'; ?>">
         <strong>New translations are stopped because the money limit cannot be checked.</strong>
         <?php echo htmlspecialchars(\Portal\Core\ProviderSpend::refusalWords($moneyWhy), ENT_QUOTES, 'UTF-8'); ?>
         <?php if ($rateFixIsHere === true): ?>
