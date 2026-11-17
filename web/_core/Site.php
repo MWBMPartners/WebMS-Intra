@@ -1355,6 +1355,49 @@ class Site
     }
 
     /**
+     * 👥 The members of ONE organisation a worker may pick from a list (#1066).
+     *
+     * The care register's "Open new case" form draws its list from this, and
+     * `care/case-save.php` does not read it: the handler asks
+     * isOwnOrganisation() for the person it was given. Both mean the same set
+     * of people because this uses the SAME ground as organisationsFor(): a live
+     * account that belongs to the organisation (an active membership row) or
+     * is a root administrator of the installation. On top of that an account
+     * emptied by an erasure is left out, by `GdprEraser::emptiedAccountSql()`,
+     * the ONE test of that. (An emptied account is also switched off, so the
+     * test is belt and braces today; it is kept so the list cannot offer an
+     * erased person if that ever stops being true.)
+     *
+     * @return list<array{userID:int, fullName:string}> Ordered by name.
+     *
+     * @throws \RuntimeException When the question could not be asked.
+     */
+    public static function membersForPicker(int $siteID, \mysqli $db): array
+    {
+        $stmt = $db->prepare(
+            'SELECT `u`.`userID`, `u`.`fullName` FROM `tblUsers` `u` '
+            . 'LEFT JOIN `tblUserSites` `us` ON `us`.`userID` = `u`.`userID` AND `us`.`siteID` = ? AND `us`.`isActive` = 1 '
+            . 'WHERE `u`.`isActive` = 1 AND (`us`.`userSiteID` IS NOT NULL OR `u`.`isRootAdmin` = 1) '
+            . 'AND NOT ' . \Portal\Core\GdprEraser::emptiedAccountSql('u') . ' '
+            . 'ORDER BY `u`.`fullName` ASC, `u`.`userID` ASC'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException('Site::membersForPicker could not be prepared: ' . $db->error);
+        }
+        $stmt->bind_param('i', $siteID);
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = ['userID' => (int) $row['userID'], 'fullName' => (string) $row['fullName']];
+        }
+
+        return $out;
+    }
+
+    /**
      * 🔗 Where another organisation's front page is, in the way in use.
      *
      *   first part of the address   "/<its key>/"
