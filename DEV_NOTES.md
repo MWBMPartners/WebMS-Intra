@@ -25225,3 +25225,15 @@ D-174 residual: `ErrorMonitor::currentUrl()` sends the page's whole address to a
   would be counted as a bound value by `$fetchUserRows` and `data-copy-selftest.php`.
 - Section 27b reads "handed over" table by table, so `WHERE 0 = ?` on a block stays green there; the HTTP checks R10-R15 catch
   it for the twelve new blocks only.
+
+### Small first-install fixes (#1138)
+
+- PHP 8 calls an installed error handler whatever `@` says; the portal's `Logger::phpError()` does not check
+  `error_reporting()`, so about 90 `@` calls reach the error log. Only `SafeFetch::resolve()` is fixed (a temporary handler
+  restored in a `finally`). On this machine a bare `@dns_get_record('does-not-exist.invalid')` raises NO warning (NXDOMAIN
+  answers an empty list); the warning is for a server fault, reproduced in a `php:8.4-cli` container with no network, so the
+  safefetch "saw nothing" check SKIPS here and says so.
+- On a one-organisation portal with multisite off (the default) an account with no membership signs in normally (SiteGate returns
+  early): never write that a removed person cannot sign in. D-223 hides Remove on that portal.
+- `check_no_developer_notes_on_pages.py` reads PHP tokens: `DEV_NOTES` in a PHP comment is allowed, in HTML, a string or a
+  heredoc is not.

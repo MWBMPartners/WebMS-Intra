@@ -2106,6 +2106,19 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_json_spenders_return_token.py --self-test
 
+      # 📝 No page sends a reader to a developer-only file (#1138): a customer
+      #    has no DEV_NOTES.md. Reads PHP's own tokens, so a mention in a PHP
+      #    comment is allowed and one in HTML, a string or a heredoc is not.
+      - name: 'No page names a developer-only file (hard gate)'
+        id: no_developer_notes_on_pages
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_developer_notes_on_pages.py
+
+      - name: 'No page names a developer-only file (self-test, hard gate)'
+        id: no_developer_notes_on_pages_selftest
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_developer_notes_on_pages.py --self-test
+
       # 💷 A money record's currency is written by ONE rule (#966, D-139):
       #    an UPDATE that writes it goes through Currency::onEdit(), and a
       #    child row takes its parent's. "An edit relabels a record" failed

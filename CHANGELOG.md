@@ -81,6 +81,20 @@
   already emptied by the merge; the member's own data copy does not list remembered positions (needs a decision).
   Codex has not reviewed this.
 
+### Small first-install fixes found by the rehearsal (#1138)
+
+- The upgrade page's "accounts with no organisation" card no longer counts erased or merged-away accounts, and on a
+  one-organisation portal says what is true: no organisation's administrator can see those accounts, their calendar
+  subscription stops until they are placed, a likely reason is that somebody was removed from the organisation (it does
+  not claim they cannot sign in: on the default one-organisation set-up they can). A new member's name now shows in the top
+  bar straight after accepting an invitation. The "Admin notice" on `/privacy` and the "no erasure contact" line on the
+  privacy policy are shown to administrators only; everyone else reads that they should ask the organisation that runs the
+  portal. The invitation e-mail says "expires in 7 days". Four pages and one HTML comment no longer send readers to
+  `DEV_NOTES.md` (a new hard check keeps it so). A failed exchange-rate fetch no longer logs PHP's raw DNS warning. Open:
+  whether the error log should record warnings a caller silenced with `@` (about 90 calls), `admin/users/unplaced.php`
+  still lists merged-away accounts, the noticeboard footer's dead links are inside the generated bundle (#1106). Codex has not
+  reviewed this.
+
 ### The full data copy hands over the member's own records; My data uses plain names (#1135, #1138 item 9)
 
 - The full data copy (`account/data-export`) now hands over the records ABOUT the person that an erasure keeps, which it used
